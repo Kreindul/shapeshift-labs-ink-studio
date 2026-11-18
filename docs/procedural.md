@@ -1975,6 +1975,15 @@ give their original edge index. Use the planes for intersection,
 occupied-volume sampling or keepout subtraction. Joining several prisms
 can approximate a shaped height field while assigning clearance only
 to exposed faces.
+### Intersecting convex plans
+
+`KIT.procedural.geometry.intersectConvexPlans(subject, boundary)` returns the
+shared XZ footprint of two convex rings. Both inputs accept either winding.
+The result is a fresh counterclockwise ring, or an empty array if the domains
+have no shared area. Use the shared plan when a projected part must stop at a
+carrier edge. For a vertical fit, lift that ring onto the part and pass it to
+`supportSkirt` with the carrier's height field.
+
 ### Withdrawing retained samples
 
 `KIT.procedural.sampleCoverage.cohort(x, y, z, spacing, seed)` assigns a stable
