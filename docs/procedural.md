@@ -1891,3 +1891,25 @@ The plan puts the first chain before the second. It supplies `reverseFirst`, `re
 `P.heightSurface.raycast(surface, origin, direction, options)` finds the first crossing of a bounded height graph. Supply `bounds`, `height(x, z)` and optionally `inside(x, z)` and `normal(x, z)`. The result contains a world point, normal (when supplied), and distance along the normalized ray. A miss returns null.
 
 A caller can pass a certified `slopeBound` on the horizontal gradient. This allows steep rays to solve one bracket and other rays to skip intervals that cannot cross the surface. Without a bound the query samples at regular intervals. Vertical rays evaluate the height directly. `maxDistance` defaults to 10000 world units.
+
+### Courses on a variable strip
+
+`KIT.stripCourses({ sections, unit, joint, stagger, datum, closed, offset,
+columnPeriod, budget })` fits rectangular stock to a strip whose lower and upper
+edges can vary independently. Supply an ordered list of `{ s, lower, upper }`
+in strip coordinates, beginning at `s: 0`, and a nominal pair `unit: [width,
+height]`. Each convex fragment is clipped to one piecewise-linear section and
+reports its polygon, section index and logical row and column. A cell can span
+several sections without adding a joint at their boundaries.
+
+A closed strip fits a whole number of columns and shares the logical cell ID
+across its seam. Retain the fitted width, `columnPeriod` and `offset` of a
+surviving portion when cutting a closed strip into open fragments. `datum`
+anchors the row elevations and `offset` sets the starting coordinate of the
+stock along the run. An open strip keeps the nominal width. `stockColumn`
+identifies the unwrapped column even when two fragments share a logical ID.
+Exceeding the bounded fragment or work budget raises a `RangeError`.
+
+The layout is independent of geometry, style and rendering. A consumer can
+map the polygons onto a carrier, extrude them into physical blocks, or use the
+same layout for materials and coverage on a sloped surface.
