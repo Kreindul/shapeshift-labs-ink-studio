@@ -542,6 +542,15 @@ or manufacturing rules for the resulting edges.
 through the shortest turn between two unit normals. A projection callback can
 use it to continue a walk onto an adjacent chart.
 
+`P.spatial.probeFootprint({cell, budget})` records the regional reads of a
+projection, growth trace, or other sampled result. Call `record(point, radius)`
+for each point or neighborhood the result queried, including unsuccessful
+queries. `seal()` produces an immutable snapshot with `intersects(bounds)`.
+The recorder merges nearby reads and keeps an overflow box when it reaches
+the budget. A clear result certifies that the given bounds missed every
+recorded read. Include both the old and new bounds of changed geometry when
+deciding whether to reuse results.
+
 ### Contact fields, runoff, and contours
 
 `P.contours.march(field, {bounds, cell, iso})` extracts open paths and closed
