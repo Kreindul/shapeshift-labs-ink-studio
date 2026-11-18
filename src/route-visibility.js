@@ -25,8 +25,9 @@ const RouteVisibility = (() => {
         throw new Error('Visibility obstacles must be simple polygons with at least three XZ points');
       const loop = polygon.slice();
       if (dist2(loop[0], loop.at(-1)) <= EPS ** 2) loop.pop();
+      const signedArea = loop.reduce((sum, p, i) => sum + area2(loop[0], p, loop[(i + 1) % loop.length]), 0);
       if (loop.length < 3 || loop.some((p, i) => dist2(p, loop[(i + 1) % loop.length]) <= EPS ** 2) ||
-        Math.abs(loop.reduce((sum, p, i) => sum + area2(loop[0], p, loop[(i + 1) % loop.length]), 0)) <= EPS)
+        Math.abs(signedArea) <= EPS)
         throw new Error('Visibility obstacles need a nondegenerate boundary');
       if (vertices.length + loop.length > maxVertices) throw new Error('Visibility graph exceeds its vertex budget');
       vertices.push(...loop);
@@ -37,13 +38,30 @@ const RouteVisibility = (() => {
         box[2] = Math.max(box[2], p[0]);
         box[3] = Math.max(box[3], p[1]);
       }
-      polygons.push({ loop, box });
+      const sign = Math.sign(signedArea);
+      // For a convex ring, its interior is the intersection of the signed
+      // edge half-planes. Keep the original edge origin for stable distances.
+      const convex = loop.every((p, i) => area2(p, loop[(i + 1) % loop.length],
+        loop[(i + 2) % loop.length]) * sign >= 0);
+      const edges = convex ? loop.map(([x, z], i) => {
+        const next = loop[(i + 1) % loop.length], dx = next[0] - x, dz = next[1] - z,
+          scale = sign / Math.hypot(dx, dz);
+        return [x, z, -dz * scale, dx * scale];
+      }) : null;
+      polygons.push({ loop, box, edges });
     }
     function check() {
       if (++work.tests > maxTests) throw exhausted;
     }
-    function inside(p, { loop, box }) {
+    function inside(p, { loop, box, edges }) {
       if (!overlap(bounds(p, p), box)) return false;
+      if (edges) {
+        for (const [x, z, nx, nz] of edges) {
+          check();
+          if (nx * (p[0] - x) + nz * (p[1] - z) <= EPS) return false;
+        }
+        return true;
+      }
       let odd = false;
       for (let i = 0; i < loop.length; i++) {
         check();
@@ -53,6 +71,20 @@ const RouteVisibility = (() => {
       }
       return odd;
     }
+    function crossesConvex(a, b, edges) {
+      let low = 0, high = 1;
+      const ax = a[0], az = a[1], bx = b[0], bz = b[1];
+      for (const [x, z, nx, nz] of edges) {
+        check();
+        const first = nx * (ax - x) + nz * (az - z) - EPS,
+          last = nx * (bx - x) + nz * (bz - z) - EPS;
+        if (first <= 0 && last <= 0) return false;
+        if (first <= 0) low = Math.max(low, first / (first - last));
+        else if (last <= 0) high = Math.min(high, first / (first - last));
+        if (high - low <= EPS) return false;
+      }
+      return true;
+    }
     function clear(a, b) {
       work.pairs++;
       const box = bounds(a, b),
@@ -61,6 +93,10 @@ const RouteVisibility = (() => {
       if (sq <= EPS * EPS) return !polygons.some(polygon => inside(a, polygon));
       for (const polygon of polygons) {
         if (!overlap(box, polygon.box)) continue;
+        if (polygon.edges) {
+          if (crossesConvex(a, b, polygon.edges)) return false;
+          continue;
+        }
         const parameters = [0, 1], { loop } = polygon;
         for (let i = 0; i < loop.length; i++) {
           check();

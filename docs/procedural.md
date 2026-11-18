@@ -574,7 +574,8 @@ node cli/ink-studio.js render examples/terrain-route.js --seed 14 --ortho --colo
 
 `P.routes.visibility(start, end, obstacles)` finds a shortest path in plan
 between XYZ pins. Each obstacle is a simple polygon of XZ points. The path
-can touch polygon boundaries. Use expanded obstacle outlines to leave room
+can touch polygon boundaries. Convex obstacles use half-plane clipping.
+Use expanded obstacle outlines to leave room
 for the width of the realized path. Intermediate elevations interpolate
 along the route.
 

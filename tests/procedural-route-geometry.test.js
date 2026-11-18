@@ -96,3 +96,21 @@ test('shared convex footprints reserve a disk margin around unordered and acute 
   assert.deepEqual(path.route.points.at(-1), b);
   assert(path.route.points.length > 2);
 });
+
+test('convex clearance checks permit exact boundary travel and reject interior chords in either winding', () => {
+  const loop = Array.from({length: 96}, (_, i) => {
+    const angle = i * Math.PI * 2 / 96;
+    return [5e5 + 3 * Math.cos(angle), -5e5 + 3 * Math.sin(angle)];
+  });
+  const pin = ([x, z], y = 0) => [x, y, z];
+  for (const polygon of [loop, loop.slice().reverse()]) {
+    const a = pin(loop[0]), edge = pin(loop[1]), b = pin(loop[24], 1);
+    assert.equal(routes.visibility(a, edge, [polygon]).route.points.length, 2);
+    const route = routes.visibility(a, b, [polygon], { maxTests: 250000 });
+    assert.equal(route.status, 'ok');
+    assert.equal(route.route.points.length, 25);
+    assert.deepEqual(route.route.points[0], a);
+    assert.deepEqual(route.route.points.at(-1), b);
+    assert.equal(routes.visibility(pin([5e5, -5e5]), b, [polygon]).status, 'blocked-pin');
+  }
+});

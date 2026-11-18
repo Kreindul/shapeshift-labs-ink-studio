@@ -14,7 +14,11 @@
     return { min: raw.min.slice(), max: raw.max.slice() };
   }
   const overlap = (a, b) => a.min.every((x, i) => x <= b.max[i] && a.max[i] >= b.min[i]);
-  const contains = (b, p) => p.every((v, i) => v >= b.min[i] && v <= b.max[i]);
+  const contains = ({ min, max }, p) => p.length === 3
+    ? p[0] >= min[0] && p[0] <= max[0] &&
+      p[1] >= min[1] && p[1] <= max[1] &&
+      p[2] >= min[2] && p[2] <= max[2]
+    : p.every((v, i) => v >= min[i] && v <= max[i]);
   const expand = (b, r) => ({ min: b.min.map(x => x - r), max: b.max.map(x => x + r) });
   function boxOf(points) {
     const min = [Infinity, Infinity, Infinity],

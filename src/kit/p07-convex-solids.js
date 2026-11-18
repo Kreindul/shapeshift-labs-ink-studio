@@ -208,10 +208,12 @@
           }
     }
     function hidden(exclude, point, tolerance = 0.002) {
-      const candidates = grid.get(key(...point.map(v => Math.floor(v / cell)))) || [];
-      for (const list of [candidates, large])
-        for (const p of list)
-          if (p.key !== exclude && A.spatial.contains(p.bounds, point) && p.distance(point) < -tolerance) return true;
+      const [x, y, z] = point;
+      const candidates = grid.get(key(Math.floor(x / cell), Math.floor(y / cell), Math.floor(z / cell)));
+      if (candidates) for (const p of candidates)
+        if (p.key !== exclude && A.spatial.contains(p.bounds, point) && p.distance(point) < -tolerance) return true;
+      for (const p of large)
+        if (p.key !== exclude && A.spatial.contains(p.bounds, point) && p.distance(point) < -tolerance) return true;
       return false;
     }
     return {
