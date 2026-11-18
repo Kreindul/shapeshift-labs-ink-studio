@@ -4,7 +4,8 @@
 //   bundle()  those files as one piece of text, to put in a page or in front of your own scripts
 //   load()    the same compiled for Node, with the demo dioramas: { makeBuilder, makeSculpt, KIT, SCENES, ... }
 const fs = require('fs'),
-  path = require('path');
+  path = require('path'),
+  { randomUUID } = require('crypto');
 const KIT_DIR = path.join(__dirname, 'src', 'kit'),
   read = f => fs.readFileSync(f, 'utf8').replace(/\nif \(typeof module[^\n]*\n?$/, '\n');
 const files = () =>
@@ -60,15 +61,22 @@ module.exports = {
       newest = Math.max(...srcs.map(f => fs.statSync(f).mtimeMs));
     if (!fs.existsSync(out) || fs.statSync(out).mtimeMs < newest) {
       fs.mkdirSync(path.dirname(out), { recursive: true });
-      fs.writeFileSync(
-        out,
-        module.exports.bundle() +
-          '\nconst SCENES = [];\n' +
-          module.exports.demos() +
-          '\nmodule.exports = { SCENES, ' +
-          EXPORTS +
-          ' };\n'
-      );
+      // Parallel consumers may compile together. Publish only complete bundles.
+      const temporary = out + '.' + randomUUID() + '.tmp';
+      try {
+        fs.writeFileSync(
+          temporary,
+          module.exports.bundle() +
+            '\nconst SCENES = [];\n' +
+            module.exports.demos() +
+            '\nmodule.exports = { SCENES, ' +
+            EXPORTS +
+            ' };\n'
+        );
+        fs.renameSync(temporary, out);
+      } finally {
+        if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+      }
     }
     return require(out);
   }

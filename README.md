@@ -696,3 +696,9 @@ The package is currently version `0.1.0` and marked private.
 ## License
 
 Licensed under the [MIT License](LICENSE).
+
+### Procedural geometry
+
+`KIT.procedural` provides renderer-independent geometry, layout, placement and
+surface operations for Node and the browser bundle. See the [procedural API and
+gallery instructions](docs/procedural.md).
