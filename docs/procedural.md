@@ -43,6 +43,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `populations.layout(boundsList, evaluate, options)` | Seeded world-space candidates ranked by density. Expanding the work region preserves existing candidate identities |
 | `sampling.poisson(options)` | Seeded Bridson samples in finite 2D and 3D bounds, with masks, variable radii, pins and axis scaling |
 | `sampling.eliminate(points, options)`, `sampling.lloyd(points, options)`, `sampling.patch(spec)`, `sampling.geodesicSpacing(points, links, options)` | Progressive point subsets, centroidal layout, stratified surface sampling and surface-neighbor separation |
+| `surfaceGrowth.trace(options)` | Seeded, bounded branching paths over caller-supplied surfaces, with a link query for seams and obstacles |
 | `materialBands(spec)` | Nonoverlapping local intervals with material and pattern metadata |
 | `masks.stroke(spec)`, `masks.compose(specs, options)` | Tapered and feathered swept discs, ordered addition and erasure, signed distance and visible source ownership |
 | `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
@@ -408,6 +409,23 @@ curvature-weighted jittered splats, and seed 2 for a ranked point set whose
 coarser prefixes are shown with larger dabs.
 
 ### Contact fields, runoff, and contours
+
+`P.surfaceGrowth.trace({roots, project, connect, step, steps, branchEvery,
+tips, budget, bias, attraction, spread, seed})` builds a graph of rooted walks.
+Each root has a unique string `key`, an XYZ `point`, and an optional starting
+`direction`. The `project(point, previous, step, root)` callback returns
+an accepted XYZ `point` and `normal`, or `null`. The previous frame is null
+at a root. Extra frame metadata, such as a chart or host ID, travels with
+the output. Root and branch keys depend on authored identity and traversal
+order, so an unchanged path keeps its keys when surface IDs change.
+
+The optional `connect(from, to, step)` callback can reject a segment with
+`null` or accept it with up to eight intermediate surface frames. Use it
+to reject crossings through holes or to insert transition points along a
+seam. Output contains `nodes`, `edges` with ordered `frames`, and terminal
+`ends`. `tips` bounds the active paths per root, and `budget` caps total
+nodes. Callers provide the surface, branching parameters, and rendering
+or manufacturing rules for the resulting edges.
 
 `P.contours.march(field, {bounds, cell, iso})` extracts open paths and closed
 loops from a bounded 2D scalar field. The default level is zero. Use it for
