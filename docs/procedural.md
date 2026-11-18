@@ -47,6 +47,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `masks.stroke(spec)`, `masks.compose(specs, options)` | Tapered and feathered swept discs, ordered addition and erasure, signed distance and visible source ownership |
 | `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
 | `geometry.profileDistance(points)` | Compile a closed 2D ring into a reusable signed distance function `(x, y) => distance`. Concavity and either winding are supported |
+| `volumeCuts.compile(specs)` | Union keyed XZ profiles extruded along Y. Provides a signed field, host subtraction, bounded exposed-boundary sampling and ray hits |
 | `clearance.field(solids).probe(bounds, options)` | Bounded sampled volume contacts for supplied solids with `id`, bounds, and distance functions |
 | `emitters.compile(spec)` | Deterministic looping samples with caller-supplied direction and drift. Sample at any finite time with `sample(index, time)` or `samples(time)` |
 | `routes.polyline(points, options)`, `routes.aroundConvex(outline, start, end, options)` | Arc-length routes with frames and closest queries. Convex XZ routes project endpoints onto an offset perimeter and interpolate world Y |
@@ -137,6 +138,16 @@ It computes the exact signed distance up to the optional ceiling. This is
 useful for a containment test or for subtraction that already has a distance
 bound. Normal array-based `distance([x, y])` queries remain unbounded. A bounded
 query preserves ordered add and erase operations and never changes ownership.
+
+Each volume cut has a stable `key`, a simple planar `profile` of XZ pairs,
+and a `span: [low, high]` in Y. Compile up to 256 cuts in a common caller-provided
+frame. `distance(point, ceiling)` clamps the union distance to its optional
+ceiling. `subtract(hostField)` returns a field that removes the union from
+only that host. `sample(spacing, emit, {maxSamples})` emits boundary points
+with cutter normals and ownership keys. The normals face into the remaining
+material after subtraction. `raycast(origin, direction, max, accept)` reports
+the first exposed cutter surface accepted by the caller. Keep the keyed specs
+as intent and remove or restore them to repair the host.
 
 ### Terrain routes between pins
 
