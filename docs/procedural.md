@@ -57,6 +57,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `volumeCuts.compile(specs)` | Union keyed XZ profiles extruded along Y. Provides a signed field, host subtraction, bounded exposed-boundary sampling and ray hits |
 | `clearance.field(solids).probe(bounds, options)` | Bounded sampled volume contacts for supplied solids with `id`, bounds, and distance functions |
 | `traversal.create({supports, clearance, ...body})` | Ground-following body with bounded displacement, head clearance, step limits and wall sliding |
+| `routes.follower(route, options)` | Distance-based position and a look-ahead frame for cameras or assemblies on sampled routes |
 | `ambientMotion.create(members, {place, move, destination?, step?})` | Seeded roaming, local avoidance, temporary attraction and habitat revalidation |
 | `emitters.compile(spec)` | Deterministic looping samples with caller-supplied direction and drift. Sample at any finite time with `sample(index, time)` or `samples(time)` |
 | `routes.polyline(points, options)`, `routes.aroundConvex(outline, start, end, options)` | Arc-length routes with frames and closest queries. Convex XZ routes project endpoints onto an offset perimeter and interpolate world Y |
@@ -204,6 +205,13 @@ the first exposed cutter surface accepted by the caller. Keep the keyed specs
 as intent and remove or restore them to repair the host.
 
 ### Ground traversal
+
+`routes.follower(route, {loop, lookAhead, up})` accepts a route with a finite
+world length and `sample(t)` on normalized arc distance. Its
+`sample(distance, direction)` returns a point, orthonormal frame, lap and
+end-of-route status. Distances and look ahead are in world units. Give a
+repeating route coincident endpoints. The caller supplies elapsed time, speed
+and any offsets for the camera or assembly.
 
 `traversal.create` accepts a `supports(x, z, low, high)` query returning
 candidate `{y, normal, id?}` surfaces and a `clearance(point, radius)` query
