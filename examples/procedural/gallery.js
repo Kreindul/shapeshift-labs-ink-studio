@@ -93,13 +93,99 @@
     ];
   }
 
+  function sweptMask() {
+    const mask = P.masks.compose([
+      {
+        id: 'sweep',
+        points: [
+          [-2, -0.7],
+          [-0.6, 0.2],
+          [1.7, 0.25]
+        ],
+        radii: [0.28, 0.63, 1]
+      },
+      { id: 'erase', points: [[1.37, 0.26]], width: 0.72, operation: 'erase', order: 1 }
+    ]);
+    const field = ([x, y, z]) => Math.max(mask.distance([x, z]), Math.abs(y) - 0.15);
+    return [
+      P.geometry.implicitSurface(
+        field,
+        { min: [-2.5, -0.3, -1.5], max: [2.9, 0.3, 1.5] },
+        { resolution: 0.085, meta: { material: 'glaze' } }
+      )
+    ];
+  }
+
+  function profiledCut() {
+    const profile = [
+      [-0.8, -0.73],
+      [0.8, -0.73],
+      [0.8, 0.27],
+      [0.58, 0.62],
+      [0, 0.85],
+      [-0.58, 0.62],
+      [-0.8, 0.27]
+    ];
+    const cut = P.profileCut({ profile, span: [-1.2, 1.2] });
+    const shell = point => Math.max(Math.abs(point[0]) - 1.75, Math.abs(point[1]) - 1.22, Math.abs(point[2]) - 0.52);
+    const lining = cut.lining(0.19, shell);
+    const body = point => Math.max(cut.subtract(shell)(point), -lining(point));
+    const bounds = { min: [-1.9, -1.4, -0.65], max: [1.9, 1.4, 0.65] };
+    return [
+      [body, 'basalt'],
+      [lining, 'coral']
+    ].map(([field, material]) => P.geometry.implicitSurface(field, bounds, { resolution: 0.09, meta: { material } }));
+  }
+
+  function clearance() {
+    const beam = P.pieces.beam([-1.85, 0, 0], [1.85, 0, 0], 0.55, 0.6, { material: 'basalt' });
+    const probes = [
+      { min: [-0.6, -0.1, -0.12], max: [0.1, 0.4, 0.38] },
+      { min: [0.42, 0.62, 0.18], max: [1.12, 1.12, 0.68] }
+    ];
+    const field = P.clearance.field([{ ...beam, id: 'beam' }]);
+    return [
+      beam.mesh,
+      ...probes.map(candidate => {
+        const center = candidate.min.map((v, i) => (v + candidate.max[i]) / 2);
+        const half = candidate.min.map((v, i) => (candidate.max[i] - v) / 2);
+        return box(center, half, field.probe(candidate).clear ? 'glaze' : 'coral');
+      })
+    ];
+  }
+
+  function emittedSamples() {
+    const emitter = P.emitters.compile({
+      id: 'plume',
+      p: [0, 0.12, 0],
+      color: [1, 0.6, 0.2],
+      height: 2.1,
+      speed: 1,
+      spread: 0.55,
+      growth: 1,
+      count: 36,
+      direction: [0.35, 1, 0.15]
+    });
+    return [
+      box([0, 0, 0], [0.9, 0.12, 0.9], 'basalt'),
+      ...emitter
+        .samples(0.71)
+        .filter(p => p.opacity > 0.07)
+        .map(({ p, size, opacity }) => box(p, [size, size, size], opacity > 0.38 ? 'ochre' : 'coral'))
+    ];
+  }
+
   const examples = [
     ['Fitted courses', 'Staggered units fit the domain and preserve physical joints.', courses],
     ['Masked cells', 'Clipped prisms follow an annular mask with real gaps.', cells],
     ['Gravity support', 'A convex carrier meets the supplied sloping ground.', skirt],
     ['Flexible span', 'Matched sockets carry an arc-length sampled cable.', span],
     ['Convex clipping', 'A closed cap carries its own material role.', clipped],
-    ['Stable population', 'World space ranks give each candidate a stable identity.', population]
+    ['Stable population', 'World space ranks give each candidate a stable identity.', population],
+    ['Swept mask', 'A taper and an erase stroke define a solid with a hole.', sweptMask],
+    ['Profile cut and lining', 'An extruded profile cuts through a solid with a separate lining.', profiledCut],
+    ['Clearance probe', 'Coral indicates an occupied candidate. Green indicates a clear sample.', clearance],
+    ['Directional emitter', 'A fixed-time sample of seeded particles rising along a chosen direction.', emittedSamples]
   ];
 
   function triangles(meshes) {
@@ -145,9 +231,14 @@
         ...face,
         points: face.points.map(p => [V.dot(p, right), -V.dot(p, up), V.dot(p, view)])
       }));
-      const points = projected.flatMap(face => face.points);
-      const min = [0, 1].map(k => Math.min(...points.map(p => p[k])));
-      const max = [0, 1].map(k => Math.max(...points.map(p => p[k])));
+      const min = [Infinity, Infinity],
+        max = [-Infinity, -Infinity];
+      for (const { points } of projected)
+        for (const p of points)
+          for (const axis of [0, 1]) {
+            min[axis] = Math.min(min[axis], p[axis]);
+            max[axis] = Math.max(max[axis], p[axis]);
+          }
       const scale = Math.min(570 / (max[0] - min[0]), 270 / (max[1] - min[1]));
       const center = min.map((v, k) => (v + max[k]) / 2);
       ctx.clearRect(0, 0, canvas.width, canvas.height);

@@ -37,6 +37,10 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `proximity.connect(sockets, options)` | Deterministic matching of named sockets with reach, degree and compatibility limits |
 | `populations.layout(boundsList, evaluate, options)` | Seeded world-space candidates ranked by density. Expanding the work region preserves existing candidate identities |
 | `materialBands(spec)` | Nonoverlapping local intervals with material and pattern metadata |
+| `masks.stroke(spec)`, `masks.compose(specs, options)` | Tapered and feathered swept discs, ordered addition and erasure, signed distance and visible source ownership |
+| `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
+| `clearance.field(solids).probe(bounds, options)` | Bounded sampled volume contacts for supplied solids with `id`, bounds, and distance functions |
+| `emitters.compile(spec)` | Deterministic looping samples with caller-supplied direction and drift. Sample at any finite time with `sample(index, time)` or `samples(time)` |
 
 Heights and distances use world units. Planar masks take XZ and use negative
 distance for the interior. Compiled carrier callbacks should be deterministic.
@@ -47,4 +51,12 @@ height and slope declaration over its footprint.
 
 Build the browser gallery with `node examples/procedural/build.js`. Open
 `dist/procedural-gallery.html` and move the View angle slider to inspect the
-actual meshes. The HTML contains the library and all six examples.
+actual meshes. The HTML contains the library and all the examples.
+
+A mask stroke takes a unique `id`, 2D `points`, optional `radii`, `width`,
+`softness`, `layer`, and `order`. Use `operation: 'erase'` to subtract a stroke.
+A mask's signed distance is independent of its feathered coverage. Empty masks
+return positive infinity. Clearance probes approximate contact at the selected
+spacing. Choose spacing and padding in relation to the smallest obstruction
+the caller needs to detect. Emitters describe visual trajectories and do not
+perform particle collision or fluid simulation.
