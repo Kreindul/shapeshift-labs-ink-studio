@@ -238,9 +238,14 @@ Callers define which surfaces carry weight and which solids obstruct motion.
 ### Ambient motion
 
 Each member has a stable `id`, an XYZ `home`, and optional `kind`, `seed`,
-`speed`, `radius`, `range`, `rest: [min, max]`, `turn`, and `yaw`.
+`speed`, `radius`, `range`, `rest: [min, max]`, `turn`, `yaw`, and `arrival`.
 Lengths and speeds use caller units and units per second. Angles are in
 radians. A kind can select a ground, water, or air policy.
+
+`arrival` is how close the member gets to a roaming destination before
+stopping. It defaults to the smaller of its separation radius and .12.
+Use a smaller value for a precise perch or docking point while retaining
+the same separation radius. Attraction cues use their own `stop` distance.
 
 - `place(point, member, context)` projects a request onto valid habitat.
 - `move(point, delta, member, context)` resolves movement against the

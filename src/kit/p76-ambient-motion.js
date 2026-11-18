@@ -13,14 +13,14 @@
     const entries = new Map();
     for (const raw of members) {
       const { id, home, kind = 'default', seed = 0, speed = .7, radius = .16,
-        range = 3, rest = [.8, 2.5], turn = 7, yaw = 0 } = raw ?? {};
+        range = 3, rest = [.8, 2.5], turn = 7, yaw = 0, arrival = Math.min(radius, .12) } = raw ?? {};
       if (typeof id !== 'string' || !id || id.length > 128 || entries.has(id) || !vector(home) ||
           typeof kind !== 'string' || !Number.isSafeInteger(seed) || !within(speed, .01, 30) ||
           !within(radius, .01, 4) || !within(range, .04, 120) || !within(turn, .1, 100) ||
           !Array.isArray(rest) || rest.length !== 2 || !within(rest[0], 0, 60) || !within(rest[1], rest[0], 60) ||
-          !Number.isFinite(yaw)) throw Error('Invalid ambient member');
+          !Number.isFinite(yaw) || !within(arrival, 0, 120)) throw Error('Invalid ambient member');
       const spec = Object.freeze({ id, kind, home: Object.freeze(home.slice()), speed, radius, range,
-        rest: Object.freeze(rest.slice()), turn, seed: P.data.hash('ambient-motion/' + id, seed) });
+        rest: Object.freeze(rest.slice()), turn, arrival, seed: P.data.hash('ambient-motion/' + id, seed) });
       entries.set(id, { spec, point: null, last: null, yaw: angle(yaw), lastYaw: angle(yaw), distance: 0, lastDistance: 0,
         serial: 0, mode: 'rest', until: 0, target: null, signal: null, detour: null, suspended: false });
     }
@@ -114,7 +114,7 @@
         if (!state.target) { rest(state, now); return; }
       }
       const target = signal?.point || state.target, aim = V.sub(target, point), length = V.len(aim),
-        stop = signal?.stop ?? Math.min(spec.radius, .12);
+        stop = signal?.stop ?? spec.arrival;
       if (signal && now < signal.holdEnd || length <= stop + 1e-6) {
         if (signal) { state.mode = now < signal.holdEnd ? 'engaged' : 'gathered'; face(state, aim); }
         else rest(state, now);

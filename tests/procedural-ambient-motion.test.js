@@ -49,6 +49,24 @@ test('temporary attraction acknowledges a cue, rounds a blocker and follows a mo
   assert(!['engaged', 'follow', 'gathered'].includes(f.poses()[0].mode));
 });
 
+test('precise destinations use a configurable arrival distance independent of separation', () => {
+  const target = [1,0,0], member = { id: 'a', home: [0,0,0], speed: 2, radius: .35, rest: [.1,.2] };
+  const options = { place, move, destination: () => target };
+  const docked = ambientMotion.create([{ ...member, arrival: .01 }],options);
+  const roaming = ambientMotion.create([member],options);
+  for (const solver of [docked, roaming]) {
+    solver.reconcile();
+    solver.advance(1);
+  }
+  assert(Math.abs(docked.poses()[0].point[0] - .99) < 1e-6);
+  assert(Math.abs(roaming.poses()[0].point[0] - .88) < 1e-6);
+  docked.attract('a',[2,0,0],{hold:0,duration:3,stop:.4});
+  docked.advance(1);
+  assert(Math.abs(docked.poses()[0].point[0] - 1.6) < 1e-6);
+  assert.doesNotThrow(() => ambientMotion.create([{ ...member, range: .04 }], options));
+  assert.throws(() => ambientMotion.create([{ ...member, arrival: -.01 }], options), /Invalid ambient member/);
+});
+
 test('habitat edits relocate or suspend a member while retaining its identity', () => {
   const member = { id: 'boat', kind: 'water', home: [1,1,2], range: 1 };
   const a = ambientMotion.create([member], {
