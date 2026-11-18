@@ -48,6 +48,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `proximity.connect(sockets, options)` | Deterministic matching of named sockets with reach, degree and compatibility limits |
 | `attachments.layout(slots, families, options)` | Stable weighted selection for framed, typed attachment slots, with fit and clearance callbacks |
 | `fitSurfaceBands({domain, opening, edges, obstructions, clearance})` | Keep bands mounted to a chart feature's edges and shorten or omit them to fit nearby boundaries and obstructions |
+| `fitFootprintContact({center, tangent, size, height, blocked, maxSpread, samples, interval})` | Seat an upright footprint on a sampled support and check space above it |
 | `environmentFields.evaluate(settings, elapsed)`, `environmentFields.opticalDepth(from, to, medium)`, `environmentFields.scatter(from, to, light, medium)`, `environmentFields.deposition(sample)` | Cyclic sun and sky tint, height-dependent fog, local scattering, and slope-sensitive surface loads |
 | `populations.layout(boundsList, evaluate, options)` | Seeded world-space candidates ranked by density. Expanding the work region preserves existing candidate identities |
 | `sampling.poisson(options)` | Seeded Bridson samples in finite 2D and 3D bounds, with masks, variable radii, pins and axis scaling |
@@ -197,6 +198,17 @@ coordinates. Configure any of the left, right, bottom, and top edges with
 Each result has a stable edge key, a mount midpoint in `hinge`, and fitted
 `bounds`. An obstruction shortens the band along its outward axis. The planner
 omits the band when its remaining space falls below the configured minimum.
+
+`fitFootprintContact` samples an oriented rectangular footprint in world XZ.
+The `center` supplies the horizontal origin and `tangent` sets the width
+axis. `size` gives the width, height and depth. Supply a `height(x, z)`
+function that returns the support height or `null` for a hole or excluded
+surface. Choose an allowable height `interval`, the maximum height
+difference `maxSpread`, and `samples` per axis. An optional `blocked(point)`
+predicate can reject sample columns at three heights above the fitted base.
+An accepted fit returns the upright frame with its origin at the highest
+sample, the height `range`, and the sampled XZ `points`. A footprint with
+missing support, excessive height variation or blocked space returns `null`.
 
 `panelFrames` fits to the carrier dimensions and exposes its member footprints
 as `parts`. Pass those to `surfaceCells.clip` for openings, then loft the
