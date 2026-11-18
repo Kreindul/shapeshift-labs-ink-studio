@@ -253,6 +253,32 @@
     );
   }
 
+  function cutCourses() {
+    const width = 5;
+    const height = 3;
+    const layout = P.fittedCourses({ width, height, unit: [0.64, 0.32], joint: 0.035, stagger: 0.5 });
+    const portal = [[1.72, 0], [3.28, 0], ...Array.from({ length: 13 }, (_, i) => {
+      const angle = (i * Math.PI) / 12;
+      return [2.5 + 0.78 * Math.cos(angle), 1.28 + 0.78 * Math.sin(angle)];
+    })];
+    const { cells } = P.surfaceCells.clip(layout.cells, {
+      boundary: [[0, 0], [width, 0], [4.65, 2.4], [2.5, height], [0.35, 2.4]],
+      holes: [portal]
+    });
+    return cells.flatMap(({ key, fragments }) =>
+      fragments.map((polygon, fragment) => {
+        const n = polygon.length;
+        const row = Number(key.split('/')[0]);
+        const indices = polygon.map((_, i) => i);
+        const vertices = [-0.13, 0.13].flatMap(z => polygon.map(([x, y]) => [x, y, z]));
+        const sides = indices.map(i => [i, (i + 1) % n, (i + 1) % n + n, i + n]);
+        return P.pieces.convex(vertices, [indices, indices.map(i => i + n), ...sides], {
+          key: key + '/' + fragment, material: row < 3 ? 'basalt' : 'glaze'
+        }).mesh;
+      })
+    );
+  }
+
   const examples = [
     ['Fitted courses', 'Staggered units fit the domain and preserve physical joints.', courses],
     ['Masked cells', 'Clipped prisms follow an annular mask with real gaps.', cells],
@@ -272,7 +298,8 @@
     ],
     ['Surface contacts', 'The seam follows the intersecting faces and stops where a solid covers it.', surfaceContact],
     ['Fitted arch trim', 'Physical joints follow the inner profile through each bend.', () => fittedRibbon('arch', 'cream')],
-    ['Fitted hatch trim', 'The same strip layout follows a closed panel profile.', () => fittedRibbon('hatch', 'glaze')]
+    ['Fitted hatch trim', 'The same strip layout follows a closed panel profile.', () => fittedRibbon('hatch', 'glaze')],
+    ['Clipped surface courses', 'Courses share a physical opening and follow a sloped outline.', cutCourses]
   ];
 
   function triangles(meshes) {

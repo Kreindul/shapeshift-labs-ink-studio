@@ -32,6 +32,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `pieces.convex`, `pieces.box`, `pieces.beam`, `pieces.tube`, `pieces.union` | Reusable solid pieces and query unions. Union meshes contain constituent shells |
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
 | `fittedRibbon({inner, outer, pitch, gap, closed, phase, budget})` | Fit repeating bands along paired 2D or 3D rails. Each logical cell contains quadrilateral footprints split at source edges |
+| `surfaceCells.clip(cells, {boundary, holes, budget, work})` | Intersect convex cell footprints with a convex chart boundary and subtract convex holes. Group fragments by logical cell key |
 | `planarCells.layout(bounds, mask, options)`, `planarCells.prism(cell, options)` | Stable planar cells clipped to a mask, including disconnected fragments and holes. Prisms provide distance, ray, sampling and closed mesh operations |
 | `supportSkirt({outline, ground, embed, overlap, maxDrop})` | Fill vertically below a convex planar carrier and above the supplied height field, up to the configured drop |
 | `basins.surface(carrier, mask, options)`, `terraces.surface(carrier, configuration)` | Masked level cuts and configurable height bands. Carrier provides bounds, height, normal and domain predicates |
@@ -88,6 +89,14 @@ order and an optional `tag`. Supply half spaces with `normal` and `offset`
 and optionally attach a `tag` to any plane. The output has the same face record
 shape, with a cap for each plane which intersects the volume. Triangulate the
 result after clipping if the consumer uses triangle geometry.
+
+`surfaceCells.clip` takes records with a string `key` and convex 2D
+`polygon`, or cells from `fittedCourses` with `id` and `inset` bounds.
+Either polygon winding is accepted. The output has counterclockwise convex
+fragments in the same chart coordinates. Shared cell keys are grouped across
+chart seams and split pieces. Material assignment and mapping chart points
+onto the host are caller policies. The work budget counts vertices visited
+by the clip operations.
 
 Catalog definitions may name one or several parents using `extends`. A
 resolved profile merges named or inline layers in order. Object keys compose
