@@ -649,6 +649,14 @@ Use the exposed `bounds` to query nearby surfaces before sampling. The
 same query can fit a ramp transition, a platform threshold, or an
 equipment loading area according to the caller's tolerances.
 
+`P.viewClearance.compile({eye, target, radius, feather, endFade, opacity,
+reach})` creates a camera-relative opacity field. Apply `opacityAt(point)`
+to the geometry you want to yield when it blocks the view. The effect
+feathers around the viewing axis and releases as it approaches the focus.
+`reach` optionally sets a fixed depth for views that use a direction in place
+of a physical focus point. The included GLSL function takes the same axis
+and profile and works on transformed sample positions.
+
 ### Contact fields, runoff, and contours
 
 `P.contours.march(field, {bounds, cell, iso})` extracts open paths and closed
