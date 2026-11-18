@@ -51,6 +51,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `materialBands(spec)` | Nonoverlapping local intervals with material and pattern metadata |
 | `masks.stroke(spec)`, `masks.compose(specs, options)` | Tapered and feathered swept discs, ordered addition and erasure, signed distance and visible source ownership |
 | `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
+| `surfaceSection(chart, options)` | Convert between world coordinates and a section measured through the varying thickness of a surface chart |
 | `geometry.profileDistance(points)` | Compile a closed 2D ring into a reusable signed distance function `(x, y) => distance`. Concavity and either winding are supported |
 | `volumeCuts.compile(specs)` | Union keyed XZ profiles extruded along Y. Provides a signed field, host subtraction, bounded exposed-boundary sampling and ray hits |
 | `clearance.field(solids).probe(bounds, options)` | Bounded sampled volume contacts for supplied solids with `id`, bounds, and distance functions |
@@ -133,6 +134,16 @@ total length and a corner splits a cell into fragments with the same key.
 `closed: true` connects the last and first vertices. A fractional `phase`
 shifts the joints around that seam. The result contains footprints in the
 input coordinate system so callers can extrude, clip or sample them.
+
+`surfaceSection(chart, {center, units, thickness, periodicU, offset})` uses
+the chart's `sample(uv)` and `project(point)` contract. Supply the two local
+chart scales in world units per chart unit, and a positive thickness sampler
+`thickness(uv)`. `map([x, y, z])` and `project(point)` place and recover local
+coordinates. Depth zero is the front surface plus the optional offset.
+Depth `-referenceDepth` follows the back across the chart, while positive
+depth keeps its world scale for trim projections. Chart projection must
+locate the corresponding surface point along the normal throughout the band.
+Turn on `periodicU` to keep local coordinates continuous across a closed seam.
 
 Convex face clipping accepts face records with `points` in outward cyclic
 order and an optional `tag`. Supply half spaces with `normal` and `offset`
