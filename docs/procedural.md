@@ -59,6 +59,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `traversal.create({supports, clearance, ...body})` | Ground-following body with bounded displacement, head clearance, step limits and wall sliding |
 | `routes.follower(route, options)` | Distance-based position and a look-ahead frame for cameras or assemblies on sampled routes |
 | `ambientMotion.create(members, {place, move, destination?, step?})` | Seeded roaming, local avoidance, temporary attraction and habitat revalidation |
+| `layerMix.create(layers, {budget})` | Combine continuous controls into bounded per-layer gains with optional fades |
 | `emitters.compile(spec)` | Deterministic looping samples with caller-supplied direction and drift. Sample at any finite time with `sample(index, time)` or `samples(time)` |
 | `routes.polyline(points, options)`, `routes.aroundConvex(outline, start, end, options)` | Arc-length routes with frames and closest queries. Convex XZ routes project endpoints onto an offset perimeter and interpolate world Y |
 | `routes.terrain(start, end, options)` | Bounded, terrain-aware search between pinned points with slope, signed clearance, keep-out regions and turn costs |
@@ -275,6 +276,21 @@ longer participates in habitat queries or separation. Use
 current habitat. Omitting the point starts the search from the member's
 last position. Both methods return whether the state changed. The caller
 can use the same member on a moving platform or during a scripted scene.
+
+### Layer gains and crossfades
+
+`layerMix.create(layers, {budget: 1})` compiles layers with IDs and optional
+`gain`, `curves`, `fadeIn` and `fadeOut`. Each curve maps a named control
+through increasing `[input, gain]` stops in the range zero to one. The mixer
+interpolates between stops, clamps at the ends, and multiplies the curves
+for each layer. When the sum exceeds the budget it scales all gains together.
+
+`sample(controls)` returns the target gains by layer ID.
+`state(initialControls)` returns a mixer with `gains()` and
+`advance(controls, seconds)`. Fades are exponential time constants in
+seconds. A zero fade applies the layer target immediately. Feed the same
+gains to synchronized audio stems or to any other independently weighted
+layers. The mixer has no clock, playback engine, or scene dependency.
 
 ### Ordered paint coverage
 
