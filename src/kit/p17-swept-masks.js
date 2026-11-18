@@ -71,81 +71,15 @@
     const retained = A.data.isImmutable(spec);
     if (retained && compiledStrokes.has(spec)) return compiledStrokes.get(spec);
     const p = parameters(spec),
-      segments = [],
+      evaluate = SweptDisc.compile(p.points, p.radii),
       minimum = [Infinity, Infinity],
       maximum = [-Infinity, -Infinity];
     for (let i = 0; i < p.points.length; i++) {
-      const a = p.points[i],
-        r = p.radii[i] + p.softness;
+      const a = p.points[i], r = p.radii[i] + p.softness;
       for (let j = 0; j < 2; j++) {
         minimum[j] = Math.min(minimum[j], a[j] - r);
         maximum[j] = Math.max(maximum[j], a[j] + r);
       }
-      if (i) {
-        const b = p.points[i - 1],
-          dx = a[0] - b[0],
-          dy = a[1] - b[1],
-          length = Math.hypot(dx, dy),
-          ra = p.radii[i - 1],
-          rb = p.radii[i],
-          delta = rb - ra,
-          k = delta / length,
-          end = length < EPS ? (rb >= ra ? 1 : 0) : Math.abs(delta) >= length ? (delta > 0 ? 1 : 0) : null;
-        segments.push({ a: b, ra, dx, dy, length, delta, k, root: end === null ? Math.sqrt(1 - k * k) : 1, end });
-      }
-    }
-    const uniform = p.radii.every(r => r === p.radii[0]);
-    let known = false,
-      lastX,
-      lastY,
-      lastDistance,
-      lastRadius;
-    // Public queries validate once. A composed field calls its privately owned
-    // evaluators after its own validation, rather than repeating it per stroke.
-    function evaluate(x, y, wantRadius = false) {
-      if (known && x === lastX && y === lastY) return wantRadius ? lastRadius : lastDistance;
-      let best = Infinity,
-        radius = p.radii[0];
-      if (!segments.length) best = Math.hypot(x - p.points[0][0], y - p.points[0][1]) - radius;
-      else if (uniform) {
-        let squared = Infinity,
-          bx = 0,
-          by = 0,
-          overflow = Infinity;
-        for (const s of segments) {
-          const u = x - s.a[0], v = y - s.a[1];
-          const t = s.end === null ? clamp((u * s.dx + v * s.dy) / s.length / s.length) : s.end;
-          const qx = u - t * s.dx, qy = v - t * s.dy, d = qx * qx + qy * qy;
-          if (d === Infinity) overflow = Math.min(overflow, Math.hypot(qx, qy));
-          if (d < squared) {
-            squared = d;
-            bx = qx;
-            by = qy;
-          }
-        }
-        best = (squared === Infinity ? overflow : Math.hypot(bx, by)) - radius;
-      } else
-        for (const s of segments) {
-          const u = x - s.a[0], v = y - s.a[1];
-          let t = s.end;
-          if (t === null) {
-            const along = (u * s.dx + v * s.dy) / s.length,
-              across = Math.abs(u * s.dy - v * s.dx) / s.length;
-            t = clamp((along + (s.k * across) / s.root) / s.length);
-          }
-          const r = s.ra + t * s.delta,
-            value = Math.hypot(u - t * s.dx, v - t * s.dy) - r;
-          if (value < best) {
-            best = value;
-            radius = r;
-          }
-        }
-      known = true;
-      lastX = x;
-      lastY = y;
-      lastDistance = best;
-      lastRadius = radius;
-      return wantRadius ? radius : best;
     }
     const distance = (q, wantRadius = false) => {
         point(q);

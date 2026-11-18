@@ -143,6 +143,12 @@ spacing. Choose spacing and padding in relation to the smallest obstruction
 the caller needs to detect. Emitters describe visual trajectories and do not
 perform particle collision or fluid simulation.
 
+Long swept-disc strokes index contiguous segment runs by their bounds and
+maximum radius. A query evaluates the original segment geometry for candidate
+runs and keeps the earliest segment's radius on equal distances. The same
+queries drive signed coverage, feathering, radius blending, and ordered
+paint and erase composition.
+
 Use `surfaceMasks.compile(strokes, {size: [width, height], periodic})` to
 keep paint attached to a changing surface chart. Each stroke has normalized
 `points`, a physical `width`, optional `softness`, and an `operation` of
