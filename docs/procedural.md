@@ -56,6 +56,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `contacts.index(mesh, options)`, `contacts.intersections(a, b, options)`, `contacts.clipCurve(points, solids)` | Index named triangle groups, trace noncoplanar contacts, and trim contact or authored curves against closed indexed solids |
 | `contacts.traceSdf(chart, sd, options)`, `contacts.expose(curves, occluder, options)`, `contacts.field(curves)`, `contacts.runoff(curves, project, options)` | Trace SDF contacts, expose visible runs, derive distance masks and follow downhill paths |
 | `tiles.compile(definitions)`, `tiles.solve(model, options)`, `tiles.learn(swatch)`, `tiles.overlap(bank, options)`, `tiles.wang(model, options)`, `tiles.refine(coarse, model, options)` | Weighted matched sockets, example-based synthesis, world-stable patterns and coarse-to-fine layouts |
+| `fields.simplex(options)`, `fields.periodic(options)`, `fields.compile(expression, options)` | Seeded analytic noise and serializable field composition for SDFs, materials and placement |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -321,6 +322,47 @@ weighted socket tiles, and a ceramic panel generated from a small swatch.
 ```sh
 node cli/ink-studio.js render examples/constraint-tiles.js --seed 0 --ortho --colored
 node cli/ink-studio.js render examples/constraint-tiles.js --seed 1 --ortho --colored
+```
+
+### Composable procedural fields
+
+`P.fields.compile(expression, {seed})` returns a function
+`field(x, y, z, time = 0)`. Pass the function to a terrain sampler, scalars
+in a material, or a population evaluator. The compiled `spec` and `seed`
+can be saved and recompiled as JSON. Use `field.sample(x, y, z, time)` for a
+value, XYZ gradient, and time derivative. Analytic derivatives are
+propagated through the expression. Clamps, folds, and nearest-feature ties
+use one selected derivative at corners.
+
+| Node | Controls |
+| --- | --- |
+| Number or `constant` | A scalar number or `{type: 'constant', value}` |
+| `axis` | Read `x`, `y`, `z`, or `time` with optional scalar `scale` |
+| `simplex` | Seeded noise. `axes` selects two or three spatial coordinates. `scale` is a world length or XYZ lengths |
+| `periodic` | Gradient noise with XYZ world `period` lengths. Use `null` on axes that should have no explicit period. Scale selects the approximate lattice size |
+| `loop` | Two spatial coordinates, selected by `axes`, and a circle in a four-dimensional noise field. Set the time `period` and circle `radius` |
+| `fbm`, `ridge`, `billow` | `source`, `octaves`, `gain`, and `lacunarity`. Ridge also has `offset` and `feedback` |
+| `warp` | `source`, `strength`, `iterations`, and `decay`. Supply three component fields in `vector` or use seeded default components at `scale` |
+| `terrace` | `source`, height `step`, `offset`, and transition width as a fraction of a step |
+| `distance` | XYZ `point` or XYZ polylines in `paths`, with optional signed `radius`. Set `axes: 'xz'` for plan distance |
+| `add`, `multiply`, `min`, `max` | Compose two or more `inputs` |
+| `clamp` | Limit `source` to `min` and `max` |
+
+The raw `fields.simplex({dimension, seed})` and
+`fields.periodic({dimension, seed, periods})` APIs expose `value`,
+`gradient`, and `sample` in two to four dimensions. Raw periodic lattice
+periods are integer cell counts. Noise has nominal unit amplitude, and
+`clamp` can constrain the final range.
+
+The sculpt node `S.displace(heldSolid, expression, amplitude, options)`
+compiles a JSON expression once and clamps its samples to the node's
+zero-to-one input range. The original callback signature still accepts a
+numeric field. The example applies the same field vocabulary to terrain
+heights, shading, and displaced solids.
+
+```sh
+node cli/ink-studio.js render examples/composed-fields.js --seed 0 --ortho --colored
+node cli/ink-studio.js render examples/composed-fields.js --seed 1 --ortho --colored
 ```
 
 ## Optional retained authoring

@@ -7,8 +7,9 @@
                           function, to cut into), o.at (a point on it), o.n (which way the surface faces there: found if left out), o.up
                           (which way is up in the drawing: [0, 1, 0]), o.depth (0.06), o.mat (the colour of the cut: its own, or left out
                           to keep the stone's). shape: { strokes, width } or outline loops (K.poly2). Raised instead of cut: o.raise
-     S.displace(p, field, amp, o)   a held solid pushed out where field (x, y, z) -> 0..1 (any K.tex pattern) is over o.mid (0.5) and in
-                          where it is under, by up to amp. o.k (0.8) slows the field down where the pattern is steep
+     S.displace(p, field, amp, o)   a held solid pushed out where a field is over o.mid (0.5) and in
+                          where it is under. Supply a (x, y, z) -> 0..1 callback or a K.procedural.fields expression.
+                          o.k (0.8) slows the field down where the pattern is steep.
      S.smooth(p, o)       a held solid (or a list of them, joined) made over on a grid, with signed-distance grid operations:
                           o.fillet: fill every crease and hollow corner with a curve of that radius (where two solids meet, where a
                           rock sits on the ground); o.round: round every edge and corner to that radius; o.mean: passes of blur (soften
@@ -437,16 +438,22 @@
     S.displace = (p0, field, amp, o) => {
       o = o || {};
       const mid = o.mid === undefined ? 0.5 : o.mid,
-        k = o.k || 0.8;
+        k = o.k || 0.8,
+        evaluate = typeof field === 'function'
+          ? field
+          : K.procedural.fields.compile({ type: 'clamp', source: field }, { seed: o.seed ?? 0 });
       const p = {
         bc: p0.bc,
         br: p0.br + amp,
-        sd: (x, y, z) => (S.psd(p0, x, y, z) - 2 * amp * (field(x, y, z) - mid)) * k,
+        sd: (x, y, z) => (S.psd(p0, x, y, z) - 2 * amp * (evaluate(x, y, z) - mid)) * k,
         sample(f) {
           const keep = p0.res;
           p0.res = this.res;
-          p0.sample(f);
-          p0.res = keep;
+          try {
+            p0.sample(f);
+          } finally {
+            p0.res = keep;
+          }
         }
       };
       if (p0.along) p.along = p0.along;
