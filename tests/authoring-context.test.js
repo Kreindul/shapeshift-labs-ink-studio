@@ -66,6 +66,21 @@ test('cylindrical and elliptical hosts wrap normalized anchors and return actual
   near(offset[0] * closest.tangent[0] + offset[2] * closest.tangent[2], 0, 1e-5);
 });
 
+test('registered transformed charts can sample just the point and normal', () => {
+  const d = A.document(), c = A.context(d);
+  const local = P.surface.cylinder({ id: 'wall', origin: [2, 1, -1], radii: [3, 1], height: 2 });
+  const pose = P.transforms.local({ position: [-3, 2, 1], rotation: [.2, .7, -.4], scale: [-1, 2, 3] });
+  const surface = P.surface.transform(local, pose);
+  c.register('carrier', {describe() { return {bounds:surface.bounds, surfaces:[surface]}; }});
+  d.create('carrier', {id:'carrier'});
+  const chart = c.surfaces('carrier')[0];
+  for (const uv of [[0,0],[.33,.5],[.999,1]]) {
+    const {p,n} = chart.sample(uv);
+    assert.deepEqual(chart.samplePointNormal(uv), {p,n});
+  }
+  c.dispose();
+});
+
 test('both creation orders produce the same retained generated opening; removal and undo include consequences', () => {
   const a = setup(),
     b = setup();

@@ -164,20 +164,18 @@
     if (!Number.isFinite(start) || !Number.isFinite(sweep) || sweep <= 0 || sweep > TAU + EPS)
       throw new Error('Invalid cylinder angular range');
     const closed = Math.abs(sweep - TAU) < EPS;
-    function sample(at) {
+    function readSurface(at, frame) {
       if (!Array.isArray(at) || at.length !== 2 || !at.every(Number.isFinite))
         throw new Error('Surface coordinates must be two finite numbers');
-      const angle = start + at[0] * sweep,
-        c = Math.cos(angle),
-        s = Math.sin(angle);
-      return {
-        p: V.add(d.origin, V.add(V.mul(Y, d.height * at[1]), V.add(V.mul(X, r[0] * c), V.mul(Z, r[1] * s)))),
-        n: V.norm(V.add(V.mul(X, c / r[0]), V.mul(Z, s / r[1]))),
-        tangent: V.norm(V.add(V.mul(X, -r[0] * s), V.mul(Z, r[1] * c))),
-        bitangent: Y.slice(),
-        uv: at.slice()
-      };
+      const angle = start + at[0] * sweep, c = Math.cos(angle), s = Math.sin(angle);
+      const p = V.add(d.origin, V.add(V.mul(Y, d.height * at[1]), V.add(V.mul(X, r[0] * c), V.mul(Z, r[1] * s))));
+      const n = V.norm(V.add(V.mul(X, c / r[0]), V.mul(Z, s / r[1])));
+      if (!frame) return { p, n };
+      const tangent = V.norm(V.add(V.mul(X, -r[0] * s), V.mul(Z, r[1] * c)));
+      return { p, n, tangent, bitangent: Y.slice(), uv: at.slice() };
     }
+    const sample = at => readSurface(at, true);
+    const samplePointNormal = at => readSurface(at, false);
     function project(p) {
       const q = V.sub(p, d.origin),
         angle = Math.atan2(V.dot(q, Z) / r[1], V.dot(q, X) / r[0]);
@@ -252,6 +250,7 @@
       data: freeze(d),
       bounds: freeze({ min: lo, max: hi }),
       sample,
+      samplePointNormal,
       project,
       closest,
       raycast
@@ -298,17 +297,22 @@
   }
   A.transforms = { local, point, normal, inversePoint, combine, distanceScale, bounds: transformBounds };
   A.surface.transform = (surface, pose) => {
-    const inverse = M.inv(pose.R);
+    const inverse = M.inv(pose.R), normalMatrix = M.tr(inverse);
+    const worldNormal = n => V.norm(M.app(normalMatrix, n));
     const unpoint = p => M.app(inverse, V.sub(p, pose.t));
     function sample(at) {
       const s = surface.sample(at);
       return {
         p: point(pose, s.p),
-        n: normal(pose, s.n),
+        n: worldNormal(s.n),
         tangent: V.norm(M.app(pose.R, s.tangent)),
         bitangent: V.norm(M.app(pose.R, s.bitangent)),
         uv: s.uv.slice()
       };
+    }
+    function samplePointNormal(at) {
+      const s = surface.samplePointNormal ? surface.samplePointNormal(at) : surface.sample(at);
+      return { p: point(pose, s.p), n: worldNormal(s.n) };
     }
     function project(p) {
       return surface.project(unpoint(p));
@@ -396,6 +400,7 @@
       data: freeze({ local: clone(surface.data || {}), transform: clone(pose) }),
       bounds: freeze(transformBounds(pose, surface.bounds)),
       sample,
+      samplePointNormal,
       project,
       closest,
       raycast

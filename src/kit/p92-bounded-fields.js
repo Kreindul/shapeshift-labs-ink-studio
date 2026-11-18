@@ -37,5 +37,16 @@
     };
   }
 
-  K.boundedFields = Object.freeze({ halfspaces, heightMask });
+  // Compute max(floor, min(first, second)). Evaluate the cheaper or
+  // usually closer field first to skip an unnecessary second probe.
+  function unionFloor(first, second) {
+    if (typeof first !== 'function' || typeof second !== 'function')
+      throw Error('A bounded union needs two field callbacks');
+    return function distance(point, floor = -Infinity) {
+      const a = first(point);
+      return a <= floor ? floor : Math.max(floor, Math.min(a, second(point)));
+    };
+  }
+
+  K.boundedFields = Object.freeze({ halfspaces, heightMask, unionFloor });
 })(KIT);

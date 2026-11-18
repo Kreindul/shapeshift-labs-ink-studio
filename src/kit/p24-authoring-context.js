@@ -188,6 +188,7 @@
             !name(s.id) ||
             ids.has(s.id) ||
             typeof s.sample !== 'function' ||
+            (s.samplePointNormal !== undefined && typeof s.samplePointNormal !== 'function') ||
             typeof s.closest !== 'function' ||
             typeof s.raycast !== 'function'
           )
@@ -528,6 +529,7 @@
                 kind: s.kind || 'parametric',
                 data: s.data ? freeze(clone(s.data)) : null,
                 sample: s.sample,
+                ...(s.samplePointNormal ? { samplePointNormal: s.samplePointNormal } : {}),
                 project: s.project,
                 closest: s.closest,
                 raycast: s.raycast,

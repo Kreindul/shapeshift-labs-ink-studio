@@ -34,3 +34,15 @@ test('sculpt probes use world-space bounds and preserve smooth-union distances',
   for(let x=-3;x<=3;x+=.13)for(let y=-2;y<=2;y+=.21)
     assert.equal(fields[0](x,y,.34),fields[1](x,y,.34));
 });
+test('a floored union can skip the second distance without changing the answer', () => {
+  const { boundedFields } = require('..').load().KIT;
+  let probes = 0;
+  const a = ([x]) => x;
+  const b = ([x]) => { probes++; return 4 - x; };
+  const field = boundedFields.unionFloor(a, b);
+  assert.equal(field([1], 2), 2);
+  assert.equal(probes, 0);
+  assert.equal(field([4], 2), 2);
+  assert.equal(field([1]), 1);
+  assert.equal(probes, 2);
+});
