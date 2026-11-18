@@ -1269,3 +1269,24 @@ Otherwise the library checks for changes before writing. Failed or stale
 saves leave local edits available through the document so callers can export
 them. The index stores metadata and references to journals. Documents keep
 their authoring data and recovery revision format.
+
+### Asset packs and portable meshes
+
+Use `KIT.authoring.assets` for versioned families with bounds, named
+attachment sockets, and weighted declarative variants. Compatible
+replacements share a kind and compatibility key, and provide every socket
+required by the original family.
+
+`KIT.authoring.assetPacks.create({families, packs})` builds a catalog from a
+base family array and one or more manifests. An `ink-studio/asset-pack`
+manifest at version 1 declares an `id`, `revision`, `title`, `families`,
+and an optional `replacements` map. Additions are addressable by their
+namespaced family ID. Compile an ordered list of active pack IDs for each
+scene. Later entries take precedence. The resulting resolver keeps the
+authored family IDs intact, validates cycles, and reports missing packs.
+
+`KIT.authoring.assetMeshes.fromGLB(bytes, {size})` imports a small static
+triangle model into a self-contained JSON recipe with fitted ground
+coordinates and bounded face colors. `assetMeshes.recipe(mesh, {size})`
+uses an already parsed mesh. The recipe carries geometry and base colors.
+The caller selects the placement, material and rendering rules.
