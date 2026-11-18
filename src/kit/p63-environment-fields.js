@@ -59,7 +59,7 @@
 
   const coatingRoles = Object.freeze(['other','foliage','wood','roof','stone','soil','metal','plaster']);
   const coatingDefaults = P.data.freeze({
-    slope: [.28,.88], bias: 0, blend: [.12,.92], variation: .5,
+    slope: [.28,.88], bias: 0, blend: [.12,.92], variation: .5, depth: 0,
     shadow: [.50,.60,.66], highlight: [.95,.96,.90],
     retention: { other:1, foliage:.84, wood:.80, roof:1, stone:1, soil:.94, metal:.58, plaster:.90 }
   });
@@ -75,13 +75,13 @@
       throw Error('Coating needs a profile and a material retention map');
     const p={...coatingDefaults,...raw,retention:{...coatingDefaults.retention,...raw.retention}};
     if (!orderedPair(p.slope,-1,1) || !orderedPair(p.blend,0,1) ||
-        !within(p.bias,-.5,.5) || !within(p.variation,0,1) ||
+        !within(p.bias,-.5,.5) || !within(p.variation,0,1) || !within(p.depth,0,16) ||
         ![p.shadow,p.highlight].every(color=>vector(color)&&Array.from(color).every(v=>within(v,0,1))) ||
         Object.keys(p.retention).length>64 ||
         !Object.entries(p.retention).every(([role,amount])=>/^[a-z][a-z0-9_-]{0,47}$/i.test(role)&&within(amount,0,1)))
-      throw Error('Coating needs ordered slope and blend bounds, normalized colors and bounded retention');
+      throw Error('Coating needs ordered slope and blend bounds, normalized colors, bounded depth and retention');
     const profile=P.data.freeze({slope:p.slope.slice(),blend:p.blend.slice(),bias:p.bias,variation:p.variation,
-      shadow:p.shadow.slice(),highlight:p.highlight.slice(),retention:p.retention});
+      depth:p.depth,shadow:p.shadow.slice(),highlight:p.highlight.slice(),retention:p.retention});
     compiledCoats.set(profile,profile);
     if (P.data.isImmutable(raw)) compiledCoats.set(raw,profile);
     return profile;
@@ -104,12 +104,40 @@
     return color.map((c,i)=>c+(p.shadow[i]+(p.highlight[i]-p.shadow[i])*light-c)*blend);
   }
 
+  function coatingThickness(amount, raw) {
+    if (!within(amount,0,1)) throw Error('Coating thickness needs a normalized amount');
+    const p = coatingProfile(raw);
+    return p.depth * ease(...p.blend,amount);
+  }
+
+  // Preserve the lower three-sigma bound of the substrate in the normal direction.
+  function coatingShape({point,normal,covariance,amount}, raw) {
+    if (!vector(point) || !vector(normal) || V.len(normal)<1e-8 ||
+        (!Array.isArray(covariance) && !ArrayBuffer.isView(covariance)) || covariance.length!==9 ||
+        !Array.from(covariance).every(Number.isFinite)) throw Error('Coating shape needs a point, normal and finite 3x3 covariance');
+    const depth = coatingThickness(amount,raw), n = V.norm(normal);
+    const sigma = Math.sqrt(Math.max(0,V.dot(n,K.M.app(covariance,n)))), pad = depth / 6;
+    const increase = pad * (2 * sigma + pad);
+    return { depth, point:V.mad(point,n,depth*.5),
+      covariance:Array.from(covariance,(c,i)=>c+increase*n[Math.floor(i/3)]*n[i%3]) };
+  }
+
   const coatingGlsl = Object.freeze({
     amount: `
 float coatingAmount(float vertical, float load, float grain, float keep, vec4 profile) {
   float up = clamp(vertical, 0.0, 1.0);
   return clamp(load * keep * (.9 + profile.w * (grain - .5)) *
     smoothstep(profile.x, profile.y, vertical + profile.z * 4.0 * up * (1.0 - up)), 0.0, 1.0);
+}
+`,
+    shape: `
+void coatingExpand(inout vec3 p, inout mat3 cov, vec3 n, float amount, vec3 profile) {
+  float depth = profile.z * smoothstep(profile.x, profile.y, amount);
+  if (depth <= 0.0) return;
+  float sigma = sqrt(max(0.0, dot(n, cov * n)));
+  float pad = depth / 6.0;
+  cov += pad * (2.0 * sigma + pad) * outerProduct(n, n);
+  p += n * (depth * .5);
 }
 `,
     color: `
@@ -136,6 +164,7 @@ vec3 coatingColor(vec3 base, float amount, vec2 blend, vec3 shadow, vec3 highlig
     return -Math.expm1(-amount * .72) * Math.exp(-opticalDepth(from, to, f) * .38 * enter / Math.max(1, length));
   }
 
-  const coating=Object.freeze({defaults:coatingDefaults,roles:coatingRoles,profile:coatingProfile,amount:coatingAmount,color:coatingColor,glsl:coatingGlsl});
+  const coating=Object.freeze({defaults:coatingDefaults,roles:coatingRoles,profile:coatingProfile,
+    amount:coatingAmount,color:coatingColor,thickness:coatingThickness,shape:coatingShape,glsl:coatingGlsl});
   P.environmentFields = Object.freeze({ defaults, evaluate, medium, opticalDepth, deposition, scatter, coating });
 })(KIT);

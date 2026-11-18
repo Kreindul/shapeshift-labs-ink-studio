@@ -72,13 +72,14 @@
           if(!open[i])continue;
           const state={wetness:wet[i],temperature:temperature[i],snow:snow[i],frost:frost[i],
             exposure:exposure[i],normal:normals[i].slice()};
-          const {rain=0,snowfall=0,air=10,humidity=0.44,wind=0.35,shelter=0,heat=0,runoff=[0,0],
+          const {rain=0,snowfall=0,precipitationExposure=1,air=10,humidity=0.44,wind=0.35,shelter=0,heat=0,runoff=[0,0],
             light=sun?clamp(V.dot(sun,normals[i]),0,1):0}=forcing(...center(i),t,state)??{};
           if(!between(rain,0,1000)||!between(snowfall,0,1000)||!between(air,-240,500)||
-            ![humidity,wind,shelter,light].every(unit)||!between(heat,-240,250)||!vector(runoff,2)||
+            ![humidity,wind,shelter,light,precipitationExposure].every(unit)||!between(heat,-240,250)||!vector(runoff,2)||
             Math.hypot(...runoff)>maxRunoff+1e-10)
             throw new Error('Surface forcing values must be finite and within their configured limits');
-          records[i]={rain,snowfall,air,humidity,wind,shelter,heat,light:light*(1-shelter),runoff:runoff.slice()};
+          records[i]={rain:rain*precipitationExposure,snowfall:snowfall*precipitationExposure,
+            air,humidity,wind,shelter,heat,light:light*(1-shelter),runoff:runoff.slice()};
         }
         dw.fill(0);dT.fill(0);
         for(let z=0,i=0;z<height;z++)for(let x=0;x<width;x++,i++){

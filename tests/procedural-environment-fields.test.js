@@ -3,6 +3,21 @@ const assert = require('node:assert/strict');
 const P = require('..').load().KIT.procedural.environmentFields;
 const near = (actual, expected, epsilon = 1e-8) => assert(Math.abs(actual - expected) < epsilon, [actual, expected].join(' vs '));
 
+test('coating thickness extends the exposed side of a splat and preserves its substrate', () => {
+  const {coating} = P, profile = {depth:.24};
+  assert.equal(coating.thickness(1,profile),.24);
+  assert.equal(coating.thickness(.1,profile),0);
+  assert.equal(coating.thickness(1),0);
+  const point=[3,2,1], covariance=[.04,0,0,0,.0004,0,0,0,.01];
+  const expanded=coating.shape({point,normal:[0,2,0],covariance,amount:1},profile);
+  near(expanded.point[1]-3*Math.sqrt(expanded.covariance[4]), point[1]-3*Math.sqrt(covariance[4]));
+  near(expanded.point[1]+3*Math.sqrt(expanded.covariance[4]), point[1]+3*Math.sqrt(covariance[4])+.24);
+  assert.equal(expanded.covariance[0],covariance[0]);
+  assert.equal(expanded.covariance[8],covariance[8]);
+  assert.deepEqual(coating.shape({point,normal:[1,1,0],covariance,amount:0},profile),{depth:0,point,covariance});
+  assert.throws(()=>coating.profile({depth:-1}),/bounded depth/);
+});
+
 test('the solar clock is deterministic, wraps both ways, and supplies a unit sun direction', () => {
   const noon = P.evaluate({ hour: 12, latitude: 0, declination: 0 }), dawn = P.evaluate({ hour: 6, latitude: 0, declination: 0 }),
     midnight = P.evaluate({ hour: 0, latitude: 0, declination: 0 });

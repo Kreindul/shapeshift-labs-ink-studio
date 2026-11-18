@@ -4,6 +4,22 @@ const {KIT:K}=require('..').load();
 const {motion}=K.procedural;
 const sum=a=>a.reduce((x,y)=>x+y,0);
 
+test('a cover field blocks local rain and accumulated snow without changing thermal shelter',()=>{
+  const {overheadCover}=K.procedural;
+  const field=overheadCover.rasterize({surfaces:[{min:[0,0],max:[2,2],heightAt:()=>1}]});
+  const weather=motion.surfaceWeather({width:8,height:4,cell:.5,initial:()=>({temperature:-4}),
+    maxRunoff:0,freezeRate:0,wetDiffusion:0,heatDiffusion:0,evaporation:0});
+  const forcing=(x,z)=>({air:-4,rain:.2,snowfall:.3,shelter:.5,
+    precipitationExposure:overheadCover.exposure(field,[x,0,z])});
+  const next=weather.step(1,{forcing}), dry=next.sample(1,1), open=next.sample(3,1);
+  assert.equal(dry.wetness,0);
+  assert.equal(dry.snow,0);
+  assert(open.wetness>.19&&open.snow>.2);
+  assert.equal(dry.temperature,open.temperature);
+  assert.throws(()=>weather.step(1,{forcing:()=>({precipitationExposure:2})}),/forcing values/);
+  assert.deepEqual(weather.snapshot().snow,next.snow);
+});
+
 test('surface temperature separates sheltered frost from warm wetness, then thaws and dries',()=>{
   const w=motion.surfaceWeather({width:19,height:10,cell:0.13,origin:[-1.235,-0.65],
     initial:()=>({wetness:0.27,temperature:-4}),maxRunoff:0,heatDiffusion:0.003});

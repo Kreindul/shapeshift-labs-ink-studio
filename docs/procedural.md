@@ -706,6 +706,13 @@ multiply load by the scene's exposure mask, and pass the substrate's
 retention. A different palette and retention map lets the same curves
 represent ash, frost or a dusting of sand.
 
+Set `depth` to a maximum thickness in scene units. It defaults to zero.
+`coating.thickness(amount, profile)` uses the same blend ramp as the color.
+`coating.shape({point, normal, covariance, amount}, profile)` extends a
+Gaussian splat along its surface normal and returns its adjusted point,
+row-major 3×3 covariance and depth. The lower three-sigma boundary stays
+at the substrate. `coating.glsl.shape` implements the same transform on the GPU.
+
 ### Overhead cover
 
 `P.overheadCover.rasterize({meshes, surfaces}, options)` projects opaque
@@ -1375,7 +1382,11 @@ normal, clock})` tracks wetness, temperature, accumulated light
 exposure, snow and frost. Use `step(dt, {forcing})` to supply rain,
 snowfall, air temperature, humidity, wind, shelter and runoff.
 The forcing callback takes `(x, z, time, state)`. Optional `light`
-overrides the illumination from the existing scene clock. Wetness
+overrides the illumination from the existing scene clock. Set
+`precipitationExposure` to a fraction from zero to one to attenuate rain and
+snowfall independently of thermal shelter. For instance, use
+`P.overheadCover.exposure` with the local ground height in the forcing callback.
+Wetness
 moves across the grid and dries as the surface warms. Ice and snow
 release moisture as they melt.
 
