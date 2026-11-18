@@ -4,12 +4,16 @@
     V = K.V,
     EPS = 1e-5,
     indexes = new WeakSet();
+  const containmentDirections = [
+    [1, 0.371391, 0.217173], [0.431319, 1, -0.273547],
+    [-0.293153, 0.387431, 1], [-1, -0.515173, 0.673193]
+  ].map(V.norm);
   const finitePoint = p => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite);
   const pointKey = p => p.map(v => Math.round(v / EPS)).join(',');
   const lerp = (a, b, t) => V.mad(a, V.sub(b, a), t);
   const box = ps => A.spatial.boxOf(ps),
     overlap = A.spatial.overlap;
-  function triangleRay(t, origin, dir) {
+  function triangleRay(t, origin, dir, tolerance, edgeInfo) {
     const e1 = V.sub(t.p[1], t.p[0]),
       e2 = V.sub(t.p[2], t.p[0]),
       cross = V.cross(dir, e2),
@@ -21,7 +25,10 @@
     const q = V.cross(d, e1),
       v = V.dot(dir, q) / det;
     if (v < -1e-8 || u + v > 1 + 1e-8) return null;
-    return V.dot(e2, q) / det;
+    const along = V.dot(e2, q) / det;
+    if (!(along >= -tolerance && along <= 1 + tolerance)) return null;
+    if (edgeInfo && Math.min(u, v, 1 - u - v) <= 1e-8) edgeInfo.grazing = true;
+    return Math.max(0, Math.min(1, along));
   }
   function index(mesh, { surfaces: filter, maxTriangles = 100000 } = {}) {
     if (
@@ -94,17 +101,20 @@
       visit(root);
       return out;
     }
+    function castSegment(a, b, edgeInfo) {
+      const dir = V.sub(b, a), length = V.len(dir);
+      if (length < EPS) return [];
+      const tolerance = EPS / length, hits = [];
+      for (const triangle of query(A.spatial.expand(box([a, b]), EPS))) {
+        const at = triangleRay(triangle, a, dir, tolerance, edgeInfo);
+        if (at !== null) hits.push(at);
+      }
+      hits.sort((x, y) => x - y);
+      return hits.filter((t, i) => !i || (t - hits[i - 1]) * length > EPS);
+    }
     function crossings(a, b) {
       if (!finitePoint(a) || !finitePoint(b)) throw new Error('Crossings need finite endpoints');
-      const dir = V.sub(b, a),
-        length = V.len(dir);
-      if (length < EPS) return [];
-      const hits = query(A.spatial.expand(box([a, b]), EPS))
-        .map(t => triangleRay(t, a, dir))
-        .filter(t => t !== null && t >= -EPS / length && t <= 1 + EPS / length)
-        .map(t => Math.max(0, Math.min(1, t)))
-        .sort((x, y) => x - y);
-      return hits.filter((t, i) => !i || (t - hits[i - 1]) * length > EPS);
+      return castSegment(a, b);
     }
     function onSurface(p) {
       if (!finitePoint(p)) throw new Error('Contact queries need a finite point');
@@ -119,9 +129,17 @@
       if (!finitePoint(p)) throw new Error('Contact queries need a finite point');
       if (!root || !A.spatial.contains(A.spatial.expand(root.bounds, EPS), p)) return false;
       if (onSurface(p)) return boundaryInside === undefined ? true : boundaryInside;
-      const extent = V.dist(root.bounds.min, root.bounds.max) * 4 + 1,
-        end = V.mad(p, V.norm([1, 0.371391, 0.217173]), extent);
-      return crossings(p, end).length % 2 === 1;
+      const extent = V.dist(root.bounds.min, root.bounds.max) * 4 + 1;
+      const edgeInfo = { grazing: false };
+      let firstParity;
+      // Touching a triangle edge can leave an outside ray with a single reported hit.
+      for (const direction of containmentDirections) {
+        edgeInfo.grazing = false;
+        const inside = castSegment(p, V.mad(p, direction, extent), edgeInfo).length % 2 === 1;
+        if (!edgeInfo.grazing) return inside;
+        firstParity ??= inside;
+      }
+      return firstParity;
     }
     const result = Object.freeze({
       triangles,

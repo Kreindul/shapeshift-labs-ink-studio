@@ -39,3 +39,22 @@ test('curve trimming identifies even a thin, closed obstruction and keeps edge o
   assert.throws(() => P.contacts.index(solid.mesh, { maxTriangles: 1 }), /budget/);
   assert(Object.isFrozen(index.triangles[0].p));
 });
+
+test('a ray that only grazes a solid edge does not hide a nearby curve', () => {
+  const main = P.pieces.box([0, 0, 0], [1, 1, 1], identity).mesh;
+  const side = P.pieces.box([-4, -2, 0], [1, 1, 1], identity).mesh;
+  const index = P.contacts.index({
+    positions: [...main.positions, ...side.positions],
+    groups: [...main.groups, ...side.groups.map(group => ({ ...group, start: group.start + main.positions.length / 3 }))]
+  });
+  // From this midpoint the default containment ray touches the box at [1, -1, 0].
+  const midpoint = [0, -1.371391, -0.217173];
+  const start = [-0.05, midpoint[1], midpoint[2]], end = [0.05, midpoint[1], midpoint[2]];
+  assert.equal(index.crossings(midpoint, [10, 2.342519, 1.954557]).length, 1);
+  assert.equal(index.contains(midpoint), false);
+  assert.equal(index.contains([0, 0, 0]), true);
+  assert.equal(index.contains([-4, -2, 0]), true);
+  const runs = P.contacts.clipCurve([start, end], [{ id: 'solid', index }]);
+  assert.equal(runs.length, 1);
+  assert.deepEqual(runs[0].points, [start, end]);
+});
