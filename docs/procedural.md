@@ -31,6 +31,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.implicitSurface(field, bounds, options)` | Marching tetrahedra for negative-inside fields. Use `edgeRefinements` (0–12, default 0) to bisect nonlinear crossings within the same bounded grid. |
 | `pieces.convex`, `pieces.box`, `pieces.beam`, `pieces.tube`, `pieces.union` | Reusable solid pieces and query unions. Union meshes contain constituent shells |
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
+| `panelFrames(spec)` | Keyed rails, posts and braces that fit chart dimensions, with optional openings and fitted surrounds |
 | `fittedRibbon({inner, outer, pitch, gap, closed, phase, budget})` | Fit repeating bands along paired 2D or 3D rails. Each logical cell contains quadrilateral footprints split at source edges |
 | `fittedRailBand({inner, outer, pitch, gap, closed, phase, depth, direction, budget})` | Fit closed solid pieces along paired 3D rails. |
 | `clippedLattice({panels, runs, edges, edgeWidth, budget})` | Fit bar families and frames to convex chart patches, keeping gaps and member identities across patches. |
@@ -134,6 +135,14 @@ total length and a corner splits a cell into fragments with the same key.
 `closed: true` connects the last and first vertices. A fractional `phase`
 shifts the joints around that seam. The result contains footprints in the
 input coordinate system so callers can extrude, clip or sample them.
+
+`panelFrames({width, height, unit, beam, braceWidth, braces, periodic, openings})`
+fits a panel of rails and posts and optional per-bay diagonal bracing. Use
+`openings: [{key, min, max, rim}]` to cut rectangular clear areas through the
+layout. Each cut can add a keyed header, sill and jambs. Set `rim: false` for
+clearance alone. A wrapped cut keeps the same member keys across both ends of
+the chart. The result exposes convex member footprints and a distance
+sampler. Callers set materials and realize the infill and apertures.
 
 `surfaceSection(chart, {center, units, thickness, periodicU, offset})` uses
 the chart's `sample(uv)` and `project(point)` contract. Supply the two local
