@@ -638,6 +638,17 @@ the budget. A clear result certifies that the given bounds missed every
 recorded read. Include both the old and new bounds of changed geometry when
 deciding whether to reuse results.
 
+`P.landingContact.create({sill, facing, width, near, far, fraction,
+verticalTolerance, elevationSpread})` samples an approach at two depths
+and three positions across its width. Pass `match()` candidates with a
+stable `id` and `height(x,z)` sampler. A missing sample, an elevation
+outside the requested sill range, or too much variation across the
+approach disqualifies the candidate. The closest fit returns its ID,
+highest supported elevation, and sampled range. Equal fits use ID order.
+Use the exposed `bounds` to query nearby surfaces before sampling. The
+same query can fit a ramp transition, a platform threshold, or an
+equipment loading area according to the caller's tolerances.
+
 ### Contact fields, runoff, and contours
 
 `P.contours.march(field, {bounds, cell, iso})` extracts open paths and closed
