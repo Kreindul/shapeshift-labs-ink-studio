@@ -1387,6 +1387,23 @@ coordinates and bounded face colors. `assetMeshes.recipe(mesh, {size})`
 uses an already parsed mesh. The recipe carries geometry and base colors.
 The caller selects the placement, material and rendering rules.
 
+### Paint domains
+
+`KIT.procedural.clipPaintDomain(field, domain, { mode })` limits a resolved
+paint field to a signed XZ domain. Both inputs supply `distanceAt(x, z)`
+with negative distances inside. A paint field may also accept an upper
+bound as its third argument. The result clamps its distance to that bound.
+The domain may supply an equivalent `inside(x, z)` predicate for faster
+membership checks and a world-space `bounds: { min, max }` box to tighten
+the result's horizontal bounds.
+
+The default `intersect` mode uses the larger of the stroke and boundary
+distances. `gate` preserves the original distance inside and returns an
+empty field outside, which lets a depth or height profile keep its shape
+up to the edge. Outside the domain, the result reports zero coverage and
+no paint owner. The original field is available as `raw`, so moving the
+domain can expose previously retained portions of a stroke.
+
 ### Ordered height layers
 
 `KIT.heightLayers.sample(layers, x, z)` evaluates ordered height edits and
