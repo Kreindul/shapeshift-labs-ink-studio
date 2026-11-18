@@ -1223,3 +1223,31 @@ crossings. Use a closed shell for point containment and curve occlusion.
 `intersections` returns paired surface names and stitched world points.
 `clipCurve` returns exposed runs with source segment coordinates and blocker
 IDs. The caller can send those runs to a route, sweep, or trim material.
+
+### Keyframe tracks
+
+`KIT.anim.keyframeTrack.create(schema, keys)` compiles a portable timeline once
+for repeated sampling. Each key has a time in seconds, a complete value
+object, and an optional outgoing ease. Tracks have sorted immutable
+`keys`, a `duration` in seconds, and a `sample(seconds)` method. Sampling
+clamps to the first and last poses, or returns null for an empty track.
+
+Channel modes are `number`, `vector` (fixed length), `radians` (continuous
+shortest-arc interpolation), and `positive` (logarithmic interpolation).
+Use `keyframeTrack.eases` for supported segment curves. A `step` segment
+holds its pose until the next key. For a turn longer than half a revolution,
+place intermediate keys. A camera is one configuration of the same track.
+
+```js
+const track = KIT.anim.keyframeTrack.create(
+  { target: 'vector', yaw: 'radians', distance: 'positive' },
+  [
+    { time: 0, value: { target: [0, 1, 0], yaw: 0.25, distance: 24 }, ease: 'linear' },
+    { time: 3, value: { target: [1, 2, 0], yaw: 1.2, distance: 17 } }
+  ]
+);
+const pose = track.sample(1.5);
+```
+
+Persist `track.keys` and the channel mapping in the application's own document.
+Sampling has no clock, rendering, document, or storage dependency.
