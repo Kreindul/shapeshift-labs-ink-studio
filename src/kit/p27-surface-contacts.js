@@ -230,7 +230,9 @@
     let considered = 0;
     const groups = new Map();
     if (!a.bounds || !b.bounds || !overlap(a.bounds, b.bounds)) return [];
-    for (const t of a.triangles)
+    const search = A.spatial.expand(b.bounds, EPS);
+    for (const t of a.triangles) {
+      if (!overlap(t.bounds, search)) continue;
       for (const other of b.query(A.spatial.expand(t.bounds, EPS))) {
         if (++considered > maxPairs) throw new Error('Contact intersections exceed their pair budget');
         const hit = triangleContact(t, other);
@@ -239,6 +241,7 @@
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(hit);
       }
+    }
     const out = [];
     for (const [key, segments] of groups) {
       const [surfaceA, surfaceB] = JSON.parse(key);
