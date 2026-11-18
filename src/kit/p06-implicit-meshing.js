@@ -64,6 +64,7 @@
         [0, 7, 4, 6],
         [0, 4, 5, 6]
       ];
+    const offsets = corners.map(([x, y, z]) => slot(x, y, z));
     const triangle = (a, b, c, inside) => {
       const n = V.cross(V.sub(b, a), V.sub(c, a)),
         mid = V.mul(V.add(V.add(a, b), c), 1 / 3);
@@ -73,9 +74,13 @@
     for (let z = 0; z < counts[2]; z++)
       for (let y = 0; y < counts[1]; y++)
         for (let x = 0; x < counts[0]; x++) {
+          const base = slot(x, y, z), inside = values[base] < 0;
+          // Most cells have one sign. Leave their vertices in the sampled grid.
+          let i = 1;
+          while (i < offsets.length && (values[base + offsets[i]] < 0) === inside) i++;
+          if (i === offsets.length) continue;
           const p = corners.map(c => at(x + c[0], y + c[1], z + c[2])),
-            d = corners.map(c => values[slot(x + c[0], y + c[1], z + c[2])]);
-          if (d.every(v => v >= 0) || d.every(v => v < 0)) continue;
+            d = offsets.map(offset => values[base + offset]);
           const edge = (a, b) => {
             if (!o.edgeRefinements) return V.mad(p[a], V.sub(p[b], p[a]), d[a] / (d[a] - d[b]));
             if (d[a] >= 0) [a, b] = [b, a];
