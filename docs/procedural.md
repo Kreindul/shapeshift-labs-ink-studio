@@ -1873,3 +1873,9 @@ requested ID so callers can show the fallback.
 `P.chainJoins.plan(first, second, { tolerance, firstEnd, secondEnd })` determines how to stitch two open chains in 3D. Each chain supplies world-space `start` and `end` points and its positive arc `length`. The default chooses the nearest pair within `tolerance`, or returns null. Pass a specific end (0 for start, 1 for end) to honor a known snap target.
 
 The plan puts the first chain before the second. It supplies `reverseFirst`, `reverseSecond` and the normalized join station `split`. `mapFirst(u)` and `mapSecond(u)` transfer positions from either input's normalized arc to the concatenation. Use the direction flags to handle sided attributes, cross-section coordinates, or directional metadata. Geometry construction and attribute precedence belong to the caller.
+
+### Coordinates on closed carriers
+
+`P.periodicCoordinates.wrap(value, period = 1)` returns a station in the half-open interval from zero to the period. `delta(value, origin, period = 1)` measures the signed shortest displacement, with a half-turn choosing the negative direction. Supply finite stations and a finite positive period.
+
+`unwrap(values, period = 1)` returns stations in the smallest continuous interval covering the supplied positions. It cuts the loop at the largest empty gap and preserves the input order. This lets tools order nearby objects, measure distances or compute centers without splitting a group at the chart seam. Wrap the result of an average to store it as a station on the original chart.

@@ -2,7 +2,7 @@
 (function (K) {
   const P=K.procedural||K.authoring, {V}=K;
   const pair=v=>Array.isArray(v)&&v.length===2&&Array.from(v).every(Number.isFinite);
-  const wrap=u=>u-Math.floor(u);
+
 
   function section(chart,{center,units,thickness,periodicU=chart?.periodicU===true,offset=0}={}) {
     if(typeof chart?.sample!=='function'||typeof chart.project!=='function'||!pair(center)||
@@ -10,6 +10,7 @@
         typeof periodicU!=='boolean'||!Number.isFinite(offset))
       throw Error('A surface section needs a chart, center, positive units and thickness sampler');
     const [u0,v0]=center,[width,height]=units;
+    const { wrap,delta }=P.periodicCoordinates;
     const sample=(chart.samplePointNormal||chart.sample).bind(chart);
 
     function depthAt(uv){
@@ -27,8 +28,8 @@
 
     function project(point){
       const uv=chart.project(point),at=sample(uv),z=V.dot(V.sub(point,at.p),at.n)-offset;
-      const du=uv[0]-u0;
-      return [(periodicU?du-Math.floor(du+.5):du)*width,(uv[1]-v0)*height,
+      const du=periodicU?delta(uv[0],u0):uv[0]-u0;
+      return [du*width,(uv[1]-v0)*height,
         z<0?z*referenceDepth/depthAt(uv):z];
     }
 
