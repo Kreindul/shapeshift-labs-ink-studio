@@ -81,9 +81,43 @@
     return P.pieces.convex(vertices,faces,meta);
   }
 
+  function fitMount({origin,tangent,toward,minReach=.24,maxReach=1.6,width=.18,drop=.62,
+    embed=.07,overlap=.06,spacing=.08}={},distance){
+    if(!vector(origin,3)||!vector(tangent,3)||!vector(toward,3)||typeof distance!=='function'||
+        ![minReach,maxReach,width,drop,embed,overlap,spacing].every(positive)||maxReach<=minReach||
+        Math.abs(tangent[1])>EPS||Math.abs(toward[1])>EPS||Math.abs(V.len(tangent)-1)>EPS||
+        Math.abs(V.len(toward)-1)>EPS||Math.abs(V.dot(tangent,toward))>EPS)
+      throw Error('A support mount needs a horizontal frame, a field and positive dimensions');
+    const steps=Math.ceil((maxReach-minReach)/spacing);
+    const columns=Math.max(2,Math.ceil(width/spacing)),rows=Math.max(2,Math.ceil((drop+overlap)/spacing));
+    if(steps>128||columns>32||rows>32)throw Error('Support mount exceeds its sample budget');
+    const sample=t=>distance(V.mad(origin,toward,t));
+    let low=minReach;
+    if(!(sample(low)>0))return null;
+    for(let i=1;i<=steps;i++){
+      let high=minReach+(maxReach-minReach)*i/steps;
+      if(sample(high)>0){low=high;continue;}
+      for(let j=0;j<12;j++){
+        const mid=(low+high)/2;
+        if(sample(mid)>0)low=mid;else high=mid;
+      }
+      const reach=(low+high)/2,point=V.mad(origin,toward,reach);
+      const pad=V.mad(point,toward,embed*.95);
+      for(let col=0;col<=columns;col++){
+        const side=V.mad(pad,tangent,width*(col/columns-.5));
+        for(let row=0;row<=rows;row++){
+          const probe=[side[0],side[1]-drop+(drop+overlap)*row/rows,side[2]];
+          if(!(distance(probe)<-EPS))return null;
+        }
+      }
+      return {point,tangent:tangent.slice(),out:V.mul(toward,-1),reach};
+    }
+    return null;
+  }
+
   function intersects(piece,planes){
     return P.geometry.clipConvex(piece.mesh,planes).positions.length>0;
   }
 
-  P.cantileverSupports=Object.freeze({sites,bracket,intersects});
+  P.cantileverSupports=Object.freeze({sites,bracket,fitMount,intersects});
 })(KIT);

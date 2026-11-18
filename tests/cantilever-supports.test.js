@@ -23,3 +23,18 @@ test('brackets have solid geometry and clear only masks that intersect the profi
   assert(!C.intersects(part,mask([0,1.15,.90],[.12,.06,.09])));
   assert(!C.intersects(part,mask([.30,1.7,.20],[.04,.2,.15])));
 });
+
+test('mounts find a nearby face and require backing across the complete pad',()=>{
+  const frame={origin:[0,2,.64],tangent:[1,0,0],toward:[0,0,-1],width:.28,drop:.62,minReach:.4,maxReach:.8};
+  const wall=([x,y,z])=>Math.max(Math.abs(x)-2,-y,y-3,z,-z-.4);
+  const mount=C.fitMount(frame,wall);
+  assert(Math.abs(mount.reach-.64)<1e-4);
+  assert(mount.point.every((q,i)=>Math.abs(q-[0,2,0][i])<1e-4));
+  assert.deepEqual(mount.out.map(n=>n||0),[0,0,1]);
+  assert(C.bracket(mount,frame).distance([0,1.96,.28])<0);
+  assert.equal(C.fitMount(frame,p=>Math.max(wall(p),1.5-p[1])),null,'short backing');
+  assert.equal(C.fitMount(frame,p=>Math.max(wall(p),-p[2]-.02)),null,'thin backing');
+  assert.equal(C.fitMount(frame,p=>Math.max(wall(p),-Math.max(Math.abs(p[0]-.10)-.04,Math.abs(p[1]-1.8)-.12))),null,'opening at one edge');
+  assert.equal(C.fitMount({...frame,maxReach:.53},wall),null,'gap beyond reach');
+  assert.throws(()=>C.fitMount({...frame,toward:[1,0,0]},wall),/horizontal frame/);
+});

@@ -72,7 +72,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `edgeClearance.strip(a, b, options)`, `edgeClearance.ranges(a, b, strips)` | Split a straight edge into retained and removed ranges where it crosses sloped clearance strips. |
 | `snapping.resolve(point, features, options)` | Project to a bounded point or segment and return the winning feature with its caller-supplied identity. |
 | `railGuard(options, meta)` | Build closed rail and upright post pieces with adjustable height, spacing and rail levels. |
-| `cantileverSupports.sites(options)`, `cantileverSupports.bracket(site, options, meta)` | Fit bearing sites along a wall or edge and build solid support profiles inside the carried footprint. |
+| `cantileverSupports.sites(options)`, `cantileverSupports.fitMount(options, distance)`, `cantileverSupports.bracket(site, options, meta)` | Fit bearing sites along an edge or to a nearby solid field and build support profiles. |
 | `traceSignedIntervals(sample, options)` | Find where a signed field is negative along a bounded curve parameter. Supply a slope bound to skip homogeneous regions. |
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
@@ -317,6 +317,13 @@ against a convex XZ footprint. Both sides of the bracket must have bearing
 behind the wall before the site is accepted. `outward: -1` reverses which side
 of the path is probed. Returned sites include the point, tangent, outward
 direction and available reach.
+`cantileverSupports.fitMount({origin, tangent, toward, minReach, maxReach,
+width, drop, embed, overlap, spacing}, distance)` fits one site against the
+first solid surface within a reach interval. The supplied horizontal tangent
+and direction form a perpendicular unit frame. The distance callback returns
+negative values inside a candidate solid. The fit also probes the width and
+height of the embedded pad, so apertures or insufficient backing can reject
+the mount. Pass the result directly to `bracket` with the same dimensions.
 `cantileverSupports.bracket(site, {width, drop, embed, overlap, profile}, meta)`
 extrudes a convex side profile into a closed piece. Positive profile coordinates
 scale by reach and overlap. Negative coordinates scale by embed and drop.
