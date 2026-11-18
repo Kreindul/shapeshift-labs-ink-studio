@@ -15,6 +15,7 @@ function toneFor(world, definition) {
   });
 }
 const SampleCoverage = require('../src/sample-coverage.js');
+const Airflow = require('../src/airflow.js');
 const surfaceShading = require('./surface-shading.js');
 const SceneOptics = require('../src/scene-optics.js');
 const { cameraRays, surfacePoint, reflectionSampler, applyAtmosphere } = require('./scene-optics.js');
@@ -184,6 +185,7 @@ function render(world, o) {
     depth = new Float32Array(N),
     add = new Float32Array(N),
     wet = new Float32Array(N);
+  const wind = Airflow.frame(o.wind ?? an.wind);
   const sampleWithdrawal = SampleCoverage.amount(o.sampleWithdrawal ?? world.sampleWithdrawal ?? 0);
   for (let i = 0, q = 0; i < N; i++, q += 16) {
     let x = d[q],
@@ -210,6 +212,11 @@ function render(world, o) {
         pr = f - Math.floor(f);
       y += pr * rg;
       x += Math.sin(pr * 7 + ph * 50) * 0.25 * pr;
+      if (kraw & Airflow.packedFlag) {
+        const age = pr * rg / Math.max(sp, 0.00001);
+        x += wind.velocity[0] * age;
+        z += wind.velocity[1] * age;
+      }
       al *= (1 - pr) * sstep(0, 0.1, pr);
       sc *= 0.6 + pr * ex;
     } else if (kind === 4) add[i] = 0.3 * sstep(0.75, 1, Math.sin(t * sp + ph));
@@ -244,9 +251,15 @@ function render(world, o) {
       x += rg * hg * Math.sin(t * sp + ph);
       z += rg * 0.6 * hg * Math.sin(t * sp * 0.73 + ph * 1.7);
     } else if (kind === 11) {
-      const x0 = x;
-      x += rg * Math.sin(t * sp + y * 1.3 + z * 0.9 + ph);
-      y += rg * 0.6 * Math.sin(t * sp * 1.3 + x0 * 1.1 + ph);
+      if (kraw & Airflow.packedFlag) {
+        const displacement = Airflow.bend(t, ph, sp, rg);
+        x += wind.flex[0] * displacement;
+        z += wind.flex[1] * displacement;
+      } else {
+        const x0 = x;
+        x += rg * Math.sin(t * sp + y * 1.3 + z * 0.9 + ph);
+        y += rg * 0.6 * Math.sin(t * sp * 1.3 + x0 * 1.1 + ph);
+      }
     }
     if (kraw & 512) {
       // born: not there till its time, then it grows to its size (as the page does it)

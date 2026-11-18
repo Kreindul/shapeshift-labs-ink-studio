@@ -1491,6 +1491,15 @@ the material callback `motionAt(x, y, z)`. Return
 reach. Use zero reach at attachment points. The flag on the baked splat lets a
 renderer apply the current wind without changing the sculpt.
 
+`airflow.pinned({reach, phase, frequency, phaseTravel})` creates that
+coefficient callback from normalized surface coordinates. Call it with
+`(station, freedom = station)`. Freedom zero pins a sample and freedom one
+gives the full reach. The separate station controls phase along the cloth.
+Use a single station or set `phaseTravel: 0` for a surface that bends
+uniformly parallel to its attachment. The offline `render(world, options)`
+accepts `options.wind: [x, z]` or defaults to `world.anim.wind`. It uses the
+same flexible displacement and windborne particle transport as the shader.
+
 `motion.surfaceWeather({width, height, cell, origin, mask, initial,
 normal, clock})` tracks wetness, temperature, accumulated light
 exposure, snow and frost. Use `step(dt, {forcing})` to supply rain,
