@@ -75,6 +75,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `grammar.symmetry(scope, rules, options)` | Reflected or radial grammar instances with optional variations and stable copy keys |
 | `fracture.power(spec)`, `fracture.separate(graph, options)`, `fracture.crack(options)` | Anisotropic power cells, cumulative bond failure and stress-guided crack paths |
 | `grammar.assemble(route, modules, options)`, `construct.loadPaths(sockets, spans, options)`, `construct.damage(parts, options)` | Dimensioned, socket-connected assemblies, stylized supports and seeded part damage |
+| `construct.profile(rings)`, `construct.offset(profile, distance)`, `construct.extrude(profile, options)`, `construct.weightedRoof(rings, options)` | Signed footprints, planar offsets, extrusions and roof wavefronts with per-edge pitches |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -799,6 +800,29 @@ and retains part keys for authoring.
 
 `examples/socket-walkway.js` fits deck modules between a pinned join,
 places a braced timber load path, and applies damage rules to a railing.
+
+### Footprints and weighted pitched roofs
+
+`construct.profile([exterior, ...holes])` validates simple XZ rings and
+compiles a negative-inside distance field. The outer ring and holes can
+arrive in either winding. `construct.offset(profile, distance)` adds or
+removes material by signed distance, with rounded outer offsets. It can
+produce closed boundary paths at a caller-chosen contour spacing.
+`construct.extrude(profile, {low, high})` creates a vertical implicit
+form directly from either profile, including its holes.
+
+`construct.weightedRoof(rings, {pitch, pitches})` advances polygon
+edges inward at the rate set by their pitch. Set a default angle in
+radians, or pass nested arrays with one angle per original edge. Edge
+collapses, reflex splits, and courtyard joins produce pitched face
+patches and ridge and valley arcs. `query(x, z)` samples the height and
+source edge. The solver reports exhausted budgets or unresolved
+degeneracies. `roof.solid({base, thickness})` makes a thin implicit
+roof from a completed result.
+
+`examples/weighted-roof.js` bakes an L-shaped roof with unequal pitches,
+offset stonework, and a roof valley. Its alternate seed uses a uniform
+pitch over the same footprint.
 
 ## Optional retained authoring
 
