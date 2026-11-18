@@ -68,8 +68,13 @@ const SurfaceLook = (() => {
     return Object.assign({}, source, { surface: merge(source?.surface, settings) });
   }
 
-  function maskAt(mask, p, seed) {
+  function maskAt(mask, p, seed, position) {
     if (!mask) return 1;
+    if (typeof mask === 'function') {
+      const coverage = mask(...position);
+      if (!Number.isFinite(coverage)) throw new TypeError('Surface mask must return a finite number');
+      return clamp(coverage);
+    }
     const scale = positive(mask.scale, 0.2);
     let weight;
     switch (mask.type) {
@@ -337,7 +342,7 @@ const SurfaceLook = (() => {
           if ((layer.blur ?? 0) < 0 || (layer.distortion ?? 0) < 0)
             throw new RangeError(id + ' needs nonnegative blur and distortion');
         }
-        if (layer.mask) {
+        if (layer.mask && typeof layer.mask !== 'function') {
           if (!isRecord(layer.mask)) throw new TypeError(id + '.mask must be an object');
           if (!['noise', 'stripes', 'checker'].includes(layer.mask.type))
             throw new RangeError('Unknown surface mask: ' + layer.mask.type);
@@ -426,7 +431,7 @@ const SurfaceLook = (() => {
       : 1;
     output[4] = 0;
     for (const layer of layers) {
-      const strength = layer.strength * maskAt(layer.mask, p, seed);
+      const strength = layer.strength * maskAt(layer.mask, p, seed, position);
       if (!strength) continue;
       const { cosine: c, sine: s } = layer;
       shading.ht = tx * c + bx * s;

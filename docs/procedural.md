@@ -53,6 +53,8 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
 | `contacts.index(mesh, options)`, `contacts.intersections(a, b, options)`, `contacts.clipCurve(points, solids)` | Index named triangle groups, trace noncoplanar contacts, and trim contact or authored curves against closed indexed solids |
+| `contacts.traceSdf(chart, sd, options)`, `contacts.expose(curves, occluder, options)`, `contacts.field(curves)`, `contacts.runoff(curves, project, options)` | Trace SDF contacts, expose visible runs, derive distance masks and follow downhill paths |
+| `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
 distance for the interior. Compiled carrier callbacks should be deterministic.
@@ -230,6 +232,45 @@ Bridson patch at the same exclusion distance.
 ```sh
 node cli/ink-studio.js render examples/poisson-patches.js --seed 0 --ortho --colored
 node cli/ink-studio.js render examples/poisson-patches.js --seed 1 --ortho --colored
+```
+
+### Contact fields, runoff, and contours
+
+`P.contours.march(field, {bounds, cell, iso})` extracts open paths and closed
+loops from a bounded 2D scalar field. The default level is zero. Use it for
+shorelines, isolines, or curves in a carrier chart. The callback receives two
+coordinates and returns a finite scalar or `null` where the domain ends.
+
+`P.contacts.traceSdf(chart, sd, options)` runs the contour calculation on
+`sd(...chart.sample([u, v]).p)`, then lifts the paths onto the chart in world
+space. The default chart bounds are `[0, 1] × [0, 1]`. Typical carriers are
+`P.surface.plane()` and `P.surface.cylinder()`. Use finer `cell` values for
+smaller intersections. The result can also be built from authored world-space
+polylines or the existing triangle-contact API.
+
+- Pass an `occluder(x, y, z)` to `traceSdf`, or call
+  `P.contacts.expose(curves, occluder, {step, clearance})` directly, to trim
+  hidden segments against a signed field. Resolution is controlled by `step`.
+- `P.contacts.field(curves)` indexes curve segments. Query `nearest(point)`
+  for distance, closest point, tangent, source ID, and position along the
+  curve. Use `distance(x, y, z)` for an unsigned field or `sdf(radius)` for
+  a tubular signed distance function.
+- Use `field.mask({inner, outer, weight})` to produce a feathered coverage
+  callback. The optional `weight(hit, point)` can limit paint to one side
+  of a seam or fade it along the curve. Use it in a material's `tex` or
+  `mod`, a surface layer's `mask`, decal placement, or a relief operation.
+- `P.contacts.runoff(curves, project, {spacing, step, distance})` starts
+  evenly spaced downhill traces on a carrier. The projection callback
+  receives a point and returns `{p, n}` for the projected point and normal,
+  or `null` outside its domain. Feed the trails into the same distance field
+  to make streaks. Change `direction` to trace another environmental flow.
+
+The SDF example compares the same sandstone wall with and without contact
+stains and seam-driven moss.
+
+```sh
+node cli/ink-studio.js render examples/contact-masks.js --seed 0 --ortho --colored
+node cli/ink-studio.js render examples/contact-masks.js --seed 1 --ortho --colored
 ```
 
 ## Optional retained authoring
