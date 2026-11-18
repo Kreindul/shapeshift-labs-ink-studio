@@ -273,6 +273,29 @@
     }).finish()];
   }
 
+  function framedWall() {
+    const width = 4.8, height = 2.7;
+    const fields = P.panelFrames({
+      width, height, unit: [1.2, 1.35], beam: .15, braceWidth: .10, braces: 'alternating'
+    });
+    const holes = [[[1.4, 0], [2.23, 0], [2.23, 1.55], [1.4, 1.55]]];
+    const backing = P.surfaceCells.clip([{
+      key: 'wall', polygon: [[0, 0], [width, 0], [width, height], [0, height]]
+    }], { holes });
+    const trim = P.surfaceCells.clip(fields.parts, { holes });
+    const sample = ([u, v], level) => {
+      const angle = (u - width / 2) * .28, radius = 3.6 + level;
+      return [radius * Math.sin(angle), v, radius * Math.cos(angle) - 3.6];
+    };
+    return [
+      P.surfaceCells.loft(backing, { sample, levels: [-.14, 0], step: .18, metadata: { material: 'cream' } }).finish(),
+      P.surfaceCells.loft(trim, {
+        sample, levels: [0, .09], step: .18,
+        metadata: key => ({ surface: key, material: key.startsWith('brace/') ? 'ochre' : 'basalt' })
+      }).finish()
+    ];
+  }
+
   const examples = [
     ['Fitted courses', 'Staggered units fit the domain and preserve physical joints.', courses],
     ['Masked cells', 'Clipped prisms follow an annular mask with real gaps.', cells],
@@ -293,7 +316,8 @@
     ['Surface contacts', 'The seam follows the intersecting faces and stops where a solid covers it.', surfaceContact],
     ['Fitted arch trim', 'Physical joints follow the inner profile through each bend.', () => fittedRibbon('arch', 'cream')],
     ['Fitted hatch trim', 'The same strip layout follows a closed panel profile.', () => fittedRibbon('hatch', 'glaze')],
-    ['Clipped surface courses', 'Courses follow a curved carrier and share a physical opening.', cutCourses]
+    ['Clipped surface courses', 'Courses follow a curved carrier and share a physical opening.', cutCourses],
+    ['Fitted panel framing', 'Continuous rails, posts and alternating braces follow a curved wall.', framedWall]
   ];
 
   function triangles(meshes) {

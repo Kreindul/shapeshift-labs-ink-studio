@@ -34,6 +34,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `fittedRibbon({inner, outer, pitch, gap, closed, phase, budget})` | Fit repeating bands along paired 2D or 3D rails. Each logical cell contains quadrilateral footprints split at source edges |
 | `surfaceCells.clip(cells, {boundary, holes, budget, work})` | Intersect convex cell footprints with a convex chart boundary and subtract convex holes. Group fragments by logical cell key |
 | `surfaceCells.loft(layout, {sample, levels, step, metadata, budget}, builder?)` | Map each fitted footprint onto two levels of a curved carrier. Emit closed, outward-wound fragments with shared cap and side vertices |
+| `panelFrames({width, height, unit, beam, braceWidth, braces, periodic, budget})` | Fit posts, rails and optional diagonal braces to rectangular bays. Get stable keyed footprints and a signed chart query |
 | `planarCells.layout(bounds, mask, options)`, `planarCells.prism(cell, options)` | Stable planar cells clipped to a mask, including disconnected fragments and holes. Prisms provide distance, ray, sampling and closed mesh operations |
 | `supportSkirt({outline, ground, embed, overlap, maxDrop})` | Fill vertically below a convex planar carrier and above the supplied height field, up to the configured drop |
 | `basins.surface(carrier, mask, options)`, `terraces.surface(carrier, configuration)` | Masked level cuts and configurable height bands. Carrier provides bounds, height, normal and domain predicates |
@@ -107,6 +108,13 @@ for each position. Supply an ordered pair of finite levels whose samples
 enclose a solid. Use `step` to subdivide in chart coordinates before mapping.
 Each convex fragment emits a closed shell. A metadata callback can assign
 owner, material and surface roles by the original logical cell key.
+
+`panelFrames` fits to the carrier dimensions and exposes its member footprints
+as `parts`. Pass those to `surfaceCells.clip` for openings, then loft the
+remaining pieces onto the carrier. Posts and rails run continuously. Braces
+fit inside individual bays and can be ascending, descending, alternating,
+crossed or omitted. A callback can choose any of those policies per bay.
+Set `periodic: true` for a shared post key across a wrapped chart seam.
 
 Catalog definitions may name one or several parents using `extends`. A
 resolved profile merges named or inline layers in order. Object keys compose
