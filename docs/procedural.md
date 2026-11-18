@@ -73,6 +73,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `forms.superquadric(spec)`, `forms.loft(sections)`, `forms.skeleton(nodes)`, `forms.periodic(spec)`, `forms.shell(host, options)` | Bounded analytic forms and locally variable shells for the sculptor |
 | `grammar.symmetry(scope, rules, options)` | Reflected or radial grammar instances with optional variations and stable copy keys |
 | `fracture.power(spec)`, `fracture.separate(graph, options)`, `fracture.crack(options)` | Anisotropic power cells, cumulative bond failure and stress-guided crack paths |
+| `grammar.assemble(route, modules, options)`, `construct.loadPaths(sockets, spans, options)`, `construct.damage(parts, options)` | Dimensioned, socket-connected assemblies, stylized supports and seeded part damage |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -743,6 +744,42 @@ material marks. Results follow the supplied fields as artistic rules.
 
 `examples/fracture-studies.js` displays weighted slab fragments and
 a stress-guided surface crack. Both are realized as SDFs for the splat bake.
+
+### Socket assemblies, supports and damage
+
+`grammar.assemble(route, modules, {start, end, pins, joins, seed})` fits
+an ordered catalog between endpoints and optional pinned joins on an
+arc-length carrier. Modules have `id`, nominal `length`, optional `min`
+and `max` lengths, `in` and `out` socket names, and a positive `cost`.
+`reversible` lets the solver swap the two ends. Matching socket names
+connect by default. `joins` accepts additional directed compatible
+pairs. Pins are `{id, at, socket}` or `{id, at, in, out}`, with `at`
+normalized over the carrier length.
+
+The solver fits exact span lengths within each module's tolerance and
+returns keyed modules with geometry frames. Pinned intervals reserve
+enough slots for the whole route. The result reports a contradiction or
+a search budget separately. If a feasible plan was found before price
+optimization uses the budget, the layout indicates this in its work data.
+
+`construct.loadPaths(sockets, spans, {ground, clear, maxSpan, maxDrop})`
+places beams, supporting columns and braces. Sockets use `{id, point}`
+with an optional `bearing` to indicate an existing support. Spans use
+`{id, a, b, load}` with a distributed line load. Ground can return
+`null` to leave a void. `clear(a, b, info)` lets an authored scene
+reject a proposed member. The plan reports unsupported spans and the
+load assigned to each bearing. Its rules are for visual plausibility.
+
+`construct.damage(parts, {rules, supports, pins, exposure, seed, steps})`
+rewrites named part states under seeded, ordered conditions. Rules have
+`id`, `from`, `to` and optional role, chance, weight and condition.
+Dependencies are `{child, by: [key, ...], required}`. A missing support
+can collapse dependents in the same tick. Pinned states persist, with a
+flag when their support is gone. The result includes state-change events
+and retains part keys for authoring.
+
+`examples/socket-walkway.js` fits deck modules between a pinned join,
+places a braced timber load path, and applies damage rules to a railing.
 
 ## Optional retained authoring
 
