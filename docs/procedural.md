@@ -67,6 +67,8 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `grammar.expand(scope, rules, options)`, `grammar.children(layout)` | Bounded shape grammar with named partitions, fitted repeats, pinned spans, sockets and retained child specs |
 | `grammar.rewriteGrid(rows, rules)`, `grammar.rewriteGraph(graph, rules)` | Seeded weighted pattern replacement on scalar grids and directed graphs |
 | `layouts.bsp(options)`, `layouts.cave(options)`, `layouts.pack(items, options)`, `layouts.floorPlan(rooms, options)` | Connected room partitions and caves, constrained rectangle packing and named room adjacencies |
+| `growth.lsystem(axiom, rules, options)`, `growth.turtle(tokens, options)`, `growth.venation(outline, options)`, `growth.roots(starts, options)`, `growth.pipe(nodes, options)` | Growth grammars, SDF branch runs, venation, obstacle-aware roots and pipe taper |
+| `growth.aggregate(options)`, `growth.grayScottGrid(options)`, `growth.grayScottSurface(points, links, options)`, `growth.dispersal(options)`, `growth.succession(options)` | Grid and surface patterns, seed dispersal and habitat competition |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -608,6 +610,50 @@ remain attached. Both APIs expose work budgets.
 
 In `examples/rooms-and-caves.js`, seeded room and cave grids are passed
 to the voxel sculpt node. A grid grammar marks floor accents in both layouts.
+
+### Vegetation and colony patterns
+
+`growth.lsystem(axiom, rules, {generations, seed, frame, environment})`
+rewrites a string or a tape of tokens in parallel. Tokens are strings or
+`{symbol, args}` objects. A production specifies `from`, `to`, and
+optional `weight` and `when`. An argument such as `{arg: 0, scale: 0.7}`
+uses the first input argument and shrinks it on each rewrite. Rules can
+read the local turtle frame and any caller-defined environmental value.
+
+`growth.turtle(tokens, frame)` returns branch runs and marked frames.
+Use `F` to draw, `f` to travel, `!` to set radius, brackets to save
+and restore state. The rotation commands turn about the three local axes.
+It emits marks at `L` by default. Pass the result directly to
+`K.grow.limbs(S, result, material, options)` for SDF tubes.
+
+- `growth.venation(outline, {root, toward, seed, sourceSpacing})` grows
+  a planar network through interior attractors. Its branch runs use XY
+  with zero Z, so they can be mapped onto a leaf or other host.
+- `growth.roots(starts, {moisture, obstacle, clearance, seed})` traces
+  tapered roots with gravity, local moisture and optional branching. The
+  obstacle field is positive outside. Accepted segments check the field
+  at quarter steps, so choose a small step for thin obstacles.
+- `growth.pipe(nodes, {tipRadius, exponent})` accepts parent indices
+  in growth order, with `-1` for roots.
+- `growth.aggregate({width, height, seeds, target, stick, mask, seed})`
+  returns occupied cells and their parent links. It reports a partial
+  pattern if it reaches the walker or work limit.
+- `growth.grayScottGrid({width, height, steps, feed, kill, mask, wrap})`
+  evolves two scalar buffers on a lattice. Use the same integration on
+  arbitrary curved domains with `growth.grayScottSurface(points, links, options)`.
+  Supply surface-local links as `[indexA, indexB, weight?]` to control
+  where diffusion crosses. The returned `u` and `v` buffers can drive
+  material masks, relief, or sample density.
+- `growth.dispersal({model, radius, spread, drift, aspect, angle})`
+  returns normalized weights on XZ offsets. `growth.succession` uses
+  those kernels to model stylized turnover and competition among named
+  populations. Each species can specify habitat, seed pressure, maturity,
+  lifespan, and competitive strength. The result provides final occupancy
+  and age along with counts from each completed year.
+
+`examples/vegetation-growth.js` bakes branch runs, root paths, and leaf
+veins. `examples/colony-patterns.js` uses aggregation and reaction–diffusion
+to color native voxel tiles.
 
 ## Optional retained authoring
 
