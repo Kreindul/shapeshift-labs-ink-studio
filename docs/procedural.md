@@ -41,6 +41,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `spans.catenary(a, b, options)` | Gravity-aware sagging curve with arc-length sampling, finite frames and closest-point queries |
 | `proximity.connect(sockets, options)` | Deterministic matching of named sockets with reach, degree and compatibility limits |
 | `attachments.layout(slots, families, options)` | Stable weighted selection for framed, typed attachment slots, with fit and clearance callbacks |
+| `environmentFields.evaluate(settings, elapsed)`, `environmentFields.opticalDepth(from, to, medium)`, `environmentFields.scatter(from, to, light, medium)`, `environmentFields.deposition(sample)` | Cyclic sun and sky tint, height-dependent fog, local scattering, and slope-sensitive surface loads |
 | `populations.layout(boundsList, evaluate, options)` | Seeded world-space candidates ranked by density. Expanding the work region preserves existing candidate identities |
 | `sampling.poisson(options)` | Seeded Bridson samples in finite 2D and 3D bounds, with masks, variable radii, pins and axis scaling |
 | `sampling.eliminate(points, options)`, `sampling.lloyd(points, options)`, `sampling.patch(spec)`, `sampling.geodesicSpacing(points, links, options)` | Progressive point subsets, centroidal layout, stratified surface sampling and surface-neighbor separation |
@@ -415,6 +416,26 @@ node cli/ink-studio.js render examples/poisson-patches.js --seed 1 --ortho --col
 `examples/sampling-detail.js` uses seed 0 for centered strata, seed 1 for
 curvature-weighted jittered splats, and seed 2 for a ranked point set whose
 coarser prefixes are shown with larger dabs.
+
+### Environment fields
+
+`P.environmentFields.evaluate(settings, elapsed)` resolves a cyclic solar
+clock. Configure local `hour`, advance in hours per second with `rate`, and
+set `latitude`, `declination`, and scene orientation (`north`) in degrees.
+Read a unit `sun` direction, daylight and twilight weights, ambient gain,
+RGB tint, and retained wind and surface parameters. A zero rate holds time.
+
+`opticalDepth(from, to, medium)` integrates a fog ray over a density field
+that mixes a constant medium and a ground-clinging exponential. Set
+`density`, `floor`, `height` and `cling` in world coordinates and convert
+optical depth to transmittance with `exp(-depth)`. `scatter(from, to, light,
+medium)` estimates a local light's contribution along the visible segment
+up to its endpoint. A light supplies `p`, `radius`, and `intensity`.
+
+`deposition({normal, load, exposure, shelter, texture, slope})` computes a
+surface load from the upward normal, incoming supply, exposure and shelter.
+Callers provide the coverage mask and material treatment. Snow, ash and
+windblown dust can all use the same query.
 
 ### Attachment slots
 
