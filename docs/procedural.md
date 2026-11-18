@@ -42,6 +42,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `proximity.connect(sockets, options)` | Deterministic matching of named sockets with reach, degree and compatibility limits |
 | `populations.layout(boundsList, evaluate, options)` | Seeded world-space candidates ranked by density. Expanding the work region preserves existing candidate identities |
 | `sampling.poisson(options)` | Seeded Bridson samples in finite 2D and 3D bounds, with masks, variable radii, pins and axis scaling |
+| `sampling.eliminate(points, options)`, `sampling.lloyd(points, options)`, `sampling.patch(spec)`, `sampling.geodesicSpacing(points, links, options)` | Progressive point subsets, centroidal layout, stratified surface sampling and surface-neighbor separation |
 | `materialBands(spec)` | Nonoverlapping local intervals with material and pattern metadata |
 | `masks.stroke(spec)`, `masks.compose(specs, options)` | Tapered and feathered swept discs, ordered addition and erasure, signed distance and visible source ownership |
 | `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
@@ -244,6 +245,33 @@ Bridson patch at the same exclusion distance.
 node cli/ink-studio.js render examples/poisson-patches.js --seed 0 --ortho --colored
 node cli/ink-studio.js render examples/poisson-patches.js --seed 1 --ortho --colored
 ```
+
+### Progressive samples and surface detail
+
+- `P.sampling.eliminate(points, {count, progressive, weights})` removes
+  points with the highest local crowding until an exact count remains.
+  Higher preference weights favor retention. `progressive` thins again
+  at larger spacing scales and puts the coarse subsets first. Use the
+  reported `levels` as prefix lengths.
+- `P.sampling.lloyd(points, {bounds, spacing, iterations, density, mask,
+  fixed})` uses sampled planar Voronoi centroids. Bounds are two-dimensional.
+  `fixed` holds point indices in place. Smaller `spacing` improves the
+  centroid approximation. A mask can constrain movement to the legal domain.
+- `P.geometry.samplePatch` can jitter samples within its adaptive UV strata
+  with `jitter` and `seed`. Positive `curvature` spends more samples where
+  the carrier bends. `P.sampling.patch(spec)` returns the same sample points
+  and UVs, with jitter enabled by default.
+- `P.sampling.geodesicSpacing(points, links, {distance, candidates})`
+  selects in candidate priority order using shortest paths along surface links.
+  A link is `[a, b]` or `[a, b, worldLength]`; points on different surfaces
+  remain independent even where they lie close in XYZ space.
+- `P.sampling.triangles(positions, {count, seed})` adapts the sampling
+  vocabulary to an imported triangle stream. It stratifies by area and
+  returns world points with triangle indices and barycentric coordinates.
+
+`examples/sampling-detail.js` uses seed 0 for centered strata, seed 1 for
+curvature-weighted jittered splats, and seed 2 for a ranked point set whose
+coarser prefixes are shown with larger dabs.
 
 ### Contact fields, runoff, and contours
 
