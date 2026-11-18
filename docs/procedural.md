@@ -1765,6 +1765,8 @@ region. Passing an owner ID clips that layer by later layers and erasers.
 The caller owns ordering, mask construction, and selection of spatial
 candidates. Swept masks are one way to build the layer functions.
 
+`KIT.heightLayers.reorder(records, id, toIndex)` plans an edit to composition order. Pass records with unique `id` strings and nonnegative integer `order` values. The index is zero-based in application order. Apply the returned `{ id, order }` updates together. It keeps the existing ranks where possible and compacts tied ranks when the desired order cannot fit. `compareOrder` orders records by rank and then identity, matching legacy scenes with tied ranks.
+
 ### Fitted profile runs
 
 `KIT.procedural.fittedProfileRun({path, profiles, pitch, gap, up, budget})`

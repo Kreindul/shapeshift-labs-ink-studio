@@ -50,5 +50,32 @@
     return d;
   }
 
-  K.heightLayers = Object.freeze({ sample, distance });
+  const compareOrder = (a,b) => a.order-b.order || a.id.localeCompare(b.id);
+
+  function reorder(records,id,toIndex) {
+    if (!Array.isArray(records) || !records.every(record => typeof record?.id === 'string' && record.id &&
+      Number.isSafeInteger(record.order) && record.order >= 0) ||
+      new Set(records.map(record => record.id)).size !== records.length)
+      throw Error('Layer order needs distinct IDs and nonnegative integer ranks');
+    const ordered = records.slice().sort(compareOrder);
+    const from = ordered.findIndex(record => record.id === id);
+    if (from < 0 || !Number.isSafeInteger(toIndex) || toIndex < 0 || toIndex >= ordered.length)
+      throw Error('Layer order needs an existing ID and valid destination index');
+    if (from === toIndex) return [];
+
+    const result = ordered.slice(), [moved] = result.splice(from,1);
+    result.splice(toIndex,0,moved);
+    const prev = result[toIndex-1], next = result[toIndex+1];
+    const min = prev ? prev.order + (id.localeCompare(prev.id) <= 0 ? 1 : 0) : 0;
+    const max = next ? next.order - (id.localeCompare(next.id) >= 0 ? 1 : 0) : Number.MAX_SAFE_INTEGER;
+    if (min <= max) return [{ id, order: Math.max(min,Math.min(max,moved.order)) }];
+
+    // Reuse the ranks in the moved range before compacting legacy tied ranks.
+    const assigned = result.map((record,i) => ({ id: record.id, order: ordered[i].order }));
+    const ranks = assigned.every((record,i) => !i || compareOrder(assigned[i-1],record) < 0)
+      ? assigned : result.map((record,order) => ({ id: record.id, order }));
+    return ranks.filter((record,i) => record.order !== result[i].order);
+  }
+
+  K.heightLayers = Object.freeze({ sample, distance, compareOrder, reorder });
 })(KIT);
