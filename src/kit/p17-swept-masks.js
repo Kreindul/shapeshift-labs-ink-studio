@@ -65,8 +65,11 @@
       throw new Error('Brush queries need a finite 2D point');
     return value;
   }
+  const compiledStrokes = new WeakMap();
   function stroke(spec) {
     if (!spec || typeof spec.id !== 'string' || !spec.id) throw Error('A mask stroke needs a stable id');
+    const retained = A.data.isImmutable(spec);
+    if (retained && compiledStrokes.has(spec)) return compiledStrokes.get(spec);
     const p = parameters(spec),
       segments = [],
       minimum = [Infinity, Infinity],
@@ -160,7 +163,9 @@
         weight: q => weight(distance(q), p.softness)
       };
     evaluators.set(result, evaluate);
-    return Object.freeze(result);
+    Object.freeze(result);
+    if (retained) compiledStrokes.set(spec, result);
+    return result;
   }
   function compose(specs, options = {}) {
     if (!Array.isArray(specs) || specs.length > 4096) throw Error('Mask composition needs at most 4096 strokes');
