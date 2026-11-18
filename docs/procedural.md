@@ -587,6 +587,24 @@ hull. Use it for plans around projected solids, clearance for a swept deck
 or an agent radius. Select the obstacles that intersect the relevant height
 range before passing their footprints to `visibility`.
 
+Use `visibility(start, end, obstacles, {links})` to admit a bridge,
+gate or other certified crossing through one polygon. Each link supplies
+`{start: [x,z], end: [x,z], through: obstacleIndex}`. The link contributes
+two graph vertices and one bidirectional edge that skips the specified
+polygon. The ends should sit outside that polygon. All other edges and
+obstacles keep their normal visibility rules. A successful result reports
+the links actually used as `{link, from, to}` with point indices into
+`route.points`. The caller checks clearance on the lifted route before
+accepting each link because the final elevations depend on the route chosen.
+
+`P.routes.sweep(start, end, {halfWidth, below, above, spacing, minClearance,
+clearance, maxSamples})` checks a sloped rectangular section with a horizontal
+side axis and vertical height. Its callback returns a signed distance
+with positive values in open space. The result reports `ok`, `blocked`
+or `budget`, a sample count and the first failing point when blocked.
+Sampling resolution governs the smallest obstruction it can detect.
+Use tighter spacing or explicit obstruction checks for thin objects.
+
 `P.routes.spline(route, {radius, spacing, clearance, minClearance})`
 rounds corners using quadratic splines, shrinking the trim when needed.
 Unfit corners stay in the route. The result contains the fitted control points

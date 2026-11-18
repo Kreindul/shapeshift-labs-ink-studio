@@ -95,5 +95,5 @@
     }
   }
 
-  Object.assign(P.routes, { visibility, spline, convexFootprint: RouteVisibility.convexFootprint });
+  Object.assign(P.routes, { visibility, spline, convexFootprint: RouteVisibility.convexFootprint, sweep: RouteVisibility.sweep });
 })(KIT);

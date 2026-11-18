@@ -11,10 +11,10 @@ const RouteVisibility = (() => {
     bounds = (a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])],
     overlap = (a, b) => a[0] <= b[2] + EPS && b[0] <= a[2] + EPS && a[1] <= b[3] + EPS && b[1] <= a[3] + EPS;
 
-  function find(start, end, obstacles, { maxVertices = 600, maxTests = 2500000 } = {}) {
+  function find(start, end, obstacles, { maxVertices = 600, maxTests = 2500000, links = [] } = {}) {
     if (
       !point(start, 3) || !point(end, 3) || Math.hypot(...start.map((v, i) => end[i] - v)) <= EPS ||
-      !Array.isArray(obstacles) || obstacles.length > 500 ||
+      !Array.isArray(obstacles) || obstacles.length > 500 || !Array.isArray(links) || links.length > 64 ||
       !limit(maxVertices, 2, 3000) || !limit(maxTests, 1, 30000000)
     ) throw new Error('Visibility paths need distinct finite pins, polygons, and work limits');
     const first = plan(start), last = plan(end), vertices = [first, last],
@@ -49,6 +49,16 @@ const RouteVisibility = (() => {
         return [x, z, -dz * scale, dx * scale];
       }) : null;
       polygons.push({ loop, box, edges });
+    }
+    const linksByVertex = new Map();
+    for (const [index, link] of links.entries()) {
+      if (!point(link?.start, 2) || !point(link?.end, 2) || dist2(link.start, link.end) <= EPS ** 2 ||
+          !Number.isInteger(link.through) || link.through < 0 || link.through >= polygons.length)
+        throw new Error('Visibility links need two distinct XZ points and an obstacle index');
+      if (vertices.length + 2 > maxVertices) throw new Error('Visibility graph exceeds its vertex budget');
+      const a = vertices.push(link.start) - 1, b = vertices.push(link.end) - 1, bypass = polygons[link.through];
+      linksByVertex.set(a, { next: b, index, bypass });
+      linksByVertex.set(b, { next: a, index, bypass });
     }
     function check() {
       if (++work.tests > maxTests) throw exhausted;
@@ -85,14 +95,14 @@ const RouteVisibility = (() => {
       }
       return true;
     }
-    function clear(a, b) {
+    function clear(a, b, bypass) {
       work.pairs++;
       const box = bounds(a, b),
         dx = b[0] - a[0], dz = b[1] - a[1],
         sq = dx * dx + dz * dz;
       if (sq <= EPS * EPS) return !polygons.some(polygon => inside(a, polygon));
       for (const polygon of polygons) {
-        if (!overlap(box, polygon.box)) continue;
+        if (polygon === bypass || !overlap(box, polygon.box)) continue;
         if (polygon.edges) {
           if (crossesConvex(a, b, polygon.edges)) return false;
           continue;
@@ -124,7 +134,7 @@ const RouteVisibility = (() => {
       if (clear(first, last)) return result('ok', { points: frozenPoints([start, end]) });
       const size = vertices.length,
         costs = new Float64Array(size).fill(Infinity), estimates = new Float64Array(size).fill(Infinity),
-        parent = new Int32Array(size).fill(-1), visited = new Uint8Array(size);
+        parent = new Int32Array(size).fill(-1), used = new Map(), visited = new Uint8Array(size);
       const toEnd = vertices.map(p => Math.sqrt(dist2(p, last)));
       costs[0] = 0;
       estimates[0] = toEnd[0];
@@ -145,21 +155,29 @@ const RouteVisibility = (() => {
           for (let i = parent[1]; i >= 0; i = parent[i]) path.push(i);
           path.reverse();
           let travelled = 0;
-          const points = [start];
-          for (let i = 1; i < path.length - 1; i++) {
+          const points = [start], traversed = [];
+          for (let i = 1; i < path.length; i++) {
             const a = vertices[path[i - 1]], b = vertices[path[i]],
               step = Math.sqrt(dist2(a, b));
             travelled += step;
-            if (step <= EPS || dist2(b, last) <= EPS ** 2) continue;
-            points.push([b[0], start[1] + (end[1] - start[1]) * travelled / cost, b[1]]);
+            const terminal = i === path.length - 1;
+            if (step <= EPS) {
+              if (terminal) points[points.length - 1] = end;
+              continue;
+            }
+            if (used.has(path[i])) traversed.push({ link: used.get(path[i]), from: points.length - 1, to: points.length });
+            points.push(terminal ? end : [b[0], start[1] + (end[1] - start[1]) * travelled / cost, b[1]]);
           }
-          points.push(end);
-          return result('ok', { points: frozenPoints(points) });
+          return result('ok', { points: frozenPoints(points),
+            ...(traversed.length && { links: Object.freeze(traversed.map(Object.freeze)) }) });
         }
+        const tunnel = linksByVertex.get(id);
         for (let i = 1; i < size; i++) {
           if (visited[i]) continue;
           const next = cost + Math.sqrt(dist2(vertices[i], vertices[id]));
-          if (next >= costs[i] || !clear(vertices[id], vertices[i])) continue;
+          const link = tunnel?.next === i ? tunnel : null;
+          if (next >= costs[i] || !clear(vertices[id], vertices[i], link?.bypass)) continue;
+          if (link) used.set(i, link.index); else used.delete(i);
           costs[i] = next;
           parent[i] = id;
           estimates[i] = next + toEnd[i];
@@ -205,6 +223,35 @@ const RouteVisibility = (() => {
     return frozenPoints(hull(outline.flatMap(p => offsets.map(q => [p[0] + q[0], p[1] + q[1]]))));
   }
 
-  return Object.freeze({ find, convexFootprint });
+
+  function sweep(start, end, { halfWidth, below, above, spacing = 0.12, minClearance = 0,
+    clearance, maxSamples = 10000 } = {}) {
+    if (!point(start, 3) || !point(end, 3) || ![halfWidth, below, above, minClearance].every(v => Number.isFinite(v) && v >= 0) ||
+        !(spacing > EPS) || !Number.isFinite(spacing) || typeof clearance !== 'function' ||
+        !limit(maxSamples, 1, 1000000)) throw new Error('A swept route needs a finite section, spacing and a clearance field');
+    const dx = end[0] - start[0], dy = end[1] - start[1], dz = end[2] - start[2], run = Math.hypot(dx, dz);
+    if (run <= EPS) throw new Error('Swept routes need a nonzero horizontal run');
+    const nx = -dz / run, nz = dx / run, lengths = [Math.hypot(run, dy), halfWidth * 2, below + above];
+    const [rows, columns, layers] = lengths.map(length => Math.ceil(length / spacing));
+    if ((rows + 1) * (columns + 1) * (layers + 1) > maxSamples) return { status: 'budget', samples: 0 };
+    let samples = 0;
+    for (let i = 0; i <= rows; i++) {
+      const t = i / rows;
+      for (let j = 0; j <= columns; j++) {
+        const u = columns ? halfWidth * (2 * j / columns - 1) : 0;
+        for (let k = 0; k <= layers; k++) {
+          const h = layers ? -below + (below + above) * k / layers : 0;
+          const q = [start[0] + dx * t + nx * u, start[1] + dy * t + h, start[2] + dz * t + nz * u];
+          const d = clearance(q);
+          samples++;
+          if (typeof d !== 'number' || Number.isNaN(d)) throw new Error('A clearance field must return a signed distance');
+          if (d < minClearance) return { status: 'blocked', samples, point: q, clearance: d };
+        }
+      }
+    }
+    return { status: 'ok', samples };
+  }
+
+  return Object.freeze({ find, convexFootprint, sweep });
 })();
 if (typeof module !== 'undefined') module.exports = RouteVisibility;

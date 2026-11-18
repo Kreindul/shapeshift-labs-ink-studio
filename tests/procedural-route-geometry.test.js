@@ -114,3 +114,30 @@ test('convex clearance checks permit exact boundary travel and reject interior c
     assert.equal(routes.visibility(pin([5e5, -5e5]), b, [polygon]).status, 'blocked-pin');
   }
 });
+
+test('visibility links bypass only their own obstacle and report the chosen point indices', () => {
+  const wall = [[-2,-4],[2,-4],[2,4],[-2,4]], origin = [-3,0,1], end = [3,0.4,1];
+  const links = [{start: [-3,1], end: [3,1], through: 0}];
+  const pass = routes.visibility(origin, end, [wall], { links });
+  assert.deepEqual(pass.route.points, [origin,end]);
+  assert.deepEqual(pass.links, [{link: 0, from: 0, to: 1}]);
+  const reverse = routes.visibility(end, origin, [wall], { links });
+  assert.equal(reverse.links[0].link,0);
+  assert.deepEqual(reverse.route.points, [end,origin]);
+  const other = [[-.1, .8],[.1,.8],[.1,1.2],[-.1,1.2]];
+  const blocked = routes.visibility(origin, end, [wall,other], { links });
+  assert(!blocked.links);
+  assert(blocked.route.length > pass.route.length);
+});
+
+test('swept clearance probes both sides and headroom along a sloping span', () => {
+  const start = [0,.8,0], end = [3,1.4,0];
+  const section = {halfWidth: .5, below: .2, above: .35, spacing: .1, minClearance: .02};
+  const tunnel = ([x,y,z]) => x < 1 || x > 2 ? Infinity : Math.min(.6 - Math.abs(z), 1.8 - y, y - .5);
+  assert.equal(routes.sweep(start, end, {...section,clearance:tunnel}).status,'ok');
+  const tight = routes.sweep(start, end, {...section,halfWidth:.65,clearance:tunnel});
+  assert.equal(tight.status,'blocked');
+  assert(Math.abs(tight.point[2]) >= .5);
+  assert.equal(routes.sweep(start, end, {...section,above:.9,clearance:tunnel}).status,'blocked');
+  assert.equal(routes.sweep(start, end, {...section,maxSamples:2,clearance:tunnel}).status,'budget');
+});
