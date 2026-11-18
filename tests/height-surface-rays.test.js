@@ -38,3 +38,16 @@ test('an oblique search keeps testing after a crossing outside the accepted surf
   near(hit.p[1],.45);
   assert.equal(heightSurface.raycast(peak,[-2,.45,0],[1,0,0],{slopeBound:1,maxDistance:3}),null);
 });
+
+test('height range samples the occupied plan and its rim with a fixed work budget', () => {
+  const triangle = [[0,0], [2,0], [0,2]];
+  const range = heightSurface.rangeOverPlan((x,z) => {
+    assert(x >= 0 && z >= 0 && x + z <= 2 + 1e-10);
+    return x - 2*z;
+  }, triangle, { spacing:.24, budget:190 });
+  assert.equal(range.min,-4);
+  assert.equal(range.max,2);
+  assert(range.samples > 30 && range.samples < 190);
+  assert.throws(() => heightSurface.rangeOverPlan(() => 0, triangle, {spacing:.01,budget:20}), /budget/);
+  assert.throws(() => heightSurface.rangeOverPlan(() => NaN, triangle), /finite/);
+});

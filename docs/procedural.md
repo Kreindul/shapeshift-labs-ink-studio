@@ -1933,6 +1933,14 @@ The plan puts the first chain before the second. It supplies `reverseFirst`, `re
 
 `P.heightSurface.raycast(surface, origin, direction, options)` finds the first crossing of a bounded height graph. Supply `bounds`, `height(x, z)` and optionally `inside(x, z)` and `normal(x, z)`. The result contains a world point, normal (when supplied), and distance along the normalized ray. A miss returns null.
 
+Use `P.heightSurface.rangeOverPlan(height, outline, {spacing, budget})` for
+sampled `{min,max,samples}` over an XZ ring. The function samples every
+vertex, the boundary between vertices, and cell centers inside the ring.
+It throws when the candidate count exceeds the budget. Use a smaller
+spacing or extra clearance for sharply varying surfaces. Intersect the
+query ring with the heightfield's footprint first when it is bounded.
+
+
 A caller can pass a certified `slopeBound` on the horizontal gradient. This allows steep rays to solve one bracket and other rays to skip intervals that cannot cross the surface. Without a bound the query samples at regular intervals. Vertical rays evaluate the height directly. `maxDistance` defaults to 10000 world units.
 
 ### Courses on a variable strip

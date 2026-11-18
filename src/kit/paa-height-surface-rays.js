@@ -1,4 +1,4 @@
-/* Ray queries on a bounded graph y = height(x, z). */
+/* Ray queries and sampled ranges on a bounded graph y = height(x, z). */
 (function (K) {
   const P = K.procedural || K.authoring, EPS = 1e-8;
   const vector = p => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite);
@@ -77,5 +77,41 @@
     return null;
   }
 
-  P.heightSurface = { raycast };
+  function rangeOverPlan(height, outline, { spacing = .1, budget = 4096 } = {}) {
+    if (typeof height !== 'function' || !Array.isArray(outline) || outline.length < 3 ||
+        outline.length > 512 || !Number.isFinite(spacing) || spacing <= 0 ||
+        !Number.isSafeInteger(budget) || budget < 1 || budget > 100000)
+      throw new Error('Height range needs a plan, sampler, positive spacing and bounded sample budget');
+    const inside = P.geometry.profileDistance(outline);
+    const xs = outline.map(p => p[0]), zs = outline.map(p => p[1]);
+    const x0 = Math.min(...xs), z0 = Math.min(...zs);
+    const width = Math.max(...xs) - x0, depth = Math.max(...zs) - z0;
+    const nx = Math.max(1, Math.ceil(width / spacing)), nz = Math.max(1, Math.ceil(depth / spacing));
+    const edgeSteps = outline.map(([x,z], i) => {
+      const [u,v] = outline[(i+1) % outline.length];
+      return Math.max(1, Math.ceil(Math.hypot(u-x,v-z) / spacing));
+    });
+    if (nx * nz + edgeSteps.reduce((sum, steps) => sum + steps, 0) > budget)
+      throw new RangeError('Height range exceeds its sampling budget');
+
+    let min = Infinity, max = -Infinity, samples = 0;
+    function put(x,z) {
+      const y = height(x,z);
+      if (!Number.isFinite(y)) throw new Error('Plan height samples must be finite');
+      min = Math.min(min,y);
+      max = Math.max(max,y);
+      samples++;
+    }
+    for (let i = 0; i < outline.length; i++) {
+      const [x,z] = outline[i], [u,v] = outline[(i+1) % outline.length], steps = edgeSteps[i];
+      for (let j = 0; j < steps; j++) put(x + (u-x)*j/steps,z + (v-z)*j/steps);
+    }
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+      const x = x0 + width*(i+.5)/nx, z = z0 + depth*(j+.5)/nz;
+      if (inside(x,z) <= EPS) put(x,z);
+    }
+    return { min, max, samples };
+  }
+
+  P.heightSurface = { raycast, rangeOverPlan };
 })(KIT);
