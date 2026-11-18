@@ -40,6 +40,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `basins.surface(carrier, mask, options)`, `terraces.surface(carrier, configuration)` | Masked level cuts and configurable height bands. Carrier provides bounds, height, normal and domain predicates |
 | `spans.catenary(a, b, options)` | Gravity-aware sagging curve with arc-length sampling, finite frames and closest-point queries |
 | `proximity.connect(sockets, options)` | Deterministic matching of named sockets with reach, degree and compatibility limits |
+| `attachments.layout(slots, families, options)` | Stable weighted selection for framed, typed attachment slots, with fit and clearance callbacks |
 | `populations.layout(boundsList, evaluate, options)` | Seeded world-space candidates ranked by density. Expanding the work region preserves existing candidate identities |
 | `sampling.poisson(options)` | Seeded Bridson samples in finite 2D and 3D bounds, with masks, variable radii, pins and axis scaling |
 | `sampling.eliminate(points, options)`, `sampling.lloyd(points, options)`, `sampling.patch(spec)`, `sampling.geodesicSpacing(points, links, options)` | Progressive point subsets, centroidal layout, stratified surface sampling and surface-neighbor separation |
@@ -412,6 +413,24 @@ node cli/ink-studio.js render examples/poisson-patches.js --seed 1 --ortho --col
 `examples/sampling-detail.js` uses seed 0 for centered strata, seed 1 for
 curvature-weighted jittered splats, and seed 2 for a ranked point set whose
 coarser prefixes are shown with larger dabs.
+
+### Attachment slots
+
+`P.attachments.layout(slots, families, {seed, fits, budget})` selects a family
+for each named slot. A slot supplies a stable `id`, a `point`, independent
+`normal` and `tangent` axes, and a three-component `room` in the caller's
+semantic size order. Optional `tags`, `chance`, `priority`, `variant`, and
+`pin` select compatibility, occupancy, order, seed offset and an explicit
+family, respectively. Families declare `id`, `size`, optional positive
+`weight` and required tags in `requires`. Slots and families can carry JSON
+`data` such as chart anchors or asset recipe keys.
+
+For compatible choices, seeded weighted ranking provides deterministic
+fallbacks. `fits(proposal, accepted)` can test scene clearance or reserve
+nearby space. `budget` bounds slot-family comparisons. Output entries contain
+`key`, the normalized `slot` frame, a `family`, and a local `seed`.
+For a retained scene, use that key in `doc.derive()` and let document
+overrides, promotion, and suppression carry authored edits.
 
 ### Surface growth
 
