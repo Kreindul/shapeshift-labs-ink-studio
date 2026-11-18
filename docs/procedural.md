@@ -65,6 +65,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.delaunay(points, options)`, `geometry.triangulatePolygon(rings)`, `routes.network(points)`, `routes.steiner(points, edges, terminals)` | Constrained planar triangulation, graph layouts with optional loops, and shared branch networks |
 | `routes.tensor(components)`, `routes.followTensor(field, seeds)`, `routes.growStreets(seeds, options)`, `routes.parcels(outline)`, `routes.medial(rings)` | Directional street systems, connected seeded roads, frontage lots and medial paths |
 | `routes.layout(route, options)` | Fit bounded intervals on a polyline, catenary, or compatible curve. Place caller-chosen pieces using gapped endpoints and midpoint frames |
+| `routes.fitStairApproach(options)` | Fit a short stair flight from an exposed landing to a sampled carrier surface. |
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
 | `contacts.index(mesh, options)`, `contacts.intersections(a, b, options)`, `contacts.clipCurve(points, solids)` | Index named triangle groups, trace noncoplanar contacts, and trim contact or authored curves against closed indexed solids |
@@ -229,6 +230,17 @@ controls how contacts are picked, which cues are available, and how the
 result is animated or rendered.
 
 ### Terrain routes between pins
+
+`routes.fitStairApproach({landing, direction, height, outline, width, accept, inside,
+rise, tread, minRise, maxRise, minRun, maxRun, step, budget})` scans out from a
+landing along a horizontal direction. It finds the shortest sampled run that
+meets the tread and rise constraints and clears the sampled ground. Give
+`outline` as a convex XZ polygon with `width` to seat the full width of the
+landing on a platform. `accept(point)` restricts the search to a connected
+approach. `inside(point)` allows initial overlap before the run leaves a
+carrier. The result gives `landing`, `toe`, `axis`, `run`, `climb`,
+`risers`, `tread` and `rise`, or `null` if the constraints cannot be met.
+The default probe spacing is .06 with a budget of 256.
 
 `routes.terrain(start, end, options)` takes exact `[x, y, z]` pins with
 distinct XZ coordinates. Supply `bounds: {min, max}` to limit the XZ search,
