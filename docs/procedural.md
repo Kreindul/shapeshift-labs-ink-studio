@@ -1960,3 +1960,18 @@ and newly cut caps get the plane's tag or the supplied `capTag`.
 An empty or missed keepout returns the original shell, and a full cover
 returns an empty array. The default fragment budget is 256. Larger outputs
 raise a `RangeError`. The supplied half spaces and shell need to be finite.
+
+### Convex height prisms
+
+`KIT.procedural.geometry.heightPrismPlanes({ lower, upper })` describes
+a convex volume between planar height caps. Pass corresponding 3D rings
+with the same convex XZ footprint and with the upper ring at or above
+the lower ring. Either winding is accepted. The two heights can slope
+independently.
+
+The result contains normalized outward half spaces. Planes identify the
+`lower` and `upper` caps and the lateral `side` faces. Side planes also
+give their original edge index. Use the planes for intersection,
+occupied-volume sampling or keepout subtraction. Joining several prisms
+can approximate a shaped height field while assigning clearance only
+to exposed faces.
