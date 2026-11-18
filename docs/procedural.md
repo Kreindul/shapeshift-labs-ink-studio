@@ -1596,6 +1596,10 @@ rule, children)` with stable per-rule keys. Editing a derived child preserves
 its overrides through regeneration. `promote(id)`, `suppress(id)`, and
 `allow(owner, rule, key)` control its relationship to the rule. Pass `getItem`
 and `setItem` to `doc.autosave(storage, key)` to keep a recovery journal.
+Transactions and history checkpoints share unchanged scene records.
+Undo, redo, and cancel can reuse their immutable read values, including
+compiled field caches associated with those values. Autosave keeps the
+version-one full-snapshot journal and reuses the encoding of earlier entries.
 `projectDerived(snapshot, jobs)` runs the same derivations on a shared
 immutable view without changing the document or its history.
 

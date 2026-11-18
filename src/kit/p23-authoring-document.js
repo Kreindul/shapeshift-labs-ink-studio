@@ -19,6 +19,20 @@
   const documentSnapshots = new WeakSet(),
     validatedViews = new WeakSet();
   const same = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
+  function sameEntries(a, b, equals = same) {
+    if (a === b) return true;
+    const keys = Object.keys(a),
+      other = Object.keys(b);
+    if (keys.length !== other.length) return false;
+    // Match the serialized key order as well as values.
+    return keys.every((key, i) => key === other[i] && equals(a[key], b[key], key));
+  }
+  const sameDocument = (a, b) =>
+    sameEntries(a, b, (left, right, key) =>
+      key === 'entities' || key === 'styles' ? sameEntries(left, right) : same(left, right)
+    );
+  // The editable maps and counter are private. All nested records are replaced on write.
+  const checkpoint = state => ({ ...state, entities: { ...state.entities }, styles: { ...state.styles } });
   const slot = (rule, key) => JSON.stringify([rule, key]);
   const derivedId = (owner, rule, key) => '@/' + [owner, rule, key].map(encodeURIComponent).join('/');
   const idOK = id => typeof id === 'string' && id.length > 0 && !['__proto__', 'prototype', 'constructor'].includes(id);
@@ -232,7 +246,8 @@
     // same compiled fields instead of cloning an entire scene on every read.
     let view = null,
       styleView = null;
-    const copies = new WeakMap();
+    const copies = new WeakMap(),
+      journalText = new WeakMap();
     function immutable(value) {
       if (!value || typeof value !== 'object') return value;
       if (!copies.has(value)) copies.set(value, freeze(json(value)));
@@ -258,13 +273,6 @@
     const limit = options.historyLimit === undefined ? 100 : options.historyLimit;
     if (!Number.isSafeInteger(limit) || limit < 0) throw new Error('historyLimit must be a non-negative integer');
     const doc = { listenerErrors: [], storageError: null };
-    // Only maps and the serial counter are mutated in place. Record replacement
-    // leaves earlier checkpoints valid and supports structural sharing in history.
-    const copy = () => ({
-      ...state,
-      entities: { ...state.entities },
-      styles: { ...state.styles }
-    });
     function notify(set, event) {
       for (const fn of [...set]) {
         try {
@@ -280,23 +288,29 @@
         label,
         revision,
         changed: diff(before, state),
-        stylesChanged: !same(before.styles, state.styles),
+        stylesChanged: !sameEntries(before.styles, state.styles),
         environmentChanged: !same(before.environment, state.environment)
       };
     }
     function save(label) {
       if (!binding) return;
       try {
-        if (journal.length && same(journal[journal.length - 1].snapshot, state)) {
+        if (journal.length && sameDocument(journal[journal.length - 1].snapshot, state)) {
           doc.storageError = null;
           return;
         }
         const serial = journal.length ? journal[journal.length - 1].serial + 1 : 1;
-        const item = { id: 'save-' + serial, serial, label, revision, snapshot: copy() };
+        const item = { id: 'save-' + serial, serial, label, revision, snapshot: checkpoint(state) };
         const next = journal.concat([item]).slice(-binding.backups - 1);
+        const entries = next.map(entry => {
+          // String labels keep the entire saved entry stable across writes.
+          if (typeof entry.label !== 'string') return JSON.stringify(entry);
+          if (!journalText.has(entry)) journalText.set(entry, JSON.stringify(entry));
+          return journalText.get(entry);
+        });
         binding.storage.setItem(
           binding.key,
-          JSON.stringify({ format: 'ink-studio/journal', version: 1, entries: next })
+          '{"format":"ink-studio/journal","version":1,"entries":[' + entries.join(',') + ']}'
         );
         journal = next;
         doc.storageError = null;
@@ -379,7 +393,7 @@
     };
     doc.begin = label => {
       if (transaction) throw new Error('A document transaction is already active');
-      transaction = { label: label || 'Edit', before: copy() };
+      transaction = { label: label || 'Edit', before: checkpoint(state) };
       return doc;
     };
     doc.preview = () => {
@@ -388,7 +402,7 @@
         resolve();
         validate(state);
       } catch (err) {
-        const before = copy(),
+        const before = state,
           tx = transaction;
         transaction = null;
         state = tx.before;
@@ -412,9 +426,9 @@
         throw err;
       }
       transaction = null;
-      if (same(tx.before, state)) return false;
+      if (sameDocument(tx.before, state)) return false;
       if (limit) {
-        past.push({ label: tx.label, before: tx.before, after: copy() });
+        past.push({ label: tx.label, before: tx.before, after: checkpoint(state) });
         if (past.length > limit) past.shift();
       }
       future.length = 0;
@@ -425,7 +439,7 @@
     };
     doc.cancel = () => {
       if (!transaction) return false;
-      const before = copy(),
+      const before = state,
         label = transaction.label;
       state = transaction.before;
       invalidateStyles();
@@ -452,8 +466,8 @@
       if (transaction) throw new Error('Finish the active transaction before ' + type);
       if (!from.length) return false;
       const entry = from.pop(),
-        before = copy();
-      state = { ...entry[key], entities: { ...entry[key].entities }, styles: { ...entry[key].styles } };
+        before = state;
+      state = checkpoint(entry[key]);
       invalidateStyles();
       to.push(entry);
       revision++;
@@ -591,7 +605,8 @@
       save('Save');
       return !doc.storageError;
     };
-    doc.backups = () => freeze(json(journal));
+    doc.backups = () =>
+      freeze(journal.map(entry => (typeof entry.label === 'string' ? immutable(entry) : json(entry))));
     doc.recover = index => {
       if (typeof index === 'string') index = journal.findIndex(entry => entry.id === index);
       if (!journal[index]) throw new Error('Unknown backup: ' + index);

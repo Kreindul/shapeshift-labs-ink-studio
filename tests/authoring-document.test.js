@@ -304,3 +304,53 @@ test('style maps, environment, restores and failed resolution invalidate read vi
   assert.equal(beforeCreate.entities[created], undefined);
   d.cancel();
 });
+
+
+test('history reuses untouched records and preserves version-one recovery bytes', () => {
+  let stored = null;
+  const d = A.document().autosave({
+    getItem: () => stored,
+    setItem(_, value) {
+      stored = value;
+    }
+  }, 'glade', { backups: 3 });
+  const untouched = d.create('mesh', { parameters: { vertices: [[0, 0, 0], [1, 0, 0]] } });
+  const edited = d.create('mass', { parameters: { width: 2 } });
+  const initial = d.snapshot(), events = [];
+  d.onChange(event => events.push(event.changed));
+
+  d.begin('Resize');
+  d.update(edited, { parameters: { width: 8 } });
+  d.preview();
+  d.cancel();
+  assert.strictEqual(d.get(untouched), initial.entities[untouched]);
+  assert.strictEqual(d.get(edited), initial.entities[edited]);
+
+  d.update(edited, { parameters: { width: 3 } });
+  const committed = d.snapshot();
+  d.undo();
+  assert.strictEqual(d.get(untouched), initial.entities[untouched]);
+  assert.strictEqual(d.get(edited), initial.entities[edited]);
+  d.redo();
+  assert.strictEqual(d.get(edited), committed.entities[edited]);
+  d.update(untouched, { parameters: { vertices: [[7, 0, 0]] } });
+  assert.deepEqual(initial.entities[untouched].parameters.vertices, [[0, 0, 0], [1, 0, 0]]);
+  assert.deepEqual(events, [[edited], [edited], [edited], [untouched]]);
+
+  const journal = JSON.parse(stored);
+  assert.equal(journal.version, 1);
+  assert.deepEqual(journal.entries, d.backups());
+  const previous = journal.entries.map(entry => JSON.stringify(entry));
+  d.flush();
+  assert.equal(stored, JSON.stringify(journal));
+  d.update(edited, { parameters: { width: 4 } });
+  assert.deepEqual(JSON.parse(stored).entries.slice(0, -1).map(entry => JSON.stringify(entry)), previous.slice(1));
+
+  const beforeRestore = d.serialize(),
+    reordered = JSON.parse(beforeRestore);
+  reordered.entities = Object.fromEntries(Object.entries(reordered.entities).reverse());
+  d.restore(reordered);
+  assert.equal(d.serialize(), JSON.stringify(reordered));
+  assert(d.undo());
+  assert.equal(d.serialize(), beforeRestore);
+});
