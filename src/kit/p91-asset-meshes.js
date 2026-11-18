@@ -2,12 +2,15 @@
 (function (K) {
   const A = K.authoring, M = K.mesh;
   const maxVertices = 3072, maxTriangles = 3072, maxBytes = 1048576;
+  const maxSockets = 32;
   const triplet = value => Array.isArray(value) && value.length === 3 && Array.from(value).every(Number.isFinite);
   const inRange = (value, max) => Number.isSafeInteger(value) && value >= 0 && value < max;
+  const socketMap = value => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length <= maxSockets;
+  const socketId = id => id.length > 0 && id.length <= 80 && !['__proto__', 'constructor', 'prototype'].includes(id);
 
   function validate(raw) {
     const value = A.data.clone(raw);
-    const { positions, triangles, colors, faceColors } = value || {};
+    const { positions, triangles, colors, faceColors, sockets } = value || {};
     if (value?.type !== 'triangle-mesh' || !Array.isArray(positions) || !Array.isArray(triangles) ||
         positions.length < 9 || positions.length > maxVertices * 3 || positions.length % 3 ||
         triangles.length < 3 || triangles.length > maxTriangles * 3 || triangles.length % 3 ||
@@ -19,6 +22,11 @@
         !Array.isArray(faceColors) || faceColors.length !== triangles.length / 3 ||
         !faceColors.every(index => inRange(index, colors.length)))
       throw Error('Invalid mesh face colors');
+    if (sockets !== undefined && (!socketMap(sockets) ||
+        Object.entries(sockets).some(([id, socket]) => !socketId(id) || !triplet(socket?.p) ||
+          socket.p.some(x => Math.abs(x) > 12) || !triplet(socket.dir) ||
+          Math.abs(Math.hypot(...socket.dir) - 1) > 1e-5)))
+      throw Error('Invalid mesh socket');
     let area = 0;
     const point = i => positions.slice(i * 3, i * 3 + 3);
     for (let i = 0; i < triangles.length; i += 3) {
@@ -58,8 +66,12 @@
       }
       faceColors.push(best);
     }
-    return validate({ type:'triangle-mesh', positions:Array.from(fitted.pos,x=>Math.round(x*100000)/100000),
-      triangles:Array.from(fitted.tri), colors, faceColors });
+    const rounded = x => Math.round(x*100000)/100000;
+    return validate({ type:'triangle-mesh', positions:Array.from(fitted.pos,rounded),
+      triangles:Array.from(fitted.tri), colors, faceColors,
+      ...(fitted.sockets && { sockets:Object.fromEntries(Object.entries(fitted.sockets).map(([id, socket]) => [
+        id, { p:socket.p.map(rounded), dir:socket.dir }
+      ])) }) });
   }
 
   function fromGLB(bytes, options) {
@@ -129,7 +141,23 @@
       for (const child of node.children || []) walk(child,depth+1);
     }
     for (const root of roots) walk(root,0);
-    return recipe(M.gltf(json,[bin]),options);
+    const names = options?.socketNodes;
+    if (names === undefined) return recipe(M.gltf(json,[bin]),options);
+    if (!socketMap(names) || Object.entries(names).some(([id, name]) =>
+      !socketId(id) || typeof name !== 'string' || !name.length || name.length > 128))
+      throw Error('Invalid GLB socket names');
+    const requested = Object.entries(names), sockets = new Map();
+    const mesh = M.gltf(json,[bin],{visitNode(name, matrix) {
+      for (const [id, target] of requested) {
+        if (name !== target) continue;
+        if (sockets.has(id)) throw Error('Ambiguous GLB socket node: ' + target);
+        const forward = matrix.slice(8,11), length = Math.hypot(...forward);
+        if (!Number.isFinite(length) || length < 1e-9) throw Error('Invalid GLB socket direction: ' + target);
+        sockets.set(id,{p:matrix.slice(12,15), dir:forward.map(value => value / length)});
+      }
+    }});
+    if (sockets.size) mesh.sockets = Object.fromEntries(sockets);
+    return recipe(mesh,options);
   }
   A.assetMeshes = Object.freeze({ recipe, validate, fromGLB });
 })(KIT);

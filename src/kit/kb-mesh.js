@@ -164,7 +164,7 @@
       5126: [4, 'getFloat32', 1]
     },
     WIDTH = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
-  M.gltf = (json, bins) => {
+  M.gltf = (json, bins, { visitNode } = {}) => {
     const g = typeof json === 'string' ? JSON.parse(json) : json,
       bufs = (g.buffers || []).map((b, i) =>
         bins && bins[i]
@@ -212,6 +212,7 @@
     const walk = (ni, parent) => {
       const n = g.nodes[ni],
         m = mat4.mul(parent, mat4.trs(n));
+      if (visitNode && n.name !== undefined) visitNode(n.name, m.slice());
       if (n.mesh !== undefined)
         for (const pr of g.meshes[n.mesh].primitives) {
           if (pr.mode !== undefined && pr.mode !== 4) {
@@ -329,6 +330,16 @@
       p[i] = (p[i] - cx) * k + at[0];
       p[i + 1] = (p[i + 1] - y0) * k + at[1];
       p[i + 2] = (p[i + 2] - cz) * k + at[2];
+    }
+    if (mesh.sockets) {
+      const rotate = ([x, y, z]) => {
+        if (o.up === 'z') [y, z] = [z, -y];
+        return [x * c + z * s, y, -x * s + z * c];
+      };
+      const center = [cx, y0, cz];
+      out.sockets = Object.fromEntries(Object.entries(mesh.sockets).map(([id, socket]) => [
+        id, { p: rotate(socket.p).map((value, i) => (value - center[i]) * k + at[i]), dir: rotate(socket.dir) }
+      ]));
     }
     return out;
   };

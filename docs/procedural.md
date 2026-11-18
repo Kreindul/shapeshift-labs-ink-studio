@@ -1446,6 +1446,14 @@ coordinates and bounded face colors. `assetMeshes.recipe(mesh, {size})`
 uses an already parsed mesh. The recipe carries geometry and base colors.
 The caller selects the placement, material and rendering rules.
 
+Pass `socketNodes: { seat: 'Ride Seat', hook: 'Hook' }` to map names in
+the active glTF scene to asset socket IDs. Matching nodes may be empty.
+Each matching socket is saved as `{p,dir}` in the recipe's fitted
+coordinates, including parent transforms. The node's local +Z defines
+its forward direction. Absent node names are omitted. Duplicate matches
+for a requested name report an error. The named sockets can be reused in
+an asset family or interpreted by a placement system.
+
 ### Surface lighting overrides
 
 `KIT.procedural.surfaceLighting.override(options)` prepares an immutable

@@ -29,11 +29,11 @@ test('asset catalogs expose additions and resolve ordered compatible replacement
   assert.throws(()=>A.assetPacks.create({packs:[first,first]}),/Duplicate/);
 });
 
-function makeGLB() {
+function makeGLB(nodes=[{mesh:0}]) {
   const positions=[-1,0,0,1,0,0,0,1,0];
   const bin=Buffer.alloc(36);
   positions.forEach((v,i)=>bin.writeFloatLE(v,i*4));
-  const scene={asset:{version:'2.0'},scenes:[{nodes:[0]}],nodes:[{mesh:0}],
+  const scene={asset:{version:'2.0'},scenes:[{nodes:[0]}],nodes,
     meshes:[{primitives:[{attributes:{POSITION:0},material:0}]}],
     materials:[{pbrMetallicRoughness:{baseColorFactor:[1,0,0,1]}}],
     buffers:[{byteLength:bin.length}],bufferViews:[{buffer:0,byteLength:bin.length}],
@@ -57,4 +57,21 @@ test('GLB imports a fitted mesh and preserves face color in a self-contained rec
   const invalid = {...recipe,triangles:[0,1,9]};
   assert.throws(()=>A.assetMeshes.validate(invalid),/Invalid triangle/);
   assert.throws(()=>A.assetMeshes.recipe(mesh.make([0,0,0,0,0,0,0,0,0],[0,1,2])),/area/);
+});
+
+test('GLB sockets preserve nested node positions and forward axes when fitted',()=>{
+  const seat={name:'Ride Seat',translation:[.5,.4,-2],rotation:[0,Math.SQRT1_2,0,Math.SQRT1_2]};
+  const hook={name:'Hook',matrix:[1,0,0,0,0,1,0,0,0,0,1,0,-.5,1,2,1]};
+  const body={mesh:0,translation:[10,2,3],scale:[2,1,1],children:[1,2]};
+  const bytes=makeGLB([body,seat,hook]);
+  const recipe=A.assetMeshes.fromGLB(bytes,{size:1,socketNodes:{seat:'Ride Seat',hook:'Hook',missing:'Absent'}});
+  assert.deepEqual(Object.keys(recipe.sockets),['seat','hook']);
+  assert.deepEqual(recipe.sockets.seat.p,[.25,.10,-.5]);
+  assert(recipe.sockets.seat.dir[0]>.999999 && Math.abs(recipe.sockets.seat.dir[2])<1e-8);
+  assert.deepEqual(recipe.sockets.hook,{p:[-.25,.25,.5],dir:[0,0,1]});
+  assert.deepEqual(A.assetMeshes.validate(JSON.parse(JSON.stringify(recipe))),recipe);
+  assert.equal(A.assetMeshes.fromGLB(bytes,{size:1}).sockets,undefined);
+  assert.deepEqual(A.assetMeshes.fromGLB(bytes,{size:1}).positions,recipe.positions);
+  assert.throws(()=>A.assetMeshes.fromGLB(makeGLB([body,seat,seat]),{socketNodes:{seat:'Ride Seat'}}),/Ambiguous/);
+  assert.throws(()=>A.assetMeshes.validate({...recipe,sockets:{seat:{p:[0,0,0],dir:[0,0,0]}}}),/socket/);
 });
