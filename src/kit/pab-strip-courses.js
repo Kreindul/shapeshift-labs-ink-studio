@@ -21,11 +21,13 @@
 
   function stripCourses({ sections, unit, joint = 0, stagger = .5, datum = 0,
     closed = false, offset = 0, columnPeriod = 0, budget = 4096 } = {}) {
+    const fullHeight = unit?.[1] === null;
     if (!Array.isArray(sections) || sections.length < 2 || sections.length > 8192 ||
       sections[0]?.s !== 0 || sections.some((section, i) => !section ||
         ![section.s, section.lower, section.upper].every(Number.isFinite) ||
         section.upper < section.lower || i && section.s - sections[i - 1].s <= EPS) ||
-      !Array.isArray(unit) || unit.length !== 2 || !unit.every(v => Number.isFinite(v) && v > EPS) ||
+      !Array.isArray(unit) || unit.length !== 2 || !Number.isFinite(unit[0]) || unit[0] <= EPS ||
+      !fullHeight && (!Number.isFinite(unit[1]) || unit[1] <= EPS) ||
       !Number.isFinite(datum) || !Number.isFinite(offset) ||
       !Number.isSafeInteger(columnPeriod) || columnPeriod < 0 ||
       !Number.isFinite(joint) || joint < 0 ||
@@ -36,7 +38,7 @@
     const length = sections.at(-1).s;
     const count = closed ? Math.max(1, Math.round(length / unit[0])) : 0;
     const dx = closed ? length / count : unit[0], dy = unit[1], gap = joint / 2;
-    if (!Number.isSafeInteger(count) || dx <= EPS || joint >= Math.min(dx, dy))
+    if (!Number.isSafeInteger(count) || dx <= EPS || joint >= (fullHeight ? dx : Math.min(dx, dy)))
       throw Error('Strip course joints must be smaller than both fitted dimensions');
 
     const period = count || columnPeriod, pieces = [];
@@ -44,8 +46,8 @@
     let work = budget * 8 + sections.length;
     for (let segment = 0; segment < sections.length - 1; segment++) {
       const a = sections[segment], b = sections[segment + 1];
-      const firstRow = Math.floor((Math.min(a.lower, b.lower) - datum) / dy);
-      const lastRow = Math.ceil((Math.max(a.upper, b.upper) - datum) / dy) - 1;
+      const firstRow = fullHeight ? 0 : Math.floor((Math.min(a.lower, b.lower) - datum) / dy);
+      const lastRow = fullHeight ? 0 : Math.ceil((Math.max(a.upper, b.upper) - datum) / dy) - 1;
       if (![firstRow, lastRow].every(Number.isSafeInteger) || lastRow - firstRow >= work) overflow();
       const slope = edge => (b[edge] - a[edge]) / (b.s - a.s);
       const lower = slope('lower'), upper = slope('upper');
@@ -60,10 +62,17 @@
           const lo = Math.max(a.s, (column + phase) * dx - offset + gap);
           const hi = Math.min(b.s, (column + phase + 1) * dx - offset - gap);
           if (hi - lo <= EPS) continue;
-          let polygon = clip([[lo, low], [hi, low], [hi, high], [lo, high]],
-            ([s, y]) => y - a.lower - (s - a.s) * lower);
-          if (!polygon.length) continue;
-          polygon = clip(polygon, ([s, y]) => a.upper + (s - a.s) * upper - y);
+          let polygon;
+          if (fullHeight) {
+            const edge = (s, base, slope) => [s, base + (s - a.s) * slope];
+            polygon = [edge(lo, a.lower, lower), edge(hi, a.lower, lower),
+              edge(hi, a.upper, upper), edge(lo, a.upper, upper)];
+          } else {
+            polygon = clip([[lo, low], [hi, low], [hi, high], [lo, high]],
+              ([s, y]) => y - a.lower - (s - a.s) * lower);
+            if (!polygon.length) continue;
+            polygon = clip(polygon, ([s, y]) => a.upper + (s - a.s) * upper - y);
+          }
           if (polygon.length < 3) continue;
           const [x0, y0] = polygon[0];
           const area = polygon.slice(1, -1).reduce((sum, [x, y], i) => {

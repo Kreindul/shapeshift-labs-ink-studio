@@ -5,6 +5,31 @@ const fit = KIT.stripCourses;
 const section = (s, lower, upper) => ({ s, lower, upper });
 const close = (a, b) => assert(Math.abs(a - b) < 1e-7);
 
+test('full-height stock joins each station without introducing a horizontal joint',()=>{
+  const sections=[section(0,-.4,1.4),section(.62,.36,1.9),section(2,.08,2.2)];
+  const {pieces,unit}=fit({sections,unit:[.82,null],joint:.08,datum:7});
+  assert.deepEqual(unit,[.82,null]);
+  assert.equal(pieces.length,4);
+  assert(pieces.every(p=>p.row===0&&p.polygon.length===4));
+  const joined=pieces.filter(p=>p.id==='0/0');
+  assert.equal(joined.length,2);
+  for(const piece of joined)assert.deepEqual(piece.polygon.filter(([s])=>s===.62).map(([,y])=>y),[.36,1.9]);
+  close(Math.min(...pieces[0].polygon.map(([s])=>s)),.04);
+  close(Math.max(...joined[1].polygon.map(([s])=>s)),.78);
+});
+
+test('full-height stock preserves closed seam identity and handles pinched bands',()=>{
+  const sections=[section(0,0,1),section(1.2,.3,.3),section(2.85,0,1)];
+  const {pieces,unit,columnPeriod}=fit({sections,unit:[1,null],closed:true,offset:.21});
+  close(unit[0],.95);
+  assert.equal(columnPeriod,3);
+  const wraps=pieces.filter(p=>p.id==='0/0');
+  assert(wraps.some(p=>p.polygon.some(([s])=>s===0)));
+  assert(wraps.some(p=>p.polygon.some(([s])=>s===2.85)));
+  assert.deepEqual(fit({sections:[section(0,1,1),section(1,1,1)],unit:[.3,null]}).pieces,[]);
+  assert.throws(()=>fit({sections,unit:[.2,null],joint:.2}),/joint/);
+});
+
 test('stock clips to both edges of a sloped strip and continues across sections', () => {
   const sections = [section(0, .33, 1.6), section(.62, .64, 1.38), section(2, .33, 1.6)];
   const { pieces } = fit({ sections, unit: [1, .4], joint: .04 });

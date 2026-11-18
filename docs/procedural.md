@@ -1936,6 +1936,11 @@ height]`. Each convex fragment is clipped to one piecewise-linear section and
 reports its polygon, section index and logical row and column. A cell can span
 several sections without adding a joint at their boundaries.
 
+Use `unit: [width, null]` for full-height stock such as boards or louvers.
+Each column spans from the lower edge to the upper edge. The joint applies
+along the strip and the stock keeps one logical ID across section breaks.
+The vertical datum and row staggering apply to the rectangular stock mode.
+
 A closed strip fits a whole number of columns and shares the logical cell ID
 across its seam. Retain the fitted width, `columnPeriod` and `offset` of a
 surviving portion when cutting a closed strip into open fragments. `datum`
