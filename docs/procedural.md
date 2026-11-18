@@ -27,6 +27,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.samplePatch(spec, emit)` | Adaptive sampling of a bounded UV patch, using world spacing and an optional acceptance mask |
 | `geometry.triangulate2D(points)` | Index triples for a simple concave or convex 2D polygon |
 | `geometry.clipConvex(mesh, planes, capMetadata)`, `geometry.clipSurface(mesh, planes)` | Clip to half spaces `dot(normal, point) <= offset`. Closed convex shells receive caps, open triangle streams retain interpolated UVs/normals |
+| `geometry.clipConvexFaces(faces, planes, {capTag})` | Clip a closed convex shell of outward-wound planar faces. Keep polygons intact through clipping and tag each cap with its plane tag or the supplied default |
 | `geometry.implicitSurface(field, bounds, options)` | Marching tetrahedra for negative-inside fields, with a bounded cell count |
 | `pieces.convex`, `pieces.box`, `pieces.beam`, `pieces.tube`, `pieces.union` | Reusable solid pieces and query unions. Union meshes contain constituent shells |
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
@@ -81,6 +82,12 @@ total length and a corner splits a cell into fragments with the same key.
 `closed: true` connects the last and first vertices. A fractional `phase`
 shifts the joints around that seam. The result contains footprints in the
 input coordinate system so callers can extrude, clip or sample them.
+
+Convex face clipping accepts face records with `points` in outward cyclic
+order and an optional `tag`. Supply half spaces with `normal` and `offset`
+and optionally attach a `tag` to any plane. The output has the same face record
+shape, with a cap for each plane which intersects the volume. Triangulate the
+result after clipping if the consumer uses triangle geometry.
 
 Catalog definitions may name one or several parents using `extends`. A
 resolved profile merges named or inline layers in order. Object keys compose
