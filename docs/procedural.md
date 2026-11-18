@@ -88,7 +88,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `forms.superquadric(spec)`, `forms.loft(sections)`, `forms.skeleton(nodes)`, `forms.periodic(spec)`, `forms.shell(host, options)` | Bounded analytic forms and locally variable shells for the sculptor |
 | `grammar.symmetry(scope, rules, options)` | Reflected or radial grammar instances with optional variations and stable copy keys |
 | `fracture.power(spec)`, `fracture.separate(graph, options)`, `fracture.crack(options)` | Anisotropic power cells, cumulative bond failure and stress-guided crack paths |
-| `grammar.assemble(route, modules, options)`, `construct.loadPaths(sockets, spans, options)`, `construct.damage(parts, options)` | Dimensioned, socket-connected assemblies, stylized supports and seeded part damage |
+| `grammar.assemble(route, modules, options)`, `construct.loadPaths(sockets, spans, options)`, `construct.supportGraph(parts)`, `construct.damage(parts, options)` | Dimensioned, socket-connected assemblies, stylized supports, support propagation and seeded part damage |
 | `construct.profile(rings)`, `construct.offset(profile, distance)`, `construct.extrude(profile, options)`, `construct.weightedRoof(rings, options)` | Signed footprints, planar offsets, extrusions and roof wavefronts with per-edge pitches |
 | `geometry.distanceTransform(mask, options)`, `materials.outline(mask, options)` | Exact Euclidean distances over pixel or voxel centers, including anisotropic spacing and inside/outside masks |
 | `materials.triplanar(sample, options)`, `materials.tangent(sample, options)`, `materials.threshold(field, options)`, `materials.ramp(colors, options)` | Surface-aligned patterns, pixel-footprint filtering and perceptual palettes |
@@ -1017,6 +1017,15 @@ returns keyed modules with geometry frames. Pinned intervals reserve
 enough slots for the whole route. The result reports a contradiction or
 a search budget separately. If a feasible plan was found before price
 optimization uses the budget, the layout indicates this in its work data.
+
+`construct.supportGraph([{id, links, grounded}, ...])` resolves which
+parts connect to a bearing. A link points from a dependent part to a part
+it can lean on. Mark direct bearings with `grounded: true`. Unresolved IDs
+can remain in the links while a part is absent. A cycle with a path to a
+bearing is supported, and an isolated cycle is floating. Results retain
+input order with resolved `grounded` and `state` values. Each part and
+contact is visited a bounded number of times. Callers choose how to find
+contacts and how to present either state.
 
 `construct.loadPaths(sockets, spans, {ground, clear, maxSpan, maxDrop})`
 places beams, supporting columns and braces. Sockets use `{id, point}`
