@@ -68,6 +68,16 @@ test('depth steps and masked holes do not get bridged, and isolated pixels remai
   assert.throws(() => KIT.depth.fromMap({ width: 2, height: 1, depth: [0, NaN] }), /no valid samples/);
 });
 
+test('islands meeting at one sample stay closed after backing is added', () => {
+  const model = KIT.depth.fromMap({
+    width: 3, height: 3, depth: [1.9, 1.9, 0, 1.9, 2, 2.1, 0, 2.1, 2.1], maxDepthJump: 0.15
+  });
+  assert.equal(model.count, 7);
+  assert.equal(KIT.mesh.info(model.mesh).open, 0);
+  const example = KIT.depth.fromMap(require('../examples/depth-map.js').input());
+  assert.equal(KIT.mesh.info(example.mesh).open, 0);
+});
+
 // A small grayscale PNG with values chosen to differ only in the low byte.
 function png16(file) {
   const sig = Buffer.from('89504e470d0a1a0a', 'hex');

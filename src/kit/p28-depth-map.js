@@ -106,21 +106,8 @@
     const frontTriangles = [];
     const normals = new Float64Array(samples.length * 3);
     const used = new Uint8Array(samples.length);
-    const uniqueEdges = new Map();
-    const triangle = (a, b, c) => {
-      frontTriangles.push(a, b, c);
-      for (const [u, v] of [
-        [a, b],
-        [b, c],
-        [c, a]
-      ]) {
-        const key = Math.min(u, v) + ',' + Math.max(u, v);
-        if (uniqueEdges.has(key)) uniqueEdges.delete(key);
-        else uniqueEdges.set(key, [u, v]);
-      }
-    };
     const observed = ([a, b, c]) => {
-      triangle(a, b, c);
+      frontTriangles.push(a, b, c);
       const p = vectorAt(pos, a);
       const n = V.cross(V.sub(vectorAt(pos, b), p), V.sub(vectorAt(pos, c), p));
       for (const i of [a, b, c]) {
@@ -168,9 +155,11 @@
         pos.push(...project(vertex.u, vertex.v, vertex.d));
         colors.push(...vectorAt(colors, i));
       }
-      triangle(first, first + 2, first + 1);
-      triangle(first + 1, first + 2, first + 3);
+      frontTriangles.push(first, first + 2, first + 1, first + 1, first + 2, first + 3);
     }
+    let boundary = boundaryEdges(frontTriangles, rasterVertices.length);
+    if (splitBoundaryFans(frontTriangles, boundary, rasterVertices, pos, colors))
+      boundary = boundaryEdges(frontTriangles, rasterVertices.length);
     const front = K.mesh.make(pos, frontTriangles, colors);
     const bounds = K.mesh.box(front);
     const span = Math.max(...bounds.hi.map((v, k) => v - bounds.lo[k]));
@@ -192,7 +181,7 @@
     for (let i = 0; i < frontTriangles.length; i += 3) {
       closedTriangles.push(frontTriangles[i] + count, frontTriangles[i + 2] + count, frontTriangles[i + 1] + count);
     }
-    for (const [a, b] of uniqueEdges.values()) closedTriangles.push(b, a, a + count, b, a + count, b + count);
+    for (const [a, b] of boundary.values()) closedTriangles.push(b, a, a + count, b, a + count, b + count);
     const closedColors = colors.concat(Array.from({ length: count }, () => backColor).flat());
     const mesh = K.mesh.make(pos.concat(back), closedTriangles, closedColors);
     const closedBounds = K.mesh.box(mesh);
@@ -261,6 +250,65 @@
       splat,
       world
     };
+  }
+
+  function boundaryEdges(triangles, count) {
+    const edges = new Map();
+    for (let i = 0; i < triangles.length; i += 3) {
+      for (let j = 0; j < 3; j++) {
+        const a = triangles[i + j],
+          b = triangles[i + ((j + 1) % 3)];
+        const key = Math.min(a, b) * count + Math.max(a, b);
+        if (edges.has(key)) edges.delete(key);
+        else edges.set(key, [a, b]);
+      }
+    }
+    return edges;
+  }
+
+  // Two islands can touch at one raster sample. Keep separate vertex fans so
+  // extruding them does not give the same vertical edge four incident faces.
+  function splitBoundaryFans(triangles, boundary, raster, positions, colors) {
+    const degree = new Uint8Array(raster.length);
+    for (const [a, b] of boundary.values()) {
+      degree[a]++;
+      degree[b]++;
+    }
+    const candidates = new Map();
+    degree.forEach((n, vertex) => {
+      if (n > 2) candidates.set(vertex, new Set());
+    });
+    if (!candidates.size) return false;
+    triangles.forEach((vertex, offset) => candidates.get(vertex)?.add(offset));
+    const neighbors = offset => {
+      const face = offset - (offset % 3);
+      return [triangles[face + ((offset + 1) % 3)], triangles[face + ((offset + 2) % 3)]];
+    };
+    for (const [vertex, remaining] of candidates) {
+      let id = vertex;
+      while (remaining.size) {
+        const next = [remaining.values().next().value];
+        while (next.length) {
+          const offset = next.pop();
+          remaining.delete(offset);
+          const [a, b] = neighbors(offset);
+          triangles[offset] = id;
+          for (const corner of remaining) {
+            const [c, d] = neighbors(corner);
+            if (a === c || a === d || b === c || b === d) {
+              remaining.delete(corner);
+              next.push(corner);
+            }
+          }
+        }
+        if (!remaining.size) break;
+        id = raster.length;
+        raster.push(raster[vertex]);
+        positions.push(...vectorAt(positions, vertex));
+        colors.push(...vectorAt(colors, vertex));
+      }
+    }
+    return true;
   }
 
   function typicalJump(order, samples, cols, rows, span) {
