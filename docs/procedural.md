@@ -706,6 +706,29 @@ multiply load by the scene's exposure mask, and pass the substrate's
 retention. A different palette and retention map lets the same curves
 represent ash, frost or a dusting of sand.
 
+### Overhead cover
+
+`P.overheadCover.rasterize({meshes, surfaces}, options)` projects opaque
+geometry from above. Each mesh supplies a flat `positions` buffer with
+nine world coordinates per triangle. Each analytic surface supplies
+two-element XZ bounds `min` and `max` and a `heightAt(x, z)` function that
+returns the upper height or `null` outside its footprint. The highest
+intersection at each XZ cell center becomes a texel in a single-channel
+Float32 height field. Use `spacing` to set the cell size and
+`maxSize` to bound the longest axis in texels. The field also carries
+`origin` (minimum X and Z), `step`, `width`, `height` and `samples`.
+
+`P.overheadCover.exposure(field, point, normal)` gives the exposed fraction
+for a surface. The optional normal estimates the surface height at neighboring
+texels to avoid shading a sloped surface with its own heights. `clearance`
+keeps an exposed surface clear of its rasterized height and `softness`
+sets the vertical transition from exposed to covered. Empty geometry
+returns a null field with full exposure. A caller can pass this exposure
+to coating, deposition, or other surface effects without regenerating the
+field when their intensity changes. For WebGL 2, upload the samples as
+`R32F` and use the matching `overheadExposure` GLSL function with
+`vec3(origin, step)` and `vec2(clearance, softness)`.
+
 ### Attachment slots
 
 `P.attachments.layout(slots, families, {seed, fits, budget})` selects a family
