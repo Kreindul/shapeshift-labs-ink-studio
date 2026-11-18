@@ -10,6 +10,9 @@
       v = [0, 1],
       steps = [1, 1],
       spacing,
+      jitter = 0,
+      seed = 0,
+      curvature = 0,
       sample,
       accept = () => true,
       maxDepth = 24,
@@ -22,6 +25,9 @@
       !steps.every(n => Number.isSafeInteger(n) && n > 0 && n <= 4096) ||
       !Number.isFinite(spacing) ||
       spacing <= 0 ||
+      !Number.isFinite(jitter) || jitter < 0 || jitter > 1 ||
+      !Number.isSafeInteger(seed) ||
+      !Number.isFinite(curvature) || curvature < 0 || curvature > 100 ||
       typeof sample !== 'function' ||
       typeof accept !== 'function' ||
       typeof emit !== 'function' ||
@@ -40,6 +46,14 @@
         throw new Error('Parametric samples must be finite 3D points');
       return p;
     };
+    function sagitta(a, b, mid) {
+      const line = V.sub(b, a),
+        length2 = V.dot(line, line),
+        offset = V.sub(mid, a);
+      if (length2 < 1e-20) return 0;
+      const bend = V.mad(offset, line, -V.dot(line, offset) / length2);
+      return 8 * V.len(bend) / length2;
+    }
     function patch(x0, x1, y0, y1, a, b, c, d, depth) {
       if (++visits > maxSamples * 8) throw new Error('Parametric sampling work budget exceeded');
       const x = (x0 + x1) / 2,
@@ -53,8 +67,10 @@
         dv = Math.max(V.dist(a, d), V.dist(b, c), 2 * V.dist(low, mid), 2 * V.dist(mid, high));
       const cu = V.dist(mid, V.mul(V.add(left, right), 0.5)),
         cv = V.dist(mid, V.mul(V.add(low, high), 0.5));
-      const splitU = du > spacing || cu > spacing * 0.12,
-        splitV = dv > spacing || cv > spacing * 0.12;
+      const bend = curvature ? Math.max(sagitta(left, right, mid), sagitta(low, high, mid)) : 0;
+      const target = spacing / Math.min(8, 1 + curvature * spacing * bend),
+        splitU = du > target || cu > spacing * 0.12,
+        splitV = dv > target || cv > spacing * 0.12;
       if (splitU || splitV) {
         if (depth >= maxDepth || x === x0 || x === x1 || y === y0 || y === y1)
           throw new Error('Parametric sampling cannot meet spacing within its depth budget');
@@ -67,9 +83,15 @@
         }
         return;
       }
-      if (accept(x, y)) {
+      let u = x, v = y;
+      if (jitter) {
+        const rand = K.grow.dice(A.data.hash(JSON.stringify([x0, x1, y0, y1]), seed >>> 0));
+        u += (rand() - 0.5) * jitter * (x1 - x0);
+        v += (rand() - 0.5) * jitter * (y1 - y0);
+      }
+      if (accept(u, v)) {
         if (count >= maxSamples) throw new Error('Parametric sample budget exceeded');
-        emit(mid, x, y);
+        emit(jitter ? at(u, v) : mid, u, v);
         count++;
       }
     }
