@@ -901,8 +901,9 @@ function makeSculpt(B) {
     }
     /* a wet or polished thing has a small hard highlight where it mirrors the sun to the eye. The eye is taken to be at S.view (set it to the
        way the camera looks from); gloss: { c (palette index), at (how small: 0.95), c2 and at2 (a dimmer ring round it) } */
+    const surface = m.surface === undefined ? m0.surface : m.surface;
     let glint = false;
-    if (m.gloss && !m.em && !flat) {
+    if (m.gloss && !surface && !m.em && !flat) {
       const g = m.gloss,
         vw = S.view || VIEW0,
         hx = L[0] + vw[0],
@@ -949,6 +950,7 @@ function makeSculpt(B) {
           ramp[
             clamp(Math.floor(t * ramp.length + (R() - 0.5) * (lf.j === undefined ? 1.3 : lf.j)), 0, ramp.length - 1)
           ];
+        if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, [tx / tl, ty / tl, tz / tl]);
         stick(
           x + nx * 0.04,
           y + ny * 0.04,
@@ -971,6 +973,7 @@ function makeSculpt(B) {
       ci = tones[clamp(Math.floor(li * tones.length + (R() - 0.5) * 1.1), 0, tones.length - 1)];
       const size = (R() < 0.32 ? 0.12 + R() * 0.1 : 0.06 + R() * 0.065) * 2.3 * clamp(res * 5.2, 0.45, 1.1),
         out = 0.04 + R() * size * 0.6;
+      if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, [tx / tl, ty / tl, tz / tl]);
       stick(
         x + nx * out,
         y + ny * out,
@@ -997,6 +1000,7 @@ function makeSculpt(B) {
         lo = ramp[Math.max(0, k - 1)],
         mid = ramp[k],
         hi = ramp[Math.min(n - 1, k + 1)];
+      if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd);
       disc(x, y, z, [nx, ny, nz], res * S.fat, res * 0.3, P[lo], 3, m.fl);
       if (wear > 0.7 && R() < (wear - 0.7) * 6) return;
       const h = (bl.h || 0.15) * 2.1 * (0.45 + 1.1 * tall) * (0.55 + 0.75 * R()),
@@ -1005,6 +1009,7 @@ function makeSculpt(B) {
         lz = (R() - 0.5) * 0.5,
         ll = Math.hypot(lx, 1, lz),
         ax = [lx / ll, 1 / ll, lz / ll];
+      if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, ax);
       stick(
         x + ax[0] * h * 0.3,
         y + ax[1] * h * 0.3,
@@ -1016,6 +1021,7 @@ function makeSculpt(B) {
         3,
         fl
       );
+      if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, ax);
       stick(
         x + ax[0] * h * 0.72,
         y + ax[1] * h * 0.72,
@@ -1058,6 +1064,7 @@ function makeSculpt(B) {
       fy -= ny * fn;
       fz -= nz * fn;
       const fm = Math.hypot(fx, fy, fz) || 1;
+      if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd);
       disc(x, y, z, [nx, ny, nz], res * S.fat, res * 0.3, P[ramp[Math.max(0, k - 2)]], 3, m.fl);
       for (let hi = 0; hi < hairs; hi++) {
         const jx = R() - 0.5,
@@ -1086,6 +1093,7 @@ function makeSculpt(B) {
                 ? rr2[clamp(Math.floor(rim * rr2.length), 0, rr2.length - 1)]
                 : ramp[Math.min(n - 1, k + sg + (rim > 0.75 ? 1 : 0))];
           }
+          if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, ax);
           stick(
             qx + ax[0] * sl * 0.5,
             qy + ax[1] * sl * 0.5,
@@ -1112,7 +1120,7 @@ function makeSculpt(B) {
     /* colour worked out per pixel (S.pixel, for a diorama whose look.pixel is on): the dab says which ramp, how lit, which pattern and
        which way its surface truly faces; each pixel is then coloured from those where it lands. A colour a material chose itself
        (a texture with no pattern behind it), a glowing thing, glass and a glint keep the dab's own colour */
-    if (S.pixel && !m.em && !m.glass && !glint && (m.a === undefined || m.a >= 1) && (!flat || m.pat))
+    if (S.pixel && !surface?.opacity && !m.em && !m.glass && !glint && (m.a === undefined || m.a >= 1) && (!flat || m.pat))
       B.pixNext(
         ramp,
         t,
@@ -1126,6 +1134,7 @@ function makeSculpt(B) {
         m0.line === false || m.line === false
       );
     // (a: how solid it is, 1 and over is solid, under 1 lets what is behind show through; glass also bends what is behind it)
+    if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd);
     if (S.follow && !m.glass) {
       formDab(res, x, y, z, nx, ny, nz, P[ci], m.a === undefined || glint ? 3 : m.a, fl);
       return;
