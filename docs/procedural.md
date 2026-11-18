@@ -1308,6 +1308,22 @@ region. Passing an owner ID clips that layer by later layers and erasers.
 The caller owns ordering, mask construction, and selection of spatial
 candidates. Swept masks are one way to build the layer functions.
 
+### Fitted profile runs
+
+`KIT.procedural.fittedProfileRun({path, profiles, pitch, gap, up, budget})`
+fits repeated sections along an open 3D polyline. Pass one or more convex
+2D cross sections in lateral and up coordinates. Sections use the length of
+the run to fit their pitch. The gap is a fraction of the fitted pitch, and the
+first and last ends reach the ends of the path. At a turn, fragments of the
+same section retain the same station index.
+
+`run.pieces({key, owner, material})` returns closed convex pieces with stable
+keys, mesh, distance, intersection, and surface-sampling methods. Use one
+profile for a cap or multiple profiles for an open channel. The up vector
+sets the profile orientation. Each path segment needs an extent perpendicular
+to it. Use a backing strip when the chosen treatment needs continuous
+coverage through joints and turns.
+
 ### Bounded field probes
 
 `KIT.boundedFields.halfspaces(planes)` compiles convex plane fields into
