@@ -86,6 +86,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.distanceTransform(mask, options)`, `materials.outline(mask, options)` | Exact Euclidean distances over pixel or voxel centers, including anisotropic spacing and inside/outside masks |
 | `materials.triplanar(sample, options)`, `materials.tangent(sample, options)`, `materials.threshold(field, options)`, `materials.ramp(colors, options)` | Surface-aligned patterns, pixel-footprint filtering and perceptual palettes |
 | `materials.quilt(swatch, options)`, `materials.patchMatch(source, target, options)`, `materials.synthesize(source, target, options)`, `materials.blueNoise(options)` | Swatch quilting, exemplar matching and fill, and periodic blue-noise ranks |
+| `materials.paintMixer(layers)` | Ordered paint and erasure over scalar coverage masks. Sample provenance weights or select one material with a stable caller-supplied rank. |
 | `geometry.dualContour(field, bounds, options)`, `geometry.surfaceNets(field, bounds, options)` | Cell-local surface samples, optional indexed preview triangles and tagged mesh output |
 | `geometry.octree(field, bounds, options)`, `geometry.stitchVoxelLevels(tree, options)`, `geometry.adaptiveSurface(field, bounds, options)` | Sparse field sampling, 2:1 voxel levels and stitched adaptive previews |
 | `geometry.simplifyQEM(mesh, options)`, `lod.mergeSplats(records, options)`, `lod.packSplats(result)` | Error-driven previews with retained material seams, ownership and protected samples |
@@ -229,6 +230,20 @@ hold interval exposes an `engaged` pose before pursuing the target. Use
 `retarget(id, point)` during the cue to follow a moving marker. The caller
 controls how contacts are picked, which cues are available, and how the
 result is animated or rendered.
+
+### Ordered paint coverage
+
+`materials.paintMixer([{id, coverage, operation}, ...])` accepts layers in
+oldest-to-newest order. Each `coverage(x, y)` returns a scalar in `[0, 1]`.
+An add layer contributes that fraction over what remains from older layers.
+An erase layer commits its fraction to the background. Subsequent add
+layers can paint back over it.
+
+`sample(x, y)` gives the visible `contributions` as `{id, weight}` pairs
+and the remaining `background` weight. `pick(x, y, rank)` samples one
+ID, or `null` for background, using a rank in `[0, 1)`. Use a stationary
+spatial rank for dithered surfaces, or consume the weights directly in a
+renderer. The mixer does not impose a brush shape, a material, or a layout.
 
 ### Signed intervals on a curve
 
