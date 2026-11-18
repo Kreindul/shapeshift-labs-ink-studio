@@ -69,6 +69,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `edgeClearance.strip(a, b, options)`, `edgeClearance.ranges(a, b, strips)` | Split a straight edge into retained and removed ranges where it crosses sloped clearance strips. |
 | `snapping.resolve(point, features, options)` | Project to a bounded point or segment and return the winning feature with its caller-supplied identity. |
 | `railGuard(options, meta)` | Build closed rail and upright post pieces with adjustable height, spacing and rail levels. |
+| `cantileverSupports.sites(options)`, `cantileverSupports.bracket(site, options, meta)` | Fit bearing sites along a wall or edge and build solid support profiles inside the carried footprint. |
 | `traceSignedIntervals(sample, options)` | Find where a signed field is negative along a bounded curve parameter. Supply a slope bound to skip homogeneous regions. |
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
@@ -273,6 +274,19 @@ and key prefix from `meta`. Posts follow the supplied up direction. The layout
 puts posts at ends and corners, then divides each run at or below the given
 spacing. The `levels` array gives the rail heights as fractions of guard height.
 Call it with retained spans from `edgeClearance` to leave an approach opening.
+
+`cantileverSupports.sites({path, outline, spacing, width, seat, minReach,
+maxReach, outward, maxSites})` fits stable station indices on a wall path
+against a convex XZ footprint. Both sides of the bracket must have bearing
+behind the wall before the site is accepted. `outward: -1` reverses which side
+of the path is probed. Returned sites include the point, tangent, outward
+direction and available reach.
+`cantileverSupports.bracket(site, {width, drop, embed, overlap, profile}, meta)`
+extrudes a convex side profile into a closed piece. Positive profile coordinates
+scale by reach and overlap. Negative coordinates scale by embed and drop.
+`cantileverSupports.intersects(piece, planes)` tests the result against a
+convex keep-out volume. These functions share the existing convex pieces and
+clipping code.
 
 `traceSignedIntervals(sample, {range, maxSlope, step, tolerance, maxSamples})`
 returns ordered pairs `[low, high]` where `sample(t)` is negative. The
