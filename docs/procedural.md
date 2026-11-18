@@ -49,6 +49,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `attachments.layout(slots, families, options)` | Stable weighted selection for framed, typed attachment slots, with fit and clearance callbacks |
 | `fitSurfaceBands({domain, opening, edges, obstructions, clearance})` | Keep bands mounted to a chart feature's edges and shorten or omit them to fit nearby boundaries and obstructions |
 | `fitFootprintContact({center, tangent, size, height, blocked, maxSpread, samples, interval})` | Seat an upright footprint on a sampled support and check space above it |
+| `createFootprintReservations({clearance, cellSize})` | Reserve space for oriented upright objects and test nearby candidates |
 | `environmentFields.evaluate(settings, elapsed)`, `environmentFields.opticalDepth(from, to, medium)`, `environmentFields.scatter(from, to, light, medium)`, `environmentFields.deposition(sample)` | Cyclic sun and sky tint, height-dependent fog, local scattering, and slope-sensitive surface loads |
 | `populations.layout(boundsList, evaluate, options)` | Seeded world-space candidates ranked by density. Expanding the work region preserves existing candidate identities |
 | `sampling.poisson(options)` | Seeded Bridson samples in finite 2D and 3D bounds, with masks, variable radii, pins and axis scaling |
@@ -209,6 +210,18 @@ predicate can reject sample columns at three heights above the fitted base.
 An accepted fit returns the upright frame with its origin at the highest
 sample, the height `range`, and the sampled XZ `points`. A footprint with
 missing support, excessive height variation or blocked space returns `null`.
+
+`createFootprintReservations` manages a temporary set of oriented volume
+claims. Each claim takes `{point, tangent, size}`, where `point` is the
+center of the base. Pass a contact result's point and tangent with the
+original size to reuse the fitted frame. `fits(spec)` checks for a free
+volume. `reserve(spec)` inserts a claim if it fits and returns whether it
+was inserted. `occupy(spec)` inserts a preexisting obstacle even if it
+overlaps another obstacle. The optional `clearance` pads the horizontal
+footprints. Heights must overlap for a conflict, so the same XZ footprint
+can fit on multiple decks. Insert claims in your preferred order to settle
+competing candidates deterministically. The `cellSize` changes lookup
+granularity and keeps the overlap test identical.
 
 `panelFrames` fits to the carrier dimensions and exposes its member footprints
 as `parts`. Pass those to `surfaceCells.clip` for openings, then loft the
