@@ -79,6 +79,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `construct.profile(rings)`, `construct.offset(profile, distance)`, `construct.extrude(profile, options)`, `construct.weightedRoof(rings, options)` | Signed footprints, planar offsets, extrusions and roof wavefronts with per-edge pitches |
 | `geometry.distanceTransform(mask, options)`, `materials.outline(mask, options)` | Exact Euclidean distances over pixel or voxel centers, including anisotropic spacing and inside/outside masks |
 | `materials.triplanar(sample, options)`, `materials.tangent(sample, options)`, `materials.threshold(field, options)`, `materials.ramp(colors, options)` | Surface-aligned patterns, pixel-footprint filtering and perceptual palettes |
+| `materials.quilt(swatch, options)`, `materials.patchMatch(source, target, options)`, `materials.synthesize(source, target, options)`, `materials.blueNoise(options)` | Swatch quilting, exemplar matching and fill, and periodic blue-noise ranks |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -881,6 +882,33 @@ calculation to produce separate inset and outer ink coverage.
 
 `examples/material-masks.js` uses wrapping glazes, a tangent-aligned
 grain, and distance ink on a voxel stamp.
+
+### Swatch synthesis and threshold ranks
+
+Raster input is `{width, height, channels, data}` with row-major,
+interleaved channels. Use one channel for palette indices or several
+for colors and masks.
+
+- `materials.quilt(swatch, {width, height, patch, overlap, candidates,
+  tolerance, seed})` assembles matched swatches and cuts minimum-error
+  seams through the overlaps. The result includes a covered-cell mask
+  and each placed patch's source coordinates.
+- `materials.patchMatch(source, target, {radius, iterations, weights, seed})`
+  estimates which source patch matches each target center. It alternates
+  propagation directions and uses a shrinking randomized search. It
+  returns source indices and errors in target order.
+- `materials.synthesize(source, target, {mask, radius, cycles, blend, seed})`
+  fills cells marked one, holding the other cells fixed. It estimates an
+  initial guide from known pixels where the budget permits and refines
+  with overlapping patch votes. The default `blend: 'sample'` retains
+  exemplar pixel values. Use `'average'` for a continuous-color fill.
+- `materials.blueNoise({width, height, sigma, density, seed})` ranks a
+  tile with void-and-cluster relaxation and progressive thresholding.
+  `sample(x, y)` wraps in both directions and returns a value in zero
+  to one. Compare it with a coverage field for deterministic stipple.
+
+`examples/texture-synthesis.js` shows a quilted motif, an exemplar
+repair, and a blue-noise density ramp on native voxel tiles.
 
 ## Optional retained authoring
 
