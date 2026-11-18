@@ -1291,6 +1291,23 @@ coordinates and bounded face colors. `assetMeshes.recipe(mesh, {size})`
 uses an already parsed mesh. The recipe carries geometry and base colors.
 The caller selects the placement, material and rendering rules.
 
+### Ordered height layers
+
+`KIT.heightLayers.sample(layers, x, z)` evaluates ordered height edits and
+returns a delta from the base surface, an owning layer ID, and coverage.
+Each layer supplies `entity.id`, `parameters.operation`, `parameters.height`,
+world-space `bounds: {min, max}`, and a `weight(x, z)` in `[0, 1]`.
+Operations are `add`, `max`, `min`, `replace`, and `erase`. An erase fades
+earlier edits toward zero. Full erasure clears ownership, and later layers
+can make new contributions at the same point.
+
+Provide a signed `support(x, z)` for each layer to query
+`KIT.heightLayers.distance(layers, x, z, ownerId?)`. Negative values mark
+the support interior. For an eraser, use the support of its fully erased
+region. Passing an owner ID clips that layer by later layers and erasers.
+The caller owns ordering, mask construction, and selection of spatial
+candidates. Swept masks are one way to build the layer functions.
+
 ### Bounded field probes
 
 `KIT.boundedFields.halfspaces(planes)` compiles convex plane fields into
