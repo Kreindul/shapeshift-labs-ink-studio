@@ -95,11 +95,18 @@
     return { p, n: V.len(n)>EPS ? V.norm(n) : [0,1,2].map(i=>i===axis ? (wanted ? 1 : -1) : 0) };
   }
 
-  function trianglesFor(face,points) {
+  function trianglesFor(face,points,normals) {
     if (face.length === 3) return [face.slice()];
     const [a,b,c,d] = face,
-      ac = V.dist(points[a],points[c]), bd = V.dist(points[b],points[d]);
-    return ac <= bd ? [[a,b,c],[a,c,d]] : [[a,b,d],[b,c,d]];
+      ac = [[a,b,c],[a,c,d]], bd = [[a,b,d],[b,c,d]];
+    if (normals) {
+      const winding = ([i,j,k]) => V.dot(
+        V.cross(V.sub(points[j],points[i]),V.sub(points[k],points[i])),
+        V.add(normals[i],V.add(normals[j],normals[k]))
+      ), aMin = Math.min(...ac.map(winding)), bMin = Math.min(...bd.map(winding));
+      if (Math.min(aMin,bMin)<-EPS && Math.abs(aMin-bMin)>EPS) return aMin>bMin ? ac : bd;
+    }
+    return V.dist(points[a],points[c]) <= V.dist(points[b],points[d]) ? ac : bd;
   }
   function meshFor(points,normals,triangles,metadata) {
     const builder = G.builder();
