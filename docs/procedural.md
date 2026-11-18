@@ -86,6 +86,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.octree(field, bounds, options)`, `geometry.stitchVoxelLevels(tree, options)`, `geometry.adaptiveSurface(field, bounds, options)` | Sparse field sampling, 2:1 voxel levels and stitched adaptive previews |
 | `geometry.simplifyQEM(mesh, options)`, `lod.mergeSplats(records, options)`, `lod.packSplats(result)` | Error-driven previews with retained material seams, ownership and protected samples |
 | `motion.streamline(field, start, options)`, `motion.obstacleWake(sdf, options)`, `motion.loopTrajectory(points, options)`, `motion.surfaceAdvection(chart, seeds, options)` | Field integration, wake and curl sampling, closed tracks and UV-attached motion |
+| `motion.stableFluid(options)`, `motion.shallowWater(options)` | Persistent density and velocity grids, and conservative terrain-aligned water |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -1065,6 +1066,30 @@ differences.
 `examples/flow-wake.js` traces the current around a river stone.
 `examples/surface-advection.js` draws moving pigment on a changing
 banner surface.
+
+### Fluid grids
+
+Both solvers take `{width, height, cell, origin, mask, initial}` for
+an XZ lattice. `cell` can be a scalar or an XZ pair. A mask identifies
+where the fluid may flow. A completed step returns independent typed
+buffers and a world-space `sample(x, z)` function.
+
+`motion.stableFluid` stores velocity on staggered grid faces. It
+projects pressure on a closed domain, diffuses implicitly, and advects
+velocity and density with a semi-Lagrangian backtrace. Pass
+`{force, source, viscosity, diffusion, dissipation}` to `step(dt, options)`.
+The snapshot includes density, velocity components and residual
+divergence. Semi-Lagrangian density is intended for ink and fog effects.
+
+`motion.shallowWater` takes a `terrain(x, z)` height field and initial
+depth or `{depth, velocity}`. It advances water by conservative face
+fluxes with hydrostatic reconstruction and CFL-limited substeps.
+Optionally supply `rain`, `drain`, and `friction` to each step. The
+snapshot supplies depth, water level, flow and a source-adjusted mass
+balance. Flat water levels remain at rest over uneven terrain.
+
+`examples/fluid-grids.js` uses the two grids to show suspended ink and
+water flowing through a lowered point in a berm.
 
 ## Optional retained authoring
 
