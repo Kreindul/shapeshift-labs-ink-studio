@@ -268,6 +268,7 @@
     const up = V.cross(view, right),
       sun = V.norm([-0.45, 0.8, 0.35]);
     for (const { canvas, faces } of panels) {
+      if (!faces.length) continue;
       const ctx = canvas.getContext('2d');
       const projected = faces.map(face => ({
         ...face,
@@ -281,7 +282,7 @@
             min[axis] = Math.min(min[axis], p[axis]);
             max[axis] = Math.max(max[axis], p[axis]);
           }
-      const scale = Math.min(570 / (max[0] - min[0]), 270 / (max[1] - min[1]));
+      const scale = Math.min((canvas.width * 0.8) / (max[0] - min[0]), (canvas.height * 0.75) / (max[1] - min[1]));
       const center = min.map((v, k) => (v + max[k]) / 2);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const depth = face => face.points.reduce((sum, p) => sum + p[2], 0);
@@ -304,4 +305,18 @@
   const update = () => draw((Number(slider.value) * Math.PI) / 180);
   slider.addEventListener('input', update);
   update();
+  const byId = id => document.getElementById(id);
+  const assembly = { canvas: byId('assemblies'), faces: [] };
+  panels.push(assembly);
+  retainedExample(K, {
+    canvas: assembly.canvas,
+    status: byId('assembly-status'),
+    resize: byId('resize-mount'),
+    undo: byId('undo-mount'),
+    redo: byId('redo-mount'),
+    draw(canvas, meshes) {
+      assembly.faces = triangles(meshes);
+      update();
+    }
+  });
 })(KIT);

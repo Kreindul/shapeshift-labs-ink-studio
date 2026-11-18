@@ -86,6 +86,50 @@
         grid-template-columns: 1fr;
       }
     }
+    #retained {
+      margin-top: 22px;
+      border: 1px solid #c9cec0;
+      background: #faf9f5;
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    #retained header {
+      padding: 15px 17px;
+      margin: 0;
+      align-items: center;
+    }
+    #retained h2 {
+      font:
+        25px Georgia,
+        serif;
+      margin: 0;
+    }
+    #retained p {
+      font-size: 14px;
+      margin: 4px 0 0;
+    }
+    #retained canvas {
+      aspect-ratio: 4/1;
+    }
+    #retained footer {
+      padding: 12px 17px;
+      color: #515e57;
+      font-size: 14px;
+    }
+    #retained button {
+      font: inherit;
+      border: 1px solid #c9cec0;
+      padding: 7px 11px;
+      border-radius: 8px;
+      background: #fff;
+      color: #192723;
+    }
+    #retained button:enabled {
+      cursor: pointer;
+    }
+    #retained button:disabled {
+      opacity: 0.48;
+    }
   </style>
   <header>
     <div>
@@ -95,6 +139,21 @@
     <label for="yaw">View angle <input id="yaw" type="range" min="-100" max="170" value="32" /></label>
   </header>
   <main id="gallery"></main>
+  <section id="retained" aria-labelledby="retained-title">
+    <header>
+      <div>
+        <h2 id="retained-title">Retained assemblies</h2>
+        <p>Resize one mount to refit its anchored clips and rebuild its geometry.</p>
+      </div>
+      <div>
+        <button id="resize-mount">Resize left mount</button>
+        <button id="undo-mount">Undo</button>
+        <button id="redo-mount">Redo</button>
+      </div>
+    </header>
+    <canvas id="assemblies" width="1200" height="300" aria-label="Two retained mounts with generated clips"></canvas>
+    <footer><output id="assembly-status" aria-live="polite">Building assemblies</output></footer>
+  </section>
   <script>
     /* BUNDLE */
   </script>

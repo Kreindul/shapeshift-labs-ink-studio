@@ -44,6 +44,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `routes.polyline(points, options)`, `routes.aroundConvex(outline, start, end, options)` | Arc-length routes with frames and closest queries. Convex XZ routes project endpoints onto an offset perimeter and interpolate world Y |
 | `routes.layout(route, options)` | Fit bounded intervals on a polyline, catenary, or compatible curve. Place caller-chosen pieces using gapped endpoints and midpoint frames |
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
+| `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
 
 Heights and distances use world units. Planar masks take XZ and use negative
 distance for the interior. Compiled carrier callbacks should be deterministic.
@@ -77,3 +78,52 @@ resolved profile merges named or inline layers in order. Object keys compose
 recursively, while arrays and scalar values replace earlier values.
 Material role values accept aliases, RGB colors, and attribute records.
 Use a complete material record or an inherited color when setting shades.
+
+## Optional retained authoring
+
+`KIT.authoring.document(snapshot?, options?)` stores JSON intent. Transactions
+share stable identifiers, deterministic seeds, anchors, generated children,
+overrides, undo/redo, and an optional storage adapter. Call `derive(owner,
+rule, children)` with stable per-rule keys. Editing a derived child preserves
+its overrides through regeneration. `promote(id)`, `suppress(id)`, and
+`allow(owner, rule, key)` control its relationship to the rule. Pass `getItem`
+and `setItem` to `doc.autosave(storage, key)` to keep a recovery journal.
+`projectDerived(snapshot, jobs)` runs the same derivations on a shared
+immutable view without changing the document or its history.
+
+`KIT.authoring.context(doc)` indexes spatial descriptors supplied by
+`context.register(type, { describe, raycast? })`. Descriptors provide world
+bounds and may expose named surfaces. `context.query`, `nearest`, `raycast`,
+and `anchor` use those descriptors. A rule registered with
+`context.rule({id, types, generate})` returns child specifications and can
+read named entities, related collections, and spatial regions. Changes
+invalidate affected descriptors and rules. The context reconciles within
+the transaction and rolls back a rule chain that fails to converge.
+
+`KIT.authoring.worldFrame(context, id)` composes local transforms and resolves
+surface anchors. `context.style(id)` combines the environment, related hosts
+and entity overrides through the same style catalog as the pure API.
+
+## Incremental realization
+
+`P.chunks.create({preview, refine})` accepts synchronous builders or promises.
+Call `await chunks.update(descriptors, options)` with the complete desired
+descriptor set. Each descriptor has a stable `key`, a string or integer
+`revision`, caller-owned `input`, optional `bounds`, and optional dependency
+IDs. Bump the revision whenever the input changes, or supply `changedIds`
+and `regions` for external dependencies. Treat inputs and committed outputs
+as immutable while in use. The runtime retains payloads by reference.
+
+Set `quality: 'preview'` for the fast builder and `quality: 'final'` for
+refinement. The callback receives the descriptor, an abort signal, and
+the previous payload and quality. Updates publish a patch with replacement
+chunks, removed keys, and old and new affected regions. Submitting another
+update or calling `cancel()` aborts obsolete work and suppresses publication
+even if the builder ignores the signal. Builders can use a worker or another
+async backend supplied by the caller. Achievable frame times depend on the
+builders and renderer.
+
+The gallery's **Retained assemblies** example combines these APIs. Resizing
+the left mount changes generated attachments and replaces that mount's visual
+chunk. The right payload is reused. Undo and Redo operate on the retained
+document and trigger the same realization path.
