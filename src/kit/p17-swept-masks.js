@@ -279,15 +279,16 @@
     function radiusSmooth(q, blend = 0.2) {
       point(q);
       if (!Number.isFinite(blend) || blend <= 0) throw new Error('Radius blending needs a positive distance');
+      const [x, y] = q;
       let nearest = Infinity;
       for (let i = 0; i < strokes.length; i++) {
-        if (strokes[i].parameters.operation !== 'add') {
+        if (!adds[i] || irrelevant(i, x, y, nearest + blend)) {
           radiusDistances[i] = Infinity;
           continue;
         }
-        const d = fast[i](q[0], q[1]);
+        const d = fast[i](x, y);
         radiusDistances[i] = d;
-        radiusValues[i] = fast[i](q[0], q[1], true);
+        radiusValues[i] = fast[i](x, y, true);
         nearest = Math.min(nearest, d);
       }
       let sum = 0,

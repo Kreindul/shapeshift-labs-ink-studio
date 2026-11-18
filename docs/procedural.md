@@ -29,7 +29,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.clipConvex(mesh, planes, capMetadata)`, `geometry.clipSurface(mesh, planes)` | Clip to half spaces `dot(normal, point) <= offset`. Closed convex shells receive caps, open triangle streams retain interpolated UVs/normals |
 | `geometry.clipConvexFaces(faces, planes, {capTag})` | Clip a closed convex shell of outward-wound planar faces. Keep polygons intact through clipping and tag each cap with its plane tag or the supplied default |
 | `geometry.clipHeightMesh(mesh, height, {slopeBound, resolution, budget})` | Keep the part of a triangle surface above a world-space height field (height(x, z)). Subdivision near the cut follows the supplied grade bound and resolution. UVs, normals and surface metadata carry through to the uncapped result |
-| `geometry.implicitSurface(field, bounds, options)` | Marching tetrahedra for negative-inside fields. Use `edgeRefinements` (0–12, default 0) to bisect nonlinear crossings within the same bounded grid. |
+| `geometry.implicitSurface(field, bounds, options)` | Marching tetrahedra for negative-inside fields, with column preparation and bounded edge refinement |
 | `pieces.convex`, `pieces.box`, `pieces.beam`, `pieces.tube`, `pieces.union` | Reusable solid pieces and query unions. Union meshes contain constituent shells |
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
 | `logicalParts.compile(pieces, identify)` | Group clipped pieces of one stock part and partition visible and omitted pieces from retained keys |
@@ -123,6 +123,13 @@ Primitive operations with sampling or tessellation expose work limits so the
 caller can choose the appropriate detail for the use case. Mesh output is
 approximate where a curved field is sampled. A support requires a conservative
 height and slope declaration over its footprint.
+
+`geometry.implicitSurface` accepts an optional `prepareColumn(x, z)` that
+returns a signed field of `y` for the lattice at that horizontal position.
+Use it when height, material layers, or a planar mask can be prepared once
+per column. The values must match the ordinary three-dimensional field.
+`edgeRefinements` from 0 to 12 use the ordinary field between lattice
+points to bisect nonlinear crossings within the same cell budget.
 
 Build the browser gallery with `node examples/procedural/build.js`. Open
 `dist/procedural-gallery.html` and move the View angle slider to inspect the

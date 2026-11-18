@@ -4,6 +4,32 @@
 (function (K) {
   const A = K.procedural,
     V = K.V;
+  const corners = [
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, 1, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+      [1, 0, 1],
+      [1, 1, 1],
+      [0, 1, 1]
+    ],
+    tets = [
+      [0, 5, 1, 6],
+      [0, 1, 2, 6],
+      [0, 2, 3, 6],
+      [0, 3, 7, 6],
+      [0, 7, 4, 6],
+      [0, 4, 5, 6]
+    ],
+    partitions = new Array(256);
+  function split(d) {
+    let mask = 0;
+    for (let i = 0; i < 8; i++) if (d[i] < 0) mask |= 1 << i;
+    return partitions[mask] ||= tets
+      .map(tet => [tet.filter(i => d[i] < 0), tet.filter(i => d[i] >= 0)])
+      .filter(([low, high]) => low.length && high.length);
+  }
   A.geometry.implicitSurface = (field, bounds, options) => {
     const o = Object.assign({ resolution: 0.12, maxCells: 30000, edgeRefinements: 0, meta: {} }, options);
     if (
@@ -19,6 +45,8 @@
       o.maxCells < 8
     )
       throw new Error('Implicit meshes need a finite box, field and sampling budget');
+    if (o.prepareColumn !== undefined && typeof o.prepareColumn !== 'function')
+      throw new Error('Implicit mesh column preparation needs a callback');
     const size = bounds.max.map((v, i) => v - bounds.min[i]);
     if (!size.every(Number.isFinite) || o.maxCells > 2000000 ||
         !Number.isInteger(o.edgeRefinements) || o.edgeRefinements < 0 || o.edgeRefinements > 12)
@@ -38,32 +66,24 @@
         bounds.min[2] + (size[2] * z) / counts[2]
       ],
       slot = (x, y, z) => x + dimensions[0] * y + stride * z;
-    for (let z = 0; z < dimensions[2]; z++)
-      for (let y = 0; y < dimensions[1]; y++)
+    function write(x, y, z, distance) {
+      if (!Number.isFinite(distance)) throw new Error('Implicit mesh field must return finite values');
+      values[slot(x, y, z)] = distance;
+    }
+    if (o.prepareColumn) {
+      for (let z = 0; z < dimensions[2]; z++)
         for (let x = 0; x < dimensions[0]; x++) {
-          const d = field(at(x, y, z));
-          if (!Number.isFinite(d)) throw new Error('Implicit mesh field must return finite values');
-          values[slot(x, y, z)] = d;
+          const [px, , pz] = at(x, 0, z), evaluate = o.prepareColumn(px, pz);
+          if (typeof evaluate !== 'function') throw new Error('An implicit mesh column must return a field of y');
+          for (let y = 0; y < dimensions[1]; y++)
+            write(x, y, z, evaluate(bounds.min[1] + (size[1] * y) / counts[1]));
         }
-    const builder = A.geometry.builder(),
-      corners = [
-        [0, 0, 0],
-        [1, 0, 0],
-        [1, 1, 0],
-        [0, 1, 0],
-        [0, 0, 1],
-        [1, 0, 1],
-        [1, 1, 1],
-        [0, 1, 1]
-      ],
-      tets = [
-        [0, 5, 1, 6],
-        [0, 1, 2, 6],
-        [0, 2, 3, 6],
-        [0, 3, 7, 6],
-        [0, 7, 4, 6],
-        [0, 4, 5, 6]
-      ];
+    } else {
+      for (let z = 0; z < dimensions[2]; z++)
+        for (let y = 0; y < dimensions[1]; y++)
+          for (let x = 0; x < dimensions[0]; x++) write(x, y, z, field(at(x, y, z)));
+    }
+    const builder = A.geometry.builder(), edges = new Array(64);
     const offsets = corners.map(([x, y, z]) => slot(x, y, z));
     const triangle = (a, b, c, inside) => {
       const n = V.cross(V.sub(b, a), V.sub(c, a)),
@@ -81,8 +101,10 @@
           if (i === offsets.length) continue;
           const p = corners.map(c => at(x + c[0], y + c[1], z + c[2])),
             d = offsets.map(offset => values[base + offset]);
+          if (!o.edgeRefinements) edges.fill(undefined);
           const edge = (a, b) => {
-            if (!o.edgeRefinements) return V.mad(p[a], V.sub(p[b], p[a]), d[a] / (d[a] - d[b]));
+            if (!o.edgeRefinements)
+              return edges[(a << 3) + b] ||= V.mad(p[a], V.sub(p[b], p[a]), d[a] / (d[a] - d[b]));
             if (d[a] >= 0) [a, b] = [b, a];
             const delta = V.sub(p[b], p[a]);
             let low = 0, high = 1;
@@ -95,10 +117,7 @@
             }
             return V.mad(p[a], delta, (low + high) / 2);
           };
-          for (const tet of tets) {
-            const low = tet.filter(i => d[i] < 0),
-              high = tet.filter(i => d[i] >= 0);
-            if (!low.length || !high.length) continue;
+          for (const [low, high] of split(d)) {
             const inside = V.mul(
               low.reduce((n, i) => V.add(n, p[i]), [0, 0, 0]),
               1 / low.length
