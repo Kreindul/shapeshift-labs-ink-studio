@@ -111,30 +111,6 @@ segment, so an interval never bridges a bend. A route has `length` and
 the caller owns arc-length parameterization. The sample contract is shared
 with `spans.catenary`.
 
-### Ground traversal
-
-`traversal.create` accepts a `supports(x, z, low, high)` query returning
-candidate `{y, normal, id?}` surfaces and a `clearance(point, radius)` query
-returning a signed distance to obstacles, positive in free space. The
-clearance query can ignore solids outside the supplied radius and return
-positive infinity for open space. Heights and distances share the scene's
-coordinate units. Normal vectors need not be unit length.
-
-`body.stand([x, y, z], {rise, drop})` returns the highest stable support
-that fits the body in its search interval, or `null`. The result has
-`foot`, `support`, and `normal`. `body.move(foot, [dx, dz])` follows
-supports in increments. It limits the rise and drop per increment and
-tries sliding along an axis when a diagonal is blocked. It also returns
-`blocked`, horizontal `progress`, and the planned number of increments
-as `steps`.
-
-The default body is 1.64 units tall with radius .18, a .34 rise limit
-(`stepUp`), and a .48 drop limit (`stepDown`). `minimumNormal` sets the
-minimum upward component of a normalized support normal. The body leaves
-room for a step below its sampled collision volume. Set `stride` to resolve
-smaller features and `budget` to limit the number of increments in a move.
-Callers define which surfaces carry weight and which solids obstruct motion.
-
 For fitted ribbons, corresponding inner and outer vertices define a strip.
 Pitch and gap are distances along the inner rail. The pitch is fitted to the
 total length and a corner splits a cell into fragments with the same key.
@@ -190,6 +166,30 @@ with cutter normals and ownership keys. The normals face into the remaining
 material after subtraction. `raycast(origin, direction, max, accept)` reports
 the first exposed cutter surface accepted by the caller. Keep the keyed specs
 as intent and remove or restore them to repair the host.
+
+### Ground traversal
+
+`traversal.create` accepts a `supports(x, z, low, high)` query returning
+candidate `{y, normal, id?}` surfaces and a `clearance(point, radius)` query
+returning a signed distance to obstacles, positive in free space. The
+clearance query can ignore solids outside the supplied radius and return
+positive infinity for open space. Heights and distances share the scene's
+coordinate units. Normal vectors need not be unit length.
+
+`body.stand([x, y, z], {rise, drop})` returns the highest stable support
+that fits the body in its search interval, or `null`. The result has
+`foot`, `support`, and `normal`. `body.move(foot, [dx, dz])` follows
+supports in increments. It limits the rise and drop per increment and
+tries sliding along an axis when a diagonal is blocked. It also returns
+`blocked`, horizontal `progress`, and the planned number of increments
+as `steps`.
+
+The default body is 1.64 units tall with radius .18, a .34 rise limit
+(`stepUp`), and a .48 drop limit (`stepDown`). `minimumNormal` sets the
+minimum upward component of a normalized support normal. The body leaves
+room for a step below its sampled collision volume. Set `stride` to resolve
+smaller features and `budget` to limit the number of increments in a move.
+Callers define which surfaces carry weight and which solids obstruct motion.
 
 ### Terrain routes between pins
 
