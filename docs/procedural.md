@@ -1590,8 +1590,22 @@ coordinates and bounded face colors. `assetMeshes.recipe(mesh, {size})`
 uses an already parsed mesh. The recipe carries geometry and base colors.
 The caller selects the placement, material and rendering rules.
 
+`await assetMeshes.importGLB(bytes, {size, socketNodes, decodeImage})`
+also imports embedded PNG and JPEG base-color textures. The decoder takes
+`(bytes, mime, {width, height, maxEdge})` and returns or resolves to
+`{width, height, pixels}` with RGBA bytes. A plain color GLB needs no decoder.
+Decoded images are fitted to at most 64 pixels on their longest edge.
+The asset recipe retains the texels, UVs and color factors in JSON.
+
+`assetMeshes.colorSampler(recipe)` returns `at(face, u, v)` for
+barycentric weights of the face's second and third vertices and
+`atPoint(face, x, y, z)` for a point in fitted asset coordinates.
+Both return normalized sRGB. Sampling applies repeat, mirror or clamp,
+nearest or linear filtering, and material and vertex factors in linear
+space. UVs respect the binding's coordinate set and texture transform.
+
 `assetMeshes.thumbnail(recipe, {size, padding, yaw, pitch, light})`
-renders the asset's face colors into a transparent square RGBA buffer.
+renders the asset's face colors and textures into a transparent square RGBA buffer.
 The returned `{width, height, pixels}` uses orthographic framing and
 depth testing. It works without a document, browser or renderer and can
 be used for picker icons, previews or contact sheets.

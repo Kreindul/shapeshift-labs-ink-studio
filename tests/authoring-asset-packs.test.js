@@ -72,6 +72,61 @@ test('mesh thumbnails fit the visible asset, resolve occlusion and retain transp
   assert.deepEqual(frame,A.assetMeshes.thumbnail(back,{size:32,yaw:0,pitch:0,light:[0,0,1]}));
 });
 
+function texturedGLB(filter=9728) {
+  const source=makeGLB(), size=source.readUInt32LE(12);
+  const document=JSON.parse(source.subarray(20,20+size));
+  const coordinates=Buffer.alloc(24);
+  [0,0,1,0,0,1].forEach((n,i)=>coordinates.writeFloatLE(n,i*4));
+  const tint=Buffer.from([255,255,255,255,64,255,255,255,255,0,0,0]);
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nGQAAAAASUVORK5CYII=','base64');
+  const bin=Buffer.concat([source.subarray(28+size),coordinates,tint,png,Buffer.alloc((4-png.length%4)%4)]);
+  document.bufferViews.push({buffer:0,byteOffset:36,byteLength:24},{buffer:0,byteOffset:60,byteLength:9},
+    {buffer:0,byteOffset:72,byteLength:png.length});
+  document.accessors.push({bufferView:1,componentType:5126,type:'VEC2',count:3},
+    {bufferView:2,componentType:5121,normalized:true,type:'VEC3',count:3});
+  Object.assign(document.meshes[0].primitives[0].attributes,{TEXCOORD_1:1,COLOR_0:2});
+  document.materials[0].pbrMetallicRoughness={baseColorFactor:[.5,1,1,1],baseColorTexture:{index:0,
+    extensions:{KHR_texture_transform:{texCoord:1}}}};
+  document.images=[{bufferView:3,mimeType:'image/png'}];
+  document.textures=[{source:0,sampler:0}];
+  document.samplers=[{wrapS:33071,wrapT:33071,magFilter:filter}];
+  document.buffers[0].byteLength=bin.length;
+  const raw=Buffer.from(JSON.stringify(document)),json=Buffer.alloc((raw.length+3)&~3,32);
+  raw.copy(json);
+  const header=Buffer.alloc(20), binHeader=Buffer.alloc(8);
+  [0x46546c67,2,28+json.length+bin.length,json.length,0x4e4f534a].forEach((n,i)=>header.writeUInt32LE(n,i*4));
+  binHeader.writeUInt32LE(bin.length);binHeader.writeUInt32LE(0x004e4942,4);
+  return Buffer.concat([header,json,binHeader,bin]);
+}
+
+test('textured GLB imports decode once and produce portable, UV-addressable base color',async()=>{
+  let decoded=0;
+  const decodeImage=(bytes,mime,{width,height})=>{
+    decoded++;
+    assert(bytes.length>24);
+    assert.equal(mime,'image/png');
+    assert.deepEqual([width,height],[1,1]);
+    return {width:2,height:2,pixels:Uint8Array.from([255,0,0,255,0,255,0,255,0,0,255,255,255,255,0,255])};
+  };
+  const bytes=texturedGLB(), imported=await A.assetMeshes.importGLB(bytes,{decodeImage,size:1});
+  assert.equal(decoded,1);
+  assert.equal(A.assetMeshes.fromGLB(bytes).texture,undefined);
+  await assert.rejects(A.assetMeshes.importGLB(bytes),/need an image decoder/);
+  const portable=A.assetMeshes.validate(JSON.parse(JSON.stringify(imported)));
+  const sampler=A.assetMeshes.colorSampler(portable);
+  const near=(a,b)=>assert(Math.abs(a-b)<.002,[a,b].join(' vs '));
+  const expected=q=>1.055*q**(1/2.4)-.055;
+  near(sampler.at(0,0,0)[0],expected(.5));
+  near(sampler.at(0,1,0)[1],expected(64/255));
+  near(sampler.atPoint(0,...portable.positions.slice(6,9))[2],1);
+  const icon=A.assetMeshes.thumbnail(portable,{size:24,yaw:0,pitch:0,light:[0,0,1]});
+  assert(icon.pixels.some((v,i)=>i%4===0&&v>155));
+  assert(icon.pixels.some((v,i)=>i%4===2&&v>230));
+  const filtered=A.assetMeshes.colorSampler(await A.assetMeshes.importGLB(texturedGLB(9729),{decodeImage}));
+  near(filtered.at(0,.5,.25)[0],expected(.25));
+  near(filtered.at(0,.5,.25)[1],expected(.5*(255+64)/510));
+});
+
 test('GLB sockets preserve nested node positions and forward axes when fitted',()=>{
   const seat={name:'Ride Seat',translation:[.5,.4,-2],rotation:[0,Math.SQRT1_2,0,Math.SQRT1_2]};
   const hook={name:'Hook',matrix:[1,0,0,0,0,1,0,0,0,0,1,0,-.5,1,2,1]};

@@ -164,7 +164,7 @@
       5126: [4, 'getFloat32', 1]
     },
     WIDTH = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
-  M.gltf = (json, bins, { visitNode } = {}) => {
+  M.gltf = (json, bins, { visitNode, visitPrimitive } = {}) => {
     const g = typeof json === 'string' ? JSON.parse(json) : json,
       bufs = (g.buffers || []).map((b, i) =>
         bins && bins[i]
@@ -222,6 +222,7 @@
           const pa = acc(pr.attributes.POSITION),
             ca = pr.attributes.COLOR_0 !== undefined ? acc(pr.attributes.COLOR_0) : null,
             base = P.length / 3,
+            firstFace = TM.length,
             mi = useMat(pr.material),
             mrgb = mats[mi].rgb;
           for (let e = 0; e < pa.n; e++) {
@@ -255,6 +256,8 @@
               T.push(base + e, base + e + 1, base + e + 2);
               TM.push(mi);
             }
+          if (visitPrimitive) visitPrimitive(pr, { firstVertex:base, vertexCount:pa.n,
+            firstFace, faceCount:TM.length-firstFace, accessor:acc });
         }
       for (const c of n.children || []) walk(c, m);
     };

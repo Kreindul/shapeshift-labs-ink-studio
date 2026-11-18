@@ -10,7 +10,7 @@
 
   function validate(raw) {
     const value = A.data.clone(raw);
-    const { positions, triangles, colors, faceColors, sockets } = value || {};
+    const { positions, triangles, colors, faceColors, sockets, texture } = value || {};
     if (value?.type !== 'triangle-mesh' || !Array.isArray(positions) || !Array.isArray(triangles) ||
         positions.length < 9 || positions.length > maxVertices * 3 || positions.length % 3 ||
         triangles.length < 3 || triangles.length > maxTriangles * 3 || triangles.length % 3 ||
@@ -34,6 +34,7 @@
       area += K.V.len(K.V.cross(K.V.sub(b,a),K.V.sub(c,a))) * .5;
     }
     if (!(area > 1e-6 && area <= 60)) throw Error('Mesh surface area is outside the asset budget');
+    if (texture !== undefined) A.assetTextures.validate(texture,positions.length/3,triangles.length/3);
     return A.data.freeze(value);
   }
 
@@ -74,7 +75,7 @@
       ])) }) });
   }
 
-  function fromGLB(bytes, options) {
+  function readGLB(bytes, textures) {
     if (Object.prototype.toString.call(bytes) !== '[object Uint8Array]' ||
         bytes.byteLength < 20 || bytes.byteLength > maxBytes) throw Error('Expected one GLB file of up to 1 MB');
     const header = new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
@@ -100,7 +101,7 @@
       throw Error('Invalid GLB mesh tables');
     const roots = json.scenes?.[json.scene || 0]?.nodes;
     if (!Array.isArray(roots) || !roots.length) throw Error('GLB needs an active scene');
-    const components = {5120:1,5121:1,5122:2,5123:2,5125:4,5126:4}, widths = {SCALAR:1,VEC3:3,VEC4:4};
+    const components = {5120:1,5121:1,5122:2,5123:2,5125:4,5126:4}, widths = {SCALAR:1,VEC2:2,VEC3:3,VEC4:4};
     function accessor(index, width, maxIndex) {
       const a = accessors[index], v = a && views[a.bufferView], widthOf = widths[a?.type], size = components[a?.componentType];
       if (!a || a.sparse || !v || v.buffer !== 0 || !size || !width.includes(widthOf) || !inRange(a.count,maxTriangles*3+1) ||
@@ -132,6 +133,7 @@
           const count = accessor(part.attributes?.POSITION,[3]);
           if (part.attributes?.COLOR_0 !== undefined && accessor(part.attributes.COLOR_0,[3,4]) !== count)
             throw Error('Vertex colors must match the vertex count');
+          if (textures) A.assetTextures.checkPrimitive(json,part,count,accessor);
           const indices = part.indices === undefined ? count : accessor(part.indices,[1],count);
           vertices += count;
           triangles += indices / 3;
@@ -141,13 +143,16 @@
       for (const child of node.children || []) walk(child,depth+1);
     }
     for (const root of roots) walk(root,0);
+    return {json,bin,vertices,triangles};
+  }
+  function buildGLB({json,bin}, options, visitPrimitive) {
     const names = options?.socketNodes;
-    if (names === undefined) return recipe(M.gltf(json,[bin]),options);
+    if (names === undefined) return recipe(M.gltf(json,[bin],{visitPrimitive}),options);
     if (!socketMap(names) || Object.entries(names).some(([id, name]) =>
       !socketId(id) || typeof name !== 'string' || !name.length || name.length > 128))
       throw Error('Invalid GLB socket names');
     const requested = Object.entries(names), sockets = new Map();
-    const mesh = M.gltf(json,[bin],{visitNode(name, matrix) {
+    const mesh = M.gltf(json,[bin],{visitPrimitive,visitNode(name, matrix) {
       for (const [id, target] of requested) {
         if (name !== target) continue;
         if (sockets.has(id)) throw Error('Ambiguous GLB socket node: ' + target);
@@ -159,12 +164,26 @@
     if (sockets.size) mesh.sockets = Object.fromEntries(sockets);
     return recipe(mesh,options);
   }
+  function fromGLB(bytes,options) {
+    return buildGLB(readGLB(bytes,false),options);
+  }
+  async function importGLB(bytes,options={}) {
+    const glb=readGLB(bytes,true);
+    const textures=A.assetTextures.read(glb);
+    const asset=buildGLB(glb,options,textures.visit);
+    const texture=await textures.finish(options.decodeImage);
+    return texture ? validate({...asset,texture}) : asset;
+  }
+  function colorSampler(raw) {
+    return A.assetTextures.sampler(A.data.isImmutable(raw)?raw:validate(raw));
+  }
   function thumbnail(raw, { size = 40, padding = .10, yaw = .62, pitch = .42,
     light = [-.4,.9,.55] } = {}) {
     if (!Number.isInteger(size) || size < 8 || size > 128 || !Number.isFinite(padding) ||
         padding < 0 || padding > .35 || !Number.isFinite(yaw) || !Number.isFinite(pitch) ||
         !triplet(light) || K.V.len(light) < 1e-6) throw Error('Invalid mesh thumbnail settings');
-    const { positions, triangles, colors, faceColors } = validate(raw), { V } = K;
+    const asset=validate(raw), {positions,triangles}=asset, {V}=K;
+    const sample=colorSampler(asset);
     const forward = [Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),Math.cos(yaw)*Math.cos(pitch)];
     const right = [Math.cos(yaw),0,-Math.sin(yaw)], up = V.cross(forward,right), sun = V.norm(light);
     const points = [];
@@ -192,7 +211,7 @@
       let n=V.norm(V.cross(V.sub(point(ib),origin),V.sub(point(ic),origin)));
       if (V.dot(n,forward)<0) n=V.mul(n,-1);
       const gain=.46+.54*Math.max(0,V.dot(n,sun));
-      const color=colors[faceColors[i/3]].map(value=>Math.round(value*gain*255));
+      const flat=asset.texture?.faces[i/3]>=0?null:sample.at(i/3,0,0).map(value=>Math.round(value*gain*255));
       const left=Math.max(0,Math.ceil(Math.min(ax,bx,cx)-.5)), right=Math.min(size-1,Math.floor(Math.max(ax,bx,cx)-.5));
       const top=Math.max(0,Math.ceil(Math.min(ay,by,cy)-.5)), bottom=Math.min(size-1,Math.floor(Math.max(ay,by,cy)-.5));
       for (let y=top;y<=bottom;y++) for (let x=left;x<=right;x++) {
@@ -201,12 +220,12 @@
         const z=Math.fround(az+u*(bz-az)+v*(cz-az)), pixel=y*size+x;
         if (z<=depth[pixel]) continue;
         depth[pixel]=z;
-        pixels.set(color,pixel*4);
+        pixels.set(flat||sample.at(i/3,u,v).map(value=>Math.round(value*gain*255)),pixel*4);
         pixels[pixel*4+3]=255;
       }
     }
     return {width:size,height:size,pixels};
   }
 
-  A.assetMeshes = Object.freeze({ recipe, validate, fromGLB, thumbnail });
+  A.assetMeshes = Object.freeze({ recipe, validate, fromGLB, importGLB, colorSampler, thumbnail });
 })(KIT);
