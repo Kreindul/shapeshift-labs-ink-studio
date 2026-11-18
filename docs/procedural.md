@@ -54,6 +54,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `hydrology.analyze(height, options)` | Priority-Flood, D8 catchments, stream orders, channel routes, wetness and optional D-infinity flow |
 | `hydrology.breach(basin)`, `hydrology.incise(basin)`, `hydrology.meander(route)`, `hydrology.corridor(routes, height)`, `hydrology.habitat(basin)` | Watershed edits, river migration and cutoff routes, levees, floodplain masks and climate fields |
 | `routes.visibility(start, end, obstacles)`, `routes.spline(route, options)`, `routes.travelTime(sources, options)` | Polygon visibility paths, clearance-tested corner fitting and fast-marching travel-time fields |
+| `geometry.delaunay(points, options)`, `geometry.triangulatePolygon(rings)`, `routes.network(points)`, `routes.steiner(points, edges, terminals)` | Constrained planar triangulation, graph layouts with optional loops, and shared branch networks |
 | `routes.layout(route, options)` | Fit bounded intervals on a polyline, catenary, or compatible curve. Place caller-chosen pieces using gapped endpoints and midpoint frames |
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
@@ -209,6 +210,32 @@ that prefers firmer ground, using the same pinned trailheads.
 node cli/ink-studio.js render examples/route-fields.js --seed 0 --ortho --colored
 node cli/ink-studio.js render examples/route-fields.js --seed 1 --ortho --colored
 ```
+
+### Triangulation and branching networks
+
+`P.geometry.delaunay(points, {constraints})` takes distinct planar points.
+It returns indexed triangles, edges, and recovered constraint segments.
+Each constraint is a pair of point indices. Segments can meet at sites,
+including sites on a longer input segment. A proper crossing requires an
+explicit shared site. The collinear case returns a connected edge chain.
+`P.geometry.triangulatePolygon(rings)` uses even-odd fill for outer
+boundaries and holes. Its indexed output can cap a solid or serve as an
+interchange representation.
+
+`P.routes.network(points, {loops, minStretch, cost})` derives candidate
+links from the XZ site positions and chooses a minimum spanning tree
+over their costs. Extra links reduce detours. `cost(a, b, aIndex, bIndex)`
+can reject a link with infinity. Pass retained breaklines through
+`constraints` to include them in the candidate graph.
+
+`P.routes.steiner(points, edges, terminals)` uses shortest paths between
+terminal indices, shares their links, then prunes non-terminal leaves.
+Supply candidate edges as `{a, b, cost}`; omitted costs use XYZ lengths.
+Both tools return individual routes for realization as SDF sweeps, pipes,
+or terrain-aware connectors.
+
+The two versions of `examples/branching-networks.js` show a road tree
+with extra loops and shared conduits serving a terminal subset.
 
 ### Watersheds and river networks
 
