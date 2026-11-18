@@ -251,7 +251,7 @@ const CMD = {
         '  motion <id> [--from 0 --to 12]   numbers about how it moves: speed, jumps, what goes underground',
         '  mesh <file.obj|.gltf|.glb>  bring a mesh in: what it is made of, and a sheet of it from all round as splats',
         '  export-glb <scene.js|.json|.obj|.gltf|.glb> --out model.glb   write UV-mapped geometry with materials, skins and clips',
-        '                              [--res 0.08 --texture-size 1024 --duration 4 --fps 30 --blender path]',
+        '                              [--res 0.08 --texture-size 1024 --triangles 16000 --duration 4 --fps 30]',
         '  depth <map.png|map.json> [--image aligned.png --out-dir folder]  import a depth map as splats, a mesh and an SDF',
         '                              [--size 6 --cells 64 --res 0.09 --hues 6 --shades 4 --up z --spin 0.5 --thick 0.1]; a mesh file also works wherever an id does',
         '  validate <file.json>        check a diorama written as data: every mistake listed, with what was probably meant',
@@ -285,13 +285,14 @@ const CMD = {
         const box = list('bounds');
         if (box && (box.length !== 6 || !box.every(Number.isFinite))) die('--bounds expects xmin,ymin,zmin,xmax,ymax,zmax');
         const options = {
-          resolution: num('res', undefined), method: opt.method, duration: num('duration', undefined), fps: num('fps', undefined)
+          resolution: num('res', undefined), method: opt.method, targetTriangles: num('triangles', undefined),
+          duration: num('duration', undefined), fps: num('fps', undefined)
         };
         if (box) options.bounds = { min: box.slice(0, 3), max: box.slice(3) };
         source = authored.model(num('seed', authored.seed), options);
       }
       const result = require('../index.js').exportGlb(source, {
-        out: opt.out, blender: opt.blender, textureSize: num('texture-size', 1024), uvMargin: num('uv-margin', 0.008)
+        out: opt.out, textureSize: num('texture-size', 1024), uvMargin: num('uv-margin', 0.008)
       });
       console.log(JSON.stringify(result, null, 2));
     } catch (error) {

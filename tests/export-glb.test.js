@@ -3,7 +3,6 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
 const studio = require('..');
 const lib = studio.load(), K = lib.KIT;
 const puppet = require('../examples/puppet.js')(lib);
@@ -85,9 +84,6 @@ test('JSON dioramas export independently skinned parts and sample their runtime 
   }
 });
 
-const blenderApp = '/Applications/Blender.app/Contents/MacOS/Blender';
-const blender = process.env.INK_BLENDER || (fs.existsSync(blenderApp) ? blenderApp : 'blender');
-const blenderAvailable = spawnSync(blender, ['--version'], { stdio: 'ignore' }).status === 0;
 const transform = (matrix, point) => [0, 1, 2].map(i =>
   matrix[i] * point[0] + matrix[4 + i] * point[1] + matrix[8 + i] * point[2] + matrix[12 + i]);
 const matrixMul = (a, b) => b.map((_, i) => [0, 1, 2, 3].reduce((s, j) =>
@@ -103,11 +99,11 @@ function trs(node) {
   ];
 }
 
-test('GLB export writes a clean UV atlas and reproduces the puppet deformation', { skip: !blenderAvailable }, t => {
+test('GLB export writes a clean UV atlas and reproduces the puppet deformation', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ink-glb-test-'));
   t.after(() => fs.rmSync(dir, { force: true, recursive: true }));
   const file = path.join(dir, 'puppet.glb'), model = puppet.model(puppet.seed);
-  const report = studio.exportGlb(model, { out: file, blender, textureSize: 512 });
+  const report = studio.exportGlb(model, { out: file, textureSize: 512 });
   const { gltf, data, bytes } = parseGlb(file), p = gltf.meshes[0].primitives[0], attr = p.attributes;
   const verts = data(attr.POSITION), indices = data(p.indices).flat();
   const faces = Array.from({ length: indices.length / 3 }, (_, i) => indices.slice(i * 3, i * 3 + 3));
@@ -156,8 +152,121 @@ test('GLB export writes a clean UV atlas and reproduces the puppet deformation',
   assert.ok(displacement > 0.05);
 
   const copy = path.join(dir, 'copy.glb');
-  assert.equal(studio.exportGlb(file, { out: copy, blender: '/not-required' }).preserved, true);
+  assert.equal(studio.exportGlb(file, { out: copy }).preserved, true);
   assert.deepEqual(fs.readFileSync(copy), bytes);
-  assert.throws(() => studio.exportGlb({ points: [], faces: [] }, { out: file, blender }), /GLB export failed/);
+  assert.throws(() => studio.exportGlb({ points: [], faces: [] }, { out: file }), /GLB export requires/);
   assert.deepEqual(fs.readFileSync(file), bytes);
+});
+
+test('authored quad topology keeps its UV seams through the per-texel bake', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ink-authored-topology-'));
+  t.after(() => fs.rmSync(dir, { force: true, recursive: true }));
+  const S = K.sculpt(lib.makeSculpt(lib.makeBuilder(1)));
+  S.box([0, 0, 0], [1, 1, 1], { r: [2, 3, 4] });
+  const mesh = K.model.fromSculpt(S, {
+    topology: {
+      points: [[-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]],
+      faces: [[0, 1, 2, 3]],
+      uvs: [[[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]]
+    }
+  });
+  assert.equal(mesh.uvs.length, 2);
+  const file = path.join(dir, 'piece.glb');
+  const report = studio.exportGlb(mesh, { out: file, textureSize: 256 });
+  assert.equal(report.meshes[0].generatedUVs, false);
+  const { gltf } = parseGlb(file);
+  assert.ok(gltf.materials[0].pbrMetallicRoughness.baseColorTexture);
+});
+
+test('JSON supports independent analytic props and authored PBR channels', () => {
+  const spec = {
+    id: 'metal-ring',
+    solids: [{ kind: 'torus', id: 'band', at: [0, 0, 0], R: 1, r: 0.02, separate: true,
+      mat: { role: 'metal', model: { metallic: 0.9, roughness: 0.3 } } }]
+  };
+  const model = K.diorama.scene(spec).model(1, { resolution: 0.8 });
+  assert.equal(model.meshes[0].name, 'band');
+  assert.equal(model.meshes[0].materials[0].metallic, 0.9);
+  assert.ok(model.meshes[0].faces.length > 20);
+  assert.equal(model.meshes[0].static, true);
+});
+
+test('native conversion preserves guided sections, thin details, groom roots and material channels', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ink-model-fur-'));
+  t.after(() => fs.rmSync(dir, { force: true, recursive: true }));
+  const B = lib.makeBuilder(2), S = K.sculpt(lib.makeSculpt(B)), creature = K.creature(B, S);
+  const coat = K.look.fur([2, 3, 4], { len: 0.24, comb: [0, -1, 0], rim: [5, 6], droop: 0.8 });
+  coat.model = (p, n) => ({ emission: p[1] > 1.35 ? [2, 0.25, 0.02] : [0, 0, 0],
+    roughness: p[0] > 0 ? 0.64 : 0.97, normal: VaryNormal(n) });
+  const VaryNormal = n => K.V.norm(K.V.mad(n, [0, 1, 0], 0.05));
+  S.ball([0, 1, 0], [0.58, 0.63, 0.5], coat, { tag: 'body' });
+  S.torus([0, 1.25, 0.72], 0.19, 0.02, { r: [5], model: { metallic: 0.82 } },
+    { tag: 'body', res: 0.03, model: { separate: true, name: 'Thin ring' } });
+  S.ball([0.2, 1.32, 0.44], 0.06, { r: [6], em: true },
+    { tag: 'body', ghost: true, model: { separate: true, name: 'Eye glow' } });
+  const mesh = K.model.fromSculpt(S, {
+    resolution: 0.09, targetTriangles: 680, guides: [{ center: [0, 1, 0], radius: 0.72, axis: [0, 1, 0] }],
+    fur: { maxLocks: 30 }
+  });
+  assert.ok(mesh.faces.length < mesh.sourceTriangles);
+  assert.ok(mesh.faces.flat().filter(v => Math.abs(mesh.points[v][1] - 1) < 1e-8).length > 10);
+  assert.equal(meshMetrics(mesh.points, mesh.faces).badEdges, 0);
+  assert.ok(mesh.attachments.some(p => p.name === 'Fur locks'));
+  const cards = mesh.attachments.find(p => p.name === 'Fur cards');
+  assert.ok(cards.faces.length > 0);
+  assert.deepEqual(cards.skinPoints[0], cards.skinPoints[7]);
+  assert.ok(K.V.dist(cards.skinPoints[7], cards.points[7]) > 0.1);
+  assert.ok(mesh.attachments.find(p => p.name === 'Thin ring').closed);
+  S.bake();
+  const W = B.finish({ cam: { target: [0, 1, 0], dist: 7, pitch: 0, yaw: 0 } });
+  creature.bind(W, time => creature.set('body', [1, 0.2 * time, 0, 0, 1, 0, 0, 0, 1], [0, 1, 0], [time, 1, 0]));
+  const model = K.model.fromCreature(mesh, creature, { clips: [{ name: 'Sheared bow', duration: 1, fps: 2 }] });
+  assert.ok(model.meshes.every(part => part.weights.every(row => row.length === 1 && row[0][1] === 1)));
+  const pathOut = path.join(dir, 'fur.glb');
+  const report = studio.exportGlb(model, { out: pathOut, textureSize: 256 });
+  const { gltf, data } = parseGlb(pathOut);
+  assert.equal(report.joints, 1);
+  const skin = gltf.skins[0], pick = gltf.meshes.find(m => m.name === 'Fur cards').primitives[0];
+  assert.equal(gltf.materials[pick.material].alphaMode, 'MASK');
+  const core = gltf.materials[gltf.meshes[0].primitives[0].material];
+  assert.ok(core.emissiveTexture && core.normalTexture && core.pbrMetallicRoughness.metallicRoughnessTexture);
+  assert.equal(core.extensions.KHR_materials_emissive_strength.emissiveStrength, 2);
+
+  const node = skin.joints[0], driver = gltf.nodes.findIndex(obj => obj.children?.includes(node));
+  assert.notEqual(driver, -1);
+  const poses = structuredClone(gltf.nodes);
+  for (const c of gltf.animations[0].channels) poses[c.target.node][c.target.path] = data(gltf.animations[0].samplers[c.sampler].output).at(-1);
+  const delta = matrixMul(matrixMul(trs(poses[driver]), trs(poses[node])), data(skin.inverseBindMatrices)[0]);
+  const p = [0.3, 1.4, 0.1], actual = transform(delta, p);
+  assert.ok(K.V.dist(actual, [1.38, 1.4, 0.1]) < 1e-6, 'native shear bake drift ' + actual);
+});
+
+test('native GLB repacks external glTF buffers and keeps OBJ UVs, hard normals and textures', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ink-portable-model-'));
+  t.after(() => fs.rmSync(dir, { force: true, recursive: true }));
+  const PNG = require('../cli/png');
+  const red = Uint8Array.of(255, 0, 0);
+  PNG.write(path.join(dir, 'red.png'), 1, 1, red);
+  fs.writeFileSync(path.join(dir, 'tri.mtl'), 'newmtl Red\nKd 1 1 1\nmap_Kd red.png\n');
+  const source = path.join(dir, 'tri.obj'), out = path.join(dir, 'tri.glb');
+  fs.writeFileSync(source, [
+    'mtllib tri.mtl', 'v 0 0 0', 'v 1 0 0', 'v 0 1 0', 'vt 0 1', 'vt 1 1', 'vt 0 0',
+    'vn 0 0 1', 'usemtl Red', 'f 1/1/1 2/2/1 3/3/1'
+  ].join('\n'));
+  const report = studio.exportGlb(source, { out });
+  const { gltf, data, bytes } = parseGlb(out);
+  assert.equal(report.meshes[0].generatedUVs, false);
+  assert.deepEqual(data(gltf.meshes[0].primitives[0].attributes.TEXCOORD_0), [[0, 0], [1, 0], [0, 1]]);
+  assert.deepEqual(data(gltf.meshes[0].primitives[0].attributes.NORMAL), Array.from({ length: 3 }, () => [0, 0, 1]));
+  assert.equal(gltf.images[0].mimeType, 'image/png');
+  gltf.buffers[0].uri = 'tri.bin';
+  const start = 28 + bytes.readUInt32LE(12);
+  fs.writeFileSync(path.join(dir, 'tri.bin'), bytes.subarray(start, start + gltf.buffers[0].byteLength));
+  fs.writeFileSync(path.join(dir, 'tri.gltf'), JSON.stringify(gltf));
+  const embedded = path.join(dir, 'packed.glb');
+  studio.exportGlb(path.join(dir, 'tri.gltf'), { out: embedded });
+  const result = parseGlb(embedded);
+  delete gltf.buffers[0].uri;
+  assert.deepEqual(result.gltf, gltf);
+  assert.deepEqual(result.data(gltf.meshes[0].primitives[0].attributes.POSITION), data(gltf.meshes[0].primitives[0].attributes.POSITION));
 });

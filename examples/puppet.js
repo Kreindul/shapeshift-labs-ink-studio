@@ -16,7 +16,8 @@ module.exports = ({ makeBuilder, makeSculpt, KIT: K }) => {
         name: 'Celebrating puppet',
         bounds: { min: [-0.75, -0.22, -0.75], max: [0.75, 2.85, 0.75] },
         resolution: exportOptions.resolution,
-        method: exportOptions.method
+        method: exportOptions.method,
+        targetTriangles: exportOptions.targetTriangles
       });
     S.bake();
 

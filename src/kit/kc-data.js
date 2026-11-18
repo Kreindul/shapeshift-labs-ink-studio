@@ -112,6 +112,7 @@
     group: 'str',
     carve: 'bool',
     ghost: 'bool',
+    separate: 'bool',
     turn: 'vec3',
     bump: 'vec2',
     hold: 'bool'
@@ -305,7 +306,20 @@
       if (m === undefined) return;
       const role = typeof m === 'string' ? m : m && m.role;
       if (m && typeof m === 'object') {
-        keys(m, path, { role: 1, ramp: 1, noise: 1, scale: 1, glow: 1, over: 1, surface: 1 });
+        keys(m, path, { role: 1, ramp: 1, noise: 1, scale: 1, glow: 1, over: 1, surface: 1, model: 1 });
+        if (m.model !== undefined) {
+          const q = m.model, at = path + '.model', channels = { color: 1, emission: 1, roughness: 1, metallic: 1 };
+          if (!q || typeof q !== 'object' || Array.isArray(q)) bad(at, 'model material channels need an object');
+          else {
+            keys(q, at, channels);
+            for (const [channel, value] of Object.entries(q)) {
+              const valid = channel === 'color' || channel === 'emission' ?
+                isVec(value, 3) && value.every(v => v >= 0 && (channel === 'emission' || v <= 1)) :
+                isNum(value) && value >= 0 && value <= 1;
+              if (!valid) bad(at + '.' + channel, 'invalid model material channel');
+            }
+          }
+        }
         if (m.surface !== undefined) {
           try {
             K.surface.prepare(applySurface({}, m.surface).surface, pal, st.sun);
@@ -449,6 +463,8 @@
           'groups are declared at the top: "groups": { "' + s.group + '": { "blend": 0.2 } }'
         );
       if (s.carve && s.part) bad(path, 'a carving cannot be a moving part');
+      if (s.separate && (!['ball', 'torus'].includes(s.kind) || s.carve || s.group || s.hold || inner))
+        bad(path + '.separate', 'separate model geometry needs an independent ball or torus');
       if (s.kind === 'mesh' && typeof s.asset === 'string' && !assets[s.asset])
         bad(
           path + '.asset',
@@ -651,6 +667,7 @@
           const sc = m.scale || 0.7;
           if (m.noise) out.mod = (x, y, z) => m.noise * (B.n3(x * sc, y * sc, z * sc) - 0.5);
           if (m.glow) out.em = true;
+          if (m.model) out.model = m.model;
           if (m.over) {
             const r2 = ramp(m.over.role),
               above = m.over.above === undefined ? 0.55 : m.over.above,
@@ -685,6 +702,7 @@
         if (s.group) Object.assign(o, grp[s.group]);
         if (s.carve) o.neg = true;
         if (s.ghost) o.ghost = true;
+        if (s.separate) o.model = { separate: true, name: s.id ?? s.part ?? s.kind };
         if (s.bump) o.bump = s.bump;
         if (held || s.hold) o.hold = true;
         if (s.turn) o.ax = B.frame(s.turn[0], s.turn[1], s.turn[2]);
@@ -758,10 +776,10 @@
       };
     if (modelOptions) {
       const groups = new Map(), meshes = [];
-      const { duration = 4, fps = 30, resolution, method, bounds } = modelOptions;
+      const { duration = 4, fps = 30, resolution, method, bounds, targetTriangles } = modelOptions;
       for (const solid of spec.solids) {
         // Ground is an infinite half-space in the sculpt API. Ghosts are render overlays.
-        if (solid.kind === 'ground' || solid.ghost) continue;
+        if (solid.kind === 'ground' || (solid.ghost && !solid.separate)) continue;
         const name = solid.part || null;
         if (!groups.has(name)) groups.set(name, []);
         groups.get(name).push(solid);
@@ -788,23 +806,23 @@
         for (const solid of groups.get(name)) make(solid);
         let detail = name === null ? resolution ?? 0.08 :
           Math.min(resolution ?? 0.08, ...groups.get(name).map(solid => solid.res ?? Infinity));
-        const restBounds = (name === null ? bounds : undefined) ?? S.modelBounds(detail * 2);
-        if (resolution === undefined && name === null) {
+        const hasBody = groups.get(name).some(solid => !solid.separate && !solid.carve);
+        const restBounds = (name === null ? bounds : undefined) ?? (hasBody ? S.modelBounds(detail * 2) : undefined);
+        if (resolution === undefined && name === null && restBounds) {
           const volume = restBounds.max.reduce((v, high, i) => v * (high - restBounds.min[i]), 1);
           detail = Math.max(detail, Math.cbrt(volume / 400000));
         }
         const mesh = K.model.fromSculpt(S, {
-          name: name ?? spec.id, palette: pal, resolution: detail, method, bounds: restBounds
+          name: name ?? spec.id, palette: pal, resolution: detail, method, bounds: restBounds, targetTriangles
         });
-        if (name === null) mesh.static = true;
+        if (name === null) meshes.push(...K.model.mapModelMeshes(mesh, part => ({ ...part, static: true })));
         else {
           const index = joints.length, box = previewRig.box(name);
           joint[name] = parts[name]?.joint || (box ? [(box.lo[0] + box.hi[0]) * 0.5, box.lo[1], (box.lo[2] + box.hi[2]) * 0.5] : mesh.points[0]);
           joints.push({ name, parent: parts[name]?.parent ? names.indexOf(parts[name].parent) : null,
             head: joint[name], tail: V.mad(joint[name], [0, 1, 0], box ? Math.max(0.05, box.hi[1] - box.lo[1]) : 0.1) });
-          mesh.weights = mesh.points.map(() => [[index, 1]]);
+          meshes.push(...K.model.mapModelMeshes(mesh, part => ({ ...part, weights: part.points.map(() => [[index, 1]]) })));
         }
-        meshes.push(mesh);
       }
       const animations = motion.length ? K.model.sampleClips([{ name: 'Scene motion', duration, fps,
         pose: partMotion(B, previewRig, names, joint, parts, motion) }], (pose, time) => {
