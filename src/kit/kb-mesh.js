@@ -44,11 +44,12 @@
     }
     return out;
   };
-  M.obj = (text, mtlText) => {
+  M.obj = (text, mtlText, { attributes = false } = {}) => {
     const P = [],
       C = [],
       T = [],
       TM = [],
+      uv = [], n = [], uvFaces = [], normalFaces = [],
       mats = [{ name: 'default', rgb: [0.7, 0.7, 0.7] }],
       lib = mtlText ? M.mtl(mtlText) : {};
     let cur = 0,
@@ -63,14 +64,33 @@
           C.push(+w[4], +w[5], +w[6]);
           anyCol = true;
         } else C.push(0.7, 0.7, 0.7);
-      } else if (w[0] === 'f') {
-        const ix = w.slice(1).map(s => {
-          const i = parseInt(s, 10);
-          return i < 0 ? P.length / 3 + i : i - 1;
-        });
-        for (let k = 1; k < ix.length - 1; k++) {
-          T.push(ix[0], ix[k], ix[k + 1]);
+      } else if (attributes && w[0] === 'vt') uv.push([+w[1], 1 - +w[2]]);
+      else if (attributes && w[0] === 'vn') n.push([+w[1], +w[2], +w[3]]);
+      else if (w[0] === 'f') {
+        const index = (value, size) => {
+          const i = parseInt(value, 10);
+          return i < 0 ? size + i : i - 1;
+        };
+        const tokens = w.slice(1), ix = tokens.map(s => index(s, P.length / 3));
+        const corners = attributes ? tokens.map(s => s.split('/')) : null;
+        let triplets = ix.slice(2).map((_, i) => [0, i + 1, i + 2]);
+        if (attributes && ix.length > 3) {
+          const points = ix.map(i => P.slice(i * 3, i * 3 + 3)), first = points[0];
+          let normal = [0, 0, 0];
+          for (const [i, p] of points.entries())
+            normal = K.V.add(normal, K.V.cross(K.V.sub(p, first), K.V.sub(points[(i + 1) % points.length], first)));
+          const axis = [0, 1, 2].reduce((a, b) => Math.abs(normal[b]) > Math.abs(normal[a]) ? b : a);
+          const flat = points.map(p => [p[(axis + 1) % 3], p[(axis + 2) % 3]]);
+          triplets = K.procedural.geometry.triangulate2D(flat);
+          if (normal[axis] < 0) triplets = triplets.map(tri => tri.slice().reverse());
+        }
+        for (const ids of triplets) {
+          T.push(...ids.map(i => ix[i]));
           TM.push(cur);
+          if (corners) {
+            uvFaces.push(ids.map(i => uv[index(corners[i][1], uv.length)]));
+            normalFaces.push(ids.map(i => n[index(corners[i][2], n.length)]));
+          }
         }
       } else if (w[0] === 'usemtl') {
         const name = w.slice(1).join(' ');
@@ -81,7 +101,12 @@
         }
       }
     }
-    return M.make(P, T, anyCol ? C : null, TM, mats);
+    const mesh = M.make(P, T, anyCol ? C : null, TM, mats);
+    if (attributes && T.length) {
+      if (uvFaces.every(face => face.every(Boolean))) mesh.uvs = uvFaces;
+      if (normalFaces.every(face => face.every(Boolean))) mesh.cornerNormals = normalFaces;
+    }
+    return mesh;
   };
   M.toObj = mesh => {
     const out = [],

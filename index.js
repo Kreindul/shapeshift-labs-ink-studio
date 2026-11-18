@@ -33,7 +33,7 @@ module.exports = {
   // refuse-to-build check: code written after a // comment on the same line never runs. Returns the offending lines
   lint: require('./scripts/lint.js'),
   // a mesh file from disk, by its ending: .obj (with the .mtl beside it), .gltf (with its .bin files), .glb
-  readMesh(file) {
+  readMesh(file, { attributes = false } = {}) {
     const K = module.exports.load().KIT,
       ext = path.extname(file).toLowerCase(),
       dir = path.dirname(file);
@@ -41,7 +41,24 @@ module.exports = {
       const text = fs.readFileSync(file, 'utf8'),
         m = /^mtllib\s+(.+)$/m.exec(text),
         mf = m && path.join(dir, m[1].trim());
-      return K.mesh.obj(text, mf && fs.existsSync(mf) ? fs.readFileSync(mf, 'utf8') : null);
+      const mtl = mf && fs.existsSync(mf) ? fs.readFileSync(mf, 'utf8') : null;
+      const mesh = K.mesh.obj(text, mtl, { attributes });
+      if (attributes && mtl && mesh.uvs) {
+        let name;
+        const textures = new Map();
+        for (const raw of mtl.split('\n')) {
+          const entry = /^(newmtl|map_Kd)\s+(.+)$/.exec(raw.trim());
+          if (!entry) continue;
+          if (entry[1] === 'newmtl') name = entry[2];
+          else if (name && !entry[2].startsWith('-')) {
+            const image = path.resolve(path.dirname(mf), entry[2].replace(/^["']|["']$/g, ''));
+            const mimeType = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' }[path.extname(image).toLowerCase()];
+            if (mimeType && fs.existsSync(image)) textures.set(name, { bytes: fs.readFileSync(image), mimeType });
+          }
+        }
+        mesh.mats = mesh.mats.map(m => ({ ...m, texture: textures.get(m.name) }));
+      }
+      return mesh;
     }
     if (ext === '.glb') return K.mesh.glb(fs.readFileSync(file));
     if (ext === '.gltf') {
@@ -55,6 +72,7 @@ module.exports = {
     }
     throw new Error('do not know how to read ' + ext + ' (obj, gltf and glb are read)');
   },
+  exportGlb: require('./cli/export-glb.js'),
   load() {
     const out = path.join(__dirname, 'dist', 'standalone.js'),
       srcs = files().concat(demoFiles()),

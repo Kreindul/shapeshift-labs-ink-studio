@@ -5,10 +5,10 @@
    the combined surface, and coloured from a material ramp using the
    surface normal, a cast shadow, ambient occlusion and nearby lamps.
    ------------------------------------------------------------------ */
-function makeSculpt(B) {
+function makeSculpt(B, rest) {
   const { P, n3, fbm, disc, stick, fib, TAU, clamp, norm, R } = B;
-  const pos = [],
-    neg = [],
+  const pos = rest?.positive || [],
+    neg = rest?.negative || [],
     ghosts = [],
     g3 = [0, 0, 0],
     EM = { em: true },
@@ -78,6 +78,7 @@ function makeSculpt(B) {
     p.g = o.g || gid++;
     p.bump = o.bump || null;
     p.tag = o.tag || null;
+    p.model = o.model;
     if (p.bump) p.br += p.bump[0];
     p.reach = o.reach || 0;
     p.whole = !!o.whole;
@@ -133,7 +134,7 @@ function makeSculpt(B) {
       ry = r.length ? r[1] : r,
       rz = r.length ? r[2] : r,
       sph = rx === ry && ry === rz;
-    return local(
+    const solid = local(
       c,
       Math.max(rx, ry, rz),
       (x, y, z) => {
@@ -158,6 +159,8 @@ function makeSculpt(B) {
       mat,
       o
     );
+    solid.analytic = { kind: 'ellipsoid', center: c, radii: [rx, ry, rz], frame: o?.ax };
+    return solid;
   };
   // box: c is the centre, h the half-sizes, o.rd rounds the edges
   S.box = (c, h, mat, o) => {
@@ -233,8 +236,8 @@ function makeSculpt(B) {
     );
   };
   // ring lying flat (turn it with o.ax)
-  S.torus = (c, R, r, mat, o) =>
-    local(
+  S.torus = (c, R, r, mat, o) => {
+    const solid = local(
       c,
       R + r,
       (x, y, z) => Math.hypot(Math.hypot(x, z) - R, y) - r,
@@ -252,6 +255,9 @@ function makeSculpt(B) {
       mat,
       o
     );
+    solid.analytic = { kind: 'torus', center: c, major: R, minor: r, frame: o?.ax };
+    return solid;
+  };
   // limb or branch through a list of points; radius goes r0 -> r1, or is a function of 0..1
   S.tube = (pts, r0, r1, mat, o) => {
     const rf = typeof r0 === 'function' ? r0 : t => r0 + (r1 - r0) * t,
@@ -1368,13 +1374,53 @@ function makeSculpt(B) {
         m = p.br + 0.5;
       if (dx * dx + dy * dy + dz * dz > m * m) continue;
       const nd = -psd(p, x, y, z);
-      if (nd > d) d = nd;
+      if (nd > d) {
+        d = nd;
+        ownNeg = p;
+      }
     }
     return d;
   };
   S.sdf = fieldAll;
+  /* Material and part ownership at a rest-pose surface. The distance field
+     is retained even when the renderer samples it at a different resolution. */
+  S.surfaceAt = (x, y, z) => {
+    const distance = fieldAll(x, y, z), cut = ownNeg;
+    return { distance, material: cut?.mat?.r ? cut.mat : own?.mat, tag: cut?.tag || own?.tag || null };
+  };
   /* (before a bake the field does not yet know where its solids are: S.ready() tells it, for whoever needs to ask early) */
   S.ready = buildGrid;
+  /* Conservative rest bounds for the still-unbaked finite solids. */
+  S.modelBounds = padding => {
+    if (!pos.length && !neg.length) throw new Error('Model export needs an unbaked sculpt');
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (const p of pos) {
+      if (!Number.isFinite(p.br) || p.br > 1e8) throw new Error('Model export needs finite solids; put the ground in a separate render pass');
+      const r = p.br + Math.max(0, p.k) + padding;
+      for (let a = 0; a < 3; a++) {
+        min[a] = Math.min(min[a], p.bc[a] - r);
+        max[a] = Math.max(max[a], p.bc[a] + r);
+      }
+    }
+    if (!pos.length) throw new Error('Model export needs at least one positive solid');
+    return { min, max };
+  };
+  /* Detach the rest field from the splat bake, which clears its live solids. */
+  S.modelSource = () => {
+    const parts = [], positive = [];
+    for (const solid of pos) {
+      if ((solid.model === 'separate' || solid.model?.separate) && !solid.analytic)
+        throw new Error('A separate sculpt model requires an analytic primitive');
+      if (solid.analytic && (solid.model === 'separate' || solid.model?.separate)) parts.push(solid);
+      else positive.push(solid);
+    }
+    for (const solid of ghosts)
+      if (solid.analytic && (solid.model === 'separate' || solid.model?.separate)) parts.push(solid);
+    if (!positive.length && !parts.length) throw new Error('Model export needs an unbaked sculpt');
+    const field = positive.length ? makeSculpt(B, { positive, negative: [...neg, ...negAll] }) : null;
+    if (field) field.ready();
+    return { field, parts, noise: n3 };
+  };
   S.solidCount = () => pos.length + neg.length;
   S.add = add;
   S.psd = psd; // the finished field (distance to the nearest surface), for whatever comes after the bake

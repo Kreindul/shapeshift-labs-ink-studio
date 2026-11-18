@@ -20,29 +20,31 @@ const chunk = (type, data) => {
   cr.writeUInt32BE(crc(td));
   return Buffer.concat([len, td, cr]);
 };
-function write(file, w, h, rgb) {
-  const raw = Buffer.alloc((w * 3 + 1) * h);
+function encode(w, h, pixels, channels = 3) {
+  const stride = w * channels;
+  if (![3, 4].includes(channels) || pixels.length !== stride * h) throw new Error('PNG pixel count does not match its shape');
+  const raw = Buffer.alloc((stride + 1) * h);
   for (let y = 0; y < h; y++) {
-    raw[y * (w * 3 + 1)] = 0;
-    Buffer.from(rgb.buffer, rgb.byteOffset + y * w * 3, w * 3).copy(raw, y * (w * 3 + 1) + 1);
+    raw[y * (stride + 1)] = 0;
+    Buffer.from(pixels.buffer, pixels.byteOffset + y * stride, stride).copy(raw, y * (stride + 1) + 1);
   }
   const hd = Buffer.alloc(13);
   hd.writeUInt32BE(w, 0);
   hd.writeUInt32BE(h, 4);
   hd[8] = 8;
-  hd[9] = 2;
-  fs.writeFileSync(
-    file,
-    Buffer.concat([
+  hd[9] = channels === 4 ? 6 : 2;
+  return Buffer.concat([
       Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
       chunk('IHDR', hd),
       chunk('IDAT', zlib.deflateSync(raw, { level: 6 })),
       chunk('IEND', Buffer.alloc(0))
-    ])
-  );
+  ]);
+}
+function write(file, w, h, rgb) {
+  fs.writeFileSync(file, encode(w, h, rgb));
 }
 function raster(file) {
-  const b = fs.readFileSync(file);
+  const b = Buffer.isBuffer(file) ? file : fs.readFileSync(file);
   if (b.length < 33 || b.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') throw new Error('Not a PNG file');
   let p = 8,
     w = 0,
@@ -180,4 +182,4 @@ function animate(file, frames, fps) {
   out.push(chunk('IEND', Buffer.alloc(0)));
   fs.writeFileSync(file, Buffer.concat(out));
 }
-module.exports = { write, read, raster, animate };
+module.exports = { encode, write, read, raster, animate };

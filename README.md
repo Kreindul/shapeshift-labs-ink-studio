@@ -16,6 +16,7 @@ The package includes geometry, materials, lighting, animation, character control
 - [Particles and interaction](#particles-and-interaction)
 - [Physics and persistent effects](#physics-and-persistent-effects)
 - [Importing meshes](#importing-meshes)
+- [Exporting GLB models](#exporting-glb-models)
 - [Importing depth maps](#importing-depth-maps)
 - [Procedural worlds](#procedural-worlds)
 - [Retained authoring](#retained-authoring)
@@ -135,6 +136,7 @@ The package entry point exposes:
 | `bundle()` | Toolkit source as one script string, without demo scenes. |
 | `demos()` | Demo source that appends to an existing `SCENES` array. |
 | `readMesh(file)` | Read an OBJ, glTF or GLB file and its supported companion files. |
+| `exportGlb(modelOrFile, { out, ...options })` | Export indexed authoring geometry or an input mesh file as a self-contained GLB. |
 | `lint(files)` | Return lines rejected by the source comment guard. |
 | `EXPORTS` | Comma-separated names defined by the source bundle. |
 | `version` | Package version string. |
@@ -531,6 +533,24 @@ console.log(world.count);
 
 The file example assumes the current working directory is this repository. OBJ supports a companion MTL; glTF supports companion buffers; GLB is read from binary data. Material and vertex colors become palette ramps. Texture images are not imported. Open meshes become sheets with thickness. Imported geometry becomes a distance-field solid, so it can join, be carved, receive materials and break like authored geometry.
 
+## Exporting GLB models
+
+```sh
+ink-studio export-glb examples/puppet.js --out celebrating-puppet.glb
+ink-studio export-glb lab/data-shrine.json --out shrine.glb
+ink-studio export-glb path/to/model.obj --out model.glb
+```
+
+The exporter uses Ink Studio and the Node standard library. It preserves self-contained GLBs byte-for-byte and embeds local companion buffers and textures when packing glTF. OBJ conversion retains authored corner UVs, normals, and basic PNG or JPEG diffuse maps. Authored geometry with missing UVs receives a packed unwrap.
+
+- **Body topology.** `KIT.model.fromSculpt(S, options)` captures the finite rest field before `S.bake()`. It builds a dense source mesh and simplifies it with the built-in indexed edge-collapse tool. Part seams, geometric error and optional cross-section guides constrain simplification. Set `--res` to control the source pitch and `--triangles` to set a target. Protected features can keep the input above the target. In JavaScript, pass `guides: [{ center, axis, radius }]` to add edges around a section, or supply a fitted `topology: { points, faces, uvs }` to control the final edge flow and UV seams directly.
+- **Rest fields.** `KIT.model.fromSdf(field, { bounds })` accepts a signed function or a bounded field object. The field must stay positive on the box boundary. Extraction tries a quad surface first, with indexed tetrahedra for ambiguous cases. The optional `--method` accepts `surfaceNets`, `dualContour`, `adaptive` or `tetrahedra`. Use `--bounds xmin,ymin,zmin,xmax,ymax,zmax` to tighten the static bounds of a JSON diorama.
+- **Details and fur.** Give a torus or ellipsoid `model: { separate: true, name }` in its sculpt options to export it at its own resolution. This also works for emissive ellipsoids authored as ghost shapes. In JSON use `separate: true` on a ball or torus and put material channels under `mat.model`. Authored fur grows solid locks and curved cutout cards from the coat's length, comb direction, droop, clumping and palette. The optional `fur: { density, maxLocks }` controls its budget and `fur: false` produces a bare mesh.
+- **Materials.** The baker places padded UV charts on the runtime mesh and samples the rest field per texel. It can embed base color, tangent-space normals, metallic/roughness, and emission. An authored material can set these channels through `model: { color, roughness, metallic, emission, normal }` or a `model(point, normal)` function. Color and emission use linear RGB. Texture sizes range from 256 to 4096 in powers of two. Set `--texture-size 0` to export palette materials. View-dependent splat lighting, particles and per-pixel decals are handled by the splat renderer.
+- **Animation.** A JavaScript scene can return its indexed mesh or a `{ meshes, joints, animations }` model from `model(seed, options)`. Use `KIT.model.fromPuppet(mesh, puppet, { clips })` to sample a tagged puppet or `KIT.model.fromCreature(mesh, creature, { clips, parents, bones, weightZones })` with a bound creature. Creature splits provide per-region weights. Optional `weightZones: [{ center, radius, a, b, axis }]` blend adjacent regions around joints. Fur uses the weights at its roots. A model uses its authored rig for joint names, weights, and clips. JSON dioramas can export rigidly weighted parts from their motion data. `--duration` and `--fps` control sampling where the scene exposes those options.
+
+A custom indexed mesh supplies `points` and triangle or quad `faces`. It may provide linear RGB `colors` per point, face-corner `uvs`, `materials: [{ name, color }]` and a material index per face in `faceMaterials`. A model joint has `{ name, parent, head, tail }` with the parent index preceding its children. Each skinned mesh supplies a list of `[jointIndex, weight]` pairs per vertex. Use `static: true` for scenery. The writer keeps and normalizes the four strongest weights. Each custom clip supplies `frames: [{ time, matrices }]` beginning at time zero. Matrices are rest-to-pose transforms in world space, with nine row-major linear components followed by XYZ translation. The export uses a pair of nodes when a sampled affine transform needs shear.
+
 ## Importing depth maps
 
 `ink-studio depth` converts a grayscale PNG or numeric depth map into Gaussian splats, a backed signed-distance field and an OBJ mesh. Add an aligned RGB or RGBA PNG with `--image` to project its colour onto the observed surface. `KIT.depth.fromMap()` gives scene authors the same conversion and accepts typed arrays directly. See the [depth import guide](docs/depth-maps.md) for camera calibration, output formats, and converting a signed field back into mesh geometry or splats.
@@ -616,6 +636,7 @@ Use `ink-studio catalog <words>` to search catalog entries and follow their `whe
 | `review <scene>` | Save a contact sheet of fixed camera views and report lint for each. |
 | `shimmer <scene> --mode orbit` | Measure pixels that change and quickly change back across frames, and save a GIF. |
 | `compare <scene> <ref.png>` | Render the scene alongside a reference and measure both at the reference's pixel size. |
+| `export-glb <scene or mesh>` | Export indexed mesh geometry, UVs, materials, and available skins and clips. |
 | `paint export <scene>` | Export `paint.png` and the surface coordinates of the rendered view. |
 | `paint absorb <scene>` | Convert edited pixels in `paint.png` into surface-pinned decals. |
 | `paint clear <scene>` | Clear the scene's saved decals. |

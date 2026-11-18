@@ -810,23 +810,23 @@
       bid2 = new Uint16Array(NA),
       w2 = new Float32Array(NA),
       cells = [];
+    let weightsAt;
     if (o.pieces) {
       /* loose pieces: each its own bone, a splat going with the piece whose middle is nearest it, shared with none */
       for (const c of o.pieces) cells.push(c.slice(0, 3));
-      for (let j = 0; j < NA; j++) {
-        const q = ids[j] * 16;
+      weightsAt = point => {
         let best = 0,
           bd = 1e18;
         for (let i = 0; i < cells.length; i++) {
           const c = cells[i],
-            dd = (d[q] - c[0]) ** 2 + (d[q + 1] - c[1]) ** 2 + (d[q + 2] - c[2]) ** 2;
+            dd = (point[0] - c[0]) ** 2 + (point[1] - c[1]) ** 2 + (point[2] - c[2]) ** 2;
           if (dd < bd) {
             bd = dd;
             best = i;
           }
         }
-        bid[j] = bid2[j] = best;
-      }
+        return [best, best, 0];
+      };
     } else if (o.grid) {
       const g = o.grid,
         lo = [1e9, 1e9, 1e9],
@@ -846,13 +846,13 @@
               lo[1] + ((hi[1] - lo[1]) * (j + 0.5)) / g[1],
               lo[2] + ((hi[2] - lo[2]) * (k + 0.5)) / g[2]
             ]);
-      for (let j = 0; j < NA; j++) {
+      weightsAt = point => {
         const c = [0, 0, 0],
           f = [0, 0, 0];
         let best = -1,
           bf = 0;
         for (let a = 0; a < 3; a++) {
-          const s = clamp(((d[ids[j] * 16 + a] - lo[a]) / (hi[a] - lo[a] || 1)) * g[a], 0, g[a] - 1e-6);
+          const s = clamp(((point[a] - lo[a]) / (hi[a] - lo[a] || 1)) * g[a], 0, g[a] - 1e-6);
           c[a] = Math.floor(s);
           f[a] = s - c[a] - 0.5;
           const nb = c[a] + Math.sign(f[a]);
@@ -861,14 +861,11 @@
             best = a;
           }
         }
-        bid[j] = at(c[0], c[1], c[2]);
-        if (best >= 0) {
-          const n = c.slice();
-          n[best] += Math.sign(f[best]);
-          bid2[j] = at(n[0], n[1], n[2]);
-          w2[j] = bf;
-        }
-      }
+        const primary = at(...c);
+        if (best < 0) return [primary, 0, 0];
+        c[best] += Math.sign(f[best]);
+        return [primary, at(...c), bf];
+      };
     } else {
       const n = Math.max(1, o.slices || 1),
         ax = V.norm(o.axis || [0, 1, 0]);
@@ -889,19 +886,21 @@
       for (let a = 0; a < 3; a++) cen[a] /= NA || 1;
       const mid = V.dot(cen, ax);
       for (let i = 0; i < n; i++) cells.push(V.mad(cen, ax, lo + ((hi - lo) * (i + 0.5)) / n - mid));
-      for (let j = 0; j < NA; j++) {
-        const q = ids[j] * 16,
-          s = ((d[q] * ax[0] + d[q + 1] * ax[1] + d[q + 2] * ax[2] - lo) / (hi - lo || 1)) * n - 0.5,
+      weightsAt = point => {
+        const s = ((V.dot(point, ax) - lo) / (hi - lo || 1)) * n - 0.5,
           i0 = Math.floor(s),
           f = s - i0,
           a = clamp(f < 0.5 ? i0 : i0 + 1, 0, n - 1),
           b = clamp(f < 0.5 ? i0 + 1 : i0, 0, n - 1);
-        bid[j] = a;
-        bid2[j] = b;
-        w2[j] = a === b ? 0 : f < 0.5 ? f : 1 - f;
-      }
+        return [a, b, a === b ? 0 : f < 0.5 ? f : 1 - f];
+      };
+    }
+    for (let j = 0; j < NA; j++) {
+      const q = ids[j] * 16;
+      [bid[j], bid2[j], w2[j]] = weightsAt([d[q], d[q + 1], d[q + 2]]);
     }
     const skin = {
+      weightsAt,
       bid,
       bid2,
       w2,

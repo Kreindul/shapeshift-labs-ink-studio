@@ -250,6 +250,8 @@ const CMD = {
         '  acts                        the ready clips, reactions, easings and cues, by name',
         '  motion <id> [--from 0 --to 12]   numbers about how it moves: speed, jumps, what goes underground',
         '  mesh <file.obj|.gltf|.glb>  bring a mesh in: what it is made of, and a sheet of it from all round as splats',
+        '  export-glb <scene.js|.json|.obj|.gltf|.glb> --out model.glb   write UV-mapped geometry with materials, skins and clips',
+        '                              [--res 0.08 --texture-size 1024 --triangles 16000 --duration 4 --fps 30]',
         '  depth <map.png|map.json> [--image aligned.png --out-dir folder]  import a depth map as splats, a mesh and an SDF',
         '                              [--size 6 --cells 64 --res 0.09 --hues 6 --shades 4 --up z --spin 0.5 --thick 0.1]; a mesh file also works wherever an id does',
         '  validate <file.json>        check a diorama written as data: every mistake listed, with what was probably meant',
@@ -271,6 +273,31 @@ const CMD = {
         'view options: --surface off (no finish layers) --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (lone pixels removed) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n'
       ].join('\n')
     );
+  },
+  'export-glb'() {
+    const id = pos[0];
+    if (!id || typeof opt.out !== 'string') die('Usage: ink-studio export-glb <scene.js|.json|mesh> --out model.glb');
+    try {
+      let source = id;
+      if (!/\.(obj|gltf|glb)$/i.test(id)) {
+        const authored = scene(id);
+        if (typeof authored.model !== 'function') die('This scene needs a model(seed, options) hook that exposes its rest geometry');
+        const box = list('bounds');
+        if (box && (box.length !== 6 || !box.every(Number.isFinite))) die('--bounds expects xmin,ymin,zmin,xmax,ymax,zmax');
+        const options = {
+          resolution: num('res', undefined), method: opt.method, targetTriangles: num('triangles', undefined),
+          duration: num('duration', undefined), fps: num('fps', undefined)
+        };
+        if (box) options.bounds = { min: box.slice(0, 3), max: box.slice(3) };
+        source = authored.model(num('seed', authored.seed), options);
+      }
+      const result = require('../index.js').exportGlb(source, {
+        out: opt.out, textureSize: num('texture-size', 1024), uvMargin: num('uv-margin', 0.008)
+      });
+      console.log(JSON.stringify(result, null, 2));
+    } catch (error) {
+      die(error.message);
+    }
   },
   scenes() {
     for (const s of lib().SCENES) console.log(s.id.padEnd(12), s.name.padEnd(20), s.blurb);
