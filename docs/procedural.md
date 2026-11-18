@@ -88,6 +88,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `motion.streamline(field, start, options)`, `motion.obstacleWake(sdf, options)`, `motion.loopTrajectory(points, options)`, `motion.surfaceAdvection(chart, seeds, options)` | Field integration, wake and curl sampling, closed tracks and UV-attached motion |
 | `motion.stableFluid(options)`, `motion.shallowWater(options)` | Persistent density and velocity grids, and conservative terrain-aligned water |
 | `motion.surfaceWeather(options)`, `motion.materialStateGraph(machine, entities, options)` | Persistent wetness and thermal fields, and event-driven material changes |
+| `motion.transportSplats(source, target, options)` | Balanced mass correspondences and barycentric splat targets |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -1114,6 +1115,23 @@ preserving entry times and revisions.
 `examples/persistent-weather.js` shows the same ground before and
 after thaw and uses rain, footfall and sun events to change four
 paving materials.
+
+### Splat transport
+
+`motion.transportSplats(source, target, {normalize, epsilon, iterations,
+positionWeight, normalWeight, colorWeight, featureWeight})` builds a
+balanced transport plan. Pass XYZ points or records with `id`,
+`position`, and optional `weight`, `normal`, `color`, and `feature`.
+An optional callback can supply a custom cost. The returned row-major
+`mass` meets the normalized source and target masses, with forward and
+reverse barycentric positions in world space. The status and residual
+report whether the regularized solve converged within its work budget.
+
+Set `correspondence: 'transport'` on `K.morph` to use those positions in
+the existing stage effect. It can take contiguous dab ranges or explicit
+dab ID lists. Pass solver settings through `transport`. The normal
+correspondence mode uses nearest samples. `examples/transport-morph.js`
+shows a leaf, an intermediate stage, and the resulting flower.
 
 ## Optional retained authoring
 
