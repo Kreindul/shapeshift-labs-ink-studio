@@ -1251,3 +1251,21 @@ const pose = track.sample(1.5);
 
 Persist `track.keys` and the channel mapping in the application's own document.
 Sampling has no clock, rendering, document, or storage dependency.
+
+### Named scene library
+
+`KIT.authoring.sceneLibrary.create(storage, {key, backups})` indexes named
+documents and assigns each its own autosave journal. `create(name, snapshot)`
+and `open(id)` return `{slot, doc}`, with autosave already bound. Use
+`state()` for the active ID and slot metadata. Rename or archive a slot
+without changing the document or its recoverable revisions. Unarchive
+it before opening it again.
+
+Use `adopt({id, name, journal, initial})` to register an older journal in
+place. The optional initial snapshot initializes a missing journal.
+The storage adapter follows `getItem / setItem`. An optional atomic
+`compareAndSet(key, expected, next)` provides cross-session write protection.
+Otherwise the library checks for changes before writing. Failed or stale
+saves leave local edits available through the document so callers can export
+them. The index stores metadata and references to journals. Documents keep
+their authoring data and recovery revision format.
