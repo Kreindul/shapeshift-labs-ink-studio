@@ -294,7 +294,7 @@
       distributed: distributed ? flowDInfinity(grid, flood, rainArea, flow) : null,
       fields: Object.freeze({
         elevation, terrainHeight: terrain, drainageHeight: filled, accumulation: flow.area, receiver: flow.receiver,
-        outlet: flow.outlet, slope: flow.slope, wetness: wet, streamOrder: network.streamOrder
+        outlet: flow.outlet, slope: flow.slope, wetness: wet, streamOrder: network.streamOrder, lakeIds: Object.freeze(lakeIds)
       })
     });
   }

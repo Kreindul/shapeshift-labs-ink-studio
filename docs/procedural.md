@@ -51,6 +51,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `routes.polyline(points, options)`, `routes.aroundConvex(outline, start, end, options)` | Arc-length routes with frames and closest queries. Convex XZ routes project endpoints onto an offset perimeter and interpolate world Y |
 | `routes.terrain(start, end, options)` | Bounded, terrain-aware search between pinned points with slope, signed clearance, keep-out regions and turn costs |
 | `hydrology.analyze(height, options)` | Priority-Flood, D8 catchments, stream orders, channel routes, wetness and optional D-infinity flow |
+| `hydrology.breach(basin)`, `hydrology.incise(basin)`, `hydrology.meander(route)`, `hydrology.corridor(routes, height)`, `hydrology.habitat(basin)` | Watershed edits, river migration and cutoff routes, levees, floodplain masks and climate fields |
 | `routes.layout(route, options)` | Fit bounded intervals on a polyline, catenary, or compatible curve. Place caller-chosen pieces using gapped endpoints and midpoint frames |
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
@@ -210,6 +211,34 @@ field to darken banks and place reeds around an authored pond.
 ```sh
 node cli/ink-studio.js render examples/watershed.js --ortho --colored
 ```
+
+### River editing and habitats
+
+- `P.hydrology.breach(basin, {grade, maxDepth, maxLength})` finds filled
+  depressions and follows their spill paths. A successful cut lowers the
+  channel to a continuous grade. Over-budget cuts report their cause before
+  any height is changed. Lakes may receive flow without being excavated.
+- `P.hydrology.incise(basin, options)` uses contributing areas and local
+  grades to lower unlocked downstream-facing cells. Use `strength`,
+  `areaExponent`, `slopeExponent` and `maxDepth` to control the edits.
+  Both editors return gridded heights and an interpolating `height(x, z)`.
+- `P.hydrology.meander(route, options)` resamples a route and migrates
+  its curves while keeping the pins and the longitudinal elevations.
+  `curvatureGain` and `smoothing` shape the migration. Optional seeded
+  `amplitude` starts bends on straight reaches. If `cutoffDistance` is positive,
+  nearby sections separated by a long loop can detach as cutoff routes.
+- `P.hydrology.corridor(routes, height, options)` returns `floodplain`
+  and `levee` fields from plan distance, relative elevation, and local
+  slopes. `channelWidth` and `floodWidth` are distances from the centerline.
+  Levee height fades out on steep or elevated banks.
+- `P.hydrology.habitat(basin, {wind, sun, humidity, uplift, waterDistance})`
+  advects vapor along the lattice, drops precipitation on windward slopes,
+  and returns interpolated fields for moisture, exposure, temperature, and
+  proximity to water. `lapse` cools terrain with elevation. Use these
+  fields in density or material callbacks.
+
+`examples/river-processes.js` bakes the same endpoints as a straight channel
+or a migrated river with floodplain vegetation. Seed 1 enables the terrain edits.
 
 ### Stable spacing and finite Poisson sampling
 
