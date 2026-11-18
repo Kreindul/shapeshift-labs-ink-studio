@@ -57,7 +57,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `sampling.poisson(options)` | Seeded Bridson samples in finite 2D and 3D bounds, with masks, variable radii, pins and axis scaling |
 | `sampling.eliminate(points, options)`, `sampling.lloyd(points, options)`, `sampling.patch(spec)`, `sampling.geodesicSpacing(points, links, options)` | Progressive point subsets, centroidal layout, stratified surface sampling and surface-neighbor separation |
 | `surfaceGrowth.trace(options)` | Seeded, bounded branching paths over caller-supplied surfaces, with a link query for seams and obstacles |
-| `materialBands(spec)` | Nonoverlapping local intervals with material and pattern metadata |
+| `materialBands(spec)` | Nonoverlapping intervals with material and pattern metadata, plus optional spatial projection and period |
 | `masks.stroke(spec)`, `masks.compose(specs, options)` | Tapered and feathered swept discs, ordered addition and erasure, signed distance and visible source ownership |
 | `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
 | `surfaceSection(chart, options)` | Convert between world coordinates and a section measured through the varying thickness of a surface chart |
@@ -210,6 +210,17 @@ crosses a seam splits at the panel bounds while keeping the original mount
 coordinate along the outward axis. A band only extends into a panel that
 contains its mount. Leave a gap between panel bounds for seams or stock
 overhang. The caller maps each result back onto its physical surface.
+
+`materialBands({layers, fallback, direction, origin, period})` can repeat
+layers along any direction. The direction is normalized. Spatial lookup
+projects `point - origin` onto that direction. Without a direction, `axis`
+selects X, Y, or Z. The default origin is zero. Pass a scalar to `at` when
+a coordinate is already projected, or use `atXYZ(x,y,z)` to avoid packing
+a point. In a periodic band, interval endpoints are measured within
+`[0,period]`, and queries on either side of zero wrap. `segments(min,max)`
+returns the ordered, clipped intervals across seams and rejects
+subdivisions beyond the work budget. Layer metadata can carry palette roles,
+shading offsets or other consumer-defined properties.
 
 `alignedFeatureGroups(features, options)` groups nearby features with
 compatible dimensions. Supply one compatible family with records

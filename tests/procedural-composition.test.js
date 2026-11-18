@@ -104,3 +104,18 @@ test('material bands route local coordinates to metadata without imposing a pale
     ]
   );
 });
+
+test('repeating material bands project onto a direction and split exact intervals across negative cycles', () => {
+  const diagonal = Math.SQRT1_2;
+  const slabs = P.materialBands({ direction:[0,1,-1], origin:[3,1,2], period:2,
+    fallback:{material:'soft'}, layers:[{min:0,max:.5,material:'seam'},{min:1,max:1.75,material:'hard'}] });
+  assert.equal(slabs.atXYZ(3,1+diagonal,2).material,'soft');
+  assert.equal(slabs.at([3,1,2]).material,'seam');
+  assert.equal(slabs.at(-.6).material,'hard');
+  assert.equal(slabs.at(2).material,'seam');
+  assert.deepEqual(slabs.segments(-.75,2.5).map(({min,max,material})=>[min,max,material]),[
+    [-.75,-.25,'hard'],[-.25,0,'soft'],[0,.5,'seam'],[.5,1,'soft'],[1,1.75,'hard'],
+    [1.75,2,'soft'],[2,2.5,'seam']
+  ]);
+  assert.throws(()=>slabs.segments(0,1e7),/budget/);
+});
