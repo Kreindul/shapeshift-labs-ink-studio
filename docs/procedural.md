@@ -45,6 +45,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `clearance.field(solids).probe(bounds, options)` | Bounded sampled volume contacts for supplied solids with `id`, bounds, and distance functions |
 | `emitters.compile(spec)` | Deterministic looping samples with caller-supplied direction and drift. Sample at any finite time with `sample(index, time)` or `samples(time)` |
 | `routes.polyline(points, options)`, `routes.aroundConvex(outline, start, end, options)` | Arc-length routes with frames and closest queries. Convex XZ routes project endpoints onto an offset perimeter and interpolate world Y |
+| `routes.terrain(start, end, options)` | Bounded, terrain-aware search between pinned points with slope, signed clearance, keep-out regions and turn costs |
 | `routes.layout(route, options)` | Fit bounded intervals on a polyline, catenary, or compatible curve. Place caller-chosen pieces using gapped endpoints and midpoint frames |
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
@@ -103,6 +104,48 @@ resolved profile merges named or inline layers in order. Object keys compose
 recursively, while arrays and scalar values replace earlier values.
 Material role values accept aliases, RGB colors, and attribute records.
 Use a complete material record or an inherited color when setting shades.
+
+### Terrain routes between pins
+
+`routes.terrain(start, end, options)` takes exact `[x, y, z]` pins with
+distinct XZ coordinates. Supply `bounds: {min, max}` to limit the XZ search,
+and `height(x, z)` to set the candidate centerline elevation. Add any intended
+offset above the ground to this callback. Pin elevations are supplied
+independently.
+
+- `cell` controls the grid spacing. `sampleStep` controls checks along an
+  edge and defaults to a third of the cell size.
+- `maxSlope` is rise over horizontal run. It applies to the segment grade
+  and to changes in the terrain sampled along each edge. `slopeCost` penalizes
+  both uphill and downhill travel.
+- `clearance(x, y, z)` supplies a signed obstacle distance at the route
+  centerline. Set `minClearance` to account for the half-width and any margin.
+  `keepOut(x, z, y)` blocks authored areas when it returns true.
+- `cost(x, y, z)` supplies a nonnegative penalty per unit of horizontal
+  travel. Positive infinity marks an impassable point. `turnCost` adds a
+  penalty per radian of heading change.
+- `maxDeviation` limits how far a segment can leave the height field.
+  `lookAhead` bounds simplification. Use zero to keep the grid turns.
+
+Callbacks should be deterministic. Clearance, grade, and keep-out checks
+are sampled, including on shortcuts. Choose `sampleStep` and a clearance
+margin for the smallest feature you need to avoid. A route can be unreachable
+at a coarse grid spacing if the grid misses an available corridor.
+
+An `ok` result includes a `route` compatible with `routes.layout` and a
+weighted `cost`. Other statuses are `blocked-pin`, `unreachable`, and
+`budget`. A budget result names the exhausted limit. Configure `maxCells`,
+`maxVisits`, and `maxSamples` to bound work. The result reports counts in
+`work`.
+
+The runnable example uses ordinary SDFs for the ground, boulders, and
+paving, then bakes two versions of the scene as splats. The pins are identical
+in both versions.
+
+```sh
+node cli/ink-studio.js render examples/terrain-route.js --seed 13 --ortho --colored
+node cli/ink-studio.js render examples/terrain-route.js --seed 14 --ortho --colored
+```
 
 ## Optional retained authoring
 
