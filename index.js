@@ -81,6 +81,9 @@ module.exports = {
   exportGlb: require('./cli/export-glb.js'),
   render: require('./cli/render.js').render,
   spriteAtlas: require('./cli/sprite-atlas.js').spriteAtlas,
+  readRasterAsset(file) {
+    return require('./cli/raster-asset.js').readRasterAsset(file, module.exports.load().KIT.procedural.graph.raster);
+  },
   load() {
     const out = path.join(__dirname, 'dist', 'standalone.js'),
       srcs = files().concat(demoFiles()),

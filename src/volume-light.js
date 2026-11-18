@@ -122,7 +122,7 @@ const VolumeLight = (() => {
                 continue;
               }
               advance = 0;
-              const value = v.field.sample(x, y, z, time);
+              const value = v.field.sample(x, y, z, time, options);
               const extinction = value * v.density;
               if (!extinction) continue;
               density += extinction;

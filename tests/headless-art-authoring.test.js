@@ -9,6 +9,7 @@ test('weighted mesh paths prefer a seam and expose distances from stable sources
   const route = P.geometry.meshPaths(mesh, { sources: [0], edgeCost: e => e.a === 0 && e.b === 2 ? Infinity : e.length });
   assert.deepEqual(route.path(2).indices, [0, 1, 2]);
   assert.equal(route.distances[2], 2);
+  assert.equal(route.distanceAt([.5, 0, .5]), 1);
   assert.equal(route.path(4), null);
   assert.deepEqual(route.curves([4, 2]).map(c => c.cost), [2]);
 });
@@ -47,6 +48,7 @@ test('headless groups expose inputs, keyframe parameters, and keep stable previe
   assert.equal(parent.evaluate({}, { time: .5 }).status.a, 'cached');
   assert.equal(parent.evaluate({}, { time: 1 }).outputs.out, 12);
   assert.equal(first.preview('a'), 8);
+  assert.equal(first.preview('a/animated'), 8);
   assert.throws(() => P.graph.create({
     nodes: { a: { op: 'scale', inputs: { n: { node: 'a' }, factor: 2 } } }, outputs: {}
   }, { operations }), /cycle/);
@@ -126,5 +128,25 @@ test('atlas exports eight registered directions and aligned relighting maps', ()
   for (const name of ['color', 'depth', 'normal', 'emission']) {
     assert.equal(atlas.images[name].length, atlas.metadata.width * atlas.metadata.height * 4);
     assert(atlas.images[name].some((value, index) => index % 4 === 3 && value > 0));
+  }
+});
+
+test('built-in graph operators and generic PNG manifests work through public entry points', () => {
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'ink-raster-'));
+  try {
+    const png = require('../cli/png.js');
+    fs.writeFileSync(path.join(folder, 'mark.png'), png.encode(1, 1, new Uint8Array([45, 85, 125, 230]), 4));
+    const manifest = path.join(folder, 'mark.json');
+    fs.writeFileSync(manifest, JSON.stringify({ width: 1, height: 1, layers: { mark: { frames: ['mark.png'] } } }));
+    const asset = studio.readRasterAsset(manifest);
+    const graph = P.graph.create({
+      inputs: { asset: 'any' },
+      nodes: { tile: { op: 'rasterLayer', inputs: { source: { input: 'asset' }, layer: 'mark' } } },
+      outputs: { image: { node: 'tile' } }
+    });
+    assert.deepEqual(Array.from(graph.evaluate({ asset }).outputs.image.data), [45, 85, 125, 230]);
+  } finally {
+    fs.rmSync(folder, { recursive: true });
   }
 });

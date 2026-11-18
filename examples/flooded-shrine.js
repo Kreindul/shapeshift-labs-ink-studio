@@ -39,7 +39,9 @@ module.exports = ({ makeBuilder, makeSculpt, KIT: K }) => ({
         S.box(p.point, p.half, stone, { tag, res: part.type === 'foundation' ? .18 : .12,
           rd: .045 + (p.wear || 0) * .13, ax: B.frame(p.yaw || 0, 0, 0) });
       } else if (part.type === 'moss') {
-        S.ball(p.point, [p.height * .56 + .04, p.height * .26, p.height * .44 + .05], moss, { tag, res: .10 });
+        const wetness = material.wetness(p.point[0], p.point[2], 0, { y: p.point[1] + .19 });
+        const growth = p.height * (.72 + .58 * wetness);
+        S.ball(p.point, [growth * .56 + .04, growth * .26, growth * .44 + .05], moss, { tag, res: .10 });
       } else {
         for (let i = 0; i < 3; i++) {
           const at = [p.point[0] + (i - 1) * .055, p.point[1], p.point[2] + (i - 1) * .026];
@@ -75,9 +77,17 @@ module.exports = ({ makeBuilder, makeSculpt, KIT: K }) => ({
     S.box([0, waterline - .04, .04], [3.10, .027, 2.59], water,
       { tag: 'floodline', ghost: true, res: .16, rd: .024 });
     S.bake();
+    const air = P.density.fromSdf({
+      bounds: { min: [-3.1, waterline, -2.15], max: [3.1, waterline + .7, 2.31] },
+      field: (x, y, z) => (Math.hypot(x / 3, (y - waterline - .19) / .33, z / 2.1) - 1) * .35,
+      feather: .12, breakup: .65,
+      noise: (x, y, z, time) => B.fbm(x * 2.6, y * 3.1 + time * .15, z * 2.2, 2) * flood(y)
+    });
     return B.finish({
       cam: { target: [0, .74, -.03], dist: 11.7, yaw: -.22, pitch: .54 }, radius: 9,
       detail: 27, dither: .11,
+      atmosphere: [K.atmosphere.field({ field: air, density: .18, color: '#34555e', step: .18 })],
+      volumeQuality: { scale: 2, steps: 29 },
       look: { pixel: true, stable: { snap: true, protect: ['sigil', 'glow'] },
         ink: { depthGap: .18, litAt: .66, creaseCosine: .5,
           silhouette: { shadow: '#121b27', litSteps: 0 },

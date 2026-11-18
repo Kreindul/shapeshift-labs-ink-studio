@@ -16,7 +16,7 @@ module.exports = kit => {
         bounds: { min: [-2.72, -.24, -2.0], max: [2.72, .68, 1.95] },
         field: (x, y, z) => (Math.hypot(x / 2.7, (y - .12 - .15 * Math.sin(x * 1.3)) / .29, z / 1.75) - 1) * .30,
         feather: .078, breakup: .89, noise: (x, y, z, time) => Math.max(0, noise(x, y, z, time) * .86 + .44),
-        drift: [.15, .09]
+        drift: [.08, .04], windInfluence: .6
       });
       const steam = density.fromSdf({
         bounds: { min: [-1.55, .02, -1.6], max: [1.18, 1.63, .78] },
@@ -33,6 +33,7 @@ module.exports = kit => {
         K.atmosphere.field({ field: steam, density: .93, step: .15, anisotropy: .28,
           ramp: ['#344a62', '#637f99', '#a4bbbf'], emissive: '#6392a6', emissiveGain: .15 })
       ];
+      world.volumeWind = [.12, .08];
       world.volumeQuality = { scale: 2, depthTolerance: .22, steps: 38 };
       world.look = {
         ...world.look,

@@ -100,7 +100,16 @@
       return { indices, points: indices.map(i => points[i].slice()), distances: indices.map(i => distances[i]),
         cost: distances[target], source: origin[target] };
     }
-    return { distances, predecessor, origin, path,
+    let field;
+    function distanceAt(point) {
+      if (!field) field = P.attributes.mesh(mesh, { vertex: {
+        reachable: { type: 'number', values: Float64Array.from(distances, value => Number.isFinite(value) ? 1 : 0) },
+        distance: { type: 'number', values: Float64Array.from(distances, value => Number.isFinite(value) ? value : 0) }
+      } });
+      const hit = field.sample(point);
+      return hit && hit.values.reachable >= 1 - 1e-8 ? hit.values.distance : Infinity;
+    }
+    return { distances, predecessor, origin, path, distanceAt,
       curves: targets => targets.map(path).filter(Boolean) };
   }
 

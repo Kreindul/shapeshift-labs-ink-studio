@@ -124,4 +124,47 @@
   P.graph.raster = raster;
   P.graph.material = material;
   P.graph.tiles = tiles;
+  P.graph.operations = Object.freeze({
+    meshPaths: {
+      inputs: { mesh: 'geometry', sources: 'points', targets: { type: 'points', default: [] }, options: { type: 'any', default: {} } },
+      outputs: { value: 'any', curves: 'points', distance: 'field' },
+      run({ mesh, sources, targets, options }) {
+        const value = P.geometry.meshPaths(mesh, { ...options, sources });
+        return { value, curves: value.curves(targets), distance: point => value.distanceAt(point) };
+      }
+    },
+    attributeTransfer: {
+      inputs: { source: 'field', domain: 'string', entities: 'points', options: { type: 'any', default: {} } },
+      outputs: { value: 'points' },
+      run({ source, domain, entities, options }) {
+        return { value: P.attributes.transfer(source, domain, entities, options) };
+      }
+    },
+    densityMesh: {
+      inputs: { source: 'field', options: { type: 'any', default: {} } },
+      outputs: { value: 'geometry' },
+      run({ source, options }) { return { value: P.density.toMesh(source, options) }; }
+    },
+    densityPoints: {
+      inputs: { source: 'field', options: { type: 'any', default: {} } },
+      outputs: { value: 'points' },
+      run({ source, options }, { seed }) { return { value: P.density.scatter(source, { seed, ...options }).samples }; }
+    },
+    rasterLayer: {
+      inputs: { source: 'any', layer: 'string', tag: { type: 'string', default: 'all' } },
+      outputs: { value: 'image' },
+      time: true,
+      run({ source, layer, tag }, { time }) { return { value: source.layer(layer, time, tag) }; }
+    },
+    materialSample: {
+      inputs: { source: 'field', uv: 'vec2' },
+      outputs: { height: 'number', normal: 'vec3', wetness: 'number', ink: 'number', palette: 'string' },
+      time: true,
+      run({ source, uv }, { time }) { return source.sample(...uv, time); }
+    },
+    tiles: {
+      inputs: { settings: 'any' }, outputs: { value: 'points' }, time: true,
+      run({ settings }, { seed, time }) { return { value: tiles({ seed, time, ...settings }) }; }
+    }
+  });
 })(KIT);

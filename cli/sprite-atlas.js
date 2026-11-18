@@ -14,7 +14,7 @@ function spriteAtlas(world, options = {}) {
     pivot = world.cam.target, yaw = world.cam.yaw, maps = [], pose, view = {}, depthRange
   } = options;
   if (!integer(width, 1, 2048) || !integer(height, 1, 2048) || !integer(directions, 1, 64) ||
-      !integer(columns, 1, 256) || !Number.isFinite(fps) || fps <= 0 ||
+      !integer(columns, 1, 256) || !Number.isFinite(fps) || fps <= 0 || fps > 240 ||
       !Array.isArray(times) || !times.length || times.length > 512 ||
       times.some((time, i) => !Number.isFinite(time) || time < 0 || (i && time <= times[i - 1])) ||
       !Array.isArray(pivot) || pivot.length !== 3 || !pivot.every(Number.isFinite) || !Number.isFinite(yaw) ||
@@ -34,6 +34,9 @@ function spriteAtlas(world, options = {}) {
   let minDepth = Infinity, maxDepth = -Infinity;
   const entries = [];
   const history = Array.from({ length: directions }, () => ArtEffects.history({ frames: 24 }));
+  const { volumeHistory } = require('../src/scene-optics.js');
+  const volumes = view.volumeQuality?.jitter === 'spatiotemporal' || world.volumeQuality?.jitter === 'spatiotemporal'
+    ? Array.from({ length: directions }, () => volumeHistory()) : [];
   const orientation = Array.from({ length: directions }, (_, i) => yaw + i * Math.PI * 2 / directions);
   for (let f = 0; f < times.length; f++) {
     const time = times[f];
@@ -44,7 +47,7 @@ function spriteAtlas(world, options = {}) {
       const i = f * directions + direction, ox = i % cols * width, oy = Math.floor(i / cols) * height;
       const image = render(world, { ...view, t: time, w: width, h: height, px: 1,
         yaw: orientation[direction], ortho: true, target: pivot,
-        transparent: true, passes: requested, artHistory: history[direction] });
+        transparent: true, passes: requested, artHistory: history[direction], volumeHistory: volumes[direction] });
       const data = image.passes;
       for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
         const p = y * width + x, q = (y + oy) * w + x + ox, j = p * 3, k = q * 4;

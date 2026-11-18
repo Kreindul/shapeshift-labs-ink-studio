@@ -65,7 +65,7 @@
       const spec = specs[name];
       if (!record(spec) || !id(spec.op)) throw new TypeError('Invalid graph node ' + name);
       const operation = Object.hasOwn(operations, spec.op) ? operations[spec.op] :
-        Object.hasOwn(groups, spec.op) ? groups[spec.op] : null;
+        Object.hasOwn(groups, spec.op) ? groups[spec.op] : Object.hasOwn(P.graph.operations || {}, spec.op) ? P.graph.operations[spec.op] : null;
       if (typeof operation?.run !== 'function' && typeof operation?.instantiate !== 'function')
         throw new TypeError('Unknown graph operation ' + spec.op);
       stack.add(name);
@@ -125,7 +125,7 @@
           for (const [key, socket] of Object.entries(outputs))
             if (!Object.hasOwn(produced, key) || !typed[socket.type](produced[key]))
               throw new TypeError('Wrong output from graph node ' + name + '.' + key);
-          pending.set(name, { seed, time, values: comparable, outputs: produced });
+          pending.set(name, { seed, time, values: comparable, outputs: produced, subgraph: run.inspect?.() });
         }
         status[name] = reused ? 'cached' : 'evaluated';
       }
@@ -133,13 +133,19 @@
       const snapshot = new Map(pending);
       for (const [name, item] of snapshot) marks.set(name, item);
       return { outputs, status, preview(node, port = 'value') {
-        if (!snapshot.has(node) || !Object.hasOwn(snapshot.get(node).outputs, port))
+        const [name, ...nested] = node.split('/');
+        const result = snapshot.get(name);
+        if (nested.length && result?.subgraph) return result.subgraph.preview(nested.join('/'), port);
+        if (!result || !Object.hasOwn(result.outputs, port))
           throw new RangeError('Unknown graph preview output ' + node + '.' + port);
-        return snapshot.get(node).outputs[port];
-      } };
+        return result.outputs[port];
+      }, inspectGroup(name) { return snapshot.get(name)?.subgraph || null; } };
     }
 
-    return Object.freeze({ spec: stored, evaluate, clear() { marks.clear(); } });
+    return Object.freeze({ spec: stored, evaluate, clear() {
+      marks.clear();
+      for (const config of configs.values()) config.run.clear?.();
+    } });
   }
 
   function group(spec, { operations, groups, outputs } = {}) {
@@ -147,7 +153,14 @@
     const outputTypes = schema(outputs || Object.fromEntries(Object.keys(spec.outputs || {}).map(name => [name, 'any'])));
     return { inputs: inputTypes, outputs: outputTypes, time: true, instantiate() {
       const graph = create(spec, { operations, groups });
-      return (inputs, context) => graph.evaluate(inputs, context).outputs;
+      let latest;
+      const run = (inputs, context) => {
+        latest = graph.evaluate(inputs, context);
+        return latest.outputs;
+      };
+      run.inspect = () => latest;
+      run.clear = () => graph.clear();
+      return run;
     } };
   }
 

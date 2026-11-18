@@ -83,7 +83,7 @@ const shape = D.fromSdf({
   feather: .20,
   breakup: .65,
   noise: (x, y, z, t) => .5 + .5 * Math.sin(4 * x + t + z),
-  drift: [.10, .04]
+  drift: [.10, .04], windInfluence: .6
 });
 const volume = K.atmosphere.field({
   field: shape, density: .8, step: .14, ramp: ['#435969', '#769599', '#adc5bd'],
@@ -97,7 +97,7 @@ const volumeLighting = {
 };
 ```
 
-Put `volume` in `finish.atmosphere`, and pass `volumeLighting` and optional `volumeQuality` to the finished world. The integrator clips each ray against opaque geometry, evaluates bounded density through overlapping media, and adds single scattering, geometry shadowing and emission before palette resolution. Directional light is defined as a vector from a sample toward the light. Set `lit: false` on a volume to use its density ramp and emission without scene scattering.
+Put `volume` in `finish.atmosphere`, and pass `volumeLighting` and optional `volumeQuality` to the finished world. The integrator clips each ray against opaque geometry, evaluates bounded density through overlapping media, and adds single scattering, geometry shadowing and emission before palette resolution. Use `windInfluence` to let live airflow advect the density pattern. Directional light is defined as a vector from a sample toward the light. Set `lit: false` on a volume to use its density ramp and emission without scene scattering.
 
 `D.bounded({ bounds, sample, skip })` accepts a custom density. A skip callback returns a conservative distance to the next possible nonzero sample. `D.sparse(field, { resolution, brick, time })` caches occupied bricks at one time and includes conservative interpolation-aware skipping. `D.toMesh(field, { iso, resolution })` extracts a threshold surface. `D.scatter(field, { minDensity, radius, seed })` places deterministic points inside density.
 

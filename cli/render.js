@@ -134,9 +134,9 @@ function render(world, o) {
   const motionFrame = historyFrames[Math.max(0, historyFrames.length - (effects?.smear?.frames || 1))];
   const motionFrom = o.motionFrom ?? motionFrame?.motionReference;
   const captureMotion = !!o.captureMotion || passSelection.has('motion') || passSelection.has('emissionMotion');
-  if (styled && !tone && (o.colored || specializedResolve)) {
+  if (styled && (specializedResolve || (o.colored && !tone))) {
     const native = render(world, Object.assign({}, o, { colored: false, samples: true, worked: true, passes: [...passSelection], artInkActive: !!ink,
-      captureMotion, motionFrom, reflectionTint: effects?.reflection, captureFog: ink?.ramps.has('fog') }));
+      captureMotion, motionFrom, reflectionTint: effects?.reflection, captureFog: o.captureFog || ink?.ramps.has('fog') }));
     const samples = render(
       world,
       Object.assign({}, o, {
@@ -154,12 +154,14 @@ function render(world, o) {
         passes: specializedResolve ? ['coverage'] : false
       })
     );
-    const palette = world.pal.map(h => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255]);
+    const basePalette = tone?.palette || world.pal;
+    const palette = basePalette.map(h => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255]);
     const local = native.localAt && {
-      at: native.localAt, palettes: native.localPalettes, output: PixelLook.outputPalettes(world.pal, native.localPalettes)
+      at: native.localAt, palettes: native.localPalettes, output: PixelLook.outputPalettes(basePalette, native.localPalettes)
     };
     const amount = (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither;
-    const img = specializedResolve ? ArtStability.resolve(native, samples, stable, palette, PixelLook, amount) :
+    const img = specializedResolve ? ArtStability.resolve(native, samples, stable, palette, PixelLook, amount,
+      { local, tone, grade: !tone && world.anim?.grade }) :
       PixelLook.resolve(Object.assign(samples, {
         palette, local, contour: !ink, grade: world.anim && world.anim.grade, interiorColor: native.color, dither: amount,
         ditherAt: anchoring ? (x, y) => ArtStability.ditherCoordinates(stable, native.passes, (H - 1 - y) * W + x, x, y) : null
@@ -169,7 +171,8 @@ function render(world, o) {
       native.motionReference && { motionReference: native.motionReference },
       native.alpha && { alpha: native.alpha },
       (native.orderFallback || samples.orderFallback) && { orderFallback: true },
-      native.volumeStats && { volumeStats: native.volumeStats }), native.passes, native.fog);
+      native.volumeStats && { volumeStats: native.volumeStats },
+      o.captureFog && native.fog && { fog: native.fog }), native.passes, native.fog);
   }
   /* orthographic (o.ortho): no perspective, every ray parallel, the picture as big as the perspective one is at the target. The eye
      is set well back, so nothing comes behind it however far in the camera zooms; the zoom is the size of the view */
@@ -1041,6 +1044,7 @@ function render(world, o) {
   let atmosphere, volumeStats;
   if (axialDepth) {
     const quality = atmosphereQuality({ ...world.volumeQuality, ...o.volumeQuality });
+    quality.wind = world.volumeWind && !o.wind && !an.wind ? Airflow.frame(world.volumeWind).velocity : wind.velocity;
     const lighting = volumes.some(volume => volume.type === 'field') && (o.volumeLighting ?? world.volumeLighting);
     const media = lighting ? SceneOptics.lighting(lighting, world.pal) : undefined;
     atmosphere = applyAtmosphere(volumes, col, axialDepth, rayAt, W, H, eyeD + 2 * R, quality, t, media,

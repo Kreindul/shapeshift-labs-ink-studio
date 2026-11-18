@@ -44,7 +44,7 @@
     });
 
     function instantiate() {
-      let state = initial, entered = 0, clock = 0, previous = null, blendTime = 0, properties = { ...defaults };
+      let state = initial, entered = 0, clock = 0, previous = null, blendTime = 0, started = false, properties = { ...defaults };
       const raised = new Set();
       function pose(id, age) {
         const { track, loop } = animations[id];
@@ -89,7 +89,8 @@
               (typeof value === 'number' && !Number.isFinite(value))) throw new TypeError('Invalid state property ' + key);
           next[key] = value;
         }
-        const events = cuesBetween(state, clock - entered, time - entered);
+        const events = cuesBetween(state, started ? clock - entered : -1e-8, time - entered);
+        started = true;
         clock = time;
         properties = next;
         const rule = rules.find(r => r.to !== state && (r.from === state || r.from === '*') &&

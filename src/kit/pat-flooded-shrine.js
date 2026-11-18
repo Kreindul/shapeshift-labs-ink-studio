@@ -29,12 +29,14 @@
       const controls = settings(incoming);
       const { point: foot } = doc.get('entrance').parameters;
       const { point: hero } = doc.get('silhouette').parameters;
+      const pathX = z => foot[0] + (hero[0] - foot[0]) * Math.max(0, Math.min(1,
+        (foot[2] - z) / Math.max(.1, foot[2] - hero[2])));
       const plan = [{ key: 'platform', type: 'foundation', parameters: { point: [0, -.21, 0], half: [3.4, .35, 2.95] } }];
       for (const side of [-1, 1]) for (let i = 0; i < 8; i++) {
         const key = 'wall/' + side + '/' + i, dice = diceFor(layoutSeed, key), z = (i - 3.6) * .71;
         const height = .58 + .54 * dice() * (1 - controls.age),
           x = side * (2.7 + .25 * dice());
-        const nearPath = Math.abs(foot[0] + (hero[0] - foot[0]) * (foot[2] - z) / Math.max(.1, foot[2] - hero[2]) - x) < controls.clearance;
+        const nearPath = Math.abs(pathX(z) - x) < controls.clearance;
         const worn = dice();
         plan.push({ key, type: 'wall', parameters: {
           point: [x, .15 + height / 2, z], half: [.23 + .13 * dice(), height / 2, .36],
@@ -54,7 +56,7 @@
         const z = -2.6 + dice() * 5.1, x = side * (controls.clearance + .16 + dice() * Math.max(.1, 3.1 - controls.clearance - .16));
         const height = .10 + dice() * .45, species = dice() > .68 ? 'reed' : 'moss';
         plan.push({ key, type: species, parameters: { point: [x, .17, z],
-          height, visible: dice() < controls.vegetation, phase: dice() * 6.28 } });
+          height, visible: dice() < controls.vegetation && Math.abs(pathX(z) - x) >= controls.clearance * .78, phase: dice() * 6.28 } });
       }
       return doc.derive('shrine', 'layout', plan);
     }

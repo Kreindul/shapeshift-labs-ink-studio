@@ -27,6 +27,43 @@
     return { domain, entities: entities.slice(), points, channels, read };
   }
 
+  function nearestRows(source) {
+    if (!source || !Array.isArray(source.points) || typeof source.read !== 'function')
+      throw new TypeError('Expected a captured attribute table');
+    const { points } = source;
+    function build(ids, depth = 0) {
+      if (!ids.length) return null;
+      const axis = depth % 3;
+      ids.sort((a, b) => points[a][axis] - points[b][axis] || a - b);
+      const middle = ids.length >> 1;
+      return { axis, index: ids[middle], lower: build(ids.slice(0, middle), depth + 1),
+        upper: build(ids.slice(middle + 1), depth + 1) };
+    }
+    const root = build(points.map((_, i) => i));
+    return { sample(p) {
+      if (!point(p)) throw new TypeError('Attribute queries need a finite XYZ point');
+      let distance = Infinity, index = -1;
+      function visit(node) {
+        if (!node) return;
+        const at = points[node.index], candidate = V.dist(at, p), split = p[node.axis] - at[node.axis];
+        if (candidate < distance || (candidate === distance && node.index < index)) {
+          index = node.index;
+          distance = candidate;
+        }
+        if (split <= 0) {
+          visit(node.lower);
+          if (-split <= distance) visit(node.upper);
+        } else {
+          visit(node.upper);
+          if (split <= distance) visit(node.lower);
+        }
+      }
+      visit(root);
+      return index < 0 ? null : { point: points[index].slice(), distance,
+        sourceId: source.entities[index]?.id ?? index, values: source.read(index) };
+    } };
+  }
+
   function meshSampler(mesh, { vertex, face, maxDistance = Infinity } = {}) {
     const { points, faces } = P.geometry.topology(mesh);
     if (!(maxDistance >= 0)) throw new RangeError('Invalid mesh sampling distance');
@@ -176,6 +213,17 @@
     });
   }
 
+  function paths(source, curves, options) {
+    if (!Array.isArray(curves) || curves.length > 10000) throw new RangeError('Expected a bounded list of paths');
+    let nodes = 0;
+    return curves.map((curve, index) => {
+      const id = curve.id ?? index, points = Array.isArray(curve) ? curve : curve.points;
+      if (!Array.isArray(points) || (nodes += points.length) > 250000) throw new RangeError('Path attribute budget exceeded');
+      const samples = transfer(source, 'curve', points.map((p, i) => ({ point: position(p), id: String(id) + '/' + i })), options);
+      return { id, points: samples.map(sample => sample.point), samples };
+    });
+  }
+
   function splats(world, source, options) {
     const entities = Array.from({ length: world.count }, (_, i) => ({
       id: i + 1, at: Array.from(world.data.subarray(i * 16, i * 16 + 3))
@@ -183,5 +231,5 @@
     return transfer(source, 'splat', entities, options);
   }
 
-  P.attributes = Object.freeze({ table, mesh: meshSampler, sdf: sdfSampler, carrier: carrierSampler, transfer, splats });
+  P.attributes = Object.freeze({ table, nearest: nearestRows, mesh: meshSampler, sdf: sdfSampler, carrier: carrierSampler, transfer, paths, splats });
 })(KIT);

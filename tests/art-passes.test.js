@@ -53,3 +53,23 @@ test('sculpt tags and material identities reach the public pass API', () => {
   assert.equal(ArtPasses.ownsSurface(.51, true, 1, Infinity), true);
   assert.equal(ArtPasses.ownsSurface(.99, true, 2, 1), false);
 });
+
+test('surface ordering resolves crossovers and falls back atomically under a low budget', () => {
+  const b = makeBuilder(1, [0, 0xee6644, 0x44aadd]);
+  const norm = Math.SQRT1_2;
+  b.disc(0, 0, .04, [-norm, 0, norm], .72, .009, b.P[1], 3);
+  b.disc(0, 0, 0, [norm, 0, norm], .72, .009, b.P[2], 3);
+  const world = b.finish({ cam: camera });
+  const options = { w: 64, h: 64, px: 1, ortho: true, raw: true, passes: ['splatId'] };
+  const center = studio.render(world, options);
+  const resolved = studio.render(world, { ...options, splatOrder: 'surface' });
+  const capped = studio.render(world, { ...options, splatOrder: 'surface', fragmentBudget: 11 });
+  const left = 32 * 64 + 27, right = 32 * 64 + 37;
+  assert.equal(center.passes.splatId[left], 1);
+  assert.equal(resolved.passes.splatId[left], 2);
+  assert.equal(resolved.passes.splatId[right], 1);
+  assert(resolved.rgb[left * 3 + 2] > resolved.rgb[left * 3]);
+  assert(capped.orderFallback);
+  assert.deepEqual(capped.rgb, center.rgb);
+  assert.deepEqual(capped.passes, center.passes);
+});

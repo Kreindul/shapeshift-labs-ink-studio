@@ -15,9 +15,9 @@ const VolumeField = (() => {
       throw new TypeError('Density needs a sample function and an optional conservative skip function');
     return Object.freeze({
       bounds: Object.freeze({ min: Object.freeze(min), max: Object.freeze(max) }),
-      sample(x, y, z, time = 0) {
+      sample(x, y, z, time = 0, context) {
         if (x < min[0] || x > max[0] || y < min[1] || y > max[1] || z < min[2] || z > max[2]) return 0;
-        const value = sample(x, y, z, time);
+        const value = sample(x, y, z, time, context);
         if (!Number.isFinite(value) || value < 0) throw new RangeError('Density samples must be finite and nonnegative');
         return value;
       },
@@ -25,20 +25,22 @@ const VolumeField = (() => {
     });
   }
 
-  function fromSdf({ bounds: extent, field, feather = .18, noise, breakup = .5, drift = [0, 0], conservative = false } = {}) {
+  function fromSdf({ bounds: extent, field, feather = .18, noise, breakup = .5, drift = [0, 0], windInfluence = 0, conservative = false } = {}) {
     const sdf = typeof field === 'function' ? field : field?.sdf?.bind(field) || field?.sd?.bind(field);
     if (typeof sdf !== 'function' || (noise !== undefined && typeof noise !== 'function') ||
         !Number.isFinite(feather) || feather < 0 || !Number.isFinite(breakup) || breakup < 0 || breakup > 1 ||
-        !Array.isArray(drift) || drift.length !== 2 || !drift.every(Number.isFinite))
+        !Array.isArray(drift) || drift.length !== 2 || !drift.every(Number.isFinite) || !Number.isFinite(windInfluence))
       throw new TypeError('Shape density needs an SDF, nonnegative feather and optional noise');
     return bounded({
       bounds: extent,
-      sample(x, y, z, time) {
+      sample(x, y, z, time, context) {
         const distance = sdf(x, y, z, time);
         if (!Number.isFinite(distance)) throw new RangeError('The shape SDF must return finite distances');
         if (distance >= 0) return 0;
         const t = feather ? clamp(-distance / feather, 0, 1) : 1;
-        const variation = noise ? clamp(noise(x - drift[0] * time, y, z - drift[1] * time, time), 0, 1) : 1;
+        const wx = drift[0] + (context?.wind?.[0] || 0) * windInfluence;
+        const wz = drift[1] + (context?.wind?.[1] || 0) * windInfluence;
+        const variation = noise ? clamp(noise(x - wx * time, y, z - wz * time, time), 0, 1) : 1;
         return t * t * (3 - 2 * t) * (1 - breakup + breakup * variation);
       },
       skip: conservative ? (x, y, z, direction, time) => Math.max(0, sdf(x, y, z, time)) : undefined

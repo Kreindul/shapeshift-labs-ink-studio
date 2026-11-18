@@ -68,3 +68,20 @@ test('low-resolution volumes reuse rays and respect opaque depth boundaries', ()
   assert.notDeepEqual(low.rgb, disabled.rgb);
   assert.equal(disabled.fog, undefined);
 });
+
+test('volume history combines compatible frames and rejects a depth break or camera cut', () => {
+  const history = K.atmosphere.history({ weight: .5, maxGap: .2 });
+  const depths = new Float32Array([3, 3]);
+  const first = new Float32Array([.4, .2, 0, .6, .1, .1, .1, 1]);
+  history.filter(first, depths, 0, 'a');
+  const next = new Float32Array([.2, 0, 0, .6, .6, 0, .1, 1]);
+  history.filter(next, new Float32Array([3, 4]), .1, 'a');
+  near(next[0], .3);
+  near(next[4], .6);
+  const cut = new Float32Array([.1, 0, 0, .6, .2, 0, .1, 1]);
+  history.filter(cut, depths, .2, 'b');
+  near(cut[0], .1);
+  const D = K.procedural.density;
+  const drift = D.fromSdf({ bounds: span, field: () => -1, noise: x => .5 + x * .4, breakup: 1, windInfluence: 1 });
+  near(drift.sample(0, 0, 0, 1, { wind: [.5, 0] }), .3);
+});

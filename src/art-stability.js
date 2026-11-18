@@ -43,9 +43,9 @@ const ArtStability = (() => {
       (material > 0 && settings.protect.has(String(passes.materials[material] ?? material)));
   }
 
-  function resolve(native, samples, settings, palette, pixelLook, dither) {
+  function resolve(native, samples, settings, palette, pixelLook, dither, { local, grade, tone } = {}) {
     const { w, h, color, passes } = native, sw = samples.w;
-    const rgb = new Uint8Array(w * h * 3), use = new Uint32Array(palette.length);
+    const rgb = new Uint8Array(w * h * 3), use = new Uint32Array(local?.output.packed.length ?? palette.length);
     const coverage = new Float32Array(w * h), detail = new Uint8Array(w * h);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const p = y * w + x, s = (y * sw + x) * 2;
@@ -60,6 +60,15 @@ const ArtStability = (() => {
       const c = ((h - 1 - y) * w + x) * 3;
       const [dx, dy] = ditherCoordinates(settings, passes, p, x, y);
       const bias = (pixelLook.bayerRank(dx, dy) - .5) * dither;
+      const localId = local?.at[(h - 1 - y) * w + x];
+      if (localId && (detail[p] || coverage[p] >= settings.threshold)) {
+        const nativeShade = [color[c] / 255, color[c + 1] / 255, color[c + 2] / 255];
+        const index = local.output.rows[localId - 1][pixelLook.nearest(nativeShade, local.palettes[localId - 1], false)];
+        use[index]++;
+        const packed = local.output.packed[index];
+        rgb[q] = packed >> 16; rgb[q + 1] = (packed >> 8) & 255; rgb[q + 2] = packed & 255;
+        continue;
+      }
       let threshold = settings.threshold, chosen = 0;
       if (settings.resolve === 'clusters' && coverage[p] > 0 && coverage[p] < 1) {
         const neighbor = (x > 0 && coverage[p - 1] >= threshold) || (x + 1 < w && coverage[p + 1] >= threshold) ||
@@ -74,12 +83,18 @@ const ArtStability = (() => {
             if (weight < .06) continue;
             const iy = (sw * (samples.h - 1 - Math.floor(j / sw)) + j % sw) * 3, a = weight || 1;
             // The raw samples are composited against palette zero. Recover the foreground.
-            const shade = palette[0].map((bg, k) => Math.max(0, Math.min(1, (samples.color[iy + k] / 255 - bg * (1 - a)) / a + bias)));
-            const index = pixelLook.nearest(shade, palette, true);
+            const shade = palette[0].map((bg, k) => {
+              const value = samples.color[iy + k] / 255;
+              const foreground = samples.alpha ? value : (value - bg * (1 - a)) / a;
+              return Math.max(0, Math.min(1, foreground + bias));
+            });
+            const index = tone ? pixelLook.toneIndex(tone, ...shade, dx, dy) : pixelLook.nearest(shade, palette, true);
             votes.set(index, (votes.get(index) || 0) + weight);
           }
         }
-        chosen = pixelLook.nearest([color[c] / 255 + bias, color[c + 1] / 255 + bias, color[c + 2] / 255 + bias], palette, !detail[p]);
+        const shade = [color[c] / 255, color[c + 1] / 255, color[c + 2] / 255];
+        chosen = tone ? pixelLook.toneIndex(tone, ...shade, dx, dy) :
+          pixelLook.nearest(shade.map(value => value + bias), palette, !detail[p]);
         let best = votes.get(chosen) || 0;
         for (const [index, weight] of votes) if (weight > best) {
           chosen = index;
@@ -87,9 +102,9 @@ const ArtStability = (() => {
         }
       }
       use[chosen]++;
-      for (let k = 0; k < 3; k++) rgb[q + k] = Math.round(palette[chosen][k] * 255);
+      for (let k = 0; k < 3; k++) rgb[q + k] = Math.round((grade ? grade[chosen * 3 + k] : palette[chosen][k]) * 255);
     }
-    return { w, h, rgb, use, detail };
+    return { w, h, rgb, use, detail, ...((local || tone) && { palette: local?.output.packed || tone.palette }) };
   }
 
   return Object.freeze({ prepare, snapView, modulo, ditherCoordinates, protectedPixel, resolve });
