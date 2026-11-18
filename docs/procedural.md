@@ -84,6 +84,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `materials.quilt(swatch, options)`, `materials.patchMatch(source, target, options)`, `materials.synthesize(source, target, options)`, `materials.blueNoise(options)` | Swatch quilting, exemplar matching and fill, and periodic blue-noise ranks |
 | `geometry.dualContour(field, bounds, options)`, `geometry.surfaceNets(field, bounds, options)` | Cell-local surface samples, optional indexed preview triangles and tagged mesh output |
 | `geometry.octree(field, bounds, options)`, `geometry.stitchVoxelLevels(tree, options)`, `geometry.adaptiveSurface(field, bounds, options)` | Sparse field sampling, 2:1 voxel levels and stitched adaptive previews |
+| `geometry.simplifyQEM(mesh, options)`, `lod.mergeSplats(records, options)`, `lod.packSplats(result)` | Error-driven previews with retained material seams, ownership and protected samples |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -1007,6 +1008,29 @@ steps and exposes the tree alongside the surface.
 
 `examples/adaptive-surface.js` uses two voxel levels in one baked ring.
 The alternate seed highlights the transition edges.
+
+### Preview reduction
+
+`geometry.simplifyQEM({points, triangles}, {ratio, target, groups,
+locked, maxError})` reduces indexed triangles by quadric error. A
+collapse must preserve the local mesh link and avoid reversed or
+duplicate faces. Open boundaries and group seams are locked by
+default. Pass one owner, surface, and material record per face in
+`groups`. The result maps source vertices to surviving indices.
+
+`lod.mergeSplats(records, {ratio, target, maxDistance, maxRadius,
+viewDirections, silhouette, lockSeams})` reduces native Gaussian samples.
+Each record has `id`, `position`, `normal`, `color` in normalized RGB,
+optional `opacity`, and a `radius` or symmetric six-component
+`covariance`. Owner, material, and surface names define independent
+groups. The merger matches weighted centers and covariances, keeps
+group boundaries, and can lock near-grazing samples for specified
+view directions. Use `protect: true` for individually authored dabs.
+Constraints may stop reduction above the requested count.
+
+`lod.packSplats(result)` returns the static `data` and `count` fields
+used by the renderer. `examples/preview-lod.js` packs an original and
+reduced shield side by side.
 
 ## Optional retained authoring
 
