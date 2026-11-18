@@ -2,7 +2,7 @@
 
 A JavaScript toolkit for sculpting signed-distance solids, baking them into pixel-art Gaussian splats, and making them move, react, break, grow and remember what happened to them. Use it from Node, drive it through the `ink-studio` command, or embed the source bundle in an Inkwell or browser application.
 
-The package includes geometry, materials, lighting, animation, character controls, particles, physics, procedural environment tools and a headless renderer. Scene authors can use JavaScript or JSON. A host application supplies its own interactive viewport and editor interface.
+The package includes geometry, materials, lighting, animation, character controls, particles, physics, procedural generation, retained authoring and a headless renderer. Scene authors can use JavaScript or JSON. A host application supplies its own interactive viewport and editor interface.
 
 ## Contents
 
@@ -18,6 +18,7 @@ The package includes geometry, materials, lighting, animation, character control
 - [Importing meshes](#importing-meshes)
 - [Importing depth maps](#importing-depth-maps)
 - [Procedural worlds](#procedural-worlds)
+- [Retained authoring](#retained-authoring)
 - [Rendering and command reference](#rendering-and-command-reference)
 - [View-dependent surface materials](#view-dependent-surface-materials)
 - [Reflections, ripples and atmosphere](#reflections-ripples-and-atmosphere)
@@ -536,7 +537,29 @@ The file example assumes the current working directory is this repository. OBJ s
 
 ## Procedural worlds
 
-The environment tools produce normal solids, placements or stage systems, so their outputs use the same lighting, tags and interaction APIs:
+`KIT.procedural` runs in Node and in the plain-script browser bundle. Its tools work with signed fields, voxel grids, curves and placements. Feed those results into the sculptor, material pipeline or stage, or extract a mesh for preview or interchange. The [procedural API guide](docs/procedural.md) documents signatures, options and runnable examples.
+
+| Area | Available tools | Guide |
+| --- | --- | --- |
+| Noise and scalar fields | Seeded simplex noise and analytic derivatives, ridged and billow noise, anisotropic noise, domain warps, periodic and looped noise, terraces, distance fields and serializable composition for displacement, masks and placement. | [Composable fields](docs/procedural.md#composable-procedural-fields) |
+| Sampling and placement | Poisson disk with variable radius and anisotropy, chunk-stable spacing and species exclusion, progressive sample elimination, Lloyd relaxation, stratified surface sampling, geodesic spacing and curvature weighting. | [Stable spacing](docs/procedural.md#stable-spacing-and-finite-poisson-sampling), [Progressive samples](docs/procedural.md#progressive-samples-and-surface-detail) |
+| Terrain, rivers and habitats | Depression filling and breaching, D8 and D-infinity drainage, catchments and stream order, channel incision, meanders and cutoffs, levees and floodplains, marching-squares shorelines and climate and habitat fields. | [Watersheds](docs/procedural.md#watersheds-and-river-networks), [River editing](docs/procedural.md#river-editing-and-habitats) |
+| Routes, networks and settlements | Terrain-aware A* with slope and clearance, visibility paths and clearance-tested splines, fast-marching travel times, Delaunay networks and minimum spanning trees, Steiner approximations, tensor and agent-grown streets, frontage parcels and medial paths. | [Terrain routes](docs/procedural.md#terrain-routes-between-pins), [Branching networks](docs/procedural.md#triangulation-and-branching-networks), [Street systems](docs/procedural.md#street-systems-parcels-and-medial-paths) |
+| Buildings and construction | Split, repeat and inset grammars with pinned bays, fitted courses and ribbons, panel frames and attachment slots, dimensioned socket assemblies, load paths, damage rules, adjacency floor plans and packing, signed footprint offsets and weighted roofs with per-edge pitches. | [Shape grammar](docs/procedural.md#shape-grammar-and-pinned-bays), [Socket assemblies](docs/procedural.md#socket-assemblies-supports-and-damage), [Weighted roofs](docs/procedural.md#footprints-and-weighted-pitched-roofs) |
+| Constraints and layouts | Socket-constrained and overlapping Wave Function Collapse, constraint propagation and backtracking with pins, Wang and hierarchical tiling, grid and graph rewrite rules, binary space partitioning and connected cellular caves. | [Socket tiling](docs/procedural.md#socket-tiling-and-learned-swatches), [Rewriting](docs/procedural.md#grid-and-graph-rewriting), [Rooms and caves](docs/procedural.md#rooms-caves-and-packing) |
+| Growth and ecology | Stochastic, parametric L-systems with environmental inputs, branching across surfaces, leaf venation, moisture-aware roots, pipe-model taper, diffusion-limited aggregation, grid and surface Gray–Scott patterns, seed dispersal and succession. | [Vegetation](docs/procedural.md#vegetation-and-colony-patterns), [Surface growth](docs/procedural.md#surface-growth) |
+| Sculptural forms and fracture | Superquadrics, profile lofts, medial skeletons, mirrored and radial grammars, gyroid and other periodic solids, variable shells, weighted anisotropic fracture, stress-guided cracks and progressive bond failure. Bake bounded forms with `S.implicitForm`. | [Implicit forms](docs/procedural.md#implicit-forms), [Fracture](docs/procedural.md#implicit-fracture-and-crack-paths) |
+| Pixel materials | Curvature and occlusion wear, contact masks and runoff streaks, triplanar and tangent-aligned patterns, object-anchored thresholds with pixel-footprint filtering, perceptual ramps, distance outlines, swatch quilting, PatchMatch fills and void-and-cluster dither. | [Contact fields](docs/procedural.md#contact-fields-runoff-and-contours), [Material mapping](docs/procedural.md#material-mapping-ramps-and-distance-ink), [Swatch synthesis](docs/procedural.md#swatch-synthesis-and-threshold-ranks) |
+| Geometry and level of detail | Euclidean distance transforms, signed-field reinitialization, polygon triangulation with holes and constrained Delaunay, Surface Nets, dual contouring, adaptive octrees and stitched voxel levels, quadric mesh simplification and guarded Gaussian splat merging. | [Dual surfaces](docs/procedural.md#dual-surface-samples-and-reinitialization), [Adaptive levels](docs/procedural.md#adaptive-voxel-levels), [Preview reduction](docs/procedural.md#preview-reduction) |
+| Motion and persistent changes | Streamlines and signed-obstacle wakes, closed trajectories, splat advection on deforming surfaces, stable fluids and shallow water, wetness and drying, temperature and exposure, snow and frost, material state graphs and transport-based morphs. Ground traversal, ambient roaming and a scene clock support live worlds. | [Currents](docs/procedural.md#currents-and-surface-motion), [Fluids](docs/procedural.md#fluid-grids), [Weather and materials](docs/procedural.md#weather-and-retained-materials), [Splat transport](docs/procedural.md#splat-transport) |
+
+Run [terrain routing](examples/terrain-route.js), [a weighted roof](examples/weighted-roof.js), [texture synthesis](examples/texture-synthesis.js), or [a transport morph](examples/transport-morph.js) from the checkout.
+
+```sh
+node cli/ink-studio.js render examples/weighted-roof.js --seed 1 --ortho --colored
+```
+
+Higher-level scene helpers include:
 
 - `K.curve` and `K.sweep`: paths, ribbons, leaves, planks and swept profiles.
 - `K.grow`: surface-aware scattering, branching, species variation, instancing, rocks, creepers and spreading patches.
@@ -562,7 +585,13 @@ species.sow(S, places);
 S.bake();
 ```
 
-Each module opens with signatures and option descriptions. Use `ink-studio catalog <words>` to locate an existing feature, then follow its `where` field to the implementation.
+Use `ink-studio catalog <words>` to search catalog entries and follow their `where` fields to the implementation.
+
+## Retained authoring
+
+`KIT.authoring.document` stores scene intent as JSON with stable IDs, deterministic seeds, transactions, undo and redo, and an optional autosave adapter. Generated parts can keep hand edits across regeneration. They can also be suppressed or promoted to independent entities.
+
+`KIT.authoring.context` adds spatial queries, raycasts, named surface anchors, transform resolution, and rules that respond to changes in related entities. `KIT.authoring.groups` supports batch transforms, copying, deletion and named selections. `KIT.procedural.chunks` rebuilds affected preview or final chunks and cancels superseded work. See the [retained authoring API](docs/procedural.md#optional-retained-authoring), [incremental realization](docs/procedural.md#incremental-realization) and [runnable example](examples/procedural/authoring-example.js).
 
 ## Rendering and command reference
 
@@ -717,6 +746,7 @@ Then `ink-studio scenes`, `render`, `snap` and other commands operate on that co
 | `kit/kx-life.js` | Plants, shells, horns, antlers, ribs, feathers, scales and tentacles. |
 | `kit/ky-built.js` | Masonry walls, worn steps and fences. |
 | `kit/kz-weather.js` | Falling weather, snowdrifts and frost. |
+| `kit/p*.js` | [Procedural fields, geometry, layouts, materials, motion and retained authoring](docs/procedural.md). |
 
 Other directories:
 
@@ -724,7 +754,7 @@ Other directories:
 - `demos/`: the seven bundled interactive dioramas.
 - `examples/`: small runnable scenes corresponding to this guide.
 - `lab/`: larger shape experiments, mesh examples and the data-driven shrine.
-- `tests/`: pixel-rendering unit tests.
+- `tests/`: unit tests for rendering, procedural tools, authoring and simulation.
 - `scripts/`: source checks and formatting support.
 - `catalog.json`: searchable descriptions of features available in this package.
 - `storage-retention.json`: exact retained inputs and disposable generated outputs.
@@ -740,7 +770,7 @@ node cli/ink-studio.js snap watcher --t 0,2
 node cli/ink-studio.js check watcher
 ```
 
-`npm test` runs five pixel-rendering unit tests and 171 numerical self-checks covering the toolkit and simulated demos. `npm run lint` runs a focused comment guard; it is not a general JavaScript linter. The guard rejects source-like statements after `//` because they would be silently commented out. Put usage examples in block comments.
+`npm test` runs the unit tests and the CLI self-checks for the toolkit and simulated demos. `npm run lint` checks for source-like statements after `//` that would be silently commented out. Put usage examples in block comments.
 
 Visual baselines are created explicitly by `snap`; no baseline images are bundled. `check` compares rendered pixels against those baselines. Keep baselines when they provide useful regression evidence; generated previews and the compiled `dist/` bundle can be regenerated.
 
@@ -749,9 +779,3 @@ The package is currently version `0.1.0` and marked private.
 ## License
 
 Licensed under the [MIT License](LICENSE).
-
-### Procedural geometry
-
-`KIT.procedural` provides renderer-independent geometry, layout, placement and
-surface operations for Node and the browser bundle. See the [procedural API and
-gallery instructions](docs/procedural.md).
