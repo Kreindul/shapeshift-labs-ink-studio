@@ -30,6 +30,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.implicitSurface(field, bounds, options)` | Marching tetrahedra for negative-inside fields, with a bounded cell count |
 | `pieces.convex`, `pieces.box`, `pieces.beam`, `pieces.tube`, `pieces.union` | Reusable solid pieces and query unions. Union meshes contain constituent shells |
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
+| `fittedRibbon({inner, outer, pitch, gap, closed, phase, budget})` | Fit repeating bands along paired 2D or 3D rails. Each logical cell contains quadrilateral footprints split at source edges |
 | `planarCells.layout(bounds, mask, options)`, `planarCells.prism(cell, options)` | Stable planar cells clipped to a mask, including disconnected fragments and holes. Prisms provide distance, ray, sampling and closed mesh operations |
 | `supportSkirt({outline, ground, embed, overlap, maxDrop})` | Fill vertically below a convex planar carrier and above the supplied height field, up to the configured drop |
 | `basins.surface(carrier, mask, options)`, `terraces.surface(carrier, configuration)` | Masked level cuts and configurable height bands. Carrier provides bounds, height, normal and domain predicates |
@@ -73,6 +74,13 @@ segment, so an interval never bridges a bend. A route has `length` and
 `sample(t)` returning a `point` and optional frame metadata. For custom curves,
 the caller owns arc-length parameterization. The sample contract is shared
 with `spans.catenary`.
+
+For fitted ribbons, corresponding inner and outer vertices define a strip.
+Pitch and gap are distances along the inner rail. The pitch is fitted to the
+total length and a corner splits a cell into fragments with the same key.
+`closed: true` connects the last and first vertices. A fractional `phase`
+shifts the joints around that seam. The result contains footprints in the
+input coordinate system so callers can extrude, clip or sample them.
 
 Catalog definitions may name one or several parents using `extends`. A
 resolved profile merges named or inline layers in order. Object keys compose

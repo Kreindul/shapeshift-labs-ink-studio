@@ -232,6 +232,27 @@
     return [lower, upright, cover, ...seams];
   }
 
+  function fittedRibbon(shape, material) {
+    const inner =
+      shape === 'arch'
+        ? [[1.2, 0], ...Array.from({ length: 17 }, (_, i) => {
+          const angle = (i * Math.PI) / 16;
+          return [1.2 * Math.cos(angle), 1 + 1.2 * Math.sin(angle)];
+        }), [-1.2, 0]]
+        : [[-1.3, 0], [1.3, 0], [1.5, 0.55], [1.5, 1.6], [0.9, 2], [-0.9, 2], [-1.5, 1.6], [-1.5, 0.55]];
+    const outer = inner.map(([x, y]) => [x * 1.23, 1 + (y - 1) * 1.26]);
+    const band = P.fittedRibbon({ inner, outer, pitch: 0.47, gap: 0.036, closed: shape !== 'arch' });
+    return band.cells.flatMap(cell =>
+      cell.fragments.map(({ points, edge }) => {
+        const vertices = [-0.13, 0.13].flatMap(z => points.map(([x, y]) => [x, y, z]));
+        return P.pieces.convex(vertices, P.pieces.boxFaces, {
+          key: cell.key + '/' + edge,
+          material: cell.index % 3 ? material : 'ochre'
+        }).mesh;
+      })
+    );
+  }
+
   const examples = [
     ['Fitted courses', 'Staggered units fit the domain and preserve physical joints.', courses],
     ['Masked cells', 'Clipped prisms follow an annular mask with real gaps.', cells],
@@ -249,7 +270,9 @@
       'The same dimensions and geometry use overridden material roles.',
       () => fittedRoute('warm')
     ],
-    ['Surface contacts', 'The seam follows the intersecting faces and stops where a solid covers it.', surfaceContact]
+    ['Surface contacts', 'The seam follows the intersecting faces and stops where a solid covers it.', surfaceContact],
+    ['Fitted arch trim', 'Physical joints follow the inner profile through each bend.', () => fittedRibbon('arch', 'cream')],
+    ['Fitted hatch trim', 'The same strip layout follows a closed panel profile.', () => fittedRibbon('hatch', 'glaze')]
   ];
 
   function triangles(meshes) {
