@@ -1,5 +1,7 @@
 /* Core scene optics descriptors and samplers shared by browser hosts and the CLI. */
 const SceneOptics = (() => {
+  const reflection = typeof ReflectionPlane === 'undefined' ? require('./reflection-plane.js') : ReflectionPlane;
+  const { planeDistance, reflectedView, captureView } = reflection;
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const sub = (a, b) => a.map((v, i) => v - b[i]);
   const length = v => Math.hypot(...v);
@@ -39,23 +41,6 @@ const SceneOptics = (() => {
       bias: nonnegative(bias, 'Reflection bias'),
       select
     };
-  }
-
-  function planeDistance(surface, x, y, z) {
-    const { at, normal } = surface;
-    return (x - at[0]) * normal[0] + (y - at[1]) * normal[1] + (z - at[2]) * normal[2];
-  }
-
-  // Multiply an orthogonal scene-to-view matrix by a world-space mirror.
-  function reflectedView(matrix, surface) {
-    const out = matrix.slice(),
-      { at, normal } = surface;
-    for (let row = 0; row < 3; row++) {
-      const projection = matrix[row] * normal[0] + matrix[4 + row] * normal[1] + matrix[8 + row] * normal[2];
-      for (let col = 0; col < 3; col++) out[col * 4 + row] -= 2 * projection * normal[col];
-      out[12 + row] += 2 * projection * dot(at, normal);
-    }
-    return out;
   }
 
   function volumeColor(value, palette) {
@@ -279,6 +264,6 @@ const SceneOptics = (() => {
     };
   }
 
-  return { plane, planeDistance, reflectedView, fog, sphere, box, shaft, prepareVolumes, trace, ripple, ringSampler };
+  return { plane, planeDistance, reflectedView, captureView, fog, sphere, box, shaft, prepareVolumes, trace, ripple, ringSampler };
 })();
 if (typeof module !== 'undefined') module.exports = SceneOptics;

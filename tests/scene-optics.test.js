@@ -15,6 +15,12 @@ test('a tilted reflection fixes the plane and reflects the signed distance aroun
   close(mapPoint(matrix, plane.at), plane.at);
   close(mapPoint(matrix, [3, 4, 9]), [1, 4, 7]);
   close(K.reflection.reflectedView(matrix, plane), identity);
+  const capture = K.reflection.captureView(identity, plane, [3, 4, 9]);
+  close(capture.view, matrix);
+  close(capture.equation, [Math.SQRT1_2, 0, Math.SQRT1_2, -10 * Math.SQRT1_2]);
+  assert.equal(capture.bias, plane.bias);
+  assert.equal(K.reflection.captureView(identity, plane, [1, 4, 7]), null);
+  assert.equal(K.reflection.captureView(identity, plane, plane.at), null);
   assert.throws(() => K.reflection.plane({ id: 'bad', normal: [0, 0, 0] }), /nonzero/);
 });
 

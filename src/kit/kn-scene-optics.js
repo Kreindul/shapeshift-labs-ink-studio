@@ -2,6 +2,7 @@
   K.reflection = {
     plane: SceneOptics.plane,
     reflectedView: SceneOptics.reflectedView,
+    captureView: SceneOptics.captureView,
     material(base, plane, options) {
       return SurfaceLook.material(base, { layers: { mirror: { ...options, type: 'planarReflection', plane } } });
     }
