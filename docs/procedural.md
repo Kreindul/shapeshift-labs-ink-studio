@@ -67,6 +67,8 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `routes.layout(route, options)` | Fit bounded intervals on a polyline, catenary, or compatible curve. Place caller-chosen pieces using gapped endpoints and midpoint frames |
 | `routes.fitStairApproach(options)` | Fit a short stair flight from an exposed landing to a sampled carrier surface. |
 | `edgeClearance.strip(a, b, options)`, `edgeClearance.ranges(a, b, strips)` | Split a straight edge into retained and removed ranges where it crosses sloped clearance strips. |
+| `snapping.resolve(point, features, options)` | Project to a bounded point or segment and return the winning feature with its caller-supplied identity. |
+| `railGuard(options, meta)` | Build closed rail and upright post pieces with adjustable height, spacing and rail levels. |
 | `traceSignedIntervals(sample, options)` | Find where a signed field is negative along a bounded curve parameter. Supply a slope bound to skip homogeneous regions. |
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
@@ -256,6 +258,21 @@ defaults to zero. `above` and `below` default to .20 world units.
 corridors and returns ordered normalized `{kept, removed}` intervals. Sample
 these intervals on the original edge to build separate guard, trim or fence
 pieces. For piecewise-linear edges, apply the query to each segment.
+
+`snapping.resolve(position, features, {tolerance, axes})` returns the eligible
+feature, projected point, distance and segment parameter `t`, or `null`.
+A feature has a unique `id`, a world point `from`, and optional `to` for a
+finite segment. A feature can override `tolerance` or set a numeric `priority`.
+After the distance check, higher priority wins, followed by closest distance
+and then feature ID. Supply `axes: [0, 2]` to snap in plan and preserve height.
+Attach an owner or product-specific data to the feature for use after the snap.
+
+`railGuard({path, up, height, thickness, postWidth, postSpacing, levels,
+maxPieces}, meta)` returns closed construction pieces with the owner, material
+and key prefix from `meta`. Posts follow the supplied up direction. The layout
+puts posts at ends and corners, then divides each run at or below the given
+spacing. The `levels` array gives the rail heights as fractions of guard height.
+Call it with retained spans from `edgeClearance` to leave an approach opening.
 
 `traceSignedIntervals(sample, {range, maxSlope, step, tolerance, maxSamples})`
 returns ordered pairs `[low, high]` where `sample(t)` is negative. The
