@@ -47,6 +47,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `emitters.compile(spec)` | Deterministic looping samples with caller-supplied direction and drift. Sample at any finite time with `sample(index, time)` or `samples(time)` |
 | `routes.polyline(points, options)`, `routes.aroundConvex(outline, start, end, options)` | Arc-length routes with frames and closest queries. Convex XZ routes project endpoints onto an offset perimeter and interpolate world Y |
 | `routes.terrain(start, end, options)` | Bounded, terrain-aware search between pinned points with slope, signed clearance, keep-out regions and turn costs |
+| `hydrology.analyze(height, options)` | Priority-Flood, D8 catchments, stream orders, channel routes, wetness and optional D-infinity flow |
 | `routes.layout(route, options)` | Fit bounded intervals on a polyline, catenary, or compatible curve. Place caller-chosen pieces using gapped endpoints and midpoint frames |
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
@@ -152,6 +153,47 @@ in both versions.
 ```sh
 node cli/ink-studio.js render examples/terrain-route.js --seed 13 --ortho --colored
 node cli/ink-studio.js render examples/terrain-route.js --seed 14 --ortho --colored
+```
+
+### Watersheds and river networks
+
+Pass `P.hydrology.analyze(height, {bounds, cell, origin, channelArea, lakeAt})`
+a deterministic `height(x, z)` callback and a bounded XZ work region. The
+lattice is aligned to the world coordinates in `origin`, which defaults
+to `[0, 0]`. Drainage uses Priority-Flood depression filling and D8
+steepest descent. Interior flats follow the flood path towards an outlet.
+The boundary represents the extent of the drainage model. Re-run the analysis
+when the extent, elevation, or rainfall changes. The optional
+`rain(x, z, y)` supplies a nonnegative multiplier for each cell's area.
+
+- `fields` contains row-major typed arrays, X first. Elevation is the authored
+  surface, drainage height is the filled surface, and terrain height applies
+  fills only outside authored lakes. `receiver` is the downstream sample
+  index or `-1` at an outlet. Treat the arrays as analysis results when
+  reusing them with the point queries.
+- `sample(x, z)` interpolates scalar data such as accumulation and wetness.
+  Catchment and lake IDs, lake level, and stream order use the nearest
+  lattice sample. It returns `null` outside the sampled region.
+- `reaches` contains ordinary arc-length routes separated at stream starts,
+  junctions, lakes, and outlets. The first directed world-lattice edge
+  determines a reach ID. The same edge keeps its identity while the lattice
+  alignment and that section of the graph agree. Set `channelArea` to the
+  minimum contributing area for a visible channel.
+- `lakeAt(x, z, y)` may return a lake ID, `{id, level}`, or `null`.
+  An authored lake keeps its bed in `terrainHeight` and its specified water
+  level. The drainage grid routes through it, and internal lake channel
+  segments remain submerged. Its network node connects incoming and outgoing
+  reaches. `wetness(x, z)` returns one on sampled lake interiors.
+- `distributed: true` also returns D-infinity area accumulation with
+  `receiver`, `secondary`, and `secondaryShare` arrays. Flow may split
+  between adjacent downhill directions adjoining the steepest facet.
+  The reach and catchment APIs describe the D8 network.
+
+The splat example uses the network to place river surfaces and the wetness
+field to darken banks and place reeds around an authored pond.
+
+```sh
+node cli/ink-studio.js render examples/watershed.js --ortho --colored
 ```
 
 ## Optional retained authoring
