@@ -1,0 +1,70 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { ambientMotion } = require('..').load().KIT.procedural;
+
+const place = ([x, , z]) => [x, 0, z];
+const move = ([x, , z], [dx, , dz]) => [x + dx, 0, z + dz];
+const roster = [
+  { id: 'a', kind: 'land', home: [-.3, 0, 0], radius: .22, range: 2 },
+  { id: 'b', kind: 'land', home: [.3, 0, 0], radius: .22, range: 2 }
+];
+
+test('seeded motion is independent of frame partition and roster order', () => {
+  const a = ambientMotion.create(roster, { place, move }), b = ambientMotion.create(roster.slice().reverse(), { place, move });
+  a.reconcile();
+  b.reconcile();
+  for (let i = 0; i < 240; i++) a.advance(1 / 60);
+  for (let i = 0; i < 16; i++) b.advance(.25);
+  const first = a.poses(), second = b.poses();
+  assert.equal(a.time, b.time);
+  assert.deepEqual(first, second);
+  assert(first.every(p => p.distance > .1));
+  assert(Math.hypot(first[0].point[0] - first[1].point[0], first[0].point[2] - first[1].point[2]) >= .43);
+});
+
+test('temporary attraction acknowledges a cue, rounds a blocker and follows a moving target', () => {
+  const blocked = ([x, , z]) => x > .28 && x < .6 && Math.abs(z) < .28;
+  const f = ambientMotion.create([{ id: 'a', home: [0,0,0], speed: 1.4 }], {
+    place: q => blocked(q) ? null : place(q),
+    move: (a, delta) => {
+      const next = move(a, delta);
+      return blocked(next) ? null : next;
+    }
+  });
+  f.reconcile();
+  f.attract('a', [1.9,0,0], { hold: .5, duration: 5, stop: .25 });
+  f.advance(.2);
+  assert.equal(f.poses()[0].mode, 'engaged');
+  assert.deepEqual(f.poses()[0].point, [0,0,0]);
+  for (let i = 0; i < 150; i++) {
+    f.advance(.015);
+    assert(!blocked(f.poses()[0].point));
+  }
+  assert(f.poses()[0].point[0] > 1.2);
+  f.retarget('a', [2.7,0,.25]);
+  f.advance(.85);
+  assert(f.poses()[0].point[0] > 2.2);
+  f.advance(1);
+  f.advance(.85);
+  assert(!['engaged', 'follow', 'gathered'].includes(f.poses()[0].mode));
+});
+
+test('habitat edits relocate or suspend a member while retaining its identity', () => {
+  const member = { id: 'boat', kind: 'water', home: [1,1,2], range: 1 };
+  const a = ambientMotion.create([member], {
+    place: ([x, , z], spec, water) => water && [x, water.y, z],
+    move: ([x, y, z], [dx, , dz]) => [x + dx, y, z + dz],
+    destination: (point, spec) => [spec.home[0] + .8, point[1], spec.home[2]]
+  });
+  a.reconcile({ y: 1.5 });
+  assert.deepEqual(a.poses()[0].point, [1,1.5,2]);
+  a.reconcile(null);
+  assert.equal(a.poses()[0].mode, 'dormant');
+  assert.equal(a.poses()[0].point, null);
+  a.reconcile({ y: 3 });
+  assert.equal(a.poses()[0].id, 'boat');
+  assert.equal(a.poses()[0].point[1], 3);
+  a.advance(.95, { y: 3 });
+  assert(a.poses()[0].point[0] > 1);
+  assert.throws(() => a.advance(2), /elapsed/);
+});

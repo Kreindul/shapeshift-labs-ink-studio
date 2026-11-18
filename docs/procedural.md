@@ -53,6 +53,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `volumeCuts.compile(specs)` | Union keyed XZ profiles extruded along Y. Provides a signed field, host subtraction, bounded exposed-boundary sampling and ray hits |
 | `clearance.field(solids).probe(bounds, options)` | Bounded sampled volume contacts for supplied solids with `id`, bounds, and distance functions |
 | `traversal.create({supports, clearance, ...body})` | Ground-following body with bounded displacement, head clearance, step limits and wall sliding |
+| `ambientMotion.create(members, {place, move, destination?, step?})` | Seeded roaming, local avoidance, temporary attraction and habitat revalidation |
 | `emitters.compile(spec)` | Deterministic looping samples with caller-supplied direction and drift. Sample at any finite time with `sample(index, time)` or `samples(time)` |
 | `routes.polyline(points, options)`, `routes.aroundConvex(outline, start, end, options)` | Arc-length routes with frames and closest queries. Convex XZ routes project endpoints onto an offset perimeter and interpolate world Y |
 | `routes.terrain(start, end, options)` | Bounded, terrain-aware search between pinned points with slope, signed clearance, keep-out regions and turn costs |
@@ -191,6 +192,34 @@ minimum upward component of a normalized support normal. The body leaves
 room for a step below its sampled collision volume. Set `stride` to resolve
 smaller features and `budget` to limit the number of increments in a move.
 Callers define which surfaces carry weight and which solids obstruct motion.
+
+### Ambient motion
+
+Each member has a stable `id`, an XYZ `home`, and optional `kind`, `seed`,
+`speed`, `radius`, `range`, `rest: [min, max]`, `turn`, and `yaw`.
+Lengths and speeds use caller units and units per second. Angles are in
+radians. A kind can select a ground, water, or air policy.
+
+- `place(point, member, context)` projects a request onto valid habitat.
+- `move(point, delta, member, context)` resolves movement against the
+  caller's world. It can use ground traversal, a fluid surface, or a flight
+  volume. Both queries return an XYZ point or `null`.
+- `destination(point, member, serial, context)` optionally chooses a
+  waypoint, perch or other destination. The default samples the member's
+  home range with a seeded sequence.
+
+Call `reconcile(context)` to seat the initial roster and after habitat edits.
+An invalid member tries nearby positions before going dormant. Advance time
+with `advance(seconds, context)` using up to one second per call. The solver
+uses a fixed step, tries alternate directions at obstacles, and keeps members
+apart by their radii. Render `poses()` for each member's interpolated position,
+yaw, distance traveled and current mode.
+
+`attract(id, target, {hold, duration, stop})` introduces a bounded cue. Its
+hold interval exposes an `engaged` pose before pursuing the target. Use
+`retarget(id, point)` during the cue to follow a moving marker. The caller
+controls how contacts are picked, which cues are available, and how the
+result is animated or rendered.
 
 ### Terrain routes between pins
 
