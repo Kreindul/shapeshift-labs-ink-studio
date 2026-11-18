@@ -53,6 +53,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `routes.terrain(start, end, options)` | Bounded, terrain-aware search between pinned points with slope, signed clearance, keep-out regions and turn costs |
 | `hydrology.analyze(height, options)` | Priority-Flood, D8 catchments, stream orders, channel routes, wetness and optional D-infinity flow |
 | `hydrology.breach(basin)`, `hydrology.incise(basin)`, `hydrology.meander(route)`, `hydrology.corridor(routes, height)`, `hydrology.habitat(basin)` | Watershed edits, river migration and cutoff routes, levees, floodplain masks and climate fields |
+| `routes.visibility(start, end, obstacles)`, `routes.spline(route, options)`, `routes.travelTime(sources, options)` | Polygon visibility paths, clearance-tested corner fitting and fast-marching travel-time fields |
 | `routes.layout(route, options)` | Fit bounded intervals on a polyline, catenary, or compatible curve. Place caller-chosen pieces using gapped endpoints and midpoint frames |
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
@@ -176,6 +177,37 @@ in both versions.
 ```sh
 node cli/ink-studio.js render examples/terrain-route.js --seed 13 --ortho --colored
 node cli/ink-studio.js render examples/terrain-route.js --seed 14 --ortho --colored
+```
+
+### Visibility, corner fitting, and travel time
+
+`P.routes.visibility(start, end, obstacles)` finds a shortest path in plan
+between XYZ pins. Each obstacle is a simple polygon of XZ points. The path
+can touch polygon boundaries. Use expanded obstacle outlines to leave room
+for the width of the realized path. Intermediate elevations interpolate
+along the route.
+
+`P.routes.spline(route, {radius, spacing, clearance, minClearance})`
+rounds corners using quadratic splines, shrinking the trim when needed.
+Unfit corners stay in the route. The result contains the fitted control points
+and a checked, sampled polyline. Optional `keepOut`, `height`,
+`maxDeviation`, and `maxSlope` limit the centerline. Finite resolution
+controls the clearance guarantee.
+
+`P.routes.travelTime(sources, {bounds, cell, speed})` solves a travel-time
+field with fast marching. The sources and bound vectors are XZ. A
+`speed(x, z)` of zero or less blocks travel. Query `time(x, z)` for
+interpolated arrival time or `trace([x, z], {height})` to trace an XYZ route
+toward a source. The traced route uses continuous descent when available
+and passable grid links where interpolation cannot descend. Traversal and
+boundary accuracy depend on the lattice spacing.
+
+The SDF example compares a short visibility path with a travel-time route
+that prefers firmer ground, using the same pinned trailheads.
+
+```sh
+node cli/ink-studio.js render examples/route-fields.js --seed 0 --ortho --colored
+node cli/ink-studio.js render examples/route-fields.js --seed 1 --ortho --colored
 ```
 
 ### Watersheds and river networks
