@@ -47,6 +47,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `spans.catenary(a, b, options)` | Gravity-aware sagging curve with arc-length sampling, finite frames and closest-point queries |
 | `proximity.connect(sockets, options)` | Deterministic matching of named sockets with reach, degree and compatibility limits |
 | `attachments.layout(slots, families, options)` | Stable weighted selection for framed, typed attachment slots, with fit and clearance callbacks |
+| `fitSurfaceBands({domain, opening, edges, obstructions, clearance})` | Keep bands mounted to a chart feature's edges and shorten or omit them to fit nearby boundaries and obstructions |
 | `environmentFields.evaluate(settings, elapsed)`, `environmentFields.opticalDepth(from, to, medium)`, `environmentFields.scatter(from, to, light, medium)`, `environmentFields.deposition(sample)` | Cyclic sun and sky tint, height-dependent fog, local scattering, and slope-sensitive surface loads |
 | `populations.layout(boundsList, evaluate, options)` | Seeded world-space candidates ranked by density. Expanding the work region preserves existing candidate identities |
 | `sampling.poisson(options)` | Seeded Bridson samples in finite 2D and 3D bounds, with masks, variable radii, pins and axis scaling |
@@ -188,6 +189,14 @@ Pass `slope` as the pair of derivative bounds of the normalized profile.
 The result reports their conservative values in chart units. Use
 `height(u, v, key)` with the loft's cell key to retain the original profile
 after clipping. Use `top(u, v)` to query the raised surface including joints.
+
+`fitSurfaceBands` takes two-dimensional chart bounds with `min` and `max`
+coordinates. Configure any of the left, right, bottom, and top edges with
+`reach`, optional `minReach`, and a `gap` from the opening. Set `span` and
+`minSpan` along the edge for fittings of a particular height or width.
+Each result has a stable edge key, a mount midpoint in `hinge`, and fitted
+`bounds`. An obstruction shortens the band along its outward axis. The planner
+omits the band when its remaining space falls below the configured minimum.
 
 `panelFrames` fits to the carrier dimensions and exposes its member footprints
 as `parts`. Pass those to `surfaceCells.clip` for openings, then loft the
