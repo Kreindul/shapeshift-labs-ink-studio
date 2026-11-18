@@ -928,7 +928,7 @@ function makeSculpt(B) {
     }
     if (PRB) return ci;
     const fl =
-      FLO || m.fl || (m.em || glint ? EM : (m.leaf || m.blade) && !m.still ? (m.leaf ? WINDL : WINDG) : undefined);
+      FLO || m.motionAt?.(x, y, z) || m.fl || (m.em || glint ? EM : (m.leaf || m.blade) && !m.still ? (m.leaf ? WINDL : WINDG) : undefined);
     if (m.leaf && !flat) {
       const lf = m.leaf,
         a = R() * TAU,

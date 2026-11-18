@@ -61,7 +61,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `ambientMotion.create(members, {place, move, destination?, step?})` | Seeded roaming, local avoidance, temporary attraction and habitat revalidation |
 | `layerMix.create(layers, {budget})` | Combine continuous controls into bounded per-layer gains with optional fades |
 | `inputActions.compile(contexts)` | Map physical keys and analog controls to semantic actions in named contexts |
-| `emitters.compile(spec)` | Deterministic looping samples with caller-supplied direction and drift. Sample at any finite time with `sample(index, time)` or `samples(time)` |
+| `emitters.compile(spec)` | Deterministic looping samples with configurable emission direction and local drift. Set `windborne: true` and pass `{wind: [x, z]}` when sampling to advect by particle age. |
 | `routes.polyline(points, options)`, `routes.aroundConvex(outline, start, end, options)` | Arc-length routes with frames and closest queries. Convex XZ routes project endpoints onto an offset perimeter and interpolate world Y |
 | `routes.terrain(start, end, options)` | Bounded, terrain-aware search between pinned points with slope, signed clearance, keep-out regions and turn costs |
 | `hydrology.analyze(height, options)` | Priority-Flood, D8 catchments, stream orders, channel routes, wetness and optional D-infinity flow |
@@ -1301,6 +1301,16 @@ balance. Flat water levels remain at rest over uneven terrain.
 water flowing through a lowered point in a berm.
 
 ### Weather and retained materials
+
+`airflow.frame([x, z])` converts horizontal scene velocity into raw transport
+and a bounded displacement vector for flexible materials. Use
+`airflow.bend(time, phase, frequency, reach)` for a scalar gust in scene
+units. The matching GLSL function is available in `airflow.glsl`. Cloth,
+foliage or other flexible surfaces can give each sculpt sample its own reach via
+the material callback `motionAt(x, y, z)`. Return
+`{k: 11, wind: true, ph, sp, rg}` to pack phase, angular frequency and
+reach. Use zero reach at attachment points. The flag on the baked splat lets a
+renderer apply the current wind without changing the sculpt.
 
 `motion.surfaceWeather({width, height, cell, origin, mask, initial,
 normal, clock})` tracks wetness, temperature, accumulated light

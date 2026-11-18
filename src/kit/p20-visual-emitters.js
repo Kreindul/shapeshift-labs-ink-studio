@@ -15,7 +15,8 @@
         opacity: 0.8,
         seed: 1,
         direction: [0, 1, 0],
-        drift: [0.25, 0, 0]
+        drift: [0.25, 0, 0],
+        windborne: false
       },
       raw
     );
@@ -28,6 +29,7 @@
       !Number.isFinite(V.len(p.direction)) ||
       V.len(p.direction) < 1e-8 ||
       !vector(p.drift) ||
+      typeof p.windborne !== 'boolean' ||
       p.drift.some(v => Math.abs(v) > 2048) ||
       !vector(p.color) ||
       p.color.some(v => v < 0 || v > 1) ||
@@ -60,7 +62,7 @@
   A.emitters = {
     compile(raw) {
       const parameters = validate(raw);
-      const { p, seed, spread, count, size, speed, height, growth, opacity, drift } = parameters;
+      const { p, seed, spread, count, size, speed, height, growth, opacity, drift, windborne } = parameters;
       const axis = V.norm(parameters.direction);
       const side = V.norm(V.cross(axis, Math.abs(axis[2]) < 0.8 ? [0, 0, 1] : [0, 1, 0]));
       const cross = V.cross(side, axis);
@@ -74,7 +76,7 @@
           size: size * (0.8 + K.hash(seed, index, 4) * 0.4)
         };
       });
-      function sample(index, time) {
+      function sample(index, time, wind) {
         if (!Number.isInteger(index) || index < 0 || index >= count || !Number.isFinite(time)) {
           throw new Error('Emitter sampling needs an item index and finite time');
         }
@@ -82,8 +84,13 @@
           phase = ((((time % period) / period + base.phase) % 1) + 1) % 1;
         const t = Math.min(1, phase / 0.1),
           fade = t * t * (3 - 2 * t);
+        const point = V.mad(V.mad(base.p, axis, phase * height), drift, Math.sin(phase * 7 + base.phase * 50) * phase);
+        if (wind) {
+          point[0] += wind[0] * phase * period;
+          point[2] += wind[1] * phase * period;
+        }
         return {
-          p: V.mad(V.mad(base.p, axis, phase * height), drift, Math.sin(phase * 7 + base.phase * 50) * phase),
+          p: point,
           size: base.size * (0.6 + phase * growth),
           opacity: opacity * (1 - phase) * fade
         };
@@ -91,8 +98,11 @@
       return Object.freeze({
         parameters,
         period,
-        sample,
-        samples: time => bases.map((_, index) => sample(index, time))
+        sample: (index, time, options) => sample(index, time, windborne && options?.wind && A.airflow.frame(options.wind).velocity),
+        samples(time, options) {
+          const wind = windborne && options?.wind && A.airflow.frame(options.wind).velocity;
+          return bases.map((_, index) => sample(index, time, wind));
+        }
       });
     }
   };

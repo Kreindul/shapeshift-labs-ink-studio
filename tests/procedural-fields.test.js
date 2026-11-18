@@ -119,3 +119,41 @@ test('compiled emitters cycle in a caller supplied direction and stay finite at 
     assert(emitter.sample(i, Number.MAX_VALUE).p.every(Number.isFinite));
   }
 });
+
+test('bounded airflow carries a looping emitter by age and exposes a saturated flex response', () => {
+  const wind = [1, -.5];
+  const frame = P.airflow.frame(wind);
+  assert.deepEqual(frame.velocity, wind);
+  assert(Math.hypot(...frame.flex) < 1);
+  assert.deepEqual(P.airflow.frame([0, 0]).flex, [0, 0]);
+  assert.throws(() => P.airflow.frame([21, 0]), /Wind/);
+  assert.equal(P.airflow.bend(1, 0, 1.8, 0), 0);
+  assert.notEqual(P.airflow.bend(0, 0, 1.8, 1), P.airflow.bend(.9, 0, 1.8, 1));
+  const opts = {id:'volute',p:[0,0,0],color:[.6,.6,.6],height:2,speed:1,spread:0,drift:[0,0,0]};
+  const plume = P.emitters.compile({...opts,windborne:true}), steady = P.emitters.compile(opts);
+  const still = plume.sample(0,.38), blown = plume.sample(0,.38,{wind});
+  assert.equal(blown.p[0],still.p[1]);
+  assert.equal(blown.p[1],still.p[1]);
+  assert.equal(blown.p[2],-.5*still.p[1]);
+  assert.equal(blown.opacity,still.opacity);
+  assert.deepEqual(plume.samples(.38,{wind})[0],blown);
+  assert.deepEqual(steady.sample(0,.38,{wind}),still);
+});
+
+test('sculpt materials can encode spatially varying motion on selected samples', () => {
+  const { KIT, makeBuilder, makeSculpt } = require('..').load();
+  const builder = makeBuilder(1,[0,0x558866,0x77aa88]);
+  const sculpt = KIT.sculpt(makeSculpt(builder));
+  sculpt.box([0,.3,0],[.4,.4,.07],{
+    r:[1,2],motionAt:(x,y)=>x>0?{k:11,wind:true,rg:y+.15}:undefined
+  },{res:.08});
+  sculpt.bake();
+  const {data,count}=builder.finish(),flag=KIT.procedural.airflow.packedFlag;
+  let moving=0,still=0;
+  for(let i=0;i<count;i++){
+    const q=i*16;
+    if(data[q+11]&flag){assert(data[q]>0);assert.equal(data[q+11]&15,11);moving++;}
+    else if(data[q]<0)still++;
+  }
+  assert(moving>10&&still>10);
+});
