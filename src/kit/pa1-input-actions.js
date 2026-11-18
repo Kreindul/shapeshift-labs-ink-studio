@@ -51,5 +51,15 @@
     return Object.freeze({ resolve, sample, bindings:(context,action)=>get(context).byAction.get(action) });
   }
 
-  P.inputActions=Object.freeze({compile});
+  function radial(x,y,deadZone=0) {
+    if (![x,y].every(value=>Number.isFinite(value)&&Math.abs(value)<=1) ||
+        !Number.isFinite(deadZone)||deadZone<0||deadZone>=1)
+      throw Error('Radial input needs two axes in [-1, 1] and a dead zone below 1');
+    const length=Math.hypot(x,y);
+    if (length<=deadZone) return [0,0];
+    const strength=(Math.min(1,length)-deadZone)/(1-deadZone);
+    return [x/length*strength,y/length*strength];
+  }
+
+  P.inputActions=Object.freeze({compile,radial});
 })(KIT);

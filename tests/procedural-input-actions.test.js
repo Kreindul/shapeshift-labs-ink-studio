@@ -26,3 +26,16 @@ test('independent devices combine without dead-zone drift or doubling the same a
   assert.deepEqual(map.sample('edit',[]),{rotate:0,pan:0});
   assert.throws(()=>map.resolve('edit','pad:RightX',2),/Input values/);
 });
+
+test('radial pairs keep headings, reject drift, and cap travel on diagonals',()=>{
+  const {radial}=inputActions;
+  assert.deepEqual(radial(.09,-.14,.2),[0,0]);
+  const near=(value,target)=>assert(Math.abs(value-target)<1e-9);
+  near(radial(0,-.6,.2)[1],-.5);
+  const [x,y]=radial(.3,.4,.2);
+  near(x/y,.75);
+  near(Math.hypot(x,y),.375);
+  near(Math.hypot(...radial(-1,1,.2)),1);
+  assert.throws(()=>radial(NaN,0),/Radial input/);
+  assert.throws(()=>radial(0,1,1),/Radial input/);
+});

@@ -323,6 +323,13 @@ tooltips or settings. The caller owns polling, key edges, focus, and
 persisted overrides. A caller can recompile a changed profile and keep the
 previous one if the update contains conflicting bindings.
 
+`inputActions.radial(x, y, deadZone = 0)` remaps a pair of signed analog
+axes together. The pair is zero inside the circular dead zone and reaches
+unit length at full deflection. Heading is preserved and diagonal input is
+capped to the same maximum as cardinal input. Use it for two-axis movement,
+camera control, or any other directional action. Each input axis is in
+`[-1, 1]`.
+
 ### Ordered paint coverage
 
 `materials.paintMixer([{id, coverage, operation}, ...])` accepts layers in
