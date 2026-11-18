@@ -56,3 +56,46 @@ test('queries try overlapping supports, validate callbacks and bound work', () =
   assert.throws(() => traversal.create({ supports: floor, clearance: () => NaN }).stand([0, 0, 0]), /signed distance/);
   assert(traversal.create({ supports: floor, clearance: clear, radius: .04 }).stand([0, 0, 0]));
 });
+
+test('contact traces report accepted ground movement and materials, including slides', () => {
+  const body = traversal.create({
+    supports: x => [{ y: 0, normal: up, id: 'floor', material: x < 1 ? 'grass' : 'wood' }],
+    clearance: ([, , z]) => 1 - z
+  });
+  const start = [0, 0, 0];
+  const move = body.move(start, [2, 2], { trace: true });
+  assert(move.blocked);
+  assert(move.contacts.length > 0);
+  assert.equal(move.contacts.at(-1).material, 'wood');
+  assert(move.contacts.some(contact => contact.material === 'grass'));
+  assert.deepEqual(move.contacts.at(-1).foot, move.foot);
+  assert(move.progress > Math.hypot(move.foot[0], move.foot[2]));
+  assert.equal(body.stand(start).material, 'grass');
+  assert.equal(body.move(start, [.3, 0]).contacts, undefined);
+  assert.deepEqual(body.move(start, [0, 0], { trace: true }).contacts, []);
+  assert.deepEqual(body.move(move.foot, [0, .5], { trace: true }).contacts, []);
+});
+
+test('cadence is independent of frame distance and leaves state intact when a trace exceeds its budget', () => {
+  const body = traversal.create({ supports: floor, clearance: clear });
+  const cadence = traversal.cadence({ spacing: .6, first: .2 });
+  const from = [0, 0, 0];
+  const walk = (foot, delta) => body.move(foot, [delta, 0], { trace: true });
+  const whole = cadence.advance(from, walk(from, 2).contacts);
+  cadence.reset();
+  const a = walk(from, .77), b = walk(a.foot, 1.23);
+  const split = [...cadence.advance(from, a.contacts), ...cadence.advance(a.foot, b.contacts)];
+  assert.equal(whole.length, 4);
+  assert.deepEqual(whole.map(step => step.side), ['left', 'right', 'left', 'right']);
+  whole.forEach((step, i) => {
+    near(step.foot[0], .2 + .6 * i);
+    near(split[i].foot[0], step.foot[0]);
+    assert.equal(split[i].index, i);
+  });
+  const limited = traversal.cadence({ spacing: .6, first: .2, budget: 1 });
+  assert.throws(() => limited.advance(from, walk(from, 2).contacts), /budget/);
+  assert.throws(() => limited.advance(from, [...walk(from, .3).contacts, null]), /contact/);
+  const [first] = limited.advance(from, walk(from, .3).contacts);
+  assert.equal(first.index, 0);
+  near(first.foot[0], .2);
+});

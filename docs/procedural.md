@@ -216,7 +216,7 @@ repeating route coincident endpoints. The caller supplies elapsed time, speed
 and any offsets for the camera or assembly.
 
 `traversal.create` accepts a `supports(x, z, low, high)` query returning
-candidate `{y, normal, id?}` surfaces and a `clearance(point, radius)` query
+candidate `{y, normal, id?, material?}` surfaces and a `clearance(point, radius)` query
 returning a signed distance to obstacles, positive in free space. The
 clearance query can ignore solids outside the supplied radius and return
 positive infinity for open space. Heights and distances share the scene's
@@ -224,11 +224,23 @@ coordinate units. Normal vectors need not be unit length.
 
 `body.stand([x, y, z], {rise, drop})` returns the highest stable support
 that fits the body in its search interval, or `null`. The result has
-`foot`, `support`, and `normal`. `body.move(foot, [dx, dz])` follows
+`foot`, `support`, `normal`, and the support's optional `material` tag.
+`body.move(foot, [dx, dz])` follows
 supports in increments. It limits the rise and drop per increment and
 tries sliding along an axis when a diagonal is blocked. It also returns
 `blocked`, horizontal `progress`, and the planned number of increments
 as `steps`.
+
+Use `body.move(foot, [dx, dz], {trace: true})` to collect accepted supports
+in travel order as `contacts`. A slide contributes its actual distance.
+Blocked increments contribute no contact. Pass the starting `foot` and
+the returned `contacts` to `traversal.cadence({spacing, first, budget})`
+via its `advance(foot, contacts)` method. Each event has an interpolated
+position, the increment's support and optional material, a zero-based
+`index`, and an alternating `side` of `left` or `right`. Cadence carries
+unused horizontal distance across calls. `reset()` starts a new cadence
+after teleporting or switching movement modes. The defaults are .62 units
+between events and .217 units to the first one.
 
 The default body is 1.64 units tall with radius .18, a .34 rise limit
 (`stepUp`), and a .48 drop limit (`stepDown`). `minimumNormal` sets the
