@@ -1947,3 +1947,16 @@ Exceeding the bounded fragment or work budget raises a `RangeError`.
 The layout is independent of geometry, style and rendering. A consumer can
 map the polygons onto a carrier, extrude them into physical blocks, or use the
 same layout for materials and coverage on a sloped surface.
+
+### Convex keepout subtraction
+
+`KIT.procedural.geometry.subtractConvexFaces(faces, planes, { capTag, budget })`
+removes a keepout described by half spaces from a closed, convex polygon shell.
+Each plane keeps points whose signed value `normal · point - offset` is
+nonpositive for points inside the volume to remove. The result contains closed
+convex shells with disjoint interiors. The operation keeps polygon face tags,
+and newly cut caps get the plane's tag or the supplied `capTag`.
+
+An empty or missed keepout returns the original shell, and a full cover
+returns an empty array. The default fragment budget is 256. Larger outputs
+raise a `RangeError`. The supplied half spaces and shell need to be finite.
