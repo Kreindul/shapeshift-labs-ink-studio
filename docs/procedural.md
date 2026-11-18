@@ -55,6 +55,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
 | `contacts.index(mesh, options)`, `contacts.intersections(a, b, options)`, `contacts.clipCurve(points, solids)` | Index named triangle groups, trace noncoplanar contacts, and trim contact or authored curves against closed indexed solids |
 | `contacts.traceSdf(chart, sd, options)`, `contacts.expose(curves, occluder, options)`, `contacts.field(curves)`, `contacts.runoff(curves, project, options)` | Trace SDF contacts, expose visible runs, derive distance masks and follow downhill paths |
+| `tiles.compile(definitions)`, `tiles.solve(model, options)`, `tiles.learn(swatch)`, `tiles.overlap(bank, options)`, `tiles.wang(model, options)`, `tiles.refine(coarse, model, options)` | Weighted matched sockets, example-based synthesis, world-stable patterns and coarse-to-fine layouts |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -279,6 +280,47 @@ stains and seam-driven moss.
 ```sh
 node cli/ink-studio.js render examples/contact-masks.js --seed 0 --ortho --colored
 node cli/ink-studio.js render examples/contact-masks.js --seed 1 --ortho --colored
+```
+
+### Socket tiling and learned swatches
+
+Compile tile IDs, positive weights, and directional sockets with
+`P.tiles.compile(definitions)`. Set sockets using `north`, `east`, `south`,
+and `west` keys. Omitted sockets are `null`. Opposite sides must match.
+A JavaScript `matches(a, b, direction)` option can define other compatibility.
+
+`P.tiles.solve(model, {width, height, seed, pins, ports})` uses weighted
+minimum-entropy selection, arc consistency and bounded backtracking.
+Coordinates are integer `x` and `z`. A pin names a `tile` or an allowed
+`tiles` list. A port supplies `{x, z, direction, socket}`. Use ports to
+carry the edges of an authored connectivity graph into the tiling.
+Optional `boundary` sockets apply at outer edges and next to masked cells.
+`wrap` is a boolean or separate X and Z booleans.
+
+An `ok` result contains row-major tile IDs and an `at(x, z)` query. Empty
+cells contain `null`. An inconsistent set of constraints reports
+`contradiction`, with a conflict cell when known. Limits on `maxWork` or
+`maxBacktracks` report `budget`.
+
+- `tiles.learn(swatch, {size, periodic, symmetry})` learns overlapping
+  square patterns from rows of scalar values. `tiles.overlap(bank, options)`
+  synthesizes a new swatch. Its pins are `{x, z, value}` in the output.
+- `tiles.wang(model, {width, height, labels, origin, seed})` hashes edges
+  using integer world coordinates so independent regions agree on shared
+  seams. Supply variants for every signature used by the label alphabet.
+  Incomplete sets return `missing` with the required signature.
+- `tiles.refine(coarse, model, {size, template})` expands each coarse cell
+  into a square block, then solves all fine cells together. Templates supply
+  fine tile IDs or allowed lists, or `null` for free cells. The coarse mask
+  carries through to the fine result.
+
+Use the chosen IDs to emit signed solids or splats, or interpret swatch
+values as material masks. The example bakes an authored three-way path with
+weighted socket tiles, and a ceramic panel generated from a small swatch.
+
+```sh
+node cli/ink-studio.js render examples/constraint-tiles.js --seed 0 --ortho --colored
+node cli/ink-studio.js render examples/constraint-tiles.js --seed 1 --ortho --colored
 ```
 
 ## Optional retained authoring
