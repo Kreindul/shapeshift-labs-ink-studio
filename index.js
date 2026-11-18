@@ -9,7 +9,7 @@ const fs = require('fs'),
 const KIT_DIR = path.join(__dirname, 'src', 'kit'),
   read = f => fs.readFileSync(f, 'utf8').replace(/\nif \(typeof module[^\n]*\n?$/, '\n');
 const files = () =>
-  ['src/pixel-look.js', 'src/reflection-plane.js', 'src/airflow.js', 'src/sample-coverage.js', 'src/ripple-field.js', 'src/scene-optics.js', 'src/surface-look.js', 'src/builder.js', 'src/sculpt.js']
+  ['src/pixel-look.js', 'src/reflection-plane.js', 'src/airflow.js', 'src/light-schedule.js', 'src/sample-coverage.js', 'src/ripple-field.js', 'src/scene-optics.js', 'src/surface-look.js', 'src/builder.js', 'src/sculpt.js']
     .map(f => path.join(__dirname, f))
     .concat(
       fs

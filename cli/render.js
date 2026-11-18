@@ -16,6 +16,7 @@ function toneFor(world, definition) {
 }
 const SampleCoverage = require('../src/sample-coverage.js');
 const Airflow = require('../src/airflow.js');
+const LightSchedule = require('../src/light-schedule.js');
 const surfaceShading = require('./surface-shading.js');
 const SceneOptics = require('../src/scene-optics.js');
 const { cameraRays, surfacePoint, reflectionSampler, applyAtmosphere } = require('./scene-optics.js');
@@ -186,6 +187,13 @@ function render(world, o) {
     add = new Float32Array(N),
     wet = new Float32Array(N);
   const wind = Airflow.frame(o.wind ?? an.wind);
+  const daylight = o.lightDaylight ?? o.environment?.daylight ?? an.daylight ?? 1;
+  const dusk = LightSchedule.gain(daylight);
+  const lamps = LightSchedule.select(world.lights || [], [
+    T[0]+eyeD*Math.cos(pitch)*Math.sin(yaw),
+    T[1]+eyeD*Math.sin(pitch),
+    T[2]+eyeD*Math.cos(pitch)*Math.cos(yaw)
+  ], { daylight, duskOnly: true });
   const sampleWithdrawal = SampleCoverage.amount(o.sampleWithdrawal ?? world.sampleWithdrawal ?? 0);
   for (let i = 0, q = 0; i < N; i++, q += 16) {
     let x = d[q],
@@ -228,7 +236,7 @@ function render(world, o) {
       z = -sn * x + cs * z;
       x = nx;
     } else if (kind === 6) y += Math.sin(t * sp + ph) * rg;
-    else if (kind === 7) al *= 0.82 + 0.18 * Math.sin(t * sp + ph);
+    else if (kind === 7 && ex !== LightSchedule.emissionMarker) al *= 0.82 + 0.18 * Math.sin(t * sp + ph);
     else if (kind === 8) {
       const f = 0.2 + 0.8 * Math.abs(Math.sin(t * sp + ph));
       x = rg + (x - rg) * f;
@@ -339,6 +347,9 @@ function render(world, o) {
       b *= 1 - 0.3 * wet[i];
     }
     const hasSurface = surface?.has(i);
+    const automatic = kind === LightSchedule.emissionKind && d[q + 15] === LightSchedule.emissionMarker;
+    const sourceScale = automatic ? LightSchedule.emissionScale(dusk) : 1;
+    const scheduled = lamps.length && !(flags & 22) && al >= 1 ? LightSchedule.transfer(lamps, x, y, z) : null;
     const dn = clamp((-cz - (eyeD - R)) / (2 * R), 0, 1);
     const iz = -1 / cz,
       tx = clamp(cx * iz, -limx, limx) / iz,
@@ -462,6 +473,13 @@ function render(world, o) {
               pb += (fog[2] - pb) * fogMix;
             }
           }
+        }
+        if (automatic || scheduled) {
+          const exposure = scheduled?.gain ?? sourceScale;
+          const tint = scheduled?.color;
+          pr = Math.min(1, pr * exposure + (tint?.[0] ?? 0));
+          pg = Math.min(1, pg * exposure + (tint?.[1] ?? 0));
+          pb = Math.min(1, pb * exposure + (tint?.[2] ?? 0));
         }
         if (reflectInRaster) {
           const hit = surfacePoint(rayAt(ix + 0.5, iy + 0.5), normal, x, y, z, -cz, R);

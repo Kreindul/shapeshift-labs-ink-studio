@@ -1479,6 +1479,23 @@ balance. Flat water levels remain at rest over uneven terrain.
 `examples/fluid-grids.js` uses the two grids to show suspended ink and
 water flowing through a lowered point in a berm.
 
+### Daylight-dependent sources
+
+`KIT.procedural.lightSchedule.gain(daylight)` gives dusk strength. It is
+zero above .58 daylight, one below .16 and eases between them.
+`lightSchedule.select(lights, eye, {daylight, duskOnly, limit})` scales
+sources declaring `schedule: 'dusk'` and chooses the strongest nearby
+sources. Lights have world position `p`, positive `radius`, `intensity`,
+normalized RGB `color` and an optional unit `normal` pointing toward
+the illuminated side. `transfer(lights, x, y, z)` evaluates the bounded
+spill from previously selected sources. Reuse `lightSchedule.glsl` for
+radial falloff and the facing term on the GPU.
+
+Use `lightSchedule.marker` as a splat motion descriptor for the source's
+visible emitter. The offline renderer reads `lightDaylight` or the
+environment daylight option and applies the live sources in `world.lights`
+over the retained world.
+
 ### Weather and retained materials
 
 `airflow.frame([x, z])` converts horizontal scene velocity into raw transport
