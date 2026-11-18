@@ -80,6 +80,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.distanceTransform(mask, options)`, `materials.outline(mask, options)` | Exact Euclidean distances over pixel or voxel centers, including anisotropic spacing and inside/outside masks |
 | `materials.triplanar(sample, options)`, `materials.tangent(sample, options)`, `materials.threshold(field, options)`, `materials.ramp(colors, options)` | Surface-aligned patterns, pixel-footprint filtering and perceptual palettes |
 | `materials.quilt(swatch, options)`, `materials.patchMatch(source, target, options)`, `materials.synthesize(source, target, options)`, `materials.blueNoise(options)` | Swatch quilting, exemplar matching and fill, and periodic blue-noise ranks |
+| `geometry.dualContour(field, bounds, options)`, `geometry.surfaceNets(field, bounds, options)` | Cell-local surface samples, optional indexed preview triangles and tagged mesh output |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -909,6 +910,26 @@ for colors and masks.
 
 `examples/texture-synthesis.js` shows a quilted motif, an exemplar
 repair, and a blue-noise density ramp on native voxel tiles.
+
+### Dual surface samples and reinitialization
+
+`geometry.surfaceNets(field, bounds, {cell})` takes the mean of
+zero crossings in each active voxel. `geometry.dualContour` uses the
+same crossings and fits their surface planes in a constrained
+least-squares solve. Both take a negative-inside XYZ callback and
+optionally a `normal(x, y, z)` callback. Results provide `points`,
+`normals`, cell keys, and fit errors. Those samples can feed a custom
+sculpt solid. Preview consumers can use `quads`, indexed `triangles`,
+or `mesh({owner, surface, material})`.
+
+`K.sdfgrid(sd, lo, hi, cell).reinitialize({passes: 2})` starts fast
+sweeping from interpolated subcell crossings. It preserves field sign
+and restores distance units after editing or scaling a signed field.
+`S.smooth(held, {cell, reinitialize: true})` applies the same step before
+baking a held sculpt. The bounded grid samples drive the zero surface.
+
+`examples/dual-surface-studies.js` bakes a pair of carved blocks
+using cell samples from the two extractors.
 
 ## Optional retained authoring
 
