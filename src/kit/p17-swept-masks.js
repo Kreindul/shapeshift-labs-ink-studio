@@ -99,57 +99,54 @@
       lastRadius;
     // Public queries validate once. A composed field calls its privately owned
     // evaluators after its own validation, rather than repeating it per stroke.
-    function evaluate(q, wantRadius = false) {
-      if (known && q[0] === lastX && q[1] === lastY) return wantRadius ? lastRadius : lastDistance;
+    function evaluate(x, y, wantRadius = false) {
+      if (known && x === lastX && y === lastY) return wantRadius ? lastRadius : lastDistance;
       let best = Infinity,
         radius = p.radii[0];
-      if (!segments.length) best = Math.hypot(q[0] - p.points[0][0], q[1] - p.points[0][1]) - radius;
+      if (!segments.length) best = Math.hypot(x - p.points[0][0], y - p.points[0][1]) - radius;
       else if (uniform) {
         let squared = Infinity,
           bx = 0,
           by = 0,
           overflow = Infinity;
         for (const s of segments) {
-          const t =
-              s.end === null ? clamp(((q[0] - s.a[0]) * s.dx + (q[1] - s.a[1]) * s.dy) / s.length / s.length) : s.end,
-            x = q[0] - s.a[0] - t * s.dx,
-            y = q[1] - s.a[1] - t * s.dy,
-            d = x * x + y * y;
-          if (d === Infinity) overflow = Math.min(overflow, Math.hypot(x, y));
+          const u = x - s.a[0], v = y - s.a[1];
+          const t = s.end === null ? clamp((u * s.dx + v * s.dy) / s.length / s.length) : s.end;
+          const qx = u - t * s.dx, qy = v - t * s.dy, d = qx * qx + qy * qy;
+          if (d === Infinity) overflow = Math.min(overflow, Math.hypot(qx, qy));
           if (d < squared) {
             squared = d;
-            bx = x;
-            by = y;
+            bx = qx;
+            by = qy;
           }
         }
         best = (squared === Infinity ? overflow : Math.hypot(bx, by)) - radius;
       } else
         for (const s of segments) {
+          const u = x - s.a[0], v = y - s.a[1];
           let t = s.end;
           if (t === null) {
-            const x = q[0] - s.a[0],
-              y = q[1] - s.a[1],
-              along = (x * s.dx + y * s.dy) / s.length,
-              across = Math.abs(x * s.dy - y * s.dx) / s.length;
+            const along = (u * s.dx + v * s.dy) / s.length,
+              across = Math.abs(u * s.dy - v * s.dx) / s.length;
             t = clamp((along + (s.k * across) / s.root) / s.length);
           }
           const r = s.ra + t * s.delta,
-            value = Math.hypot(q[0] - s.a[0] - t * s.dx, q[1] - s.a[1] - t * s.dy) - r;
+            value = Math.hypot(u - t * s.dx, v - t * s.dy) - r;
           if (value < best) {
             best = value;
             radius = r;
           }
         }
       known = true;
-      lastX = q[0];
-      lastY = q[1];
+      lastX = x;
+      lastY = y;
       lastDistance = best;
       lastRadius = radius;
       return wantRadius ? radius : best;
     }
     const distance = (q, wantRadius = false) => {
         point(q);
-        return evaluate(q, wantRadius);
+        return evaluate(q[0], q[1], wantRadius);
       },
       result = {
         owner: spec.id,
@@ -186,6 +183,7 @@
     );
     const strokes = selected,
       fast = strokes.map(s => evaluators.get(s)),
+      adds = strokes.map(s => s.parameters.operation === 'add'),
       limits = strokes.map(s => {
         const b = [s.bounds.min[0], s.bounds.max[0], s.bounds.min[2], s.bounds.max[2]];
         return b.concat(Number.EPSILON * 8 * Math.max(1, ...b.map(Math.abs)));
@@ -194,40 +192,47 @@
       byId = new Map(strokes.map((s, i) => [s.owner, i]));
     let last = null,
       lastValue = null,
-      distanceKnown = false,
       distanceX,
       distanceY,
-      distanceValue;
+      distanceValue,
+      distanceCeiling;
     // Signed L-infinity distance to the expanded box is a lower bound on the
     // swept-disc distance, including inside it. Keep a rounding margin so this
     // rejection never substitutes a box distance for the actual stroke field.
-    const lower = (i, q) => {
+    const lower = (i, x, y) => {
       const b = limits[i];
-      return Math.max(b[0] - q[0], q[0] - b[1], b[2] - q[1], q[1] - b[3]) - b[4];
+      return Math.max(b[0] - x, x - b[1], b[2] - y, y - b[3]) - b[4];
     };
-    const irrelevant = (i, q, threshold) =>
+    const irrelevant = (i, x, y, threshold) =>
       threshold === -Infinity ||
-      (threshold !== Infinity && lower(i, q) > threshold + 1e-12 * (1 + Math.abs(threshold)));
-    function rememberDistance(q, d) {
-      distanceKnown = true;
-      distanceX = q[0];
-      distanceY = q[1];
+      (threshold !== Infinity && lower(i, x, y) > threshold + 1e-12 * (1 + Math.abs(threshold)));
+    function rememberDistance(x, y, d, ceiling = Infinity) {
+      distanceX = x;
+      distanceY = y;
       distanceValue = d;
+      distanceCeiling = d < ceiling ? Infinity : ceiling;
       return d;
+    }
+    // Min and max both commute with an upper clamp. Keep the exact field
+    // inside that limit while skipping distant add and erase operations.
+    function distanceAt(x, y, ceiling = Infinity) {
+      if (!Number.isFinite(x) || !Number.isFinite(y) || typeof ceiling !== 'number' || Number.isNaN(ceiling)) {
+        throw new Error('Brush queries need a finite 2D point and a numeric ceiling');
+      }
+      if (x === distanceX && y === distanceY && ceiling <= distanceCeiling) return Math.min(distanceValue, ceiling);
+      let d = ceiling;
+      for (let i = 0; i < fast.length; i++) {
+        if (adds[i]) {
+          if (!irrelevant(i, x, y, d)) d = Math.min(d, fast[i](x, y));
+        } else if (d < ceiling && !irrelevant(i, x, y, -d)) {
+          d = Math.min(ceiling, Math.max(d, -fast[i](x, y)));
+        }
+      }
+      return rememberDistance(x, y, d, ceiling);
     }
     function distance(q) {
       point(q);
-      if (distanceKnown && q[0] === distanceX && q[1] === distanceY) return distanceValue;
-      let d = Infinity;
-      for (let i = 0; i < strokes.length; i++) {
-        const s = strokes[i],
-          add = s.parameters.operation === 'add';
-        if (!irrelevant(i, q, add ? d : -d)) {
-          const sd = fast[i](q);
-          d = add ? Math.min(d, sd) : Math.max(d, -sd);
-        }
-      }
-      return rememberDistance(q, d);
+      return distanceAt(q[0], q[1]);
     }
     function sample(q) {
       point(q);
@@ -237,7 +242,7 @@
         coverage = 0;
       for (let i = 0; i < strokes.length; i++) {
         const s = strokes[i],
-          sd = fast[i](q),
+          sd = fast[i](q[0], q[1]),
           w = weight(sd, s.parameters.softness);
         if (s.parameters.operation === 'add') {
           d = Math.min(d, sd);
@@ -252,15 +257,16 @@
       }
       if (coverage < EPS) owner = null;
       last = q.slice();
-      lastValue = { distance: rememberDistance(q, d), weight: coverage, owner };
+      lastValue = { distance: rememberDistance(q[0], q[1], d), weight: coverage, owner };
       return Object.assign({}, lastValue);
     }
     function visibleDistance(id, q) {
       point(q);
       const i = byId.get(id);
-      if (i === undefined || strokes[i].parameters.operation !== 'add') return Infinity;
-      let d = fast[i](q);
-      for (let j = i + 1; j < strokes.length; j++) if (!irrelevant(j, q, -d)) d = Math.max(d, -fast[j](q));
+      if (i === undefined || !adds[i]) return Infinity;
+      const [x, y] = q;
+      let d = fast[i](x, y);
+      for (let j = i + 1; j < strokes.length; j++) if (!irrelevant(j, x, y, -d)) d = Math.max(d, -fast[j](x, y));
       return d;
     }
     const radiusDistances = new Float64Array(strokes.length),
@@ -274,9 +280,9 @@
           radiusDistances[i] = Infinity;
           continue;
         }
-        const d = fast[i](q);
+        const d = fast[i](q[0], q[1]);
         radiusDistances[i] = d;
-        radiusValues[i] = fast[i](q, true);
+        radiusValues[i] = fast[i](q[0], q[1], true);
         nearest = Math.min(nearest, d);
       }
       let sum = 0,
@@ -296,20 +302,23 @@
       bounds: bounds && A.data.freeze(bounds),
       sample,
       distance,
+      distanceAt,
       weight: q => sample(q).weight,
-      contains: q => distance(q) < 0,
+      contains(q) {
+        point(q);
+        return distanceAt(q[0], q[1], 0) < 0;
+      },
       visibleDistance,
       radius(q) {
         point(q);
         let best = Infinity,
           radius = 1;
         for (let i = 0; i < strokes.length; i++) {
-          const s = strokes[i];
-          if (s.parameters.operation === 'add' && !irrelevant(i, q, best)) {
-            const d = fast[i](q);
+          if (adds[i] && !irrelevant(i, q[0], q[1], best)) {
+            const d = fast[i](q[0], q[1]);
             if (d < best) {
               best = d;
-              radius = fast[i](q, true);
+              radius = fast[i](q[0], q[1], true);
             }
           }
         }
@@ -321,7 +330,7 @@
           const s = strokes[i],
             b = s.bounds;
           if (q[0] < b.min[0] || q[0] > b.max[0] || q[1] < b.min[2] || q[1] > b.max[2]) continue;
-          if (fast[i](q) <= 0) return s.parameters.operation === 'add' ? s.owner : null;
+          if (fast[i](q[0], q[1]) <= 0) return adds[i] ? s.owner : null;
         }
         return null;
       }

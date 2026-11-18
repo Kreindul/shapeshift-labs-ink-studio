@@ -27,6 +27,36 @@ test('ordered swept masks taper, retain ownership, and support erasing and repai
   assert(field.distance([-1.8, 0]) < 0);
 });
 
+test('bounded brush queries keep exact distances under the ceiling through erase and repaint', () => {
+  const specs = [
+    { id: 'ground', points: [[-2, 0], [3, 2], [4, 0]], radii: [.7, 1.3, .8] },
+    { id: 'erase', points: [[0, 1], [2, 1]], width: 1.6, operation: 'erase', order: 1 },
+    { id: 'restore', points: [[1, 1]], width: .4, order: 2 }
+  ];
+  const reference = P.masks.compose(specs), bounded = P.masks.compose(specs);
+  for (let i = -12; i <= 24; i++) for (let j = -6; j <= 14; j++) {
+    const p = [i / 4, j / 4], exact = reference.sample(p).distance;
+    for (const ceiling of [-1, 0, .1, 5, Infinity, .2]) {
+      assert.equal(bounded.distanceAt(...p, ceiling), Math.min(exact, ceiling));
+    }
+    assert.equal(bounded.distance(p), exact);
+  }
+});
+
+test('a compiled planar profile keeps concave gaps, winding and its own edge storage', () => {
+  const points = [[0, 0], [2, 0], [2, 0], [2, 1], [1, 1], [1, 2], [0, 2]];
+  const forward = P.geometry.profileDistance(points);
+  const reverse = P.geometry.profileDistance(points.slice().reverse());
+  points[0][0] = 8;
+  for (const evaluate of [forward, reverse]) {
+    assert.equal(evaluate(.5, 1.5), -.5);
+    assert.equal(evaluate(1.5, 1.5), .5);
+    assert.equal(Math.abs(evaluate(1, 1.5)), 0);
+    assert.equal(evaluate(3, 3), Math.sqrt(5));
+    assert.equal(evaluate(1e200, 1e200), Math.hypot(1e200, 1e200));
+  }
+});
+
 test('concave extrusions cut along an affine profile and line only the retained host', () => {
   const profile = [
     [-1, -1],

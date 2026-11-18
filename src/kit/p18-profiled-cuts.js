@@ -14,27 +14,15 @@
     }
     const profile = P.data.clone(points);
     P.geometry.triangulate2D(profile);
-    const edges = profile.map((a, i) => {
+    for (let i = 0; i < profile.length; i++) {
+      const a = profile[i];
       const b = profile[(i + 1) % profile.length],
         x = b[0] - a[0],
         y = b[1] - a[1];
       const lengthSquared = x * x + y * y;
       if (!(lengthSquared > 0) || !Number.isFinite(lengthSquared)) throw new Error('Cut profile has an invalid edge');
-      return { a, b, x, y, lengthSquared };
-    });
-    return (x, y) => {
-      let inside = false,
-        nearest = Infinity;
-      for (const edge of edges) {
-        const { a, b, lengthSquared } = edge;
-        if (a[1] > y !== b[1] > y && x < a[0] + ((y - a[1]) * edge.x) / edge.y) inside = !inside;
-        const dx = x - a[0],
-          dy = y - a[1];
-        const t = Math.max(0, Math.min(1, (dx * edge.x + dy * edge.y) / lengthSquared));
-        nearest = Math.min(nearest, Math.hypot(dx - t * edge.x, dy - t * edge.y));
-      }
-      return inside ? -nearest : nearest;
-    };
+    }
+    return P.geometry.profileDistance(profile);
   }
 
   function profileCut({ profile, span, frame = P.transforms.local() }) {

@@ -46,6 +46,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `materialBands(spec)` | Nonoverlapping local intervals with material and pattern metadata |
 | `masks.stroke(spec)`, `masks.compose(specs, options)` | Tapered and feathered swept discs, ordered addition and erasure, signed distance and visible source ownership |
 | `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
+| `geometry.profileDistance(points)` | Compile a closed 2D ring into a reusable signed distance function `(x, y) => distance`. Concavity and either winding are supported |
 | `clearance.field(solids).probe(bounds, options)` | Bounded sampled volume contacts for supplied solids with `id`, bounds, and distance functions |
 | `emitters.compile(spec)` | Deterministic looping samples with caller-supplied direction and drift. Sample at any finite time with `sample(index, time)` or `samples(time)` |
 | `routes.polyline(points, options)`, `routes.aroundConvex(outline, start, end, options)` | Arc-length routes with frames and closest queries. Convex XZ routes project endpoints onto an offset perimeter and interpolate world Y |
@@ -127,6 +128,12 @@ resolved profile merges named or inline layers in order. Object keys compose
 recursively, while arrays and scalar values replace earlier values.
 Material role values accept aliases, RGB colors, and attribute records.
 Use a complete material record or an inherited color when setting shades.
+
+The field returned by `masks.compose` also offers `distanceAt(x, y, ceiling)`.
+It computes the exact signed distance up to the optional ceiling. This is
+useful for a containment test or for subtraction that already has a distance
+bound. Normal array-based `distance([x, y])` queries remain unbounded. A bounded
+query preserves ordered add and erase operations and never changes ownership.
 
 ### Terrain routes between pins
 
