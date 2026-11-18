@@ -276,6 +276,20 @@
       bad('style', 'there is no style called "' + spec.style + '"', 'styles: ' + Object.keys(DIO.styles).join(', '));
       return out;
     }
+    const look = st.finish.look;
+    if (look?.pixelSize !== undefined && (!Number.isSafeInteger(look.pixelSize) || look.pixelSize < 1))
+      bad('finish.look.pixelSize', 'pixelSize must be a positive integer');
+    try {
+      PixelLook.toneSettings(look?.tone);
+    } catch (error) {
+      bad('finish.look.tone', error.message);
+    }
+    if (spec.light?.surfaceDirection !== undefined)
+      try {
+        SurfaceLook.prepareLightTrack(spec.light.surfaceDirection);
+      } catch (error) {
+        bad('light.surfaceDirection', error.message);
+      }
     const pal = st.palette;
     if (!Array.isArray(pal) || pal.length < 2 || !pal.every(isNum))
       bad(
@@ -865,7 +879,7 @@
       Object.assign(
         { cam, detail: 14, palName: typeof spec.style === 'string' ? spec.style : 'Data', dither: 0.25, radius: 9 },
         st0.finish,
-        { made, spec }
+        { made, spec, ...(spec.light?.surfaceDirection !== undefined && { surfaceLight: spec.light.surfaceDirection }) }
       )
     );
     if (!moving.length && !effects.length && !spec.tap) return W;

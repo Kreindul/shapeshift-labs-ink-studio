@@ -3,6 +3,79 @@
 const PixelLook = (() => {
   const weights = [0.30, 0.55, 0.15];
   const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  const stipple = Object.freeze({
+    cutoff: 0.19,
+    stops: Object.freeze([
+      [0, '#000000'], [0.14, '#176bfa'], [0.37, '#44c73d'],
+      [0.57, '#e85dc9'], [0.77, '#ff8d27'], [1, '#fff1cd']
+    ].map(Object.freeze)),
+    pattern: 'bayer',
+    amount: 1,
+    seed: 0,
+    preserveDots: true
+  });
+  const presets = Object.freeze({ stipple });
+  const fraction = value => Number.isFinite(value) && value >= 0 && value <= 1;
+  const bayerRanks = Float32Array.from(bayer, rank => (rank + 0.5) / bayer.length);
+  const bayerRank = (x, y) => bayerRanks[(x & 3) + ((y & 3) << 2)];
+
+  function toneSettings(definition) {
+    if (definition === undefined || definition === false) return null;
+    const overrides = typeof definition === 'string' ? { preset: definition } : definition;
+    if (!overrides || Object.getPrototypeOf(overrides) !== Object.prototype)
+      throw new TypeError('Expected a tone preset name or settings object');
+    const { preset = 'stipple', ...changes } = overrides;
+    if (!Object.hasOwn(presets, preset)) throw new RangeError('Unknown tone preset: ' + preset);
+    for (const key of Object.keys(changes)) {
+      if (!Object.hasOwn(stipple, key)) throw new TypeError('Unknown tone setting: ' + key);
+    }
+    const settings = { ...presets[preset], ...changes };
+    const { cutoff, stops, pattern, amount, seed, preserveDots } = settings;
+    if (!fraction(cutoff) || cutoff === 1) throw new RangeError('Tone cutoff must be in [0, 1)');
+    if (!fraction(amount)) throw new RangeError('Tone dither amount must be in [0, 1]');
+    if (pattern !== 'bayer' && pattern !== 'blue-noise')
+      throw new RangeError('Tone pattern must be bayer or blue-noise');
+    if (!Number.isSafeInteger(seed)) throw new RangeError('Tone seed must be a safe integer');
+    if (typeof preserveDots !== 'boolean') throw new TypeError('Tone preserveDots must be a boolean');
+    if (!Array.isArray(stops) || stops.length < 2 || stops.length > 48 ||
+        !Array.from(stops).every((stop, i) => Array.isArray(stop) && stop.length === 2 &&
+          fraction(stop[0]) && typeof stop[1] === 'string' && /^#[\da-f]{6}$/i.test(stop[1]) &&
+          (i === 0 || stop[0] > stops[i - 1][0])) ||
+        stops[0][0] !== 0 || stops[0][1] !== '#000000' || stops.at(-1)[0] !== 1)
+      throw new RangeError('Use 2 to 48 increasing [position, #rrggbb] tone stops from [0, "#000000"] to position 1');
+    return settings;
+  }
+
+  function prepareTone(definition, blueNoise) {
+    const settings = toneSettings(definition);
+    if (!settings) return null;
+    let width = 4, height = 4, thresholds = bayerRanks.slice();
+    if (settings.pattern === 'blue-noise') {
+      if (typeof blueNoise !== 'function') throw new TypeError('Pass materials.blueNoise to prepare this tone pattern');
+      const tile = blueNoise({ seed: settings.seed });
+      width = tile.width;
+      height = tile.height;
+      thresholds = Float32Array.from(tile.ranks, rank => (rank + 0.5) / tile.ranks.length);
+    }
+    return {
+      ...settings, width, height, thresholds,
+      palette: settings.stops.map(stop => parseInt(stop[1].slice(1), 16))
+    };
+  }
+
+  // Coordinates are top-left art pixels. Each band mixes its two adjacent palette entries.
+  function toneIndex(tone, r, g, b, x, y) {
+    const luma = r * weights[0] + g * weights[1] + b * weights[2];
+    if (luma <= tone.cutoff) return 0;
+    const value = (luma - tone.cutoff) / (1 - tone.cutoff);
+    const stops = tone.stops;
+    let low = 0;
+    while (low < stops.length - 2 && value > stops[low + 1][0]) low++;
+    const share = (value - stops[low][0]) / (stops[low + 1][0] - stops[low][0]);
+    const rank = tone.thresholds[(y % tone.height) * tone.width + x % tone.width];
+    return low + Number(share >= 0.5 + (rank - 0.5) * tone.amount);
+  }
+
   function nearest(c, palette, solid) {
     let best = solid && palette.length > 1 ? 1 : 0, distance = Infinity;
     for (let i = best; i < palette.length; i++) {
@@ -26,7 +99,7 @@ const PixelLook = (() => {
       const average = [0, 1, 2].map(k => samples.reduce((s, c) => s + c[k], 0) / 4);
       const base = (y * width + x) * 3;
       const native = interiorColor ? [0, 1, 2].map(k => interiorColor[base + k] / 255) : average;
-      const noise = interiorColor ? ((bayer[(x & 3) + ((y & 3) << 2)] + 0.5) / 16 - 0.5) * dither : 0;
+      const noise = interiorColor ? (bayerRank(x, y) - 0.5) * dither : 0;
       let selected = nearest(native.map(v => Math.max(0, Math.min(1, v + noise))), palette, false);
       let c = Array.from(mapped(selected));
       const votes = new Map(); let best = -1, score = 0, coverage = 0;
@@ -102,6 +175,27 @@ vec3 pixelResolve(ivec2 p) {
   }
   return c;
 }`;
-  return { nearest, ink, resolve, glsl };
+  const toneGlsl = `
+uniform int u_inkToneCount;
+uniform float u_inkToneCutoff;
+uniform float u_inkToneAmount;
+uniform vec4 u_inkToneStops[48]; // RGB color and stop position
+uniform highp sampler2D u_inkToneRanks; // normalized threshold tile
+
+vec3 inkToneResolve(vec3 color, ivec2 pixel) {
+  float luma = dot(color, vec3(0.30, 0.55, 0.15));
+  if (luma <= u_inkToneCutoff) return u_inkToneStops[0].rgb;
+  float value = (luma - u_inkToneCutoff) / (1.0 - u_inkToneCutoff);
+  int low = 0;
+  for (int i = 1; i < 47; i++) {
+    if (i >= u_inkToneCount - 1 || value <= u_inkToneStops[i].a) break;
+    low = i;
+  }
+  vec4 a = u_inkToneStops[low], b = u_inkToneStops[low + 1];
+  float share = (value - a.a) / (b.a - a.a);
+  float rank = texelFetch(u_inkToneRanks, pixel % textureSize(u_inkToneRanks, 0), 0).r;
+  return share >= mix(0.5, rank, u_inkToneAmount) ? b.rgb : a.rgb;
+}`;
+  return { nearest, ink, resolve, glsl, presets, toneSettings, prepareTone, toneIndex, toneGlsl, bayerRank };
 })();
 if (typeof module !== 'undefined') module.exports = PixelLook;

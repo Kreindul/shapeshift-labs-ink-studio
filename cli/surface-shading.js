@@ -6,7 +6,8 @@ function surfaceShading(world, options, camera) {
   const { data, surfaceData } = world;
   const { eye, parallel, footprint, time, reflection } = camera;
   const { STRIDE } = SurfaceLook;
-  const materials = world.surfaces.map(({ settings, light }) => SurfaceLook.prepare(settings, world.pal, light));
+  const liveLight = world.surfaceLight === undefined ? undefined : SurfaceLook.prepareLightTrack(world.surfaceLight)(time);
+  const materials = world.surfaces.map(({ settings, light }) => SurfaceLook.prepare(settings, world.pal, liveLight ?? light));
   const planarMaterials = materials.map(
     material =>
       reflection && material.layers.some(layer => layer.type === 'planarReflection' && reflection.has(layer.plane))

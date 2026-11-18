@@ -660,6 +660,8 @@ Common rendering controls:
 | `--surface off` | Render without the view-dependent finish layers. |
 | `--reflections off` / `--atmosphere off` | Toggle planar captures or atmosphere volumes. |
 | `--w`, `--h`, `--out` | Output viewport size and destination. The renderer resolves a lower-resolution pixel grid derived from the scene's detail settings. |
+| `--px 2` | Use two screen pixels per art pixel. In `compare` and `review`, `--px` specifies the scale of the reference. |
+| `--tone stipple\|off` | Enable the stipple preset or turn off the scene's tone settings. |
 | `--seed` | Override the scene seed. |
 | `--colored` | Use palette-aware smoothing of silhouettes and body-colored contours. |
 | `--raw` | Bypass palette styling. |
@@ -672,6 +674,8 @@ Common rendering controls:
 | `--poke '1:x,y,z;2:x,y,z'` | Script timed taps into a simulated scene. |
 
 The default look uses palette quantization and dithering. `--colored` preserves native interior detail while smoothing silhouettes; it does not fit a new palette every frame. `PixelLook` exposes shared CPU and shader helpers for hosts implementing the same look.
+
+Use `finish.look.tone` for a luminance-based palette with a black cutoff, ordered or seeded blue-noise dither, and explicit color stops. The [pixel look guide](docs/pixel-look.md) covers the stipple preset, art-pixel size and browser integration. The [stipple example](examples/stipple.json) pairs it with a keyframed surface light.
 
 For per-pixel materials, set `S.pixel = true` before baking and finish the world with `look: { pixel: true }`. `K.pixel` provides surface patterns such as turf, masonry and shingles. Use `K.pixel.edge(material, { up: 'grass', every: 5, share: 0.55 })` to attach sprites that follow the surface as the camera moves. `K.sprite.art` accepts text art for custom sprites, and `K.props` can scatter small objects along paths and at wall bases.
 

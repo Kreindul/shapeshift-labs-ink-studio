@@ -27,6 +27,35 @@ const SurfaceLook = (() => {
   const positive = (v, fallback) => Math.max(0.001, v ?? fallback);
   const bell = (x, width) => Math.exp(-((x / width) ** 2));
 
+  function prepareLightTrack(keys) {
+    if (!Array.isArray(keys) || !keys.length) throw new TypeError('Expected surface light keys [time, x, y, z]');
+    const frames = Array.from(keys, (key, i) => {
+      if (!Array.isArray(key) || key.length !== 4 || !Array.from(key).every(Number.isFinite) ||
+          key[0] < 0 || (i > 0 && key[0] <= keys[i - 1][0]))
+        throw new RangeError('Surface light keys need finite values and strictly increasing nonnegative times');
+      const direction = key.slice(1);
+      const length = Math.hypot(...direction);
+      if (length < 1e-8 || !Number.isFinite(length)) throw new RangeError('Surface light directions must be nonzero');
+      return { time: key[0], direction: unit(direction) };
+    });
+    return time => {
+      const first = frames[0], last = frames.at(-1);
+      if (time <= first.time) return first.direction.slice();
+      if (time >= last.time) return last.direction.slice();
+      const i = frames.findIndex(frame => frame.time >= time);
+      const a = frames[i - 1], b = frames[i];
+      const fraction = smooth(0, 1, (time - a.time) / (b.time - a.time));
+      const similarity = Math.min(1, Math.max(-1, dot(a.direction, b.direction)));
+      const tangent = b.direction.map((value, axis) => value - a.direction[axis] * similarity);
+      if (similarity > 0.9999) return unit(a.direction.map((value, axis) => mix(value, b.direction[axis], fraction)));
+      // Opposite keys can turn through either half-circle. Pick a stable perpendicular.
+      const axis = Math.abs(a.direction[1]) < 0.9 ? AXES.y : AXES.x;
+      const perpendicular = unit(tangent, unit(cross(a.direction, axis)));
+      const angle = Math.acos(similarity) * fraction;
+      return a.direction.map((value, axis) => value * Math.cos(angle) + perpendicular[axis] * Math.sin(angle));
+    };
+  }
+
   function hash(x, y, z, key) {
     let n = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(z, 1442695041) ^ Math.imul(key, 1013904223);
     n = Math.imul(n ^ (n >>> 13), 1274126177);
@@ -456,6 +485,6 @@ const SurfaceLook = (() => {
     return output;
   }
 
-  return { STRIDE, material, merge, prepare, shade };
+  return { STRIDE, material, merge, prepare, shade, prepareLightTrack };
 })();
 if (typeof module !== 'undefined') module.exports = SurfaceLook;

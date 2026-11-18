@@ -1,8 +1,19 @@
 // Draws a world without a browser: motion kinds, projection of each splat's covariance to a screen ellipse,
 // blending from far to near, low-resolution sampling, dithering and palette quantization.
-const FOV = (38 * Math.PI) / 180,
-  BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+const FOV = (38 * Math.PI) / 180;
 const PixelLook = require('../src/pixel-look.js');
+const blueNoiseTiles = new WeakMap();
+function toneFor(world, definition) {
+  return PixelLook.prepareTone(definition, ({ seed }) => {
+    let tile = blueNoiseTiles.get(world);
+    if (tile?.seed !== seed) {
+      const { KIT } = require('../index.js').load();
+      tile = { seed, ranks: KIT.procedural.materials.blueNoise({ seed }) };
+      blueNoiseTiles.set(world, tile);
+    }
+    return tile.ranks;
+  });
+}
 const SampleCoverage = require('../src/sample-coverage.js');
 const surfaceShading = require('./surface-shading.js');
 const SceneOptics = require('../src/scene-optics.js');
@@ -66,12 +77,16 @@ function render(world, o) {
     T = an.kick ? [T0[0] + an.kick[0], T0[1] + an.kick[1], T0[2] + an.kick[2]] : T0,
     cw = o.w || 900,
     ch = o.h || 620;
+  const look = world.look || {};
+  if (look.pixelSize !== undefined && (!Number.isSafeInteger(look.pixelSize) || look.pixelSize < 1))
+    throw new RangeError('look.pixelSize must be a positive integer');
+  const tone = o.raw || o.samples || o.captureCoverage ? null : toneFor(world, o.tone ?? look.tone);
   const rel = c.dist / dist0,
     rho = world.detail * Math.pow(rel, rel > 1 ? 0.5 : 0.25),
-    px = o.px || clamp(Math.round(ch / (2 * Math.tan(FOV / 2) * rho * dist0)), 1, 18),
+    px = o.px || look.pixelSize || clamp(Math.round(ch / (2 * Math.tan(FOV / 2) * rho * dist0)), 1, 18),
     W = Math.ceil(cw / px),
     H = Math.ceil(ch / px);
-  if (o.colored && !o.raw) {
+  if (o.colored && !o.raw && !tone && !o.samples && !o.captureCoverage) {
     const native = render(world, Object.assign({}, o, { colored: false, samples: true, worked: true }));
     const samples = render(
       world,
@@ -115,7 +130,7 @@ function render(world, o) {
       const h = world.pal[i];
       return [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255];
     },
-    bg = o.captureCoverage ? [0, 0, 0] : hex(0),
+    bg = o.captureCoverage || tone ? [0, 0, 0] : hex(0),
     fog = hex(world.fog.c),
     limx = (1.3 * 0.5 * W) / focal,
     limy = (1.3 * 0.5 * H) / focal;
@@ -897,8 +912,7 @@ function render(world, o) {
   const edge = world.outline && world.outline.edge ? world.outline.edge / (2 * R) : 0,
     line = hex(world.outline ? world.outline.c : 0),
     dith = (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither,
-    use = new Uint32Array(np),
-    look = world.look || {},
+    use = new Uint32Array(tone ? tone.palette.length : np),
     ln = look.lines ? (look.lines === true ? {} : look.lines) : null,
     lines = !!ln,
     lineGap = ln ? (ln.gap || 0.3) / (2 * R) : 1,
@@ -975,12 +989,23 @@ function render(world, o) {
           b *= k;
         }
       }
-      if (edge > 0 && dc - dm > edge) {
+      const outlined = edge > 0 && dc - dm > edge;
+      if (outlined) {
         r = line[0];
         g = line[1];
         b = line[2];
-      } else if (!surfaceGlint?.[p]) {
-        const th = (BAYER[(x & 3) + ((y & 3) << 2)] + 0.5) / 16 - 0.5;
+      }
+      if (tone) {
+        const index = PixelLook.toneIndex(tone, r, g, b, x, yo);
+        const color = tone.palette[index];
+        use[index]++;
+        out[q] = color >> 16;
+        out[q + 1] = (color >> 8) & 255;
+        out[q + 2] = color & 255;
+        continue;
+      }
+      if (!outlined && !surfaceGlint?.[p]) {
+        const th = PixelLook.bayerRank(x, y) - 0.5;
         r = clamp(r + th * dith, 0, 1);
         g = clamp(g + th * dith, 0, 1);
         b = clamp(b + th * dith, 0, 1);
@@ -1014,7 +1039,7 @@ function render(world, o) {
   /* pixel clean-up (an option, or a diorama's look.clean), as on the page: a speck (a pixel with no like neighbour of the eight round
      it, or one of a pair that has no other) takes the colour most of its eight neighbours share, if at least three share it, they are
      on the same surface, and it is not much brighter or darker than they are (a glint, an eye or a flower is kept). */
-  if ((o.clean || look.clean) && !o.raw) {
+  if ((o.clean || (look.clean && !tone?.preserveDots)) && !o.raw) {
     const src = out.slice(),
       keep = look.clean && look.clean.keep !== undefined ? look.clean.keep : 0.3,
       at = (x, y) => (clamp(y, 0, H - 1) * W + clamp(x, 0, W - 1)) * 3,
@@ -1144,7 +1169,7 @@ function render(world, o) {
         out[q + 2] = src[best + 2];
       }
   }
-  return { w: W, h: H, px, rgb: out, drawn, use };
+  return { w: W, h: H, px, rgb: out, drawn, use, ...(tone && { palette: tone.palette }) };
 }
 // make every art pixel k screen pixels wide, the way the page shows it
 function upscale(img, k) {

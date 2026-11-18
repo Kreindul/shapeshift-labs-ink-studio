@@ -89,6 +89,22 @@ In JSON, `mat.surface` accepts a preset ID or a settings object. Add a `preset` 
 
 The browser script bundle exposes `SurfaceLook` alongside `PixelLook`. Host renderers can cache `SurfaceLook.prepare(settings, palette, lightDirection)` and call `SurfaceLook.shade(prepared, sample, baseRgb, result)`. A sample takes world-space `position`, `normal` and `view` toward the eye, plus optional `tangent`, `visibility`, `footprint` and `time`. The result contains normalized RGB, a coverage multiplier and a glint weight. The finished world includes `surfaces` with material bindings and `surfaceData` with one row per baked splat. `SurfaceLook.STRIDE` is the row length. Row fields are the one-based binding ID (zero for an ordinary splat), XYZ normal, direct-light visibility and optional XYZ tangent. Hosts with skeletal or procedural transforms should supply the rest-space material position and transform the frame consistently with their geometry and lighting.
 
+## Animate the finish light
+
+Set `light.surfaceDirection` in a JSON scene, or pass `surfaceLight` to
+`B.finish()` in JavaScript. Each row is `[seconds, x, y, z]`. Times strictly
+increase and directions are nonzero vectors pointing toward the light.
+The track interpolates smoothly on the unit sphere and holds its first or
+last direction outside the keyed interval.
+
+The track changes the direction used by finish layers such as specular,
+sheen and glints. Baked diffuse shading and visibility remain as authored.
+Browser hosts can prepare the track once with
+`SurfaceLook.prepareLightTrack(keys)` and pass the sampled direction to
+`SurfaceLook.shade` as `sample.lightDirection`, in the same coordinate
+frame as the surface normal. See the [stipple example](../examples/stipple.json)
+for a loop with a stationary camera and geometry.
+
 ## Render the examples
 
 ```sh

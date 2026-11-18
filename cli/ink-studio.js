@@ -191,6 +191,9 @@ function pose(w, t) {
     });
   }
 }
+const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
+if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
+  die('--px needs a positive integer');
 const view = extra =>
   Object.assign(
     {
@@ -200,6 +203,8 @@ const view = extra =>
       target: opt.target ? list('target') : undefined,
       w: num('w', 900),
       h: num('h', 620),
+      px: artPixelSize,
+      tone: opt.tone === 'off' ? false : opt.tone,
       raw: !!opt.raw,
       colored: !!opt.colored,
       fine: !!opt.fine,
@@ -270,7 +275,7 @@ const CMD = {
         '                              against the pixel-art references (--map: where the stray pixels and drawn edges are)',
         '',
         'any command that plays a diorama takes --poke 2:x,y,z (tap it at 2 seconds, toward that point; several with ;)',
-        'view options: --surface off (no finish layers) --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (lone pixels removed) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n'
+        'view options: --surface off (no finish layers) --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (remove lone pixels) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n'
       ].join('\n')
     );
   },
@@ -430,7 +435,7 @@ const CMD = {
       pose(w, 0);
     }
     const im = R.render(w, view({})),
-      hexs = w.pal.map(h => '#' + h.toString(16).padStart(6, '0')),
+      hexs = (im.palette || w.pal).map(h => '#' + h.toString(16).padStart(6, '0')),
       tot = im.w * im.h;
     console.log('picture     ' + im.w + ' x ' + im.h + ' art pixels, each ' + im.px + ' screen pixels');
     console.log('colours on screen (share of the picture):');
@@ -451,8 +456,8 @@ const CMD = {
     im.use.forEach((u, i) => {
       if (!u) unused.push(i);
     });
-    if (unused.length > w.pal.length / 3)
-      warn.push(unused.length + ' of ' + w.pal.length + ' colours never show from the default view');
+    if (unused.length > hexs.length / 3)
+      warn.push(unused.length + ' of ' + hexs.length + ' colours never show from the default view');
     console.log(warn.length ? 'warnings:\n  ' + warn.join('\n  ') : 'no warnings');
   },
   render() {
@@ -521,7 +526,8 @@ const CMD = {
       t = num('t', 0);
     pose(w, t);
     const im = R.render(w, view({ t })),
-      bgc = [(w.pal[0] >> 16) & 255, (w.pal[0] >> 8) & 255, w.pal[0] & 255],
+      bg = (im.palette || w.pal)[0],
+      bgc = [(bg >> 16) & 255, (bg >> 8) & 255, bg & 255],
       n = im.w * im.h,
       lum = new Float32Array(n),
       on = new Uint8Array(n);
@@ -955,7 +961,7 @@ const CMD = {
       pose(w, t);
       const im = R.render(w, view({ t })),
         img = { w: im.w, h: im.h, rgb: im.rgb || im.color },
-        r = Cr.lint(img, { bg: w.pal[0] });
+        r = Cr.lint(img, { bg: (im.palette || w.pal)[0] });
       console.log(w.id.padEnd(16) + keys.map(k => fmt(k, r[k]).padStart(10)).join(''));
       if (opt.map) save(w.id + '-lint.png', R.upscale(Cr.lintMap(img, r), im.px));
     }
@@ -984,7 +990,7 @@ const CMD = {
         })
       );
       const img = { w: im.w, h: im.h, rgb: im.rgb || im.color },
-        r = Cr.lint(img, { bg: w.pal[0] });
+        r = Cr.lint(img, { bg: (im.palette || w.pal)[0] });
       console.log(
         label.padEnd(8),
         ['orphans', 'doubles', 'jaggies', 'banding', 'pillow']
@@ -1041,7 +1047,7 @@ const CMD = {
       c = w.cam || {},
       frames = [];
     const st = num('step', mode === 'orbit' ? 0.004 : mode === 'zoom' ? 0.012 : mode === 'pan' ? 0.02 : 1 / 12);
-    let px = 0;
+    let px = 0, bg = w.pal[0];
     for (let k = 0; k < n; k++) {
       const t = mode === 'still' ? t0 + k * st : t0;
       pose(w, t);
@@ -1053,9 +1059,10 @@ const CMD = {
       if (px) v.px = px;
       const im = R.render(w, v);
       px = px || im.px;
+      bg = (im.palette || w.pal)[0];
       frames.push({ w: im.w, h: im.h, rgb: im.rgb || im.color });
     }
-    const fl = Cr.flicker(frames, { bg: w.pal[0] });
+    const fl = Cr.flicker(frames, { bg });
     console.log(w.id + ' ' + mode + ': ' + (fl * 100).toFixed(2) + '% of pixels flicker (change and change back)');
     fs.mkdirSync(OUT, { recursive: true });
     const f = opt.out ? path.resolve(opt.out) : path.join(OUT, w.id + '-shimmer-' + mode + '.gif');
@@ -1250,7 +1257,7 @@ const CMD = {
         return c === 'colours' ? String(v) : (v * 100).toFixed(1) + '%';
       },
       mr = C.measure(rimg, { bg: (rimg.rgb[0] << 16) | (rimg.rgb[1] << 8) | rimg.rgb[2] }), // (its corner colour, joined to the edge, is its background)
-      md = C.measure(im, { bg: w.pal[0] });
+      md = C.measure(im, { bg: (im.palette || w.pal)[0] });
     console.log(''.padEnd(16) + cols.map(c => c.padStart(10)).join(''));
     console.log(path.basename(ref).slice(0, 15).padEnd(16) + cols.map(c => fmt(c, mr[c]).padStart(10)).join(''));
     console.log(w.id.padEnd(16) + cols.map(c => fmt(c, md[c]).padStart(10)).join(''));
@@ -1310,13 +1317,13 @@ const CMD = {
       const w = build(id);
       pose(w, t);
       const im = R.render(w, view({ t })),
-        m = C.measure(im, { bg: w.pal[0] });
+        m = C.measure(im, { bg: (im.palette || w.pal)[0] });
       const marks = cols.map(c => (Number.isFinite(m[c]) ? miss(c, m[c]) : ' '));
       missed += marks.some(x => x === '!') ? 1 : 0;
       console.log(w.id.padEnd(16) + cols.map((c, i) => fmt(c, m[c]).padStart(10) + marks[i]).join(''));
       if (opt.map) {
-        save(w.id + '-stray.png', R.upscale(C.strayMap(im, { bg: w.pal[0] }), im.px));
-        save(w.id + '-edges.png', R.upscale(C.edgeMap(im, { bg: w.pal[0] }), im.px));
+        save(w.id + '-stray.png', R.upscale(C.strayMap(im, { bg: (im.palette || w.pal)[0] }), im.px));
+        save(w.id + '-edges.png', R.upscale(C.edgeMap(im, { bg: (im.palette || w.pal)[0] }), im.px));
       }
     }
     if (ids.length > 1) console.log(missed + ' of ' + ids.length + ' miss a target');
