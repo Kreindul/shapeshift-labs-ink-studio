@@ -1783,13 +1783,31 @@ sets the profile orientation. Each path segment needs an extent perpendicular
 to it. Use a backing strip when the chosen treatment needs continuous
 coverage through joints and turns.
 
+### Ribbon sections
+
+`KIT.procedural.fittedRibbon({ inner, outer, pitch, gap, sections })` accepts
+landmarks as ordered sections. Each entry has a unique `id` and a normalized
+`end` station along the inner rail. The first section starts at zero and the
+last ends at one. A section can override `pitch` and `gap`, or specify a
+positive integer `count` to fit exactly that many cells over its span. A
+single cell can span several rail edges and retains the same key through the
+join. Use this to control joints at shoulders, corners or other intentional
+breaks. On a closed ribbon with sections, the seam is a section boundary and
+phase must be zero.
+
+Each sectioned cell reports `section`, `unit`, `from` and `to`; the overall
+`unit` is the mean pitch. Gap setbacks also apply at interior section
+boundaries, using the gap from each side. Omit sections to use the established
+uniform fit.
+
 ### Fitted rail bands
 
-`KIT.procedural.fittedRailBand({inner, outer, pitch, gap, closed, phase, depth, direction, budget})`
+`KIT.procedural.fittedRailBand({inner, outer, pitch, gap, closed, phase, sections, depth, direction, cellStyle, budget})`
 fits repeated solids between two matching 3D rails. Layout uses the inner rail's
 length, with a pitch and joint gap in world units. `depth` is a pair of signed
-offsets along the normalized vector returned by `direction(point, fragment)`.
-A planar convex footprint produces one prism. Warped footprints are split into
+offsets along the normalized vector returned by `direction(point, fragment, cell)`.
+Optional `cellStyle(cell)` can provide a different `depth` pair and `material`
+role for the entire logical cell. A planar convex footprint produces one prism. Warped footprints are split into
 prisms with the same logical cell and fragment.
 
 `band.layout` exposes the fitted ribbon. `band.pieces({owner, key, material})`

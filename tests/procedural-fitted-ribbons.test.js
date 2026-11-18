@@ -48,3 +48,22 @@ test('fitted ribbons use spatial rail length, preserve open ends and enforce a w
   assert.throws(() => fittedRibbon({ ...spec, outer: [[0, 0], [1, 0]] }), /rails/);
   assert.throws(() => fittedRibbon({ inner, outer, pitch: 10, closed: true, budget: 1 }), /fragment budget/);
 });
+
+test('sectioned ribbons pin joints to landmarks and preserve a featured cell across edges', () => {
+  const inner = [[0,0],[3,0],[5,0],[8,0]], outer = inner.map(([x,y])=>[x,y+1]);
+  const sections = [{id:'approach',end:.25,count:2},{id:'feature',end:.75,count:1},
+    {id:'exit',end:1,gap:.12,pitch:.6}];
+  const layout=fittedRibbon({inner,outer,sections,pitch:1,gap:.2});
+  const center=layout.cells.filter(cell=>cell.section==='feature');
+  assert.equal(center.length,1);
+  assert.equal(center[0].unit,4);
+  assert.equal(center[0].from,2.1);
+  assert.equal(center[0].to,5.9);
+  assert.deepEqual(center[0].fragments.map(fragment=>fragment.edge),[0,1,2]);
+  assert.deepEqual(center[0].fragments[1].points,[[3,0],[5,0],[5,1],[3,1]]);
+  assert.equal(layout.cells[0].from,0);
+  assert.equal(layout.cells.at(-1).to,8);
+  assert.throws(()=>fittedRibbon({inner,outer,sections:sections.slice(0,2),pitch:1}),/full rail/);
+  assert.throws(()=>fittedRibbon({inner,outer,sections,pitch:1,budget:5}),/budget/);
+  assert.throws(()=>fittedRibbon({inner,outer,sections:[{id:'same',end:.5},{id:'same',end:1}],pitch:1}),/unique/);
+});

@@ -34,3 +34,17 @@ test('warped paired rails produce finite prisms with a shared cell key', () => {
   assert(parts.every(p => p.mesh.positions.every(Number.isFinite)));
   assert.throws(() => fittedRailBand({ ...spec, direction: () => [0, 0, 0] }).pieces(), /direction/);
 });
+
+test('a band cell can override material and depth across all of its fragments', () => {
+  const band = fittedRailBand({
+    inner:[[0,0,0],[2,0,0],[4,0,0]],outer:[[0,1,0],[2,1,0],[4,1,0]],
+    pitch:.5,depth:[-.06,.12],gap:.03,direction:()=>[0,0,1],
+    sections:[{id:'first',end:.4},{id:'feature',end:.6,count:1},{id:'last',end:1}],
+    cellStyle:cell=>cell.section==='feature'?{material:'polished',depth:[-.06,.26]}:null
+  });
+  const parts=band.pieces({owner:'test',material:'rough'});
+  const featured=parts.filter(p=>p.section==='feature');
+  assert.equal(featured.length,2);
+  assert(featured.every(p=>p.cell==='feature/0'&&p.material==='polished'&&Math.abs(p.bounds.max[2]-.26)<1e-6));
+  assert(parts.filter(p=>p.section!=='feature').every(p=>p.material==='rough'&&p.bounds.max[2]<.121));
+});
