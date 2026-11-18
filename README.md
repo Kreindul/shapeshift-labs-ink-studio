@@ -16,6 +16,7 @@ The package includes geometry, materials, lighting, animation, character control
 - [Particles and interaction](#particles-and-interaction)
 - [Physics and persistent effects](#physics-and-persistent-effects)
 - [Importing meshes](#importing-meshes)
+- [Exporting GLB models](#exporting-glb-models)
 - [Importing depth maps](#importing-depth-maps)
 - [Procedural worlds](#procedural-worlds)
 - [Retained authoring](#retained-authoring)
@@ -135,6 +136,7 @@ The package entry point exposes:
 | `bundle()` | Toolkit source as one script string, without demo scenes. |
 | `demos()` | Demo source that appends to an existing `SCENES` array. |
 | `readMesh(file)` | Read an OBJ, glTF or GLB file and its supported companion files. |
+| `exportGlb(modelOrFile, { out, ...options })` | Export indexed authoring geometry or an input mesh file as a self-contained GLB. |
 | `lint(files)` | Return lines rejected by the source comment guard. |
 | `EXPORTS` | Comma-separated names defined by the source bundle. |
 | `version` | Package version string. |
@@ -531,6 +533,23 @@ console.log(world.count);
 
 The file example assumes the current working directory is this repository. OBJ supports a companion MTL; glTF supports companion buffers; GLB is read from binary data. Material and vertex colors become palette ramps. Texture images are not imported. Open meshes become sheets with thickness. Imported geometry becomes a distance-field solid, so it can join, be carved, receive materials and break like authored geometry.
 
+## Exporting GLB models
+
+```sh
+ink-studio export-glb examples/puppet.js --out celebrating-puppet.glb
+ink-studio export-glb lab/data-shrine.json --out shrine.glb
+ink-studio export-glb path/to/model.obj --out model.glb
+```
+
+Model conversion uses Blender 4.5 or later in background mode. Set `INK_BLENDER` or pass `--blender /path/to/blender` to choose the executable. Ink Studio checks the standard macOS app location and then uses the executable on your `PATH`. Complete, self-contained GLBs with indexed triangles, UVs and normals are preserved byte-for-byte without Blender. Converting other mesh inputs uses Blender’s importer and retains imported UVs and the materials, textures, skins and animations it supports. Inputs with missing UVs receive a packed unwrap.
+
+- **Sculpts.** `KIT.model.fromSculpt(S, options)` extracts the finite rest field before `S.bake()`. `KIT.model.fromSdf(field, { bounds })` accepts a signed function of `x, y, z` and a box with `min` and `max` points. The field must stay positive on the box boundary. Extraction tries a quad surface first and falls back to indexed marching tetrahedra for ambiguous topology. GLB stores the final faces as triangles. `--res` controls the grid step in scene units. The optional `--method` accepts `surfaceNets`, `dualContour` or `tetrahedra`. Use `--bounds xmin,ymin,zmin,xmax,ymax,zmax` to tighten the static bounds of a JSON diorama.
+- **Color.** Freshly unwrapped authored meshes receive a padded base color PNG inside the GLB. `--texture-size` selects 256–4096 pixels from the supported powers of two. Use `--texture-size 0` to export separate palette materials (and any authored vertex colors). Existing UVs are preserved. Splat-only effects, per-pixel paint, lighting, and particles belong to the splat scene render.
+- **Animation.** For a JavaScript scene, add `model(seed, options)` beside `build`. Return an indexed mesh, or a model with `meshes`, `joints` and `animations`. Use `KIT.model.fromPuppet(mesh, puppet, { clips })` to use a tagged sculpt’s existing puppet hierarchy, blended cell weights and named motions. Each clip supplies `{ name, duration, fps, pose(t, dt, puppet) }` with times in seconds. Build a separate puppet for export, as sampling updates its pose. JSON dioramas use the authored parent and motion data to make rigidly weighted parts. Set `--duration` and `--fps` to choose the sampled interval and rate.
+- **Scope.** Model export uses finite rest geometry and an authored rig for deforming characters. It produces a UV-mapped mesh with skinning data that can be animated in Blender or in a glTF runtime. Face loops around eyes, mouths and joints still depend on the authored asset. Raw splat clouds and splat-only overlays have no exportable rest surface. Animated joint matrices must be representable as local translation, rotation and scale.
+
+For a custom indexed model, each mesh supplies `points` and triangle or quad `faces`. It may also supply linear RGB `colors` per point, face-corner `uvs`, `materials: [{ name, color }]` and a material index per face in `faceMaterials`. Each joint has `{ name, parent, head, tail }` with the parent index preceding its children. Each skinned mesh supplies `weights` as a list of `[jointIndex, weight]` pairs per vertex, or sets `static: true` for scenery. The exporter keeps and normalizes the four strongest weights. Each custom clip supplies `frames: [{ time, matrices }]` beginning at time zero. Matrices are rest-to-pose transforms in world space, with nine row-major linear components followed by XYZ translation.
+
 ## Importing depth maps
 
 `ink-studio depth` converts a grayscale PNG or numeric depth map into Gaussian splats, a backed signed-distance field and an OBJ mesh. Add an aligned RGB or RGBA PNG with `--image` to project its colour onto the observed surface. `KIT.depth.fromMap()` gives scene authors the same conversion and accepts typed arrays directly. See the [depth import guide](docs/depth-maps.md) for camera calibration, output formats, and converting a signed field back into mesh geometry or splats.
@@ -616,6 +635,7 @@ Use `ink-studio catalog <words>` to search catalog entries and follow their `whe
 | `review <scene>` | Save a contact sheet of fixed camera views and report lint for each. |
 | `shimmer <scene> --mode orbit` | Measure pixels that change and quickly change back across frames, and save a GIF. |
 | `compare <scene> <ref.png>` | Render the scene alongside a reference and measure both at the reference's pixel size. |
+| `export-glb <scene or mesh>` | Export indexed mesh geometry, UVs, materials, and available skins and clips. |
 | `paint export <scene>` | Export `paint.png` and the surface coordinates of the rendered view. |
 | `paint absorb <scene>` | Convert edited pixels in `paint.png` into surface-pinned decals. |
 | `paint clear <scene>` | Clear the scene's saved decals. |

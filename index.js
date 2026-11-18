@@ -55,6 +55,7 @@ module.exports = {
     }
     throw new Error('do not know how to read ' + ext + ' (obj, gltf and glb are read)');
   },
+  exportGlb: require('./cli/export-glb.js'),
   load() {
     const out = path.join(__dirname, 'dist', 'standalone.js'),
       srcs = files().concat(demoFiles()),

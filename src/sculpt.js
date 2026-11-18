@@ -1368,13 +1368,37 @@ function makeSculpt(B) {
         m = p.br + 0.5;
       if (dx * dx + dy * dy + dz * dz > m * m) continue;
       const nd = -psd(p, x, y, z);
-      if (nd > d) d = nd;
+      if (nd > d) {
+        d = nd;
+        ownNeg = p;
+      }
     }
     return d;
   };
   S.sdf = fieldAll;
+  /* Material and part ownership at a rest-pose surface. The distance field
+     is retained even when the renderer samples it at a different resolution. */
+  S.surfaceAt = (x, y, z) => {
+    const distance = fieldAll(x, y, z), cut = ownNeg;
+    return { distance, material: cut?.mat?.r ? cut.mat : own?.mat, tag: cut?.tag || own?.tag || null };
+  };
   /* (before a bake the field does not yet know where its solids are: S.ready() tells it, for whoever needs to ask early) */
   S.ready = buildGrid;
+  /* Conservative rest bounds for the still-unbaked finite solids. */
+  S.modelBounds = padding => {
+    if (!pos.length && !neg.length) throw new Error('Model export needs an unbaked sculpt');
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (const p of pos) {
+      if (!Number.isFinite(p.br) || p.br > 1e8) throw new Error('Model export needs finite solids; put the ground in a separate render pass');
+      const r = p.br + Math.max(0, p.k) + padding;
+      for (let a = 0; a < 3; a++) {
+        min[a] = Math.min(min[a], p.bc[a] - r);
+        max[a] = Math.max(max[a], p.bc[a] + r);
+      }
+    }
+    if (!pos.length) throw new Error('Model export needs at least one positive solid');
+    return { min, max };
+  };
   S.solidCount = () => pos.length + neg.length;
   S.add = add;
   S.psd = psd; // the finished field (distance to the nearest surface), for whatever comes after the bake
