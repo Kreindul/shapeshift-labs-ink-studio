@@ -57,3 +57,13 @@ test('analytic roofs and triangle meshes contribute to the same field', () => {
   assert.equal(exposure(field, [.5, 0, 0]), 1);
   assert.equal(exposure(field, [0, 0, 0]), .5);
 });
+
+test('indexed assets project the same cover as their expanded triangles', () => {
+  const { rasterize, exposure } = P.overheadCover;
+  const positions = new Float32Array([0,1,0, 0,1,1, 1,1,0, 1,1,1]);
+  const indexed = { positions, triangles:new Uint16Array([0,1,2,1,2,3]) };
+  const field = rasterize({ meshes:[indexed] }, { spacing:.125 });
+  assert.deepEqual(field,rasterize({ meshes:[slab(0,1,0,1,()=>1)] },{ spacing:.125 }));
+  assert.equal(exposure(field,[.5,0,.5]),0);
+  assert.throws(()=>rasterize({meshes:[{...indexed,triangles:[0,1,8]}]}),/invalid triangle indices/);
+});

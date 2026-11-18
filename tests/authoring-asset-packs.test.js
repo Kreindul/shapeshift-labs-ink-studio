@@ -59,6 +59,19 @@ test('GLB imports a fitted mesh and preserves face color in a self-contained rec
   assert.throws(()=>A.assetMeshes.recipe(mesh.make([0,0,0,0,0,0,0,0,0],[0,1,2])),/area/);
 });
 
+test('mesh thumbnails fit the visible asset, resolve occlusion and retain transparent pixels',()=>{
+  const recipe = A.assetMeshes.fromGLB(makeGLB());
+  const positions = [...recipe.positions,...recipe.positions.map((v,i)=>i%3===2?v-.4:v)];
+  const back = {...recipe, positions, triangles:[0,1,2,3,4,5], colors:[[1,0,0],[0,0,1]], faceColors:[0,1]};
+  const frame = A.assetMeshes.thumbnail(back,{size:32,yaw:0,pitch:0,light:[0,0,1]});
+  assert.equal(frame.width,32);
+  assert.equal(frame.height,32);
+  assert.deepEqual(Array.from(frame.pixels.slice(0,4)),[0,0,0,0]);
+  const center = (16*32+16)*4;
+  assert.deepEqual(Array.from(frame.pixels.slice(center,center+4)),[255,0,0,255]);
+  assert.deepEqual(frame,A.assetMeshes.thumbnail(back,{size:32,yaw:0,pitch:0,light:[0,0,1]}));
+});
+
 test('GLB sockets preserve nested node positions and forward axes when fitted',()=>{
   const seat={name:'Ride Seat',translation:[.5,.4,-2],rotation:[0,Math.SQRT1_2,0,Math.SQRT1_2]};
   const hook={name:'Hook',matrix:[1,0,0,0,0,1,0,0,0,0,1,0,-.5,1,2,1]};

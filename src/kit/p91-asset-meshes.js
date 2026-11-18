@@ -159,5 +159,54 @@
     if (sockets.size) mesh.sockets = Object.fromEntries(sockets);
     return recipe(mesh,options);
   }
-  A.assetMeshes = Object.freeze({ recipe, validate, fromGLB });
+  function thumbnail(raw, { size = 40, padding = .10, yaw = .62, pitch = .42,
+    light = [-.4,.9,.55] } = {}) {
+    if (!Number.isInteger(size) || size < 8 || size > 128 || !Number.isFinite(padding) ||
+        padding < 0 || padding > .35 || !Number.isFinite(yaw) || !Number.isFinite(pitch) ||
+        !triplet(light) || K.V.len(light) < 1e-6) throw Error('Invalid mesh thumbnail settings');
+    const { positions, triangles, colors, faceColors } = validate(raw), { V } = K;
+    const forward = [Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),Math.cos(yaw)*Math.cos(pitch)];
+    const right = [Math.cos(yaw),0,-Math.sin(yaw)], up = V.cross(forward,right), sun = V.norm(light);
+    const points = [];
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let i=0;i<positions.length;i+=3) {
+      const point=positions.slice(i,i+3), x=V.dot(point,right), y=-V.dot(point,up);
+      points.push([x,y,V.dot(point,forward)]);
+      minX=Math.min(minX,x); maxX=Math.max(maxX,x);
+      minY=Math.min(minY,y); maxY=Math.max(maxY,y);
+    }
+    const scale=size*(1-2*padding)/Math.max(maxX-minX,maxY-minY),
+      centerX=(minX+maxX)*.5, centerY=(minY+maxY)*.5;
+    for (const point of points) {
+      point[0]=size*.5+(point[0]-centerX)*scale;
+      point[1]=size*.5+(point[1]-centerY)*scale;
+    }
+    const pixels=new Uint8ClampedArray(size*size*4), depth=new Float32Array(size*size).fill(-Infinity);
+    const point = index => positions.slice(index*3,index*3+3);
+    for (let i=0;i<triangles.length;i+=3) {
+      const ia=triangles[i], ib=triangles[i+1], ic=triangles[i+2];
+      const [ax,ay,az]=points[ia], [bx,by,bz]=points[ib], [cx,cy,cz]=points[ic];
+      const ux=bx-ax, uy=by-ay, vx=cx-ax, vy=cy-ay, area=ux*vy-uy*vx;
+      if (Math.abs(area)<1e-9) continue;
+      const origin=point(ia);
+      let n=V.norm(V.cross(V.sub(point(ib),origin),V.sub(point(ic),origin)));
+      if (V.dot(n,forward)<0) n=V.mul(n,-1);
+      const gain=.46+.54*Math.max(0,V.dot(n,sun));
+      const color=colors[faceColors[i/3]].map(value=>Math.round(value*gain*255));
+      const left=Math.max(0,Math.ceil(Math.min(ax,bx,cx)-.5)), right=Math.min(size-1,Math.floor(Math.max(ax,bx,cx)-.5));
+      const top=Math.max(0,Math.ceil(Math.min(ay,by,cy)-.5)), bottom=Math.min(size-1,Math.floor(Math.max(ay,by,cy)-.5));
+      for (let y=top;y<=bottom;y++) for (let x=left;x<=right;x++) {
+        const dx=x+.5-ax, dy=y+.5-ay, u=(dx*vy-dy*vx)/area, v=(ux*dy-uy*dx)/area;
+        if (u<-1e-8 || v<-1e-8 || u+v>1+1e-8) continue;
+        const z=Math.fround(az+u*(bz-az)+v*(cz-az)), pixel=y*size+x;
+        if (z<=depth[pixel]) continue;
+        depth[pixel]=z;
+        pixels.set(color,pixel*4);
+        pixels[pixel*4+3]=255;
+      }
+    }
+    return {width:size,height:size,pixels};
+  }
+
+  A.assetMeshes = Object.freeze({ recipe, validate, fromGLB, thumbnail });
 })(KIT);

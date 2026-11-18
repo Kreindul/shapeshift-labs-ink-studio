@@ -717,7 +717,8 @@ at the substrate. `coating.glsl.shape` implements the same transform on the GPU.
 
 `P.overheadCover.rasterize({meshes, surfaces}, options)` projects opaque
 geometry from above. Each mesh supplies a flat `positions` buffer with
-nine world coordinates per triangle. Each analytic surface supplies
+nine world coordinates per triangle, or XYZ vertices and a flat
+`triangles` index buffer. Each analytic surface supplies
 two-element XZ bounds `min` and `max` and a `heightAt(x, z)` function that
 returns the upper height or `null` outside its footprint. The highest
 intersection at each XZ cell center becomes a texel in a single-channel
@@ -1588,6 +1589,12 @@ triangle model into a self-contained JSON recipe with fitted ground
 coordinates and bounded face colors. `assetMeshes.recipe(mesh, {size})`
 uses an already parsed mesh. The recipe carries geometry and base colors.
 The caller selects the placement, material and rendering rules.
+
+`assetMeshes.thumbnail(recipe, {size, padding, yaw, pitch, light})`
+renders the asset's face colors into a transparent square RGBA buffer.
+The returned `{width, height, pixels}` uses orthographic framing and
+depth testing. It works without a document, browser or renderer and can
+be used for picker icons, previews or contact sheets.
 
 Pass `socketNodes: { seat: 'Ride Seat', hook: 'Hook' }` to map names in
 the active glTF scene to asset socket IDs. Matching nodes may be empty.

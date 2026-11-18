@@ -16,9 +16,13 @@
       throw Error('Overhead cover needs meshes and a bounded raster configuration');
     let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
     for (const mesh of meshes) {
-      const positions = mesh?.positions;
-      if (!(Array.isArray(positions) || ArrayBuffer.isView(positions)) || positions.length % 9 !== 0)
-        throw Error('Overhead cover needs consecutive XYZ triangles');
+      const { positions, triangles } = mesh || {};
+      const indexed = triangles !== undefined;
+      if (!(Array.isArray(positions) || ArrayBuffer.isView(positions)) || positions.length % (indexed ? 3 : 9) !== 0)
+        throw Error('Overhead cover needs XYZ triangles');
+      if (indexed && (!(Array.isArray(triangles) || ArrayBuffer.isView(triangles)) ||
+          triangles.length % 3 !== 0 || !Array.from(triangles).every(i => Number.isInteger(i) && i >= 0 && i < positions.length / 3)))
+        throw Error('Overhead cover has invalid triangle indices');
       for (let i = 0; i < positions.length; i += 3) {
         const x = positions[i], y = positions[i + 1], z = positions[i + 2];
         if (!between(x, empty / 2, -empty / 2) ||
@@ -41,18 +45,22 @@
     const width = Math.min(maxSize, Math.ceil((maxX - minX) / step));
     const height = Math.min(maxSize, Math.ceil((maxZ - minZ) / step));
     const samples = new Float32Array(width * height).fill(empty);
-    for (const { positions } of meshes) {
-      for (let i = 0; i < positions.length; i += 9) {
-        const ax = (positions[i] - minX) / step - .5, az = (positions[i + 2] - minZ) / step - .5;
-        const bx = (positions[i + 3] - minX) / step - .5, bz = (positions[i + 5] - minZ) / step - .5;
-        const cx = (positions[i + 6] - minX) / step - .5, cz = (positions[i + 8] - minZ) / step - .5;
+    for (const { positions, triangles } of meshes) {
+      const count = triangles ? triangles.length : positions.length / 3;
+      for (let i = 0; i < count; i += 3) {
+        const a = (triangles ? triangles[i] : i) * 3;
+        const b = (triangles ? triangles[i + 1] : i + 1) * 3;
+        const c = (triangles ? triangles[i + 2] : i + 2) * 3;
+        const ax = (positions[a] - minX) / step - .5, az = (positions[a + 2] - minZ) / step - .5;
+        const bx = (positions[b] - minX) / step - .5, bz = (positions[b + 2] - minZ) / step - .5;
+        const cx = (positions[c] - minX) / step - .5, cz = (positions[c + 2] - minZ) / step - .5;
         const ex = bx - ax, ez = bz - az, fx = cx - ax, fz = cz - az, area = ex * fz - ez * fx;
         if (Math.abs(area) < 1e-10) continue;
         const firstX = Math.max(0, Math.ceil(Math.min(ax, bx, cx) - 1e-8));
         const lastX = Math.min(width - 1, Math.floor(Math.max(ax, bx, cx) + 1e-8));
         const firstZ = Math.max(0, Math.ceil(Math.min(az, bz, cz) - 1e-8));
         const lastZ = Math.min(height - 1, Math.floor(Math.max(az, bz, cz) + 1e-8));
-        const ay = positions[i + 1], dy = positions[i + 4] - ay, ey = positions[i + 7] - ay;
+        const ay = positions[a + 1], dy = positions[b + 1] - ay, ey = positions[c + 1] - ay;
         for (let z = firstZ; z <= lastZ; z++) for (let x = firstX; x <= lastX; x++) {
           const u = ((x - ax) * fz - (z - az) * fx) / area;
           const v = (ex * (z - az) - ez * (x - ax)) / area;
