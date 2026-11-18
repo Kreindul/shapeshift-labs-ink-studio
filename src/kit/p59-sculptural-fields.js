@@ -201,7 +201,7 @@
     S.implicitForm = (source, mat, o = {}) => {
       if (typeof source?.sd !== 'function' || (o.cell !== undefined && !positive(o.cell)) ||
         (o.res !== undefined && !positive(o.res)) ||
-        (o.maxWork !== undefined && (!positive(o.maxWork) || o.maxWork > 160000000)))
+        (o.maxWork !== undefined && (!Number.isSafeInteger(o.maxWork) || o.maxWork <= 0 || o.maxWork > 160000000)))
         throw new Error('Implicit form needs a signed field and valid sample controls');
       const { sd, bounds, cost } = form(source.sd, source.bounds, source.cost ?? 1);
       if (!positive(cost)) throw new Error('Implicit form cost must be positive');

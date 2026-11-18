@@ -72,6 +72,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `growth.aggregate(options)`, `growth.grayScottGrid(options)`, `growth.grayScottSurface(points, links, options)`, `growth.dispersal(options)`, `growth.succession(options)` | Grid and surface patterns, seed dispersal and habitat competition |
 | `forms.superquadric(spec)`, `forms.loft(sections)`, `forms.skeleton(nodes)`, `forms.periodic(spec)`, `forms.shell(host, options)` | Bounded analytic forms and locally variable shells for the sculptor |
 | `grammar.symmetry(scope, rules, options)` | Reflected or radial grammar instances with optional variations and stable copy keys |
+| `fracture.power(spec)`, `fracture.separate(graph, options)`, `fracture.crack(options)` | Anisotropic power cells, cumulative bond failure and stress-guided crack paths |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -713,6 +714,35 @@ checks its work budget and needs enough resolution to detect the feature.
 
 `examples/sculptural-fields.js` combines an open pottery loft, a
 gyroid inside a rounded carrier, and a mirrored medial ornament.
+
+### Implicit fracture and crack paths
+
+`fracture.power({host, seeds, stretch, rotation, gap, cell, bond})`
+partitions a signed host into weighted, negative-inside fragments. A site
+is `{id, point, weight}`, and raising its weight grows its power cell.
+`stretch` stretches the local distance metric. `rotation` orients that
+metric in world space. For a callback host supply finite `bounds`.
+
+Each cell exposes an implicit `form` for the splat bake. `owner(x, y, z)`
+identifies the un-gapped partition winner, and the cell fields include
+the specified gap. A voxel pass estimates material volume and the area
+of bonds between adjacent cells. Lower `cell` to resolve small fragments
+in the graph. Each bond has an ID, endpoint IDs, contact area, and capacity.
+Set `bond` to derive capacity from material or another field.
+
+`fracture.separate(graph, {loads, previous})` accumulates nonnegative
+loads against bond capacities and returns the remaining connected
+components. Each map is indexed by the emitted bond IDs.
+
+`fracture.crack({width, height, starts, stress, toughness, mask, seed})`
+advances connected fronts with seeded branching. A start specifies
+`{at, angle, energy}`. Stress is a scalar load or
+`{load, direction: [dx, dz]}`. Toughness and the mask can keep cracks
+away from authored zones. Use the returned chains for relief cuts and
+material marks. Results follow the supplied fields as artistic rules.
+
+`examples/fracture-studies.js` displays weighted slab fragments and
+a stress-guided surface crack. Both are realized as SDFs for the splat bake.
 
 ## Optional retained authoring
 
