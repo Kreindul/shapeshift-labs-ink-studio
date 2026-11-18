@@ -32,6 +32,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.implicitSurface(field, bounds, options)` | Marching tetrahedra for negative-inside fields. Use `edgeRefinements` (0–12, default 0) to bisect nonlinear crossings within the same bounded grid. |
 | `pieces.convex`, `pieces.box`, `pieces.beam`, `pieces.tube`, `pieces.union` | Reusable solid pieces and query unions. Union meshes contain constituent shells |
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
+| `logicalParts.compile(pieces, identify)` | Group clipped pieces of one stock part and partition visible and omitted pieces from retained keys |
 | `courseRelief(layout, {profile, rise, slope})` | Give fitted cells independent relief with stable local coordinates when clipped or wrapped |
 | `panelFrames(spec)` | Keyed rails, posts and braces that fit chart dimensions, with optional openings and fitted surrounds |
 | `fittedRibbon({inner, outer, pitch, gap, closed, phase, sections, measure, budget})` | Fit repeating bands along paired 2D or 3D rails. Each logical cell contains quadrilateral footprints split at source edges |
@@ -1988,6 +1989,17 @@ query ring with the heightfield's footprint first when it is bounded.
 
 
 A caller can pass a certified `slopeBound` on the horizontal gradient. This allows steep rays to solve one bracket and other rays to skip intervals that cannot cross the surface. Without a bound the query samples at regular intervals. Vertical rays evaluate the height directly. `maxDistance` defaults to 10000 world units.
+
+### Edit assembled parts
+
+Use `P.logicalParts.compile(pieces, piece => piece.stockId)` to index fragments
+of the same edit target. A caller can use the logical cell ID from a fitted
+strip, a manufactured kit ID, or another stable key. Supply a nullish key
+for backing or other always-visible pieces. `index.groups` lists distinct
+keys and their fragments. `index.get(key)` returns all fragments of a single
+part. `index.partition(hiddenKeys)` returns `{ visible, omitted }` in input
+order. Retain the hidden keys alongside the generator input. Unknown keys
+can stay dormant until a future realization contains the part again.
 
 ### Courses on a variable strip
 
