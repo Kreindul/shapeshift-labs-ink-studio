@@ -1306,6 +1306,16 @@
       "tags": ["lint", "crisp", "compare", "review", "shimmer"]
     },
     {
+      "id": "import.depth",
+      "kind": "op",
+      "status": "ready",
+      "title": "Depth maps into splats, signed fields and meshes",
+      "what": "Unproject a calibrated raster, preserve holes and depth breaks, project an optional RGB image, and build a backed closed solid from the visible surface.",
+      "use": "ink-studio depth input.png --image aligned.png",
+      "where": "docs/depth-maps.md",
+      "tags": ["depth", "mesh", "sdf", "splats", "projection", "import"]
+    },
+    {
       "id": "sim.sandbox",
       "kind": "op",
       "status": "ready",

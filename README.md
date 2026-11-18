@@ -16,6 +16,7 @@ The package includes geometry, materials, lighting, animation, character control
 - [Particles and interaction](#particles-and-interaction)
 - [Physics and persistent effects](#physics-and-persistent-effects)
 - [Importing meshes](#importing-meshes)
+- [Importing depth maps](#importing-depth-maps)
 - [Procedural worlds](#procedural-worlds)
 - [Rendering and command reference](#rendering-and-command-reference)
 - [View-dependent surface materials](#view-dependent-surface-materials)
@@ -500,6 +501,10 @@ console.log(world.count);
 
 The file example assumes the current working directory is this repository. OBJ supports a companion MTL; glTF supports companion buffers; GLB is read from binary data. Material and vertex colors become palette ramps. Texture images are not imported. Open meshes become sheets with thickness. Imported geometry becomes a distance-field solid, so it can join, be carved, receive materials and break like authored geometry.
 
+## Importing depth maps
+
+`ink-studio depth` converts a grayscale PNG or numeric depth map into Gaussian splats, a backed signed-distance field and an OBJ mesh. Add an aligned RGB or RGBA PNG with `--image` to project its colour onto the observed surface. `KIT.depth.fromMap()` gives scene authors the same conversion and accepts typed arrays directly. See the [depth import guide](docs/depth-maps.md) for camera calibration, the output formats, and a runnable example.
+
 ## Procedural worlds
 
 The environment tools produce normal solids, placements or stage systems, so their outputs use the same lighting, tags and interaction APIs:
@@ -544,6 +549,7 @@ Each module opens with signatures and option descriptions. Use `ink-studio catal
 | `clip <scene> --from 0 --to 3 --fps 12` | Save an animated PNG. |
 | `ghost <scene> --t 1 --spacing 0.12 --n 2` | Overlay neighboring animation poses. |
 | `mesh <file.obj\|.gltf\|.glb>` | Import, inspect and render a mesh from multiple angles. |
+| `depth <map.png or map.json> [--image color.png]` | Build a splat preview, signed field and OBJ from a depth map. |
 | `validate <file.json>` | Report scene-data errors and suggestions. |
 | `ramps <scene>` | Inspect the scene's color ramps. |
 | `values <scene>` | Check readability in dark, middle and light tones. |

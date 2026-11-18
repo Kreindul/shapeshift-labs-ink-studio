@@ -248,6 +248,7 @@ const CMD = {
         '  acts                        the ready clips, reactions, easings and cues, by name',
         '  motion <id> [--from 0 --to 12]   numbers about how it moves: speed, jumps, what goes underground',
         '  mesh <file.obj|.gltf|.glb>  bring a mesh in: what it is made of, and a sheet of it from all round as splats',
+        '  depth <map.png|map.json> [--image aligned.png --out-dir folder]  import a depth map as splats, a mesh and an SDF',
         '                              [--size 6 --cells 64 --res 0.09 --hues 6 --shades 4 --up z --spin 0.5 --thick 0.1]; a mesh file also works wherever an id does',
         '  validate <file.json>        check a diorama written as data: every mistake listed, with what was probably meant',
         '                              a .json diorama also works wherever an id does; --style slate|moss|ember puts it in another style',
@@ -665,6 +666,9 @@ const CMD = {
     if (!pos[0]) die('validate which file?');
     const s = dataScene(pos[0]);
     console.log(pos[0] + ': sound (' + s.id + ', "' + s.name + '")');
+  },
+  depth() {
+    require('./depth.js')(pos[0], opt, lib(), path.join(OUT, 'depth-import'));
   },
   mesh() {
     const w = build(pos[0]),
