@@ -52,3 +52,24 @@ Use `model.splat(builder)` to emit the observed splats into an existing world. U
 node cli/ink-studio.js render examples/depth-map.js --ortho --raw
 node cli/ink-studio.js render examples/depth-map.js --ortho --raw --yaw 0.77 --pitch 0.2
 ```
+
+## Converting a signed field back to geometry
+
+`K.sdf.toMesh(field, options)` polygonizes a bounded field at its zero surface. Pass a function
+`sd(x, y, z)` with `bounds: { min, max }`, or pass a field object with `sd`, `lo` and `hi` such as
+the result of `model.field()`, `K.depth.readField(grid)` or `K.mesh.field(mesh)`. Leave room around
+the surface in the sampling bounds when you need a closed mesh.
+
+```js
+const signedDistance = (x, y, z) => Math.hypot(x, y, z) - 1;
+const options = { bounds: { min: [-1.2, -1.2, -1.2], max: [1.2, 1.2, 1.2] }, resolution: 0.12 };
+const mesh = K.sdf.toMesh(signedDistance, options);
+const world = K.sdf.toSplats(signedDistance, { ...options, res: 0.08 });
+K.sdf.solid(S, signedDistance, { r: [1, 2, 3] }, options);
+```
+
+`resolution` is the meshing cell size. `maxCells` bounds the sampling work, and `color` sets the mesh
+material's 0–1 RGB. `K.sdf.solid` adds the sampled surface to an existing sculpt and retains the original
+distance function for sculpt operations. `K.sdf.toSplats` bakes a standalone world with an inspection
+camera. Its optional `res` controls splat spacing, and `palette`, `material` and `cam` customize the world.
+Use the depth importer's `front`, `mesh` or `splat()` directly when you want the projected image colours.

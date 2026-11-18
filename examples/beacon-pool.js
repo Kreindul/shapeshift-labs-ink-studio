@@ -18,31 +18,34 @@ module.exports = ({ KIT: K, makeBuilder, makeSculpt }) => ({
     const wet = K.surface.preset('wet-cobblestone', { r: [1, 2, 3, 4] });
     const brass = K.surface.preset('brushed-brass', { r: [13, 14, 15, 16] }, { direction: 'y' });
     const waterline = -0.24;
-    const water = K.surface.preset(
-      'rippling-water',
-      { r: [6, 7, 8, 9], a: 0.20, glass: true },
-      {
-        normal: {
-          type: 'rings',
-          amplitude: 0.46,
-          scale: 0.58,
-          speed: 1.15,
-          width: 0.72,
-          damping: 0.25,
-          drops: [
-            { at: [-0.67, waterline, 0.22], start: 0.1, repeat: 3.2 },
-            { at: [1.1, waterline, -0.22], start: 0.85, repeat: 3.2, strength: 0.66 }
-          ]
-        },
-        layers: {
-          sky: { sky: '#40818e', horizon: '#377587', ground: '#203946', f0: 0.04, strength: 0.57 },
-          sun: { color: '#dbe9de', roughness: [0.3, 0.13], strength: 0.94 },
-          ripples: { color: '#9cdddd', strength: 0.65 }
+    const rings = K.ripple.field({
+      amplitude: 0.46,
+      scale: 0.58,
+      speed: 1.15,
+      width: 0.72,
+      damping: 0.25,
+      drops: [
+        { at: [-0.67, waterline, 0.22], start: 0.1, repeat: 3.2 },
+        { at: [1.1, waterline, -0.22], start: 0.85, repeat: 3.2, strength: 0.66 }
+      ]
+    });
+    const mirror = K.reflection.plane({ id: 'pool', at: [0, waterline, 0] });
+    const water = K.reflection.material(
+      K.surface.preset(
+        'rippling-water',
+        { r: [6, 7, 8, 9], a: 0.58 },
+        {
+          normal: rings.normal,
+          layers: {
+            sky: { sky: '#40818e', horizon: '#377587', ground: '#203946', f0: 0.04, strength: 0.42 },
+            sun: { color: '#dbe9de', roughness: [0.28, 0.13], strength: 0.65 },
+            ripples: { color: '#9cdddd', strength: 0.48 }
+          }
         }
-      }
+      ),
+      'pool',
+      { f0: 0.78, distortion: 13, blur: 0.7, color: '#c3e6ed' }
     );
-    const inside = (x, z) => (x / 2.6) ** 2 + (z / 1.47) ** 2 < 1;
-    // Keep the pool open under the surface so the mirrored geometry can be seen.
     S.ball([0, -1.89, 0], [2.72, 0.12, 1.63], { r: [6, 7, 7] }, { res: 0.15 });
     for (let i = 0; i < 28; i++) {
       const a = (i * Math.PI * 2) / 28;
@@ -69,13 +72,6 @@ module.exports = ({ KIT: K, makeBuilder, makeSculpt }) => ({
       S.lathe([x, top - 0.015, z], 0.045, [0.13, 0.13], brass, { res: 0.048 });
     }
     S.bake();
-    K.reflect(B, {
-      y: waterline,
-      where: inside,
-      maxH: 1.74,
-      gap: 5.5,
-      colours: { 3: 7, 4: 8, 5: 9, 14: 14, 15: 20, 16: 21, 17: 16, 18: 17 }
-    });
     S.sun = K.V.norm([0.55, 0.52, -0.66]);
     S.ball([0, waterline - 0.025, 0], [2.57, 0.025, 1.45], water, { res: 0.07, ghost: true });
     S.bake();
@@ -84,7 +80,18 @@ module.exports = ({ KIT: K, makeBuilder, makeSculpt }) => ({
       radius: 7,
       detail: 36,
       dither: 0,
-      refract: 2,
+      reflections: [mirror],
+      atmosphere: [
+        K.atmosphere.fog({ top: -0.35, density: 0.11, color: '#283a47', near: 5.9, far: 11 }),
+        K.atmosphere.sphere({ at: [0.64, 0.06, -1.4], radius: 1.55, density: 0.11, color: '#627f88' }),
+        K.atmosphere.shaft({
+          from: [-0.08, 1.58, -0.98],
+          to: [0.33, -0.1, -0.57],
+          radius: 0.16,
+          density: 0.49,
+          color: '#e1bc80'
+        })
+      ],
       look: { pixel: true, outline: true, clean: true }
     });
   }

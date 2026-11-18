@@ -206,6 +206,8 @@ const view = extra =>
       clean: !!opt.clean,
       ortho: !!opt.ortho,
       surface: opt.surface === 'off' ? false : undefined,
+      reflections: opt.reflections === 'off' ? false : undefined,
+      atmosphere: opt.atmosphere === 'off' ? false : undefined,
       edges: opt.edges === 'off' ? false : undefined
     },
     extra
@@ -266,7 +268,7 @@ const CMD = {
         '                              against the pixel-art references (--map: where the stray pixels and drawn edges are)',
         '',
         'any command that plays a diorama takes --poke 2:x,y,z (tap it at 2 seconds, toward that point; several with ;)',
-        'view options: --surface off (no finish layers) --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (lone pixels removed) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n'
+        'view options: --surface off (no finish layers) --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (lone pixels removed) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n'
       ].join('\n')
     );
   },
