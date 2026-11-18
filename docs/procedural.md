@@ -1861,3 +1861,9 @@ catalog leaves entities, authored construction settings, and other
 presentation channels intact. When a saved profile is unavailable,
 `resolve(source)` returns the default with `missing: true` and the saved
 requested ID so callers can show the fallback.
+
+### Camera pivots
+
+`P.cameraPivots.choose(mode, { cursor, pick, fallback, radius })` resolves a world point from normalized viewport coordinates running left to right and top to bottom. `pick(u, v)` returns the app's chosen surface point or null. Modes are `target` (return the fallback), `cursor` (use the supplied coordinates), `center` (one center sample), and `region` (center followed by nearby samples until a hit). The cursor defaults to the center. The selection includes at most nine samples so an app can reuse a pivot across an input gesture.
+
+`P.cameraPivots.orbit(view, yaw, pitch, pivot)` rotates the view around a world point while keeping that point at the same screen position. `P.cameraPivots.zoom(view, dist, pivot)` keeps the same screen position as the distance changes. A view supplies `{ yaw, pitch, dist, target }` with angles in radians, positive camera distance, and a three-component world-space target. Both functions return a new view. Passing a null pivot keeps the target fixed. The caller supplies camera limits, picking rules, and input bindings.
