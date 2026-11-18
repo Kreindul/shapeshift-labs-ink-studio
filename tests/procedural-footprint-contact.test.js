@@ -27,3 +27,12 @@ test('fit rejects gaps, narrow obstructions and excessive grades or elevations',
   assert.equal(fit({...footprint, height: flat, interval: [.1, 3]}), null);
   assert.throws(() => fit({...footprint, height: flat, interval: ['0', 3]}), /dimensions/);
 });
+
+test('compact contact produces the same frame and checks the same support and obstruction samples', () => {
+  const options={...footprint,height:(x,z)=>1+.07*(z+3),blocked:()=>false};
+  const {points,...frame}=fit(options), compact=fit({...options,includePoints:false});
+  assert.equal(points.length,9);
+  assert.deepEqual(compact,frame);
+  const blocked = ([x,y,z])=>x===3.75&&z===-3.5&&y>1.7;
+  assert.equal(fit({...options,blocked,includePoints:false}),null);
+});

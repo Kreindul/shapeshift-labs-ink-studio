@@ -48,7 +48,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `proximity.connect(sockets, options)` | Deterministic matching of named sockets with reach, degree and compatibility limits |
 | `attachments.layout(slots, families, options)` | Stable weighted selection for framed, typed attachment slots, with fit and clearance callbacks |
 | `fitSurfaceBands({domain, opening, edges, obstructions, clearance})` | Keep bands mounted to a chart feature's edges and shorten or omit them to fit nearby boundaries and obstructions |
-| `fitFootprintContact({center, tangent, size, height, blocked, maxSpread, samples, interval})` | Seat an upright footprint on a sampled support and check space above it |
+| `fitFootprintContact({center, tangent, size, height, blocked, maxSpread, samples, interval, includePoints})` | Seat an upright footprint on a sampled support and check space above it |
 | `createFootprintReservations({clearance, cellSize})` | Reserve space for oriented upright objects and test nearby candidates |
 | `environmentFields.evaluate(settings, elapsed)`, `environmentFields.opticalDepth(from, to, medium)`, `environmentFields.scatter(from, to, light, medium)`, `environmentFields.deposition(sample)` | Cyclic sun and sky tint, height-dependent fog, local scattering, and slope-sensitive surface loads |
 | `populations.layout(boundsList, evaluate, options)` | Seeded world-space candidates ranked by density. Expanding the work region preserves existing candidate identities |
@@ -208,7 +208,9 @@ surface. Choose an allowable height `interval`, the maximum height
 difference `maxSpread`, and `samples` per axis. An optional `blocked(point)`
 predicate can reject sample columns at three heights above the fitted base.
 An accepted fit returns the upright frame with its origin at the highest
-sample, the height `range`, and the sampled XZ `points`. A footprint with
+sample, the height `range`, and the sampled XZ `points`. Set
+`includePoints: false` when only the fitted frame and range are needed.
+The checks still use the full sample grid. A footprint with
 missing support, excessive height variation or blocked space returns `null`.
 
 `createFootprintReservations` manages a temporary set of oriented volume
