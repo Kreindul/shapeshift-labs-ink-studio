@@ -50,6 +50,26 @@ test('support distance bounds stay conservative on sloping and tilted carriers',
   }
   assert.throws(() => r.distance([NaN, 0, 0]));
 });
+test('fitted support courses recess their joints and keep the same bearing and course datum', () => {
+  const skirt=A.supportSkirt({outline:loop,ground}), spec={unit:[.45,.22],joint:.04,depth:.045};
+  const finish=A.supportCourses(skirt,spec), y=finish.top-finish.layout.unit[1];
+  near(skirt.distance([.2,y,1]),0);
+  assert(finish.distance([.2,y,1])>.002);
+  assert(finish.distance([.2,y,.93])<0);
+  near(finish.distance([.2,finish.top,1]),0);
+  const changed=A.supportSkirt({outline:loop,ground:{
+    ...ground,height:(x,z)=>ground.height(x,z)-.35,bounds:{min:[-3,-4,-3],max:[3,2,3]}
+  }});
+  const next=A.supportCourses(changed,spec), p=[.2,y-.05,1];
+  assert.equal(next.lookup(p).cell.id,finish.lookup(p).cell.id);
+  near(next.lookup(p).v,finish.lookup(p).v);
+  const seamY=finish.top-1.5*finish.layout.unit[1];
+  assert.equal(finish.lookup([-.99999,seamY,-1]).cell.id,finish.lookup([-1,seamY,-.99999]).cell.id);
+  const samples=[];
+  assert.equal(finish.sample(.14,q=>samples.push(q)),samples.length);
+  assert(samples.some(p=>Math.abs(p[1]-y)<1e-6&&skirt.horizontal(p[0],p[2])<-.02));
+  assert(samples.every(p=>Math.abs(finish.distance(p))<.001));
+});
 test('skirt validation and budgets reject invalid or unbounded geometry before expensive allocation', () => {
   for (const raw of [
     {
