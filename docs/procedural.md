@@ -60,6 +60,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `routes.follower(route, options)` | Distance-based position and a look-ahead frame for cameras or assemblies on sampled routes |
 | `ambientMotion.create(members, {place, move, destination?, step?})` | Seeded roaming, local avoidance, temporary attraction and habitat revalidation |
 | `layerMix.create(layers, {budget})` | Combine continuous controls into bounded per-layer gains with optional fades |
+| `inputActions.compile(contexts)` | Map physical keys and analog controls to semantic actions in named contexts |
 | `emitters.compile(spec)` | Deterministic looping samples with caller-supplied direction and drift. Sample at any finite time with `sample(index, time)` or `samples(time)` |
 | `routes.polyline(points, options)`, `routes.aroundConvex(outline, start, end, options)` | Arc-length routes with frames and closest queries. Convex XZ routes project endpoints onto an offset perimeter and interpolate world Y |
 | `routes.terrain(start, end, options)` | Bounded, terrain-aware search between pinned points with slope, signed clearance, keep-out regions and turn costs |
@@ -291,6 +292,24 @@ for each layer. When the sum exceeds the budget it scales all gains together.
 seconds. A zero fade applies the layer target immediately. Feed the same
 gains to synchronized audio stems or to any other independently weighted
 layers. The mixer has no clock, playback engine, or scene dependency.
+
+### Input actions
+
+`inputActions.compile({edit: {select: ['key:Enter', 'pad:South']}, menu:
+{confirm: ['key:Enter', 'pad:South']}})` binds inputs to named actions. The
+same physical control may be reused across contexts. Inside a context each
+control belongs to one action. Configure analog bindings with
+`{input: 'pad:RightX', deadZone: .18, scale: -1}` to remove stick drift and
+reverse its direction.
+
+`resolve(context, input, value)` returns an action and its normalized value,
+or `null` for an unbound control. `sample(context, sources)` accepts one
+input-to-value object per source, keeping the strongest absolute value per
+action. The first source wins ties. Unpressed actions are zero.
+`bindings(context, action)` provides the same binding information for
+tooltips or settings. The caller owns polling, key edges, focus, and
+persisted overrides. A caller can recompile a changed profile and keep the
+previous one if the update contains conflicting bindings.
 
 ### Ordered paint coverage
 
