@@ -65,6 +65,8 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `tiles.compile(definitions)`, `tiles.solve(model, options)`, `tiles.learn(swatch)`, `tiles.overlap(bank, options)`, `tiles.wang(model, options)`, `tiles.refine(coarse, model, options)` | Weighted matched sockets, example-based synthesis, world-stable patterns and coarse-to-fine layouts |
 | `fields.simplex(options)`, `fields.periodic(options)`, `fields.compile(expression, options)` | Seeded analytic noise and serializable field composition for SDFs, materials and placement |
 | `grammar.expand(scope, rules, options)`, `grammar.children(layout)` | Bounded shape grammar with named partitions, fitted repeats, pinned spans, sockets and retained child specs |
+| `grammar.rewriteGrid(rows, rules)`, `grammar.rewriteGraph(graph, rules)` | Seeded weighted pattern replacement on scalar grids and directed graphs |
+| `layouts.bsp(options)`, `layouts.cave(options)`, `layouts.pack(items, options)`, `layouts.floorPlan(rooms, options)` | Connected room partitions and caves, constrained rectangle packing and named room adjacencies |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -567,6 +569,45 @@ realized from the retained document and baked to splats.
 node cli/ink-studio.js render examples/pinned-facade.js --seed 0 --ortho --colored
 node cli/ink-studio.js render examples/pinned-facade.js --seed 1 --ortho --colored
 ```
+
+### Grid and graph rewriting
+
+`grammar.rewriteGrid(rows, rules, {steps, seed, pinned, wrap})` selects
+a weighted match on each step and applies it to the current grid. A rule
+has an `id`, optional `weight`, and same-sized `find` and `replace` patterns.
+Use `*` to match any cell and `=` to keep a cell. Pins use integer XZ
+indices. The result includes the current grid and rule history.
+
+`grammar.rewriteGraph(graph, rules, options)` uses the same weighted
+selection on directed graphs. The source has `nodes: [{id, type, data}]`
+and `edges: [{from, to, type, data}]`. Each rule has `find` and
+`replace` graphs whose nodes use local `key` names. Existing keys preserve
+identity, omitted matched nodes disappear, and new keys create nodes.
+Edges matched by the rule are replaced. Outside edges of retained nodes
+remain attached. Both APIs expose work budgets.
+
+### Rooms, caves and packing
+
+- `layouts.bsp({width, height, minRoom, margin, corridorWidth, seed})`
+  partitions the grid recursively, fits a room inside each leaf, and
+  joins sibling regions. It returns room bounds and corridor routes.
+- `layouts.cave({width, height, seed, steps, open, solid, repair})`
+  evolves a cellular grid. It removes small unpinned regions and can
+  carve connections among the remaining components. Pin or mask cells
+  to protect authored features. A protected barrier can leave the result
+  `disconnected`.
+- Both grid layouts return row-major `cells` with one for open space.
+  The same cells can drive a voxel shape, a floor mask, or an SDF cut.
+- `layouts.pack(items, {width, height, gap, pins, blocked})` fits
+  footprints supplied as `{id, size: [width, depth], rotate}`. Pins
+  specify an `id`, integer `at` and optional `rotated` flag.
+- `layouts.floorPlan(rooms, options)` accepts the same room shapes.
+  Pass `adjacencies: [{a, b, span}]` to request shared walls and minimum
+  door openings. The result supplies room bounds and door positions.
+  Infeasible programs and search-budget exhaustion are reported separately.
+
+In `examples/rooms-and-caves.js`, seeded room and cave grids are passed
+to the voxel sculpt node. A grid grammar marks floor accents in both layouts.
 
 ## Optional retained authoring
 
