@@ -5,7 +5,7 @@ const library = require('..');
 const { KIT: K, makeBuilder, makeSculpt, SceneOptics: Optics } = library.load();
 const { render } = require('../cli/render.js');
 
-const close = (a, b) => a.forEach((v, i) => assert(Math.abs(v - b[i]) < 1e-7, a + ' differs from ' + b));
+const close = (a, b, epsilon = 1e-7) => a.forEach((v, i) => assert(Math.abs(v - b[i]) < epsilon, a + ' differs from ' + b));
 const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const mapPoint = (m, p) => [0, 1, 2].map(i => m[i] * p[0] + m[4 + i] * p[1] + m[8 + i] * p[2] + m[12 + i]);
 
@@ -148,4 +148,26 @@ test('bundle hosts receive the reflection, ripple, volume and mesh tools', () =>
       .every(x => typeof x === 'function')
   `), true);
   assert.equal(Optics.plane, K.reflection.plane);
+});
+
+test('packed ripple frames agree with surface normals on tilted planes and respect source times', () => {
+  const ripple = K.ripple.field({ axis: 'z', cross: [1, 1, 0], capacity: 3, scale: .42 });
+  const a = ripple.add({ at: [1, 2, 3], start: .2, repeat: 2.5, strength: 1.2 });
+  ripple.add({ at: [.2, .5, .3], start: 1 });
+  ripple.add({ at: [0, 0, 0], start: 5 });
+  const point = [1.4, 2.3, 3.1], storage = new Float32Array(12), out = [0, 0, 0];
+  for (const time of [0, .2, .48, 1.8, 3.1, 5.1]) {
+    const frame = ripple.frame(time, storage);
+    assert.equal(frame.drops, storage);
+    for (const footprint of [0, .23, .5]) {
+      assert.equal(K.ripple.sampleFrame(frame, point, footprint, out), out);
+      close(out, ripple.sample(point, time, footprint), 1e-6);
+    }
+  }
+  assert.equal(ripple.frame(.2, storage).count, 0);
+  assert.equal(ripple.frame(.48, storage).count, 1);
+  assert.throws(() => ripple.frame(.48, new Float32Array(0)), /storage/);
+  assert.throws(() => ripple.add({ at: [0, 0, 0] }), /up to 3/);
+  ripple.remove(a);
+  assert.equal(ripple.frame(.48, storage).count, 0);
 });

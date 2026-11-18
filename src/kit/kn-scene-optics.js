@@ -7,7 +7,7 @@
       return SurfaceLook.material(base, { layers: { mirror: { ...options, type: 'planarReflection', plane } } });
     }
   };
-  K.ripple = { field: SceneOptics.ripple };
+  K.ripple = { field: RippleField.field, sampleFrame: RippleField.sampleFrame, glsl: RippleField.glsl };
   K.atmosphere = {
     fog: SceneOptics.fog,
     sphere: SceneOptics.sphere,

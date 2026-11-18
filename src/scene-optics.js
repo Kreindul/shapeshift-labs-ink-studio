@@ -2,6 +2,8 @@
 const SceneOptics = (() => {
   const reflection = typeof ReflectionPlane === 'undefined' ? require('./reflection-plane.js') : ReflectionPlane;
   const { planeDistance, reflectedView, captureView } = reflection;
+  const ripples = typeof RippleField === 'undefined' ? require('./ripple-field.js') : RippleField;
+  const { field: ripple, ringSampler } = ripples;
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const sub = (a, b) => a.map((v, i) => v - b[i]);
   const length = v => Math.hypot(...v);
@@ -16,11 +18,6 @@ const SceneOptics = (() => {
     if (!(size > 1e-9)) throw new RangeError(name + ' must be nonzero');
     return v.map(n => n / size);
   }
-  const clamp = n => Math.max(0, Math.min(1, n));
-  const smooth = n => {
-    const t = clamp(n);
-    return t * t * (3 - 2 * t);
-  };
   const positive = (n, name) => {
     if (!(Number.isFinite(n) && n > 0)) throw new RangeError(name + ' must be positive');
     return n;
@@ -174,94 +171,6 @@ const SceneOptics = (() => {
       last = t;
     }
     return result;
-  }
-
-  const axes = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
-  const axisVector = (v, fallback) => (typeof v === 'string' && Object.hasOwn(axes, v) ? axes[v] : (v ?? fallback));
-  function dropOf({ at, start = 0, repeat, strength = 1 }) {
-    if (!Number.isFinite(start) || !Number.isFinite(strength))
-      throw new TypeError('Ripple start and strength must be finite');
-    if (repeat !== undefined) positive(repeat, 'Ripple repeat');
-    return { at: point(at, 'Ripple source'), start, repeat, strength };
-  }
-
-  function ringSampler(drops, { along, across, amplitude, scale, speed, width, damping }) {
-    return function sample(position, time = 0, footprint = 0, out = [0, 0, 0]) {
-      const amp = amplitude * (1 - smooth((footprint / scale - 0.35) / 0.5));
-      let dx = 0,
-        dz = 0;
-      if (amp)
-        for (const drop of drops()) {
-          let age = time - (drop.start ?? 0);
-          if (age < 0) continue;
-          if (drop.repeat) age %= drop.repeat;
-          const offset = sub(position, drop.at);
-          const u = dot(offset, along),
-            v = dot(offset, across),
-            radius = Math.hypot(u, v);
-          const travel = radius - speed * age;
-          if (radius < 1e-8 || Math.abs(travel) >= width) continue;
-          const envelope =
-            (1 - smooth((Math.abs(travel) / width - 0.2) / 0.8)) *
-            smooth((speed * age) / (scale * 0.25)) *
-            Math.exp(-damping * radius);
-          const k = (Math.sin((2 * Math.PI * travel) / scale) * envelope * (drop.strength ?? 1)) / radius;
-          dx += u * k;
-          dz += v * k;
-        }
-      for (let i = 0; i < 3; i++) out[i] = amp * (along[i] * dx + across[i] * dz);
-      return out;
-    };
-  }
-  function ripple({
-    axis,
-    cross,
-    amplitude = 0.3,
-    scale = 0.3,
-    speed = 1,
-    width = scale * 2.5,
-    damping = 0.3,
-    drops = []
-  } = {}) {
-    const along = unit(axisVector(axis, axes.x), 'Ripple axis');
-    const across = unit(axisVector(cross, axes.z), 'Ripple cross axis');
-    if (Math.abs(dot(along, across)) > 1e-5) throw new RangeError('Ripple axes must be perpendicular');
-    nonnegative(amplitude, 'Ripple amplitude');
-    nonnegative(damping, 'Ripple damping');
-    positive(scale, 'Ripple wavelength');
-    positive(speed, 'Ripple speed');
-    positive(width, 'Ripple packet width');
-    if (!Array.isArray(drops) || drops.length > 64) throw new TypeError('Ripple rings need a list of up to 64 drops');
-    const active = new Map();
-    let serial = 0;
-    function add(drop) {
-      if (active.size >= 64) throw new RangeError('A ripple field can have up to 64 sources');
-      const id = ++serial;
-      active.set(id, dropOf(drop));
-      return id;
-    }
-    drops.forEach(add);
-    const sample = ringSampler(() => active.values(), { along, across, amplitude, scale, speed, width, damping });
-    function prune(time, reach) {
-      if (!Number.isFinite(time)) throw new TypeError('Ripple time must be finite');
-      nonnegative(reach, 'Ripple reach');
-      let removed = 0;
-      for (const [id, drop] of active) {
-        if (!drop.repeat && (time - drop.start) * speed > reach + width) {
-          active.delete(id);
-          removed++;
-        }
-      }
-      return removed;
-    }
-    return {
-      add,
-      remove: id => active.delete(id),
-      clear: () => active.clear(),
-      prune,
-      sample,
-      normal: { type: 'rings', sample }
-    };
   }
 
   return { plane, planeDistance, reflectedView, captureView, fog, sphere, box, shaft, prepareVolumes, trace, ripple, ringSampler };

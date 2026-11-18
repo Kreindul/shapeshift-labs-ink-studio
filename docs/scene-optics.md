@@ -42,6 +42,18 @@ Drop coordinates use the material's pattern space, which defaults to the sculpt'
 
 Add and remove sources while rendering without rebaking. `remove(drop)` removes one source, `clear()` removes all, and `prune(time, reach)` retires non-repeating drops whose last rings have travelled beyond the given maximum radius. `sample(position, time, footprint)` returns the normal offset. Use a declarative `{ type: 'rings', amplitude, scale, drops }` normal for data-authored scenes.
 
+A renderer can call `field.frame(time, storage)` once per frame and upload the
+result. `axes` contains the two world-space tangents, `shape` contains
+`[amplitude, wavelength, packetHalfWidth, damping]`, and each of the first
+`count` entries in `drops` packs `[u, v, wavefrontRadius, strength]`.
+Optional `Float32Array` storage needs four slots per active source. A field's
+`capacity` defaults to 64 and can be lowered to fit a host's buffer.
+`K.ripple.sampleFrame(frame, position, footprint, out)` evaluates the same
+world-space slope as the surface normal sampler, within float packing precision.
+Shader hosts can include `K.ripple.glsl` and sum `inkRippleSlope` for each drop
+at a tangent-plane position. The host chooses how that slope affects its
+material or reflected view.
+
 ## Atmosphere
 
 ```js
