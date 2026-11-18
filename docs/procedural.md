@@ -410,7 +410,7 @@ node cli/ink-studio.js render examples/poisson-patches.js --seed 1 --ortho --col
 curvature-weighted jittered splats, and seed 2 for a ranked point set whose
 coarser prefixes are shown with larger dabs.
 
-### Contact fields, runoff, and contours
+### Surface growth
 
 `P.surfaceGrowth.trace({roots, project, connect, step, steps, branchEvery,
 tips, budget, bias, attraction, spread, seed})` builds a graph of rooted walks.
@@ -428,6 +428,12 @@ seam. Output contains `nodes`, `edges` with ordered `frames`, and terminal
 `ends`. `tips` bounds the active paths per root, and `budget` caps total
 nodes. Callers provide the surface, branching parameters, and rendering
 or manufacturing rules for the resulting edges.
+
+`P.surfaceGrowth.transport(heading, fromNormal, toNormal)` carries a tangent
+through the shortest turn between two unit normals. A projection callback can
+use it to continue a walk onto an adjacent chart.
+
+### Contact fields, runoff, and contours
 
 `P.contours.march(field, {bounds, cell, iso})` extracts open paths and closed
 loops from a bounded 2D scalar field. The default level is zero. Use it for

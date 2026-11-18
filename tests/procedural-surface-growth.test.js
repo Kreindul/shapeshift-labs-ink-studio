@@ -42,3 +42,16 @@ test('surface normals transport a tangent across curvature without drifting off 
   assert(result.nodes.every(n => Math.abs(Math.hypot(n.point[0], n.point[2]) - 1) < 1e-8));
   assert(result.nodes.some(n => n.point[0] < -.95));
 });
+
+test('links can round an exact corner and continue in the transported heading', () => {
+  const result = P.surfaceGrowth.trace({
+    roots: [{ key: 'corner', point: [0, 0, 0], direction: [1, 0, 0] }],
+    project(point, last, step) {
+      if (!last) return { point, normal: [0, 0, 1] };
+      return last.depth ? { point, normal: [1, 0, 0] } : { point: [0, 0, -step], normal: [1, 0, 0] };
+    },
+    step: .2, steps: 3, spread: 0, attraction: 0,
+  });
+  assert.deepEqual(result.nodes[3].point.map(v => Math.round(v * 10)), [0, 0, -6]);
+  assert.deepEqual(P.surfaceGrowth.transport([1, 0, 0], [0, 0, 1], [1, 0, 0]), [0, 0, -1]);
+});

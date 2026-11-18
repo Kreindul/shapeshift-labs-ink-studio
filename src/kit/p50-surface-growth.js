@@ -4,6 +4,11 @@
   const vector = p => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite);
   const tangent = (p, n) => V.mad(p, n, -V.dot(p, n));
   const axisFor = n => Math.abs(n[1]) > .9 ? [0, 0, 1] : [0, 1, 0];
+  function transport(heading, from, to) {
+    const axis = V.cross(from, to), dot = V.dot(from, to), turn = V.cross(axis, heading);
+    if (dot < -.999999) return tangent(heading, to);
+    return V.add(V.add(heading, turn), V.mul(V.cross(axis, turn), 1 / (1 + dot)));
+  }
   function frame(hit) {
     if (!hit || !vector(hit.point) || !vector(hit.normal) || V.len(hit.normal) < 1e-8)
       throw new Error('Growth projections need a finite point and normal');
@@ -47,11 +52,13 @@
             if (!raw) continue;
             const candidate = frame(raw), delta = V.sub(candidate.point, at.point);
             const travel = V.len(delta);
-            if (travel < step * .32 || travel > step * 1.6 || V.dot(delta, h) < step * .12) continue;
+            const direction = transport(h, n, candidate.normal);
+            if (travel < step * .32 || travel > step * 1.6 ||
+                Math.max(V.dot(delta, h), V.dot(delta, direction)) < step * .12) continue;
             const via = connect(at, candidate, step);
             if (via === null) continue;
             if (!Array.isArray(via) || via.length > 8) throw new Error('Growth links need at most eight intermediate frames');
-            next = candidate; route = via.map(frame); nextDirection = h;
+            next = candidate; route = via.map(frame); nextDirection = direction;
             break;
           }
           if (!next) break;
@@ -76,5 +83,5 @@
     return P.data.freeze({ nodes, edges, ends });
   }
 
-  P.surfaceGrowth = { trace };
+  P.surfaceGrowth = { trace, transport };
 })(KIT);
