@@ -32,6 +32,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.implicitSurface(field, bounds, options)` | Marching tetrahedra for negative-inside fields. Use `edgeRefinements` (0–12, default 0) to bisect nonlinear crossings within the same bounded grid. |
 | `pieces.convex`, `pieces.box`, `pieces.beam`, `pieces.tube`, `pieces.union` | Reusable solid pieces and query unions. Union meshes contain constituent shells |
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
+| `courseRelief(layout, {profile, rise, slope})` | Give fitted cells independent relief with stable local coordinates when clipped or wrapped |
 | `panelFrames(spec)` | Keyed rails, posts and braces that fit chart dimensions, with optional openings and fitted surrounds |
 | `fittedRibbon({inner, outer, pitch, gap, closed, phase, budget})` | Fit repeating bands along paired 2D or 3D rails. Each logical cell contains quadrilateral footprints split at source edges |
 | `fittedRailBand({inner, outer, pitch, gap, closed, phase, depth, direction, budget})` | Fit closed solid pieces along paired 3D rails. |
@@ -173,11 +174,20 @@ chart seams and split pieces. Material assignment and mapping chart points
 onto the host are caller policies. The work budget counts vertices visited
 by the clip operations.
 
-`surfaceCells.loft` takes the clipped layout and calls `sample([u, v], level)`
+`surfaceCells.loft` takes the clipped layout and calls `sample([u, v], level, key)`
 for each position. Supply an ordered pair of finite levels whose samples
 enclose a solid. Use `step` to subdivide in chart coordinates before mapping.
 Each convex fragment emits a closed shell. A metadata callback can assign
 owner, material and surface roles by the original logical cell key.
+
+`courseRelief` takes a `fittedCourses` layout. Its `profile(u, v, cell)`
+callback receives coordinates normalized to a cell's inset and returns a
+number from zero to one. A wrapped seam uses the same logical cell on both
+sides. Multiply by the configured `rise` to get the height above the carrier.
+Pass `slope` as the pair of derivative bounds of the normalized profile.
+The result reports their conservative values in chart units. Use
+`height(u, v, key)` with the loft's cell key to retain the original profile
+after clipping. Use `top(u, v)` to query the raised surface including joints.
 
 `panelFrames` fits to the carrier dimensions and exposes its member footprints
 as `parts`. Pass those to `surfaceCells.clip` for openings, then loft the

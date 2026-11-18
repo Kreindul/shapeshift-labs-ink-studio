@@ -21,8 +21,8 @@
       !Number.isSafeInteger(budget) || budget < 1 || budget > 1000000
     ) throw new Error('Surface cell lofts need a carrier, ordered levels and a bounded triangle budget');
     let emitted = 0;
-    function pair(uv) {
-      const points = levels.map(level => sample(uv, level));
+    function pair(uv, key) {
+      const points = levels.map(level => sample(uv, level, key));
       if (!points.every(p => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite)))
         throw new Error('Surface cell carrier samples must be finite 3D points');
       return { uv, points };
@@ -41,7 +41,7 @@
           const b = polygon[(i + 1) % polygon.length];
           return Array.from({ length: sections[i] }, (_, j) => mix(a, b, j / sections[i]));
         });
-        const middle = pair(center), shell = boundary.map(pair);
+        const middle = pair(center, cell.key), shell = boundary.map(uv => pair(uv, cell.key));
         const along = V.sub(middle.points[1], middle.points[0]);
         let winding = 0;
         for (let i = 0; i < count; i++) {
@@ -64,7 +64,7 @@
         }
         let inner = null;
         for (let ring = 1; ring <= rings; ring++) {
-          const outer = ring === rings ? shell : boundary.map(uv => pair(mix(center, uv, ring / rings)));
+          const outer = ring === rings ? shell : boundary.map(uv => pair(mix(center, uv, ring / rings), cell.key));
           for (let i = 0; i < count; i++) {
             const j = (i + 1) % count;
             if (inner) {
