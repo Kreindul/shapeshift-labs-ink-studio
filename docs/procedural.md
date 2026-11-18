@@ -77,6 +77,8 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `fracture.power(spec)`, `fracture.separate(graph, options)`, `fracture.crack(options)` | Anisotropic power cells, cumulative bond failure and stress-guided crack paths |
 | `grammar.assemble(route, modules, options)`, `construct.loadPaths(sockets, spans, options)`, `construct.damage(parts, options)` | Dimensioned, socket-connected assemblies, stylized supports and seeded part damage |
 | `construct.profile(rings)`, `construct.offset(profile, distance)`, `construct.extrude(profile, options)`, `construct.weightedRoof(rings, options)` | Signed footprints, planar offsets, extrusions and roof wavefronts with per-edge pitches |
+| `geometry.distanceTransform(mask, options)`, `materials.outline(mask, options)` | Exact Euclidean distances over pixel or voxel centers, including anisotropic spacing and inside/outside masks |
+| `materials.triplanar(sample, options)`, `materials.tangent(sample, options)`, `materials.threshold(field, options)`, `materials.ramp(colors, options)` | Surface-aligned patterns, pixel-footprint filtering and perceptual palettes |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -844,6 +846,41 @@ roof from a completed result.
 `examples/weighted-roof.js` bakes an L-shaped roof with unequal pitches,
 offset stonework, and a roof valley. Its alternate seed uses a uniform
 pitch over the same footprint.
+
+### Material mapping, ramps and distance ink
+
+`materials.triplanar(sample, {origin, scale, sharpness})` blends
+planar samples by the surface normal. A sampler takes `(u, v, info)`
+and returns a scalar or RGB. It receives the signed projection axis
+and a two-component footprint in chart units. Supply one sampler or
+a separate sampler for each projected axis.
+
+`materials.tangent(sample, {origin, scale, angle, coordinates})`
+wraps a planar sample in the local tangent frame. Set different scales
+along and across the grain. An optional coordinate callback can use an
+existing sweep chart. Both mapping helpers return functions that take
+`(x, y, z, frame)`.
+
+`materials.threshold(field, {level, feather, samples, seed})` converts
+a scalar field to coverage. It integrates samples over a pixel footprint
+in the tangent plane when supplied with a material frame. Sample
+positions stay in the material's rest coordinates.
+
+`materials.ramp(colors, {steps, space, hue})` accepts normalized sRGB
+triples or hex colors and optional explicit `{at, color}` stops. Use
+OKLab (`lab`) or OKLCh (`lch`) interpolation. It provides normalized
+`rgb`, packed `hex`, and a continuous `sample(t)` function.
+
+`geometry.distanceTransform(mask, {size, spacing, signed, indices})`
+finds exact center-to-center Euclidean distances in a 2D or 3D binary
+grid. Store X as the fastest-moving axis. In signed mode occupied
+centers measure a negative distance to the nearest vacant center.
+Use the optional indices to retrieve the corresponding sample. Empty
+feature sets have infinite distance. `materials.outline` uses the same
+calculation to produce separate inset and outer ink coverage.
+
+`examples/material-masks.js` uses wrapping glazes, a tangent-aligned
+grain, and distance ink on a voxel stamp.
 
 ## Optional retained authoring
 
