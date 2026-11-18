@@ -92,8 +92,9 @@
         ![load,texture,exposure].every(v=>within(v,0,1)) || typeof material !== 'string')
       throw Error('Coating sample needs a normal and normalized load, texture and exposure');
     const p=coatingProfile(raw), keep=Object.hasOwn(p.retention,material)?p.retention[material]:p.retention.other;
+    const vertical=normal[1]/V.len(normal), up=clamp(vertical);
     return clamp(load * exposure * keep * (.9+p.variation*(texture-.5)) *
-      ease(...p.slope,normal[1]/V.len(normal)+p.bias));
+      ease(...p.slope,vertical+p.bias*4*up*(1-up)));
   }
 
   function coatingColor(color, amount, raw) {
@@ -106,8 +107,9 @@
   const coatingGlsl = Object.freeze({
     amount: `
 float coatingAmount(float vertical, float load, float grain, float keep, vec4 profile) {
+  float up = clamp(vertical, 0.0, 1.0);
   return clamp(load * keep * (.9 + profile.w * (grain - .5)) *
-    smoothstep(profile.x, profile.y, vertical + profile.z), 0.0, 1.0);
+    smoothstep(profile.x, profile.y, vertical + profile.z * 4.0 * up * (1.0 - up)), 0.0, 1.0);
 }
 `,
     color: `

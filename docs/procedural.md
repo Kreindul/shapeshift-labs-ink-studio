@@ -695,7 +695,8 @@ a temporary surface coat. Configure `slope` and `bias` for how readily it
 settles on inclines, `variation` for texture response, `retention` by
 material role, and `shadow`, `highlight`, and `blend` for the resulting
 appearance. Each role may use its own normalized retention. Unlisted
-roles use `other`.
+roles use `other`. Bias peaks at a midrange slope and leaves flat
+and vertical surfaces unchanged.
 
 Pass `{normal, load, texture, exposure, material}` to `coating.amount(sample,
 profile)`, then shade a normalized substrate color with `coating.color(rgb,

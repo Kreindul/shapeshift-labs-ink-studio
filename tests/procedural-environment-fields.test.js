@@ -50,6 +50,8 @@ test('surface coating profiles preserve material and slope differences with a co
   assert(coating.amount({...floor,material:'wood'})<floorStone);
   assert(coating.amount(incline)<floorStone);
   assert(coating.amount(incline,{bias:.3})>coating.amount(incline,{bias:-.3}));
+  assert.equal(coating.amount(floor,{bias:-.4}),coating.amount(floor,{bias:.4}));
+  assert.equal(coating.amount({normal:[1,0,0],load:.9},{bias:.4}),0);
   assert.equal(coating.amount({...floor,exposure:0}),0);
   const color=[.14,.21,.32], palette=[.7,.55,.4];
   const spec={shadow:palette,highlight:palette,retention:{ceramic:0}};
