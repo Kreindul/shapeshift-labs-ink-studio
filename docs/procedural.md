@@ -1309,3 +1309,18 @@ Pass a world-space `lowerBound(x, y, z, limit)` callback to a sculpt
 primitive to apply a conservative probe during field traversal. Include all
 geometry that can affect the primitive's raw signed distance in the bound.
 The traversal accounts for the primitive's blend width and bump amplitude.
+
+### Retained environment profiles
+
+`KIT.authoring.environmentProfiles.create({key, profiles, defaultId, defaults,
+validate})` builds a catalog over caller-defined environment values. Each
+profile supplies an ID, label and values. It inherits defaults and merges
+its own saved overrides. Supply a validator for the resolved value shape.
+
+`select(doc, id)`, `edit(doc, patch)` and `reset(doc)` are undoable and
+store data under `environment.presentation.profiles[key]`. The active
+profile and each profile's adjustments persist with the document. The
+catalog leaves entities, authored construction settings, and other
+presentation channels intact. When a saved profile is unavailable,
+`resolve(source)` returns the default with `missing: true` and the saved
+requested ID so callers can show the fallback.
