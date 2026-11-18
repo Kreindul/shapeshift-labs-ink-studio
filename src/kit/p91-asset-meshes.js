@@ -183,7 +183,7 @@
         padding < 0 || padding > .35 || !Number.isFinite(yaw) || !Number.isFinite(pitch) ||
         !triplet(light) || K.V.len(light) < 1e-6) throw Error('Invalid mesh thumbnail settings');
     const asset=validate(raw), {positions,triangles}=asset, {V}=K;
-    const sample=colorSampler(asset);
+    const sample=colorSampler(asset), detailed=!!asset.texture?.layers;
     const forward = [Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),Math.cos(yaw)*Math.cos(pitch)];
     const right = [Math.cos(yaw),0,-Math.sin(yaw)], up = V.cross(forward,right), sun = V.norm(light);
     const points = [];
@@ -211,7 +211,8 @@
       let n=V.norm(V.cross(V.sub(point(ib),origin),V.sub(point(ic),origin)));
       if (V.dot(n,forward)<0) n=V.mul(n,-1);
       const gain=.46+.54*Math.max(0,V.dot(n,sun));
-      const flat=asset.texture?.faces[i/3]>=0?null:sample.at(i/3,0,0).map(value=>Math.round(value*gain*255));
+      const flat=!detailed&&!(asset.texture?.faces[i/3]>=0)
+        ? sample.at(i/3,0,0).map(value=>Math.round(value*gain*255)) : null;
       const left=Math.max(0,Math.ceil(Math.min(ax,bx,cx)-.5)), right=Math.min(size-1,Math.floor(Math.max(ax,bx,cx)-.5));
       const top=Math.max(0,Math.ceil(Math.min(ay,by,cy)-.5)), bottom=Math.min(size-1,Math.floor(Math.max(ay,by,cy)-.5));
       for (let y=top;y<=bottom;y++) for (let x=left;x<=right;x++) {
@@ -220,12 +221,19 @@
         const z=Math.fround(az+u*(bz-az)+v*(cz-az)), pixel=y*size+x;
         if (z<=depth[pixel]) continue;
         depth[pixel]=z;
-        pixels.set(flat||sample.at(i/3,u,v).map(value=>Math.round(value*gain*255)),pixel*4);
+        let color=flat;
+        if(detailed) {
+          const material=sample.materialAt(i/3,u,v,n);
+          const irradiance=.22+.78*Math.max(0,V.dot(material.normal,sun));
+          color=A.assetTextures.shade(material,{irradiance,light:sun,view:forward}).map(v=>Math.round(v*255));
+        }
+        pixels.set(color||sample.at(i/3,u,v).map(value=>Math.round(value*gain*255)),pixel*4);
         pixels[pixel*4+3]=255;
       }
     }
     return {width:size,height:size,pixels};
   }
 
-  A.assetMeshes = Object.freeze({ recipe, validate, fromGLB, importGLB, colorSampler, thumbnail });
+  A.assetMeshes = Object.freeze({ recipe, validate, fromGLB, importGLB, colorSampler,
+    shadeMaterial: (material,options)=>A.assetTextures.shade(material,options), thumbnail });
 })(KIT);

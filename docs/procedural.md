@@ -1591,7 +1591,8 @@ uses an already parsed mesh. The recipe carries geometry and base colors.
 The caller selects the placement, material and rendering rules.
 
 `await assetMeshes.importGLB(bytes, {size, socketNodes, decodeImage})`
-also imports embedded PNG and JPEG base-color textures. The decoder takes
+also imports embedded PNG and JPEG textures for base color, normal,
+roughness, and emission. The decoder takes
 `(bytes, mime, {width, height, maxEdge})` and returns or resolves to
 `{width, height, pixels}` with RGBA bytes. A plain color GLB needs no decoder.
 Decoded images are fitted to at most 64 pixels on their longest edge.
@@ -1603,9 +1604,20 @@ barycentric weights of the face's second and third vertices and
 Both return normalized sRGB. Sampling applies repeat, mirror or clamp,
 nearest or linear filtering, and material and vertex factors in linear
 space. UVs respect the binding's coordinate set and texture transform.
+The matching `materialAt` and `materialAtPoint` methods also return the
+shading normal, linear roughness and linear RGB emission. Pass the
+geometric normal as the final optional argument for two-sided surfaces.
+The normal channel uses authored vertex normals and tangents when
+present. Its fallback derives a tangent frame from each triangle's UVs.
+Roughness uses the green channel multiplied by its factor. Emission uses
+the emissive factor and optional emissive strength.
+
+`assetMeshes.shadeMaterial(sample, {irradiance, light, view})` applies
+a diffuse gain, a roughness-dependent highlight and additive emission.
+`light` and `view` are normalized directions in the sample's frame.
 
 `assetMeshes.thumbnail(recipe, {size, padding, yaw, pitch, light})`
-renders the asset's face colors and textures into a transparent square RGBA buffer.
+renders the asset's materials into a transparent square RGBA buffer.
 The returned `{width, height, pixels}` uses orthographic framing and
 depth testing. It works without a document, browser or renderer and can
 be used for picker icons, previews or contact sheets.

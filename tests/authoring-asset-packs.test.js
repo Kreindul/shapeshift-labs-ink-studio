@@ -72,14 +72,14 @@ test('mesh thumbnails fit the visible asset, resolve occlusion and retain transp
   assert.deepEqual(frame,A.assetMeshes.thumbnail(back,{size:32,yaw:0,pitch:0,light:[0,0,1]}));
 });
 
-function texturedGLB(filter=9728) {
+function texturedGLB(filter=9728, configure) {
   const source=makeGLB(), size=source.readUInt32LE(12);
   const document=JSON.parse(source.subarray(20,20+size));
   const coordinates=Buffer.alloc(24);
   [0,0,1,0,0,1].forEach((n,i)=>coordinates.writeFloatLE(n,i*4));
   const tint=Buffer.from([255,255,255,255,64,255,255,255,255,0,0,0]);
   const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nGQAAAAASUVORK5CYII=','base64');
-  const bin=Buffer.concat([source.subarray(28+size),coordinates,tint,png,Buffer.alloc((4-png.length%4)%4)]);
+  let bin=Buffer.concat([source.subarray(28+size),coordinates,tint,png,Buffer.alloc((4-png.length%4)%4)]);
   document.bufferViews.push({buffer:0,byteOffset:36,byteLength:24},{buffer:0,byteOffset:60,byteLength:9},
     {buffer:0,byteOffset:72,byteLength:png.length});
   document.accessors.push({bufferView:1,componentType:5126,type:'VEC2',count:3},
@@ -90,6 +90,15 @@ function texturedGLB(filter=9728) {
   document.images=[{bufferView:3,mimeType:'image/png'}];
   document.textures=[{source:0,sampler:0}];
   document.samplers=[{wrapS:33071,wrapT:33071,magFilter:filter}];
+  if(configure) configure(document,(type,values)=>{
+    const bytes=Buffer.alloc(values.length*4);
+    values.forEach((v,i)=>bytes.writeFloatLE(v,i*4));
+    const index=document.accessors.length;
+    document.accessors.push({bufferView:document.bufferViews.length,componentType:5126,type,count:3});
+    document.bufferViews.push({buffer:0,byteOffset:bin.length,byteLength:bytes.length});
+    bin=Buffer.concat([bin,bytes]);
+    return index;
+  });
   document.buffers[0].byteLength=bin.length;
   const raw=Buffer.from(JSON.stringify(document)),json=Buffer.alloc((raw.length+3)&~3,32);
   raw.copy(json);
@@ -125,6 +134,38 @@ test('textured GLB imports decode once and produce portable, UV-addressable base
   const filtered=A.assetMeshes.colorSampler(await A.assetMeshes.importGLB(texturedGLB(9729),{decodeImage}));
   near(filtered.at(0,.5,.25)[0],expected(.25));
   near(filtered.at(0,.5,.25)[1],expected(.5*(255+64)/510));
+});
+
+test('material channels share embedded images and retain tangent normals, roughness and emission',async()=>{
+  const raw=texturedGLB(9728,(g,attribute)=>{
+    const m=g.materials[0], attrs=g.meshes[0].primitives[0].attributes;
+    m.normalTexture={index:0,texCoord:1,scale:.5};
+    m.pbrMetallicRoughness.roughnessFactor=.8;
+    m.pbrMetallicRoughness.metallicRoughnessTexture={index:0,texCoord:1};
+    m.emissiveTexture={index:0,texCoord:1};
+    m.emissiveFactor=[.4,0,.1];
+    m.extensions={KHR_materials_emissive_strength:{emissiveStrength:2}};
+    attrs.NORMAL=attribute('VEC3',[0,0,1,0,0,1,0,0,1]);
+    attrs.TANGENT=attribute('VEC4',[0,1,0,1,0,1,0,1,0,1,0,1]);
+  });
+  let decodes=0;
+  const asset=await A.assetMeshes.importGLB(raw,{decodeImage(){
+    decodes++;
+    return {width:1,height:1,pixels:Uint8Array.from([255,128,255,255])};
+  }});
+  assert.equal(decodes,1);
+  assert.equal(asset.texture.images.length,1);
+  const sample=A.assetMeshes.colorSampler(JSON.parse(JSON.stringify(asset))).materialAt(0,.2,.3);
+  assert(sample.normal[1]>.44&&sample.normal[2]>.89&&Math.abs(sample.normal[0])<.01);
+  assert(Math.abs(sample.roughness-128/255*.8)<1e-8);
+  assert.deepEqual(sample.emission,[.8,0,.2]);
+  const dark=A.assetMeshes.shadeMaterial(sample,{irradiance:0});
+  assert(dark[0]>.9&&dark[1]===0&&dark[2]>.45);
+  const matte=A.assetMeshes.shadeMaterial({...sample,emission:[0,0,0],roughness:1},
+    {irradiance:.2,light:sample.normal,view:sample.normal});
+  const glossy=A.assetMeshes.shadeMaterial({...sample,emission:[0,0,0]},
+    {irradiance:.2,light:sample.normal,view:sample.normal});
+  assert(glossy.every((value,i)=>value>matte[i]));
 });
 
 test('GLB sockets preserve nested node positions and forward axes when fitted',()=>{

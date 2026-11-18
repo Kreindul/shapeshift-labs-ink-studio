@@ -257,7 +257,7 @@
               TM.push(mi);
             }
           if (visitPrimitive) visitPrimitive(pr, { firstVertex:base, vertexCount:pa.n,
-            firstFace, faceCount:TM.length-firstFace, accessor:acc });
+            firstFace, faceCount:TM.length-firstFace, accessor:acc, matrix:m.slice() });
         }
       for (const c of n.children || []) walk(c, m);
     };
