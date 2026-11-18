@@ -66,6 +66,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `routes.tensor(components)`, `routes.followTensor(field, seeds)`, `routes.growStreets(seeds, options)`, `routes.parcels(outline)`, `routes.medial(rings)` | Directional street systems, connected seeded roads, frontage lots and medial paths |
 | `routes.layout(route, options)` | Fit bounded intervals on a polyline, catenary, or compatible curve. Place caller-chosen pieces using gapped endpoints and midpoint frames |
 | `routes.fitStairApproach(options)` | Fit a short stair flight from an exposed landing to a sampled carrier surface. |
+| `edgeClearance.strip(a, b, options)`, `edgeClearance.ranges(a, b, strips)` | Split a straight edge into retained and removed ranges where it crosses sloped clearance strips. |
 | `traceSignedIntervals(sample, options)` | Find where a signed field is negative along a bounded curve parameter. Supply a slope bound to skip homogeneous regions. |
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
@@ -246,6 +247,15 @@ spatial rank for dithered surfaces, or consume the weights directly in a
 renderer. The mixer does not impose a brush shape, a material, or a layout.
 
 ### Signed intervals on a curve
+
+`edgeClearance.strip(a, b, {halfWidth, extension, above, below})` creates a
+constant-width corridor along the XZ projection of two 3D points. The height
+band follows their linear grade. `extension` adds distance at both ends and
+defaults to zero. `above` and `below` default to .20 world units.
+`edgeClearance.ranges(a, b, strips)` clips a 3D edge against the union of those
+corridors and returns ordered normalized `{kept, removed}` intervals. Sample
+these intervals on the original edge to build separate guard, trim or fence
+pieces. For piecewise-linear edges, apply the query to each segment.
 
 `traceSignedIntervals(sample, {range, maxSlope, step, tolerance, maxSamples})`
 returns ordered pairs `[low, high]` where `sample(t)` is negative. The
