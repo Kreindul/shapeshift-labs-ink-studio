@@ -68,10 +68,10 @@ const SurfaceLook = (() => {
     return Object.assign({}, source, { surface: merge(source?.surface, settings) });
   }
 
-  function maskAt(mask, p, seed, position) {
+  function maskAt(mask, p, seed, position, frame) {
     if (!mask) return 1;
     if (typeof mask === 'function') {
-      const coverage = mask(...position);
+      const coverage = mask(position[0], position[1], position[2], frame);
       if (!Number.isFinite(coverage)) throw new TypeError('Surface mask must return a finite number');
       return clamp(coverage);
     }
@@ -392,7 +392,7 @@ const SurfaceLook = (() => {
     const seed = settings.seed || 0;
     let n = unit(normal),
       t = tangent(sample.tangent ?? directionAt(settings.direction, p, n), n);
-    const geometricNormal = n;
+    const geometricNormal = n, geometricTangent = t;
     n = bump(prepared.normal, n, t, cross(n, t), p, sample.time || 0, footprint, seed);
     t = tangent(t, n);
     const b = cross(n, t),
@@ -430,8 +430,13 @@ const SurfaceLook = (() => {
         )
       : 1;
     output[4] = 0;
+    let maskFrame;
     for (const layer of layers) {
-      const strength = layer.strength * maskAt(layer.mask, p, seed, position);
+      if (typeof layer.mask === 'function' && !maskFrame) maskFrame = {
+        normal: geometricNormal, tangent: geometricTangent, bitangent: cross(geometricNormal, geometricTangent),
+        footprint: sample.footprint || 0
+      };
+      const strength = layer.strength * maskAt(layer.mask, p, seed, position, maskFrame);
       if (!strength) continue;
       const { cosine: c, sine: s } = layer;
       shading.ht = tx * c + bx * s;
