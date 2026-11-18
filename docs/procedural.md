@@ -82,6 +82,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `materials.triplanar(sample, options)`, `materials.tangent(sample, options)`, `materials.threshold(field, options)`, `materials.ramp(colors, options)` | Surface-aligned patterns, pixel-footprint filtering and perceptual palettes |
 | `materials.quilt(swatch, options)`, `materials.patchMatch(source, target, options)`, `materials.synthesize(source, target, options)`, `materials.blueNoise(options)` | Swatch quilting, exemplar matching and fill, and periodic blue-noise ranks |
 | `geometry.dualContour(field, bounds, options)`, `geometry.surfaceNets(field, bounds, options)` | Cell-local surface samples, optional indexed preview triangles and tagged mesh output |
+| `geometry.octree(field, bounds, options)`, `geometry.stitchVoxelLevels(tree, options)`, `geometry.adaptiveSurface(field, bounds, options)` | Sparse field sampling, 2:1 voxel levels and stitched adaptive previews |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -955,6 +956,28 @@ baking a held sculpt. The bounded grid samples drive the zero surface.
 
 `examples/dual-surface-studies.js` bakes a pair of carved blocks
 using cell samples from the two extractors.
+
+### Adaptive voxel levels
+
+`geometry.octree(field, bounds, options)` samples a signed field on
+dyadic cells. It prunes uniform cells when the configured Lipschitz
+bound certifies that the zero surface is outside the cell. A true SDF
+can use the default bound of one. Set `lipschitz: 0` to disable that
+pruning on an arbitrary field. The tree refines around surface error,
+normal changes, and ambiguous corners, and balances neighboring leaves
+at a maximum 2:1 size ratio. Supply `surfaceDepth(point, info)` to
+request more resolution in authored regions. `lookup` returns a leaf
+and `at` reconstructs a local trilinear scalar estimate.
+
+`geometry.stitchVoxelLevels(tree)` splits shared primal edges where
+finer cells meet them. It joins those edges to the same neighboring dual
+vertices on both levels, producing transition triangles and quads. Mesh
+output is available for previews and interop. The cell vertices and
+normals also feed native splats. `geometry.adaptiveSurface` runs both
+steps and exposes the tree alongside the surface.
+
+`examples/adaptive-surface.js` uses two voxel levels in one baked ring.
+The alternate seed highlights the transition edges.
 
 ## Optional retained authoring
 
