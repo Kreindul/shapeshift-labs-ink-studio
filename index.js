@@ -9,7 +9,13 @@ const fs = require('fs'),
 const KIT_DIR = path.join(__dirname, 'src', 'kit'),
   read = f => fs.readFileSync(f, 'utf8').replace(/\nif \(typeof module[^\n]*\n?$/, '\n');
 const files = () =>
-  ['src/pixel-look.js', 'src/reflection-plane.js', 'src/airflow.js', 'src/light-schedule.js', 'src/route-visibility.js', 'src/sample-coverage.js', 'src/ripple-field.js', 'src/scene-optics.js', 'src/splat-effects.js', 'src/surface-look.js', 'src/builder.js', 'src/sculpt.js']
+  [
+    'src/art-passes.js', 'src/art-ink.js', 'src/art-effects.js', 'src/art-stability.js',
+    'src/pixel-look.js', 'src/reflection-plane.js', 'src/airflow.js', 'src/light-schedule.js',
+    'src/route-visibility.js', 'src/sample-coverage.js', 'src/ripple-field.js',
+    'src/volume-field.js', 'src/volume-light.js', 'src/scene-optics.js', 'src/splat-effects.js',
+    'src/surface-look.js', 'src/builder.js', 'src/sculpt.js'
+  ]
     .map(f => path.join(__dirname, f))
     .concat(
       fs
@@ -21,7 +27,7 @@ const files = () =>
 const demoFiles = () => [path.join(__dirname, 'demos', 'labscenes.js')];
 // the names the bundle defines at top level (add them to your own module.exports)
 const EXPORTS =
-  'makeBuilder, makeSculpt, basis, flame, motes, pondMat, lilies, courses, PALETTES, PAL_HEX, KIT, PixelLook, SurfaceLook, SceneOptics, VOX, SplatEffects';
+  'makeBuilder, makeSculpt, basis, flame, motes, pondMat, lilies, courses, PALETTES, PAL_HEX, KIT, PixelLook, SurfaceLook, SceneOptics, VOX, SplatEffects, ArtPasses, ArtInk, ArtStability, ArtEffects, VolumeField, VolumeLight';
 module.exports = {
   files,
   demoFiles,
@@ -73,6 +79,8 @@ module.exports = {
     throw new Error('do not know how to read ' + ext + ' (obj, gltf and glb are read)');
   },
   exportGlb: require('./cli/export-glb.js'),
+  render: require('./cli/render.js').render,
+  spriteAtlas: require('./cli/sprite-atlas.js').spriteAtlas,
   load() {
     const out = path.join(__dirname, 'dist', 'standalone.js'),
       srcs = files().concat(demoFiles()),

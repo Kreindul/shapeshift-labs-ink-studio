@@ -72,7 +72,7 @@ const PixelLook = (() => {
     let low = 0;
     while (low < stops.length - 2 && value > stops[low + 1][0]) low++;
     const share = (value - stops[low][0]) / (stops[low + 1][0] - stops[low][0]);
-    const rank = tone.thresholds[(y % tone.height) * tone.width + x % tone.width];
+    const rank = tone.thresholds[((y % tone.height + tone.height) % tone.height) * tone.width + (x % tone.width + tone.width) % tone.width];
     return low + Number(share >= 0.5 + (rank - 0.5) * tone.amount);
   }
 
@@ -102,7 +102,7 @@ const PixelLook = (() => {
     const shade = body.map(v => v * 0.64), luma = shade.reduce((n, v, k) => n + v * weights[k], 0);
     return shade.map(v => Math.min(1, v * Math.max(1, 0.12 / Math.max(luma, 0.001))));
   }
-  function resolve({ color, depth, w, h, palette, grade, interiorColor, dither = 0, local }) {
+  function resolve({ color, depth, w, h, palette, grade, interiorColor, dither = 0, local, contour = true, ditherAt }) {
     const width = w / 2, height = h / 2, rgb = new Uint8Array(width * height * 3), use = new Uint32Array(local?.output.packed.length ?? palette.length);
     const mapped = i => grade ? grade.slice(i * 3, i * 3 + 3) : palette[i];
     const at = (x, y) => Math.max(0, Math.min(h - 1, y)) * w + Math.max(0, Math.min(w - 1, x));
@@ -113,7 +113,8 @@ const PixelLook = (() => {
       const average = [0, 1, 2].map(k => samples.reduce((s, c) => s + c[k], 0) / 4);
       const base = (y * width + x) * 3;
       const native = interiorColor ? [0, 1, 2].map(k => interiorColor[base + k] / 255) : average;
-      const noise = interiorColor ? (bayerRank(x, y) - 0.5) * dither : 0;
+      const rank = ditherAt ? bayerRank(...ditherAt(x, y)) : bayerRank(x, y);
+      const noise = interiorColor ? (rank - 0.5) * dither : 0;
       const localId = local?.at[y * width + x];
       if (localId) {
         const id = localId - 1;
@@ -141,7 +142,7 @@ const PixelLook = (() => {
       });
       if (best >= 0) {
         const outer = coverage < 4 || [z(x - 1, y), z(x + 1, y), z(x, y - 1), z(x, y + 1)].some(d => d >= 0.995);
-        if (outer) {
+        if (outer && contour) {
           selected = best;
           const body = mapped(best), tone = ink(Array.from(body)), background = mapped(0), a = coverage / 4;
           c = body.map((v, k) => background[k] * (1 - a) + (v * 0.35 + tone[k] * 0.65) * a);

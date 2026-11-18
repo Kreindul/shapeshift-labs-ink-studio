@@ -12,6 +12,7 @@ function makeSculpt(B, rest) {
     ghosts = [],
     g3 = [0, 0, 0],
     EM = { em: true },
+    GLINT = { em: true, emission: false },
     VIEW0 = [0, 0.34, 0.94],
     FSEG = [0.38, 0.34, 0.28],
     FWID = [1, 0.75, 0.5],
@@ -79,6 +80,7 @@ function makeSculpt(B, rest) {
     p.g = o.g || gid++;
     p.bump = o.bump || null;
     p.tag = o.tag || null;
+    p.renderOwner = o.objectId ?? p.tag;
     p.model = o.model;
     if (p.bump) p.br += p.bump[0];
     p.reach = o.reach || 0;
@@ -937,7 +939,7 @@ function makeSculpt(B, rest) {
     }
     if (PRB) return ci;
     const fl =
-      FLO || m.motionAt?.(x, y, z) || m.fl || (m.em || glint ? EM : (m.leaf || m.blade) && !m.still ? (m.leaf ? WINDL : WINDG) : undefined);
+      FLO || m.motionAt?.(x, y, z) || m.fl || (m.em ? EM : glint ? GLINT : (m.leaf || m.blade) && !m.still ? (m.leaf ? WINDL : WINDG) : undefined);
     if (m.leaf && !flat) {
       const lf = m.leaf,
         a = R() * TAU,
@@ -1512,6 +1514,15 @@ function makeSculpt(B, rest) {
     }
     return open / dirs.length;
   };
+  function shadeOwned(owner, material, ...sample) {
+    if (!B.describeSplats) return light(material, ...sample);
+    const first = B.count();
+    light(material, ...sample);
+    B.describeSplats(first, B.count(), {
+      object: owner?.renderOwner ?? owner,
+      material: material.materialId ?? material
+    });
+  }
   S.bake = () => {
     buildGrid();
     L = S.sun;
@@ -1559,9 +1570,9 @@ function makeSculpt(B, rest) {
             curP = p;
             if (S.emit) {
               const n0 = B.count();
-              light(p.mat, res, x, y, z, nx, ny, nz, true);
+              shadeOwned(p, p.mat, res, x, y, z, nx, ny, nz, true);
               S.emit(p, n0, B.count());
-            } else light(p.mat, res, x, y, z, nx, ny, nz, true);
+            } else shadeOwned(p, p.mat, res, x, y, z, nx, ny, nz, true);
             return;
           }
           /* a solid whose candidate points may lie well off its own surface (reach: grown rocks, typed-in shapes) has them taken onto
@@ -1617,9 +1628,9 @@ function makeSculpt(B, rest) {
           if (S.emit) {
             const pr = curP,
               n0 = B.count();
-            light(m, res, x, y, z, nx, ny, nz, true);
+            shadeOwned(curP, m, res, x, y, z, nx, ny, nz, true);
             S.emit(pr, n0, B.count());
-          } else light(m, res, x, y, z, nx, ny, nz, true);
+          } else shadeOwned(curP, m, res, x, y, z, nx, ny, nz, true);
         });
       }
       p.res = res0;
@@ -1657,9 +1668,9 @@ function makeSculpt(B, rest) {
         curP = p;
         if (S.emit) {
           const n0 = B.count();
-          light(p.mat, res, x, y, z, nx, ny, nz, !!S.ghostLit);
+          shadeOwned(p, p.mat, res, x, y, z, nx, ny, nz, !!S.ghostLit);
           S.emit(p, n0, B.count());
-        } else light(p.mat, res, x, y, z, nx, ny, nz, !!S.ghostLit);
+        } else shadeOwned(p, p.mat, res, x, y, z, nx, ny, nz, !!S.ghostLit);
       });
       p.res = res;
     }
@@ -1805,7 +1816,7 @@ function makeSculpt(B, rest) {
         if (S.clip && !S.clip(x, y, z)) continue;
         INST.v = q[8];
         curP = INST;
-        light(q[7], res, x, y, z, nv[0], nv[1], nv[2], true);
+        shadeOwned(I.proxy, q[7], res, x, y, z, nv[0], nv[1], nv[2], true);
       }
     }
     FLO = null;
@@ -1859,7 +1870,7 @@ function makeSculpt(B, rest) {
         mz = nz * (1 - 0.35 * w),
         ml = Math.hypot(mx, my, mz) || 1;
       curP = null;
-      light(mat, res, x + nx * th, y + ny * th, z + nz * th, mx / ml, my / ml, mz / ml, true);
+      shadeOwned(null, mat, res, x + nx * th, y + ny * th, z + nz * th, mx / ml, my / ml, mz / ml, true);
       laid++;
     }
     return laid;

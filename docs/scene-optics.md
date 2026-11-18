@@ -72,3 +72,35 @@ const world = B.finish({
 Fog can occupy a height slab with `bottom` and `top`, or cover the whole view. Sphere and box volumes let mist stay around an object or in a defined region. A shaft is a capped cylinder of tinted atmosphere. Combine volumes freely. Integration accounts for overlaps in camera-depth order and stops at the nearest opaque surface. Use `near` or `far` to bound a volume by camera ray distance. Colours accept a palette index, a hex string, or 0–1 RGB.
 
 Hosts can use `K.atmosphere.prepare(world.atmosphere, world.pal)` and `K.atmosphere.trace(volumes, eye, unitDirection, distance)`. Trace returns premultiplied RGB and remaining transmittance `[r, g, b, t]`, so the final colour is the returned RGB plus `t` times the scene RGB.
+
+## Bounded density and lit volumes
+
+```js
+const D = K.procedural.density;
+const shape = D.fromSdf({
+  bounds: { min: [-2, 0, -2], max: [2, 1.4, 2] },
+  field: (x, y, z) => Math.hypot(x / 1.6, (y - .55) / .52, z / 1.4) - 1,
+  feather: .20,
+  breakup: .65,
+  noise: (x, y, z, t) => .5 + .5 * Math.sin(4 * x + t + z),
+  drift: [.10, .04]
+});
+const volume = K.atmosphere.field({
+  field: shape, density: .8, step: .14, ramp: ['#435969', '#769599', '#adc5bd'],
+  anisotropy: .22, emissive: '#5cb3aa', emissiveGain: .14
+});
+const volumeLighting = {
+  ambient: .4,
+  sun: { direction: [-.4, .8, .4], intensity: .7 },
+  point: { at: [0, 1.4, -1], color: '#ffc984', radius: 4, intensity: 2 },
+  shadow: K.atmosphere.occluder(sceneSdf)
+};
+```
+
+Put `volume` in `finish.atmosphere`, and pass `volumeLighting` and optional `volumeQuality` to the finished world. The integrator clips each ray against opaque geometry, evaluates bounded density through overlapping media, and adds single scattering, geometry shadowing and emission before palette resolution. Directional light is defined as a vector from a sample toward the light. Set `lit: false` on a volume to use its density ramp and emission without scene scattering.
+
+`D.bounded({ bounds, sample, skip })` accepts a custom density. A skip callback returns a conservative distance to the next possible nonzero sample. `D.sparse(field, { resolution, brick, time })` caches occupied bricks at one time and includes conservative interpolation-aware skipping. `D.toMesh(field, { iso, resolution })` extracts a threshold surface. `D.scatter(field, { minDensity, radius, seed })` places deterministic points inside density.
+
+Use `--atmosphere off` to disable the pass. `volumeQuality` controls `scale` (1–4), `depthTolerance`, `steps`, `stepScale`, `skip`, `samples`, `seed`, and `jitter`. The coarser pass only reuses nearby samples with compatible depth. Set `stats: true` to inspect `frame.volumeStats` ray and fallback counts. Set `jitter: 'blue-noise'` for stable spatial offsets, or `jitter: 'spatiotemporal'` with an explicit `volumeHistory: K.atmosphere.history()` for frame-varying offsets and filtered accumulation. The history resets across a changed camera, a time discontinuity, or incompatible opaque depth. CLI options include `--volume-scale`, `--volume-steps`, and `--volume-jitter`.
+
+Render `examples/art-pipeline.js` to see sculpted pool mist, a local light, and emission coloring at art resolution.

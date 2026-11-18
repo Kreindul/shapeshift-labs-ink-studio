@@ -98,7 +98,7 @@ function scene(id) {
   return s;
 }
 const paintDirectory = id => path.resolve(CWD, opt.dir || path.join(cfg.paint || 'studio/paint', id));
-function build(id) {
+function build(id, seedOverride) {
   if (opt.focus) {
     const f = list('focus'); // uneven detail: x,y,z then near, far, coarse
     globalThis.INK_FOCUS = { p: [f[0] || 0, f[1] || 0, f[2] || 0], near: f[3], far: f[4], coarse: f[5] };
@@ -117,8 +117,10 @@ function build(id) {
     ? JSON.parse(fs.readFileSync(decalFile, 'utf8')).decals
     : (globalThis.INK_PAINT || {})[s.id] || null;
   const t0 = Date.now(),
-    seed = opt.seed === undefined ? s.seed : +opt.seed;
-  let w = s.build(seed);
+    seed = seedOverride ?? (opt.seed === undefined ? s.seed : +opt.seed);
+  const controls = opt.params ? JSON.parse(String(opt.params)) : undefined;
+  const snapshot = opt.authoring ? JSON.parse(fs.readFileSync(path.resolve(opt.authoring), 'utf8')) : undefined;
+  let w = s.build(seed, { controls, snapshot });
   if (s.animate) w = s.animate(w, seed) || w; // a diorama in two halves: what stands, then what sets it moving
   if (w.sandbox && !w.anim) lib().KIT.sandbox.attach(w); // and one whose stuff is a sandbox gets its grid going
   if (w.pix && lib().KIT.pixel)
@@ -204,15 +206,28 @@ const view = extra =>
       w: num('w', 900),
       h: num('h', 620),
       px: artPixelSize,
+      stable: opt.stable === 'off' ? false : opt.snap || opt['dither-space'] || opt.resolve || opt.stable ? {
+        snap: opt.snap === 'on' || opt.snap === true || (opt.snap !== 'off' && !!opt.stable),
+        ...(opt['dither-space'] && { dither: opt['dither-space'] }),
+        ...(opt.resolve && { resolve: opt.resolve })
+      } : undefined,
+      artEffects: opt.effects === 'off' ? false : opt.effects,
+      ink: opt.ink === 'off' ? false : opt.ink,
       tone: opt.tone === 'off' ? false : opt.tone,
       raw: !!opt.raw,
       colored: !!opt.colored,
+      splatOrder: opt['splat-order'],
       fine: !!opt.fine,
       clean: !!opt.clean,
       ortho: !!opt.ortho,
       surface: opt.surface === 'off' ? false : undefined,
       reflections: opt.reflections === 'off' ? false : undefined,
       atmosphere: opt.atmosphere === 'off' ? false : undefined,
+      volumeQuality: opt['volume-scale'] || opt['volume-steps'] || opt['volume-jitter'] ? {
+        ...(opt['volume-scale'] && { scale: num('volume-scale') }),
+        ...(opt['volume-steps'] && { steps: num('volume-steps') }),
+        ...(opt['volume-jitter'] && { jitter: opt['volume-jitter'] })
+      } : undefined,
       edges: opt.edges === 'off' ? false : undefined
     },
     extra
@@ -280,6 +295,9 @@ const CMD = {
         '  paint absorb <id> [--png file]     the painted pixels kept as decals pinned to the surface (#ff00ff erases); paint clear <id>',
         '  lint <id ...> [--map]              pixel-art lint: orphans, doubles, jaggies, banding, pillow shading, noise, colours',
         '  review <id> [--ref pic --px 2]     a sheet of fixed shots (four sides, top, low, far, near, close), beside the last one',
+        '  variants <id> --seeds 3,7,12 [--group silhouette|openness|wear --motion]  render a ranked seed contact sheet',
+        '  atlas <id> [--directions 8 --w 96 --h 96 --fps 12 --maps depth,normal,emission]  export a transparent sprite atlas',
+        '  passes <id> [--channels coverage,depth,normal,objectId,materialId,emission]  save art-pixel render pass previews',
         '  shimmer <id> [--mode orbit|zoom|pan|still --frames 24]  how many pixels flicker over a move, and a GIF of it',
         '  crisp <id ...|all> [--t 2 --map]   how crisp at its own pixel size: stray pixels, specks, flat area, finest frequencies,',
         '                              against the pixel-art references (--map: where the stray pixels and drawn edges are)',
@@ -486,6 +504,55 @@ const CMD = {
     }
     save(w.id + '.png', R.upscale(im, opt.px1 ? 1 : im.px));
   },
+  variants() {
+    const seeds = list('seeds', [3, 7, 12, 19, 22, 27]), group = opt.group || 'silhouette';
+    if (!seeds.length || seeds.length > 48 || !seeds.every(Number.isSafeInteger) ||
+        !['silhouette', 'openness', 'wear'].includes(group))
+      die('variants requires up to 48 integer seeds and a valid grouping dimension');
+    const C = require('./crisp.js'), critic = require('./critic.js');
+    const t = num('t', 0), w = num('w', 104), h = num('h', 82);
+    const results = seeds.map(seed => {
+      const world = build(pos[0], seed);
+      if (!world.variant || !Number.isFinite(world.variant[group])) die('this scene does not publish variant metrics');
+      pose(world, t);
+      const config = view({ t, w, h, px: 1, ortho: true });
+      const shot = R.render(world, config);
+      const { mark, bg, ...lint } = critic.lint(shot, { bg: world.pal[0] });
+      const shimmer = opt.motion ? critic.flicker(Array.from({ length: 8 }, (_, index) =>
+        R.render(world, { ...config, yaw: (config.yaw ?? world.cam.yaw) + index * .006 })), { bg: world.pal[0] }) : undefined;
+      return { seed, shot, data: { ...world.variant, crisp: C.measure(shot, { bg: world.pal[0] }), lint, shimmer } };
+    }).sort((a, b) => a.data[group] - b.data[group] || a.seed - b.seed);
+    const file = save('variants.png', R.grid(results.map(row => R.upscale(row.shot, num('scale', 3))),
+      num('cols', Math.min(3, results.length)), results.map(row => String(row.seed))));
+    const report = file.replace(/\.[^.]+$/, '') + '.json';
+    fs.writeFileSync(report, JSON.stringify({ group, variants: results.map(row => ({ seed: row.seed, ...row.data })) }, null, 2) + '\n');
+    console.log('wrote', report);
+  },
+  atlas() {
+    const w = build(pos[0]);
+    const fps = num('fps', 12), from = num('from', num('t', 0)), to = num('to', from);
+    if (!Number.isFinite(fps) || fps <= 0 || fps > 240 || !Number.isFinite(from) || !Number.isFinite(to) || to < from)
+      die('atlas needs a positive frame rate and an ordered time range');
+    const frames = Math.max(1, Math.ceil((to - from) * fps - 1e-8));
+    if (frames > 512) die('atlas supports up to 512 frames');
+    const times = Array.from({ length: frames }, (_, index) => from + index / fps);
+    const directory = opt.out ? path.resolve(opt.out) : path.join(OUT, w.id + '-atlas');
+    const { spriteAtlas, writeAtlas } = require('./sprite-atlas.js');
+    const atlas = spriteAtlas(w, { width: num('w', 96), height: num('h', 96), directions: num('directions', 8),
+      columns: num('cols', num('directions', 8)), maps: opt.maps ? String(opt.maps).split(',') : [],
+      pivot: opt.pivot ? list('pivot') : w.cam.target, view: view(), yaw: num('yaw', w.cam.yaw), times, fps, pose });
+    writeAtlas(directory, atlas);
+    console.log('wrote', directory, atlas.metadata.frames.length, 'frames');
+  },
+  passes() {
+    const w = build(pos[0]), t = num('t', 0);
+    pose(w, t);
+    const passes = opt.channels ? String(opt.channels).split(',') : true;
+    const im = R.render(w, view({ t, passes }));
+    const directory = opt.out ? path.resolve(opt.out) : path.join(OUT, w.id + '-passes');
+    require('./pass-preview.js').writePasses(directory, im, opt.px1 ? 1 : im.px);
+    console.log('wrote', directory);
+  },
   /* the ramps a diorama is shaded on, most used first, and what kind each is: one hue darker and lighter, or turning as it darkens.
      For a one-hue ramp a turning one made from the same palette is offered (the diorama is not changed). */
   ramps() {
@@ -606,12 +673,14 @@ const CMD = {
     if (!opt.quiet) save(w.id + '-values.png', R.grid([R.upscale(im, im.px), R.upscale(out, im.px)], 2));
   },
   sheet() {
+    const artHistory = require('../src/art-effects.js').history({ frames: 24 });
+    const volumeHistory = lib().KIT.atmosphere.history();
     const w = build(pos[0]),
       ts = times(),
       imgs = [];
     for (const t of ts) {
       pose(w, t);
-      const im = R.render(w, view({ t, w: num('w', 600), h: num('h', 420) }));
+      const im = R.render(w, view({ t, artHistory, volumeHistory, w: num('w', 600), h: num('h', 420) }));
       imgs.push(displayFrame(im, w));
     }
     save(
@@ -767,6 +836,8 @@ const CMD = {
     save(w.id + '-turn.png', R.grid(imgs, num('cols', 4), labs));
   },
   clip() {
+    const artHistory = require('../src/art-effects.js').history({ frames: 24 });
+    const volumeHistory = lib().KIT.atmosphere.history();
     const w = build(pos[0]),
       fps = num('fps', 12),
       from = num('from', 0),
@@ -776,7 +847,7 @@ const CMD = {
     for (let k = 0; k < n; k++) {
       const t = from + k / fps;
       pose(w, t);
-      const im = R.render(w, view({ t, w: num('w', 600), h: num('h', 420) }));
+      const im = R.render(w, view({ t, artHistory, volumeHistory, w: num('w', 600), h: num('h', 420) }));
       frames.push(displayFrame(im, w));
     }
     const f = opt.out ? path.resolve(opt.out) : path.join(OUT, w.id + '-clip.png');

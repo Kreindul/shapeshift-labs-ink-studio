@@ -80,17 +80,101 @@ function reflectionSampler(planes, render, view, eye, scale) {
   return sample;
 }
 
-function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon) {
-  const light = [0, 0, 0, 1];
-  for (let y = 0; y < H; y++)
-    for (let x = 0; x < W; x++) {
-      const i = y * W + x,
-        p = i * 3;
-      const { origin, direction, axial } = rayAt(x + 0.5, y + 0.5);
-      const stop = (Number.isFinite(depths[i]) ? depths[i] : horizon) / axial;
-      SceneOptics.trace(volumes, origin, direction, stop, light);
-      for (let c = 0; c < 3; c++) col[p + c] = light[c] + light[3] * col[p + c];
-    }
+function atmosphereQuality(value = {}) {
+  const { scale = 1, depthTolerance = .22, steps = 64, stepScale = 1, samples = 1, jitter = 'off',
+    skip = true, seed = 0, stats = false } = value;
+  if (!Number.isSafeInteger(scale) || scale < 1 || scale > 4 ||
+      !Number.isFinite(depthTolerance) || depthTolerance < 0 ||
+      !Number.isSafeInteger(steps) || steps < 4 || steps > 256 ||
+      !Number.isFinite(stepScale) || stepScale < .25 || stepScale > 8 ||
+      !Number.isSafeInteger(samples) || samples < 1 || samples > 4 || !['off', 'blue-noise', 'spatiotemporal'].includes(jitter) ||
+      !Number.isSafeInteger(seed) || typeof skip !== 'boolean' || typeof stats !== 'boolean')
+    throw new RangeError('Invalid atmosphere quality options');
+  return { scale, depthTolerance, maxSteps: steps, stepScale, samples, jitter, skip, seed, stats };
 }
 
-module.exports = { cameraRays, surfacePoint, reflectionSampler, applyAtmosphere };
+const noiseTiles = new Map();
+function volumeNoise(seed) {
+  if (!noiseTiles.has(seed)) {
+    if (noiseTiles.size >= 8) noiseTiles.delete(noiseTiles.keys().next().value);
+    const { KIT } = require('../index.js').load();
+    noiseTiles.set(seed, KIT.procedural.materials.blueNoise({ seed }));
+  }
+  return noiseTiles.get(seed);
+}
+
+function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon, quality, time, media, capture, history, viewKey) {
+  const light = [0, 0, 0, 1], sample = [0, 0, 0, 1];
+  const fields = volumes.some(volume => volume.type === 'field');
+  const query = { ...quality, time, media };
+  const temporal = fields && quality.jitter === 'spatiotemporal' && history;
+  const tile = fields && quality.jitter !== 'off' ? volumeNoise(quality.seed) : null;
+  const accumulation = temporal ? new Float32Array(W * H * 4) : null;
+  const frame = temporal ? Math.floor(time * 60) : 0;
+  const phaseShift = (frame * .61803398875) % 1;
+  const samples = fields ? quality.samples : 1;
+  const stats = { rays: 0, fallbackRays: 0 };
+  const fog = capture ? new Float32Array(W * H) : null;
+  function solve(x, y, depth) {
+    const { origin, direction, axial } = rayAt(x + .5, y + .5);
+    const stop = (Number.isFinite(depth) ? depth : horizon) / axial;
+    const phase = tile ? ((tile.ranks[y % tile.height * tile.width + x % tile.width] + .5) / tile.ranks.length + phaseShift) % 1 : .5;
+    light.fill(0);
+    for (let i = 0; i < samples; i++) {
+      query.jitter = (i + phase) / samples;
+      SceneOptics.trace(volumes, origin, direction, stop, sample, query);
+      for (let c = 0; c < 4; c++) light[c] += sample[c] / samples;
+      stats.rays++;
+    }
+  }
+
+  const { scale, depthTolerance } = quality, cw = Math.ceil(W / scale), ch = Math.ceil(H / scale);
+  const low = scale > 1 ? new Float32Array(cw * ch * 4) : null;
+  const lowDepth = low ? new Float32Array(cw * ch) : null;
+  if (low) for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+    const rx = Math.min(W - 1, x * scale + (scale >> 1)), ry = Math.min(H - 1, y * scale + (scale >> 1));
+    const p = y * cw + x;
+    lowDepth[p] = depths[ry * W + rx];
+    solve(rx, ry, lowDepth[p]);
+    low.set(light, p * 4);
+  }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x, p = i * 3;
+    let weight = 0;
+    if (low) {
+      light.fill(0);
+      const u = (x - (scale >> 1)) / scale, v = (y - (scale >> 1)) / scale;
+      const ix = Math.floor(u), iy = Math.floor(v);
+      for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+        const bx = Math.max(0, Math.min(cw - 1, ix + dx)), by = Math.max(0, Math.min(ch - 1, iy + dy));
+        const j = by * cw + bx, guide = lowDepth[j], depth = depths[i];
+        const delta = guide === depth ? 0 : Math.abs(guide - depth);
+        if (delta > depthTolerance) continue;
+        const w = (1 - Math.abs(u - (ix + dx))) * (1 - Math.abs(v - (iy + dy))) / (1 + delta * 5);
+        for (let c = 0; c < 4; c++) light[c] += low[j * 4 + c] * w;
+        weight += w;
+      }
+    }
+    if (weight) for (let c = 0; c < 4; c++) light[c] /= weight;
+    else {
+      solve(x, y, depths[i]);
+      if (low) stats.fallbackRays += samples;
+    }
+    if (accumulation) accumulation.set(light, i * 4);
+    else {
+      for (let c = 0; c < 3; c++) col[p + c] = light[c] + light[3] * col[p + c];
+      if (fog) fog[(H - 1 - y) * W + x] = 1 - light[3];
+    }
+  }
+  if (accumulation) {
+    history.filter(accumulation, depths, time, viewKey);
+    for (let i = 0; i < W * H; i++) {
+      const transmittance = accumulation[i * 4 + 3];
+      for (let c = 0; c < 3; c++) col[i * 3 + c] = accumulation[i * 4 + c] + transmittance * col[i * 3 + c];
+      if (fog) fog[(H - 1 - Math.floor(i / W)) * W + i % W] = 1 - transmittance;
+    }
+  }
+  return { fog, stats };
+}
+
+module.exports = { cameraRays, surfacePoint, reflectionSampler, atmosphereQuality, applyAtmosphere };

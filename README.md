@@ -614,6 +614,10 @@ Use `ink-studio catalog <words>` to search catalog entries and follow their `whe
 
 `KIT.authoring.context` adds spatial queries, raycasts, named surface anchors, transform resolution, and rules that respond to changes in related entities. `KIT.authoring.groups` supports batch transforms, copying, deletion and named selections. `KIT.procedural.chunks` rebuilds affected preview or final chunks and cancels superseded work. See the [retained authoring API](docs/procedural.md#optional-retained-authoring), [incremental realization](docs/procedural.md#incremental-realization) and [runnable example](examples/procedural/authoring-example.js).
 
+The [headless authoring guide](docs/headless-authoring.md) covers typed graphs,
+cached simulation, attribute transfer, mesh paths, layered artwork, animation
+state graphs and the retained Flooded Shrine recipe.
+
 ## Rendering and command reference
 
 | Command | Purpose |
@@ -623,6 +627,9 @@ Use `ink-studio catalog <words>` to search catalog entries and follow their `whe
 | `catalog [words] [--full]` | Search feature names, descriptions and tags. |
 | `acts` | List action clips, reactions, easing names and cues. |
 | `render <scene> --t 1.5` | Render one PNG at a chosen time. |
+| `passes <scene>` | Save art-pixel coverage, depth, normals, IDs and emission previews. |
+| `atlas <scene> --directions 8` | Export an RGBA atlas with registered pivots and optional relighting maps. |
+| `variants <scene> --seeds 3,7,12` | Render a ranked seed contact sheet for a scene with variant metrics. |
 | `sheet <scene> --from 0 --to 3 --n 12` | Make a labeled sheet of animation frames. |
 | `turn <scene> --n 8` | Make a sheet from multiple viewing angles. |
 | `clip <scene> --from 0 --to 3 --fps 12` | Save an animated PNG. Use `--text ascii\|symbols\|braille\|blocks` for animated text rendering. |
@@ -681,6 +688,10 @@ Use `finish.look.tone` for a luminance-based palette with a black cutoff, ordere
 For per-pixel materials, set `S.pixel = true` before baking and finish the world with `look: { pixel: true }`. `K.pixel` provides surface patterns such as turf, masonry and shingles. Use `K.pixel.edge(material, { up: 'grass', every: 5, share: 0.55 })` to attach sprites that follow the surface as the camera moves. `K.sprite.art` accepts text art for custom sprites, and `K.props` can scatter small objects along paths and at wall bases.
 
 `paint export` and `paint absorb` work with per-pixel scenes. By default, files live in `studio/paint/<scene-id>/`, where `<scene-id>` is the ID returned by the scene. Edit `paint.png` in the scene palette and use magenta (`#ff00ff`) to erase earlier paint. If you choose a custom folder with `--dir`, pass the same folder to `paint` and `render`.
+
+The [art-pixel rendering guide](docs/art-passes.md) describes the selectable
+render passes, selective ink, camera snapping, stable dithering, art-pixel
+effects, local fragment ordering and directional export.
 
 ## View-dependent surface materials
 

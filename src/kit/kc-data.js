@@ -288,6 +288,21 @@
     if (look?.pixelSize !== undefined && (!Number.isSafeInteger(look.pixelSize) || look.pixelSize < 1))
       bad('finish.look.pixelSize', 'pixelSize must be a positive integer');
     try {
+      ArtInk.prepare(look?.ink, st.palette);
+    } catch (error) {
+      bad('finish.look.ink', error.message);
+    }
+    try {
+      ArtEffects.prepare(look?.effects, st.palette);
+    } catch (error) {
+      bad('finish.look.effects', error.message);
+    }
+    try {
+      ArtStability.prepare(look?.stable);
+    } catch (error) {
+      bad('finish.look.stable', error.message);
+    }
+    try {
       PixelLook.toneSettings(look?.tone);
     } catch (error) {
       bad('finish.look.tone', error.message);
