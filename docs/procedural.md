@@ -39,6 +39,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `spans.catenary(a, b, options)` | Gravity-aware sagging curve with arc-length sampling, finite frames and closest-point queries |
 | `proximity.connect(sockets, options)` | Deterministic matching of named sockets with reach, degree and compatibility limits |
 | `populations.layout(boundsList, evaluate, options)` | Seeded world-space candidates ranked by density. Expanding the work region preserves existing candidate identities |
+| `sampling.poisson(options)` | Seeded Bridson samples in finite 2D and 3D bounds, with masks, variable radii, pins and axis scaling |
 | `materialBands(spec)` | Nonoverlapping local intervals with material and pattern metadata |
 | `masks.stroke(spec)`, `masks.compose(specs, options)` | Tapered and feathered swept discs, ordered addition and erasure, signed distance and visible source ownership |
 | `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
@@ -187,6 +188,41 @@ field to darken banks and place reeds around an authored pond.
 
 ```sh
 node cli/ink-studio.js render examples/watershed.js --ortho --colored
+```
+
+### Stable spacing and finite Poisson sampling
+
+Opt in to minimum-distance placement with
+`P.populations.layout(regions, evaluate, {exclusion: {distance}})`.
+The higher-priority eligible candidate blocks lower-priority candidates within
+the exclusion distance. Candidate identity and the decision are based on world
+coordinates and a bounded neighbor halo. Use the same seed, settings, and
+world-space evaluator in every chunk. The evaluator also sees candidates just
+outside the output regions so splitting a region produces the same placements.
+
+Set `exclusion.maxDistance` to bound variable `minDistance` values returned
+by the evaluator or values in `exclusion.species`. An evaluator may return
+a `species` name. Supply a nested table such as `{oak: {moss: 0.6}}` to add a
+symmetric pair separation. A pair uses the maximum of its two sample distances
+and any matching species rules. Candidate and comparison budgets include work
+in the halo.
+
+Use `P.sampling.poisson({bounds: {min, max}, radius, seed})` for a finite
+patch. Bounds and points have two or three coordinates. `mask(point)` can
+restrict the domain. `seeds` pins starting samples. `reseed` allows a bounded
+number of extra random seeds in disconnected regions after a patch finishes.
+For variable spacing, supply `radius(point)`, `minRadius`, and `maxRadius`.
+Pair separation is the larger radius. With `axisScale`, distance is measured
+after dividing each coordinate difference by that axis scale. The result
+contains each `point` and `radius`, plus a work report and status.
+A `budget` or `point-limit` result contains the samples inserted so far.
+
+The splat example compares two independently populated chunks with one finite
+Bridson patch at the same exclusion distance.
+
+```sh
+node cli/ink-studio.js render examples/poisson-patches.js --seed 0 --ortho --colored
+node cli/ink-studio.js render examples/poisson-patches.js --seed 1 --ortho --colored
 ```
 
 ## Optional retained authoring

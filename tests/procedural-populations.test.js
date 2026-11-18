@@ -40,3 +40,40 @@ test('masks remove candidates without rerolling survivors and reject bad inputs 
   assert.throws(() => P.layout([box(1)], () => ({ density: 1 }), { maxInstances: 1 }), /budget/);
   assert.throws(() => P.layout([box(30)], () => null, { maxCandidates: 10 }), /budget/);
 });
+
+test('minimum-distance placement is identical in full, reversed, and independently built work regions', () => {
+  const setup = { spacing: 0.25, slots: 5, seed: 27, exclusion: { distance: 0.33, maxDistance: 0.65, species: { oak: { moss: 0.53 } } } },
+    sample = (x, z, candidate) => ({
+      density: 0.48 + 0.3 * Math.cos(x * 0.8 + z),
+      species: candidate.seed % 2 ? 'oak' : 'moss',
+      minDistance: z > 0.65 ? 0.65 : 0.33
+    }),
+    a = { min: [-3, 0, -2.2], max: [0.04, 1, 2.2] },
+    b = { min: [0.04, 0, -2.2], max: [3, 1, 2.2] },
+    full = { min: a.min, max: b.max },
+    both = P.layout([full], sample, setup),
+    reverse = P.layout([b, a], sample, setup),
+    union = new Map([...P.layout([a], sample, setup).instances, ...P.layout([b], sample, setup).instances].map(p => [p.key, p]));
+  assert(both.instances.length > 20);
+  assert.deepEqual(both, reverse);
+  assert.equal(union.size, both.instances.length);
+  for (const [i, p] of both.instances.entries()) {
+    assert.deepEqual(p, union.get(p.key));
+    for (const q of both.instances.slice(i + 1)) {
+      const gap = Math.max(p.sample.minDistance, q.sample.minDistance, p.sample.species === q.sample.species ? 0 : 0.53);
+      assert(Math.hypot(p.point[0] - q.point[0], p.point[1] - q.point[1]) + 1e-10 >= gap);
+    }
+  }
+});
+
+test('eligible priorities preserve survivors when uniformly increasing density and account for a halo budget', () => {
+  const setup = { spacing: 0.25, seed: 14, exclusion: { distance: 0.39 } },
+    a = P.layout([box(2)], () => ({ density: 0.3 }), setup),
+    b = P.layout([box(2)], () => ({ density: 0.85 }), setup),
+    keys = new Set(b.instances.map(p => p.key));
+  assert(a.instances.length > 10);
+  assert(a.instances.every(p => keys.has(p.key)));
+  assert(b.sampling.evaluated > b.sampling.candidates);
+  assert.throws(() => P.layout([box(2)], () => ({ density: 1 }), { ...setup, exclusion: { distance: 0.4, maxComparisons: 1 } }), /comparison budget/);
+  assert.throws(() => P.layout([box(2)], () => ({ density: 1, minDistance: 1 }), setup), /distance/);
+});
