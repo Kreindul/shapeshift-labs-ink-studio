@@ -85,6 +85,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.dualContour(field, bounds, options)`, `geometry.surfaceNets(field, bounds, options)` | Cell-local surface samples, optional indexed preview triangles and tagged mesh output |
 | `geometry.octree(field, bounds, options)`, `geometry.stitchVoxelLevels(tree, options)`, `geometry.adaptiveSurface(field, bounds, options)` | Sparse field sampling, 2:1 voxel levels and stitched adaptive previews |
 | `geometry.simplifyQEM(mesh, options)`, `lod.mergeSplats(records, options)`, `lod.packSplats(result)` | Error-driven previews with retained material seams, ownership and protected samples |
+| `motion.streamline(field, start, options)`, `motion.obstacleWake(sdf, options)`, `motion.loopTrajectory(points, options)`, `motion.surfaceAdvection(chart, seeds, options)` | Field integration, wake and curl sampling, closed tracks and UV-attached motion |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -1031,6 +1032,39 @@ Constraints may stop reduction above the requested count.
 `lod.packSplats(result)` returns the static `data` and `count` fields
 used by the renderer. `examples/preview-lod.js` packs an original and
 reduced shield side by side.
+
+### Currents and surface motion
+
+`motion.streamline(field, start, options)` traces a finite XYZ vector
+field with fourth-order integration and optional local error control.
+The field takes `(x, y, z, time)`. Supply a signed obstacle, clearance,
+and optional bounds or mask. With normalization enabled, time advances
+with arc step. Set `normalize: false` for a physical time step. In
+bidirectional mode the length cap applies to each end of the path.
+
+`motion.obstacleWake(sdf, {origin, flow, radius, length, width,
+circulation, eddies, period})` adds an analytic downstream wake around a
+signed obstacle. The result supplies a time-dependent `velocity` and
+`vorticity`. The wake is an artistic field for currents, trails, and
+local circulation.
+
+`motion.loopTrajectory(points, {period, tension})` creates a closed
+Hermite track with continuous position and velocity. Points can be XYZ
+triples or `{at, point, velocity}` knots, where `at` is a normalized
+phase. Sample the loop at any time, including negative times.
+
+`motion.surfaceAdvection(chart, seeds, {velocity, step, boundary})`
+stores UV coordinates for seeded particles or splats. The chart can
+be a carrier or a time-to-carrier function. The solver projects each
+world velocity into the chart metric and advances the UVs. The output
+provides position, normal and tangent on the current deformed carrier.
+Periodic carrier axes wrap, and other boundaries can clamp or stop
+particles. Explicit `du` and `dv` on a chart sample avoid finite
+differences.
+
+`examples/flow-wake.js` traces the current around a river stone.
+`examples/surface-advection.js` draws moving pigment on a changing
+banner surface.
 
 ## Optional retained authoring
 
