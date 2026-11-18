@@ -41,3 +41,24 @@ test('deposition varies with load, slope, shelter and exposure', () => {
   assert(P.deposition({ normal: [0, 2, 0], load: .3, shelter: 1 }) > P.deposition({ normal: [0, 2, 0], load: .3 }));
   assert(P.deposition({ normal: [0, 1, 0], load: 1 }) > P.deposition({ normal: [0, 1, 1], load: 1 }));
 });
+
+test('surface coating profiles preserve material and slope differences with a configurable palette', () => {
+  const {coating}=P;
+  const floor={normal:[0,1,0],load:.9};
+  const incline={normal:[1,1,0],load:.9};
+  const floorStone=coating.amount({...floor,material:'stone'});
+  assert(coating.amount({...floor,material:'wood'})<floorStone);
+  assert(coating.amount(incline)<floorStone);
+  assert(coating.amount(incline,{bias:.3})>coating.amount(incline,{bias:-.3}));
+  assert.equal(coating.amount({...floor,exposure:0}),0);
+  const color=[.14,.21,.32], palette=[.7,.55,.4];
+  const spec={shadow:palette,highlight:palette,retention:{ceramic:0}};
+  const baked=P.evaluate({coating:spec}).coating;
+  palette[0]=.1;
+  assert.equal(baked.shadow[0],.7);
+  assert.equal(coating.amount({...floor,material:'ceramic'},baked),0);
+  assert.deepEqual(coating.color(color,0,baked),color);
+  assert.deepEqual(coating.color(color,1,baked),[.7,.55,.4]);
+  assert.throws(()=>coating.profile({slope:[.8,.3]}),/Coating/);
+  assert.throws(()=>coating.profile({retention:{roof:2}}),/Coating/);
+});

@@ -35,7 +35,8 @@
     const daylight = ease(-.18, .31, up), twilight = (1 - ease(.02, .52, Math.abs(up))) * ease(-.24, -.05, up);
     const tint = [.67 + daylight * .33 + twilight * .2, .78 + daylight * .22 + twilight * .02, 1.08 - daylight * .08 - twilight * .16];
     return P.data.freeze({ hour, sun, daylight, twilight, ambient: .36 + .64 * daylight, tint,
-      fog: medium(p.fog), autumn: p.autumn, snow: p.snow, wind: p.wind.slice() });
+      fog: medium(p.fog), autumn: p.autumn, snow: p.snow, wind: p.wind.slice(),
+      ...(p.coating===undefined?{}:{coating:coatingProfile(p.coating)}) });
   }
 
   function opticalDepth(from, to, options) {
@@ -56,6 +57,67 @@
     return clamp(load * angle * exposure * (.65 + .5 * texture + .26 * shelter));
   }
 
+  const coatingRoles = Object.freeze(['other','foliage','wood','roof','stone','soil','metal','plaster']);
+  const coatingDefaults = P.data.freeze({
+    slope: [.28,.88], bias: 0, blend: [.12,.92], variation: .5,
+    shadow: [.50,.60,.66], highlight: [.95,.96,.90],
+    retention: { other:1, foliage:.84, wood:.80, roof:1, stone:1, soil:.94, metal:.58, plaster:.90 }
+  });
+  const compiledCoats = new WeakMap([[coatingDefaults,coatingDefaults]]);
+  const orderedPair = (pair, min, max) => Array.isArray(pair) && pair.length === 2 &&
+    within(pair[0],min,max) && within(pair[1],min,max) && pair[0] < pair[1];
+
+  function coatingProfile(raw = coatingDefaults) {
+    const compiled=compiledCoats.get(raw);
+    if (compiled) return compiled;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) ||
+        raw.retention !== undefined && (!raw.retention || typeof raw.retention !== 'object' || Array.isArray(raw.retention)))
+      throw Error('Coating needs a profile and a material retention map');
+    const p={...coatingDefaults,...raw,retention:{...coatingDefaults.retention,...raw.retention}};
+    if (!orderedPair(p.slope,-1,1) || !orderedPair(p.blend,0,1) ||
+        !within(p.bias,-.5,.5) || !within(p.variation,0,1) ||
+        ![p.shadow,p.highlight].every(color=>vector(color)&&Array.from(color).every(v=>within(v,0,1))) ||
+        Object.keys(p.retention).length>64 ||
+        !Object.entries(p.retention).every(([role,amount])=>/^[a-z][a-z0-9_-]{0,47}$/i.test(role)&&within(amount,0,1)))
+      throw Error('Coating needs ordered slope and blend bounds, normalized colors and bounded retention');
+    const profile=P.data.freeze({slope:p.slope.slice(),blend:p.blend.slice(),bias:p.bias,variation:p.variation,
+      shadow:p.shadow.slice(),highlight:p.highlight.slice(),retention:p.retention});
+    compiledCoats.set(profile,profile);
+    if (P.data.isImmutable(raw)) compiledCoats.set(raw,profile);
+    return profile;
+  }
+
+  function coatingAmount({normal,load,texture=.5,exposure=1,material='other'}, raw) {
+    if (!vector(normal) || !Array.from(normal).every(Number.isFinite) || V.len(normal)<1e-8 ||
+        ![load,texture,exposure].every(v=>within(v,0,1)) || typeof material !== 'string')
+      throw Error('Coating sample needs a normal and normalized load, texture and exposure');
+    const p=coatingProfile(raw), keep=Object.hasOwn(p.retention,material)?p.retention[material]:p.retention.other;
+    return clamp(load * exposure * keep * (.9+p.variation*(texture-.5)) *
+      ease(...p.slope,normal[1]/V.len(normal)+p.bias));
+  }
+
+  function coatingColor(color, amount, raw) {
+    if (!vector(color) || !Array.from(color).every(v=>within(v,0,1)) || !within(amount,0,1))
+      throw Error('Coating color needs normalized RGB and amount');
+    const p=coatingProfile(raw), light=.32+.68*V.dot(color,[.26,.64,.10]), blend=ease(...p.blend,amount);
+    return color.map((c,i)=>c+(p.shadow[i]+(p.highlight[i]-p.shadow[i])*light-c)*blend);
+  }
+
+  const coatingGlsl = Object.freeze({
+    amount: `
+float coatingAmount(float vertical, float load, float grain, float keep, vec4 profile) {
+  return clamp(load * keep * (.9 + profile.w * (grain - .5)) *
+    smoothstep(profile.x, profile.y, vertical + profile.z), 0.0, 1.0);
+}
+`,
+    color: `
+vec3 coatingColor(vec3 base, float amount, vec2 blend, vec3 shadow, vec3 highlight) {
+  float light = .32 + .68 * dot(base, vec3(.26, .64, .10));
+  return mix(base, mix(shadow, highlight, light), smoothstep(blend.x, blend.y, amount));
+}
+`
+  });
+
   function scatter(from, to, light, options) {
     if (!vector(from) || !vector(to) || !vector(light?.p) || !within(light.radius, .001, 1024) || !within(light.intensity, 0, 64))
       throw Error('Fog light needs finite endpoints, a position, radius and intensity');
@@ -72,5 +134,6 @@
     return -Math.expm1(-amount * .72) * Math.exp(-opticalDepth(from, to, f) * .38 * enter / Math.max(1, length));
   }
 
-  P.environmentFields = Object.freeze({ defaults, evaluate, medium, opticalDepth, deposition, scatter });
+  const coating=Object.freeze({defaults:coatingDefaults,roles:coatingRoles,profile:coatingProfile,amount:coatingAmount,color:coatingColor,glsl:coatingGlsl});
+  P.environmentFields = Object.freeze({ defaults, evaluate, medium, opticalDepth, deposition, scatter, coating });
 })(KIT);

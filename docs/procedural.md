@@ -690,6 +690,21 @@ surface load from the upward normal, incoming supply, exposure and shelter.
 Callers provide the coverage mask and material treatment. Snow, ash and
 windblown dust can all use the same query.
 
+`environmentFields.coating.profile(spec)` prepares a color treatment for
+a temporary surface coat. Configure `slope` and `bias` for how readily it
+settles on inclines, `variation` for texture response, `retention` by
+material role, and `shadow`, `highlight`, and `blend` for the resulting
+appearance. Each role may use its own normalized retention. Unlisted
+roles use `other`.
+
+Pass `{normal, load, texture, exposure, material}` to `coating.amount(sample,
+profile)`, then shade a normalized substrate color with `coating.color(rgb,
+amount, profile)`. `coating.glsl` supplies the same amount and color
+curves. For GPU use, supply the upward component of the normalized normal,
+multiply load by the scene's exposure mask, and pass the substrate's
+retention. A different palette and retention map lets the same curves
+represent ash, frost or a dusting of sand.
+
 ### Attachment slots
 
 `P.attachments.layout(slots, families, {seed, fits, budget})` selects a family
