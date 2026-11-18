@@ -1867,3 +1867,9 @@ requested ID so callers can show the fallback.
 `P.cameraPivots.choose(mode, { cursor, pick, fallback, radius })` resolves a world point from normalized viewport coordinates running left to right and top to bottom. `pick(u, v)` returns the app's chosen surface point or null. Modes are `target` (return the fallback), `cursor` (use the supplied coordinates), `center` (one center sample), and `region` (center followed by nearby samples until a hit). The cursor defaults to the center. The selection includes at most nine samples so an app can reuse a pivot across an input gesture.
 
 `P.cameraPivots.orbit(view, yaw, pitch, pivot)` rotates the view around a world point while keeping that point at the same screen position. `P.cameraPivots.zoom(view, dist, pivot)` keeps the same screen position as the distance changes. A view supplies `{ yaw, pitch, dist, target }` with angles in radians, positive camera distance, and a three-component world-space target. Both functions return a new view. Passing a null pivot keeps the target fixed. The caller supplies camera limits, picking rules, and input bindings.
+
+### Chain joins
+
+`P.chainJoins.plan(first, second, { tolerance, firstEnd, secondEnd })` determines how to stitch two open chains in 3D. Each chain supplies world-space `start` and `end` points and its positive arc `length`. The default chooses the nearest pair within `tolerance`, or returns null. Pass a specific end (0 for start, 1 for end) to honor a known snap target.
+
+The plan puts the first chain before the second. It supplies `reverseFirst`, `reverseSecond` and the normalized join station `split`. `mapFirst(u)` and `mapSecond(u)` transfer positions from either input's normalized arc to the concatenation. Use the direction flags to handle sided attributes, cross-section coordinates, or directional metadata. Geometry construction and attribute precedence belong to the caller.
