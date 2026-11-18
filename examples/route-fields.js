@@ -18,7 +18,7 @@ module.exports = ({ makeBuilder, makeSculpt, KIT: K }) => ({
       wall = { x: 0, z: -0.16, u: 1.19, v: 0.91 };
     const island = (x, z) => Math.hypot(Math.max(0, Math.abs(x - wall.x) - wall.u), Math.max(0, Math.abs(z - wall.z) - wall.v)) +
       Math.min(0, Math.max(Math.abs(x - wall.x) - wall.u, Math.abs(z - wall.z) - wall.v)),
-      slow = (x, z) => Math.hypot((x + 0.25) / 2.3, (z + 1.61) / 0.72),
+      slow = (x, z) => Math.hypot((x + 0.25) / 2.3, (z - 1.42) / 0.82),
       wet = (x, z) => slow(x, z) < 1.1;
     let route;
     if (seed % 2) {
