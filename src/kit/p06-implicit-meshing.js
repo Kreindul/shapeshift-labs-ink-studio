@@ -5,7 +5,7 @@
   const A = K.procedural,
     V = K.V;
   A.geometry.implicitSurface = (field, bounds, options) => {
-    const o = Object.assign({ resolution: 0.12, maxCells: 30000, meta: {} }, options);
+    const o = Object.assign({ resolution: 0.12, maxCells: 30000, edgeRefinements: 0, meta: {} }, options);
     if (
       typeof field !== 'function' ||
       !bounds ||
@@ -20,7 +20,8 @@
     )
       throw new Error('Implicit meshes need a finite box, field and sampling budget');
     const size = bounds.max.map((v, i) => v - bounds.min[i]);
-    if (!size.every(Number.isFinite) || o.maxCells > 2000000)
+    if (!size.every(Number.isFinite) || o.maxCells > 2000000 ||
+        !Number.isInteger(o.edgeRefinements) || o.edgeRefinements < 0 || o.edgeRefinements > 12)
       throw new Error('Implicit mesh extent and sampling budget exceed supported limits');
     let step = Math.max(o.resolution, Math.max(...size) / o.maxCells),
       counts = size.map(v => Math.max(1, Math.ceil(v / step)));
@@ -75,7 +76,20 @@
           const p = corners.map(c => at(x + c[0], y + c[1], z + c[2])),
             d = corners.map(c => values[slot(x + c[0], y + c[1], z + c[2])]);
           if (d.every(v => v >= 0) || d.every(v => v < 0)) continue;
-          const edge = (a, b) => V.mad(p[a], V.sub(p[b], p[a]), d[a] / (d[a] - d[b]));
+          const edge = (a, b) => {
+            if (!o.edgeRefinements) return V.mad(p[a], V.sub(p[b], p[a]), d[a] / (d[a] - d[b]));
+            if (d[a] >= 0) [a, b] = [b, a];
+            const delta = V.sub(p[b], p[a]);
+            let low = 0, high = 1;
+            for (let i = 0; i < o.edgeRefinements; i++) {
+              const mid = (low + high) / 2;
+              const value = field(V.mad(p[a], delta, mid));
+              if (!Number.isFinite(value)) throw new Error('Implicit mesh field must return finite values');
+              if (value < 0) low = mid;
+              else high = mid;
+            }
+            return V.mad(p[a], delta, (low + high) / 2);
+          };
           for (const tet of tets) {
             const low = tet.filter(i => d[i] < 0),
               high = tet.filter(i => d[i] >= 0);

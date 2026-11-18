@@ -32,6 +32,18 @@ test('implicit curved shells are finite, outward and converge near their analyti
   }
   assert(m.positions.every(Number.isFinite));
 });
+test('edge refinement resolves a nonlinear crossing inside a coarse cell', () => {
+  const field = ([x]) => x ** 3 - 0.033;
+  const options = { resolution: 0.5, meta };
+  const linear = A.geometry.implicitSurface(field, box, options);
+  const refined = A.geometry.implicitSurface(field, box, { ...options, edgeRefinements: 10 });
+  const error = mesh => Math.max(...mesh.positions.filter((_, i) => i % 3 === 0)
+    .map(x => Math.abs(x - Math.cbrt(0.033))));
+  assert(error(linear) > 0.1);
+  assert(error(refined) < 0.001);
+  assert.deepEqual(refined.sampling, linear.sampling);
+  assert.throws(() => A.geometry.implicitSurface(field, box, { edgeRefinements: 13 }), /budget/);
+});
 test('sampling is bounded, empty fields stay empty and invalid inputs fail promptly', () => {
   let calls = 0;
   const m = A.geometry.implicitSurface(

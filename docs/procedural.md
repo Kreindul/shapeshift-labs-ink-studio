@@ -28,10 +28,11 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.triangulate2D(points)` | Index triples for a simple concave or convex 2D polygon |
 | `geometry.clipConvex(mesh, planes, capMetadata)`, `geometry.clipSurface(mesh, planes)` | Clip to half spaces `dot(normal, point) <= offset`. Closed convex shells receive caps, open triangle streams retain interpolated UVs/normals |
 | `geometry.clipConvexFaces(faces, planes, {capTag})` | Clip a closed convex shell of outward-wound planar faces. Keep polygons intact through clipping and tag each cap with its plane tag or the supplied default |
-| `geometry.implicitSurface(field, bounds, options)` | Marching tetrahedra for negative-inside fields, with a bounded cell count |
+| `geometry.implicitSurface(field, bounds, options)` | Marching tetrahedra for negative-inside fields. Use `edgeRefinements` (0–12, default 0) to bisect nonlinear crossings within the same bounded grid. |
 | `pieces.convex`, `pieces.box`, `pieces.beam`, `pieces.tube`, `pieces.union` | Reusable solid pieces and query unions. Union meshes contain constituent shells |
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
 | `fittedRibbon({inner, outer, pitch, gap, closed, phase, budget})` | Fit repeating bands along paired 2D or 3D rails. Each logical cell contains quadrilateral footprints split at source edges |
+| `fittedRailBand({inner, outer, pitch, gap, closed, phase, depth, direction, budget})` | Fit closed solid pieces along paired 3D rails. |
 | `surfaceCells.clip(cells, {boundary, holes, budget, work})` | Intersect convex cell footprints with a convex chart boundary and subtract convex holes. Group fragments by logical cell key |
 | `surfaceCells.loft(layout, {sample, levels, step, metadata, budget}, builder?)` | Map each fitted footprint onto two levels of a curved carrier. Emit closed, outward-wound fragments with shared cap and side vertices |
 | `panelFrames({width, height, unit, beam, braceWidth, braces, periodic, budget})` | Fit posts, rails and optional diagonal braces to rectangular bays. Get stable keyed footprints and a signed chart query |
@@ -1332,6 +1333,21 @@ profile for a cap or multiple profiles for an open channel. The up vector
 sets the profile orientation. Each path segment needs an extent perpendicular
 to it. Use a backing strip when the chosen treatment needs continuous
 coverage through joints and turns.
+
+### Fitted rail bands
+
+`KIT.procedural.fittedRailBand({inner, outer, pitch, gap, closed, phase, depth, direction, budget})`
+fits repeated solids between two matching 3D rails. Layout uses the inner rail's
+length, with a pitch and joint gap in world units. `depth` is a pair of signed
+offsets along the normalized vector returned by `direction(point, fragment)`.
+A planar convex footprint produces one prism. Warped footprints are split into
+prisms with the same logical cell and fragment.
+
+`band.layout` exposes the fitted ribbon. `band.pieces({owner, key, material})`
+returns closed convex pieces with bounds, a mesh, signed distance, ray
+intersections and surface samples. Piece keys include the cell, fragment and
+split index. Callers supply rails, normals and any clearance fields to compose
+with the band, for example along an opening, on a curved wall or at a deck edge.
 
 ### Bounded field probes
 
