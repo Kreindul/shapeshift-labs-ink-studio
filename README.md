@@ -18,6 +18,7 @@ The package includes geometry, materials, lighting, animation, character control
 - [Importing meshes](#importing-meshes)
 - [Procedural worlds](#procedural-worlds)
 - [Rendering and command reference](#rendering-and-command-reference)
+- [View-dependent surface materials](#view-dependent-surface-materials)
 - [Embedding and custom scene collections](#embedding-and-custom-scene-collections)
 - [Module reference](#module-reference)
 - [Validation and development](#validation-and-development)
@@ -571,6 +572,7 @@ Common rendering controls:
 | `--yaw`, `--pitch`, `--zoom`, `--target x,y,z` | Camera controls; angles are radians. |
 | `--ortho` | Use a parallel projection. |
 | `--edges off` | Hide the edge sprites attached to materials in a per-pixel scene. |
+| `--surface off` | Render without the view-dependent finish layers. |
 | `--w`, `--h`, `--out` | Output viewport size and destination. The renderer resolves a lower-resolution pixel grid derived from the scene's detail settings. |
 | `--seed` | Override the scene seed. |
 | `--colored` | Use palette-aware smoothing of silhouettes and body-colored contours. |
@@ -588,6 +590,10 @@ The default look uses palette quantization and dithering. `--colored` preserves 
 For per-pixel materials, set `S.pixel = true` before baking and finish the world with `look: { pixel: true }`. `K.pixel` provides surface patterns such as turf, masonry and shingles. Use `K.pixel.edge(material, { up: 'grass', every: 5, share: 0.55 })` to attach sprites that follow the surface as the camera moves. `K.sprite.art` accepts text art for custom sprites, and `K.props` can scatter small objects along paths and at wall bases.
 
 `paint export` and `paint absorb` work with per-pixel scenes. By default, files live in `studio/paint/<scene-id>/`, where `<scene-id>` is the ID returned by the scene. Edit `paint.png` in the scene palette and use magenta (`#ff00ff`) to erase earlier paint. If you choose a custom folder with `--dir`, pass the same folder to `paint` and `render`.
+
+## View-dependent surface materials
+
+`KIT.surface` adds finishes to ordinary sculpt materials. The builder records which finish and surface normal a splat uses. The renderer evaluates the layers with the current camera and light direction, so orbiting needs no rebake. You can use the 40 named presets as supplied, override an individual layer, or compose your own finish. See the [surface material guide](docs/surface-materials.md) for the full preset list, options, JSON examples, and rendering commands.
 
 ## Embedding and custom scene collections
 
@@ -625,6 +631,7 @@ Then `ink-studio scenes`, `render`, `snap` and other commands operate on that co
 | `builder.js` | Seeded generation, palettes, low-level splat emission and world buffers. |
 | `sculpt.js` | Base distance-field solids, materials, surface attributes, sampling and baking. |
 | `pixel-look.js` | Palette-aware pixel resolve and shader helpers. |
+| `surface-look.js` | Reusable view-dependent finish evaluation and splat metadata format. |
 | `kit/k0-math.js` | Vectors, matrices, easing, keyed values and springs. |
 | `kit/k1-stage.js` | Stage, painter stack, rigs, pools, selection, sockets and bones. |
 | `kit/k2-motion.js` | Spines, IK, clips, state machines, ropes and gait. |
@@ -654,6 +661,7 @@ Then `ink-studio scenes`, `render`, `snap` and other commands operate on that co
 | `kit/kpx-pixel.js` | Per-pixel material patterns and pixel-sized geometry. |
 | `kit/kpy-props.js` | Seeded prop placement and reusable prop libraries. |
 | `kit/kpz-sprite.js` | Text and procedural sprite art with surface anchors. |
+| `kit/kq-surface-presets.js` | Named settings for brushed finishes, fabrics, coatings, and glints. |
 | `kit/kq-sandbox.js` | Material grid simulation and worker integration. |
 | `kit/kr-tex.js` | Procedural texture fields and remapping. |
 | `kit/ks-xpbd.js` | Constraint solver, cloth, hair and wind. |

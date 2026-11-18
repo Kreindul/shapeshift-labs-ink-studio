@@ -241,6 +241,13 @@
     }
     return out;
   };
+  function applySurface(material, definition) {
+    if (typeof definition === 'string') return K.surface.preset(definition, material);
+    if (!definition || typeof definition !== 'object' || Array.isArray(definition))
+      throw new TypeError('A surface is a preset name or a settings object');
+    const { preset, ...settings } = definition;
+    return preset === undefined ? K.surface.material(material, settings) : K.surface.preset(preset, material, settings);
+  }
   DIO.check = (spec, env) => {
     const out = [],
       bad = (path, problem, hint) => out.push({ level: 'error', path, problem, hint: hint || '' }),
@@ -298,7 +305,14 @@
       if (m === undefined) return;
       const role = typeof m === 'string' ? m : m && m.role;
       if (m && typeof m === 'object') {
-        keys(m, path, { role: 1, ramp: 1, noise: 1, scale: 1, glow: 1, over: 1 });
+        keys(m, path, { role: 1, ramp: 1, noise: 1, scale: 1, glow: 1, over: 1, surface: 1 });
+        if (m.surface !== undefined) {
+          try {
+            K.surface.prepare(applySurface({}, m.surface).surface, pal, st.sun);
+          } catch (error) {
+            bad(path + '.surface', error.message);
+          }
+        }
         if (m.ramp) {
           if (!Array.isArray(m.ramp) || m.ramp.some(i => !Number.isInteger(i) || i < 0 || i >= pal.length))
             bad(path + '.ramp', 'a ramp is a list of palette numbers (0 to ' + (pal.length - 1) + ')');
@@ -592,6 +606,7 @@
       rig = K.rig(B, S),
       cap = lamps.length ? K.light.capture(B, S) : null;
     S.sun = B.norm(st0.sun);
+    if (st0.finish.look?.pixel) S.pixel = true;
     if (st0.amb !== undefined) S.amb = st0.amb;
     if (st0.sky !== undefined) S.sky = st0.sky;
     if (st0.finish.res) S.res = st0.finish.res;
@@ -615,6 +630,7 @@
                 ? r2[K.clamp(Math.floor(t * r2.length), 0, r2.length - 1)]
                 : undefined;
           }
+          if (m.surface !== undefined) return applySurface(out, m.surface);
         }
         return out;
       };

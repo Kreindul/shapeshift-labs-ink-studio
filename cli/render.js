@@ -3,6 +3,7 @@
 const FOV = (38 * Math.PI) / 180,
   BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 const PixelLook = require('../src/pixel-look.js');
+const surfaceShading = require('./surface-shading.js');
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x),
   sstep = (a, b, x) => {
     const t = clamp((x - a) / (b - a), 0, 1);
@@ -105,6 +106,17 @@ function render(world, o) {
     fog = hex(world.fog.c),
     limx = (1.3 * 0.5 * W) / focal,
     limy = (1.3 * 0.5 * H) / focal;
+  const surface = surfaceShading(world, o, {
+    eye: [
+      -(V[0] * V[12] + V[1] * V[13] + V[2] * V[14]),
+      -(V[4] * V[12] + V[5] * V[13] + V[6] * V[14]),
+      -(V[8] * V[12] + V[9] * V[13] + V[10] * V[14])
+    ],
+    parallel: ortho ? [V[2], V[6], V[10]] : null,
+    footprint: (dist * 2) / (tp * H),
+    time: t
+  });
+  const surfaceGlint = surface ? new Uint8Array(W * H) : null;
   // where each splat is at this moment, and what it looks like
   const X = new Float32Array(N),
     Y = new Float32Array(N),
@@ -214,6 +226,8 @@ function render(world, o) {
         ? world.pix
         : null,
     win = PIX ? new Int32Array(W * H).fill(-1) : null;
+  // Keep later translucent coats when the opaque receiver is recoloured per pixel.
+  let surfaceOverlay = null;
   let pixed = null,
     sprM = null;
   const FN =
@@ -245,14 +259,8 @@ function render(world, o) {
       g *= 1 - 0.38 * wet[i];
       b *= 1 - 0.3 * wet[i];
     }
+    const hasSurface = surface?.has(i);
     const dn = clamp((-cz - (eyeD - R)) / (2 * R), 0, 1);
-    if (!(flags & 2) && world.fog.max > 0 && world.fog.start < 1) {
-      // (no haze is asked for when it starts at the far edge: and a smooth step from 1 to 1 is 0 / 0, which blacks out the pixel)
-      const k = sstep(world.fog.start, 1, dn) * world.fog.max;
-      r += (fog[0] - r) * k;
-      g += (fog[1] - g) * k;
-      b += (fog[2] - b) * k;
-    }
     const iz = -1 / cz,
       tx = clamp(cx * iz, -limx, limx) / iz,
       ty = clamp(cy * iz, -limy, limy) / iz,
@@ -294,13 +302,26 @@ function render(world, o) {
       sy = Math.floor(sy) + 0.5;
     }
     if (sx + ex < 0 || sx - ex > W || sy + ey < 0 || sy - ey > H) continue;
+    let coverage = 1, glint = 0;
+    if (hasSurface && !PIX?.[i * 8]) {
+      [r, g, b, coverage, glint] = surface.shade(i, x, y, z, x, y, z, r, g, b);
+    }
+    if (!(flags & 2) && world.fog.max > 0 && world.fog.start < 1) {
+      // Fog starting at the far edge would otherwise divide by zero inside smoothstep.
+      const k = sstep(world.fog.start, 1, dn) * world.fog.max;
+      r += (fog[0] - r) * k;
+      g += (fog[1] - g) * k;
+      b += (fog[2] - b) * k;
+    }
     const solid = al >= 1,
-      wd = solid && !(flags & 1),
+      wd = solid && coverage === 1 && !(flags & 1),
       glass = (flags & 16) !== 0,
       x0 = Math.max(0, Math.floor(sx - ex)),
       x1 = Math.min(W - 1, Math.ceil(sx + ex)),
       y0 = Math.max(0, Math.floor(sy - ey)),
       y1 = Math.min(H - 1, Math.ceil(sy + ey));
+    const coat = PIX && hasSurface && !wd;
+    if (coat && !surfaceOverlay) surfaceOverlay = new Float32Array(W * H * 4);
     r = Math.min(r, 1);
     g = Math.min(g, 1);
     b = Math.min(b, 1);
@@ -339,6 +360,7 @@ function render(world, o) {
         const gg = al * Math.exp(pw);
         let a = Math.min(0.99, gg);
         if (!o.soft && solid) a = 0.99 * sstep(0.38, 0.62, gg);
+        a *= coverage;
         if (a < 0.004) continue;
         const p = iy * W + ix,
           p3 = p * 3,
@@ -359,12 +381,23 @@ function render(world, o) {
         col[p3] = pr * a + col[p3] * ia;
         col[p3 + 1] = pg * a + col[p3 + 1] * ia;
         col[p3 + 2] = pb * a + col[p3 + 2] * ia;
+        if (surfaceGlint && a > 0.5) surfaceGlint[p] = glint > 0.22;
+        if (surfaceOverlay) {
+          const j = p * 4;
+          if (wd && a > 0.5) surfaceOverlay.fill(0, j, j + 4);
+          else if (!wd && (coat || surfaceOverlay[j + 3])) {
+            surfaceOverlay[j] = pr * a + surfaceOverlay[j] * ia;
+            surfaceOverlay[j + 1] = pg * a + surfaceOverlay[j + 1] * ia;
+            surfaceOverlay[j + 2] = pb * a + surfaceOverlay[j + 2] * ia;
+            surfaceOverlay[j + 3] = a + surfaceOverlay[j + 3] * ia;
+          }
+        }
         if (wd) {
           dep[p] = dn * a + dep[p] * ia;
           gls[p] *= ia;
           if (win && a > 0.5) win[p] = i;
         } else if (glass) gls[p] = Math.min(1, gls[p] + a * 0.5);
-        else if (win && a > 0.5) win[p] = -1;
+        else if (win && !coat && a > 0.5) win[p] = -1;
       }
     }
   }
@@ -464,11 +497,10 @@ function render(world, o) {
           i = win[p];
         if (i < 0 || !PIX[i * 8]) continue;
         const f = i * 8,
-          ramp = RP[PIX[f] - 1],
-          nx = PIX[f + 3],
-          ny = PIX[f + 4],
-          nz = PIX[f + 5],
-          vx = (((x + 0.5) / W) * 2 - 1) * (ortho ? oh * asp : asp / tp),
+          ramp = RP[PIX[f] - 1];
+        let nx = PIX[f + 3], ny = PIX[f + 4], nz = PIX[f + 5];
+        if (surface?.has(i)) [nx, ny, nz] = surface.normalAt(i, [nx, ny, nz]);
+        const vx = (((x + 0.5) / W) * 2 - 1) * (ortho ? oh * asp : asp / tp),
           vy = (((y + 0.5) / H) * 2 - 1) * (ortho ? oh : 1 / tp),
           // (orthographic: each ray starts at its own point on the picture's plane, and all run straight ahead)
           ox0 = ortho ? ex + R00 * vx + R10 * vy : ex,
@@ -549,7 +581,8 @@ function render(world, o) {
       ];
     for (let y = 0; y < H; y++)
       for (let x = 0; x < W; x++) {
-        const p = y * W + x;
+        const p = y * W + x,
+          i = win[p];
         let ci = cB[p];
         if (ci < 0) continue;
         const k = key[p];
@@ -559,8 +592,7 @@ function render(world, o) {
           else if (differs(k, kAt(x, y + 1))) ci = cAbove[p];
         }
         if (OL) {
-          const i = win[p],
-            rid = PIX[i * 8];
+          const rid = PIX[i * 8];
           if (!OFF[rid - 1]) {
             let edge = false,
               sky = false;
@@ -610,11 +642,19 @@ function render(world, o) {
           pixed[p] = 1;
         }
         if (!PALC[ci]) continue;
-        const c = PALC[ci],
+        const base = PALC[ci],
+          c = surface?.has(i) ? surface.shade(i, HX[p], HY[p], HZ[p], X[i], Y[i], Z[i], ...base) : base,
           kf = world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dep[p]) * world.fog.max : 0;
+        if (surfaceGlint) surfaceGlint[p] = c[4] > 0.22;
         col[p * 3] = c[0] + (fog[0] - c[0]) * kf;
         col[p * 3 + 1] = c[1] + (fog[1] - c[1]) * kf;
         col[p * 3 + 2] = c[2] + (fog[2] - c[2]) * kf;
+        if (surfaceOverlay) {
+          const j = p * 4, through = 1 - surfaceOverlay[j + 3];
+          for (let channel = 0; channel < 3; channel++) {
+            col[p * 3 + channel] = surfaceOverlay[j + channel] + col[p * 3 + channel] * through;
+          }
+        }
       }
     // (o.pick: where on the surface each pixel lies, for the paint-over tool; rows from the bottom, as everything here)
     if (o.pick) Object.assign(o.pick, { W, H, X: HX, Y: HY, Z: HZ, win, PIX, dep });
@@ -854,7 +894,7 @@ function render(world, o) {
         r = line[0];
         g = line[1];
         b = line[2];
-      } else {
+      } else if (!surfaceGlint?.[p]) {
         const th = (BAYER[(x & 3) + ((y & 3) << 2)] + 0.5) / 16 - 0.5;
         r = clamp(r + th * dith, 0, 1);
         g = clamp(g + th * dith, 0, 1);
@@ -924,7 +964,8 @@ function render(world, o) {
     for (let y = 0; y < H; y++)
       for (let x = 0; x < W; x++) {
         const q = at(x, y);
-        if (sprM && sprM[(H - 1 - y) * W + x]) continue; // (an edge sprite, drawn as its author drew it)
+        const pixel = (H - 1 - y) * W + x;
+        if (sprM?.[pixel] || surfaceGlint?.[pixel]) continue;
         // outlines, as on the page: a notch is filled from what is round it, a bump against the background taken off
         const e0 = empty(x, y),
           N4 = N8.slice(0, 4),

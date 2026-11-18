@@ -1266,6 +1266,16 @@
       "tags": ["pixel art", "sprite", "tuft", "silhouette"]
     },
     {
+      "id": "look.surface",
+      "kind": "material",
+      "status": "ready",
+      "title": "View-dependent surface finishes",
+      "what": "Compose directional roughness, fibre highlights, grazing reflection, sheen, thin-film colour, diffraction, directional tint and anchored glints. Forty editable presets use the same layer settings.",
+      "use": "K.surface.preset('brushed-steel', { r: [1, 2, 3] }, { direction: 'y' })",
+      "where": "docs/surface-materials.md",
+      "tags": ["material", "anisotropy", "iridescence", "specular", "glints"]
+    },
+    {
       "id": "place.props",
       "kind": "op",
       "status": "ready",

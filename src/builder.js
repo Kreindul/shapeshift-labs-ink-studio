@@ -141,7 +141,24 @@ function makeBuilder(seed, hex) {
     attr = null,
     attrN = null,
     pix = null,
-    pixHas = false;
+    pixHas = false,
+    surfaceData = null,
+    surfacePending = false;
+  const surfaces = [],
+    surfaceIds = new Map(),
+    surfaceRow = new Float32Array(SurfaceLook.STRIDE);
+  function surfaceNext(settings, nx, ny, nz, light, visibility = 1, tangent) {
+    let ids = surfaceIds.get(settings);
+    if (!ids) surfaceIds.set(settings, (ids = new Map()));
+    const key = light.join(',');
+    let id = ids.get(key);
+    if (id === undefined) {
+      id = surfaces.push({ settings, light: Array.from(light) });
+      ids.set(key, id);
+    }
+    surfaceRow.set([id, nx, ny, nz, visibility, tangent?.[0] ?? 0, tangent?.[1] ?? 0, tangent?.[2] ?? 0]);
+    surfacePending = true;
+  }
   /* colour worked out per pixel (a diorama's look.pixel): for a dab laid next, the ramp it is coloured from, how lit it is, the pattern
      laid on it (a K.pixel material's pat) and the way its surface faces; the picture then decides each pixel from these, not from the
      dab's one colour. Eight numbers a dab; the ramps and patterns are kept once each */
@@ -251,6 +268,16 @@ function makeBuilder(seed, hex) {
       if (pixHas) pix.set(pixN, n * 8);
       else pix.fill(0, n * 8, n * 8 + 8);
       pixHas = false;
+    }
+    if (surfacePending || surfaceData) {
+      const stride = SurfaceLook.STRIDE;
+      if (!surfaceData || surfaceData.length < cap * stride) {
+        const next = new Float32Array(cap * stride);
+        if (surfaceData) next.set(surfaceData);
+        surfaceData = next;
+      }
+      if (surfacePending) surfaceData.set(surfaceRow, n * stride);
+      surfacePending = false;
     }
     if (fine && fine[n * 12 + 11] === 1)
       fine[n * 12 + 11] = 2; // the tile laid for this dab is now its own
@@ -855,6 +882,7 @@ function makeBuilder(seed, hex) {
         ramps: pix ? ramps.map(r => r.slice()) : undefined,
         rampOff: pix ? rampOff.slice() : undefined,
         pats: pix ? pats.slice() : undefined,
+        ...(surfaceData ? { surfaceData: surfaceData.slice(0, n * SurfaceLook.STRIDE), surfaces: surfaces.slice() } : {}),
         fine: fine
           ? fine.length >= n * 12
             ? fine.subarray(0, n * 12)
@@ -883,6 +911,10 @@ function makeBuilder(seed, hex) {
     attrN = null;
     pix = null;
     pixHas = false;
+    surfaceData = null;
+    surfacePending = false;
+    surfaces.length = 0;
+    surfaceIds.clear();
     bounced = 0;
     cidx.length = 0;
     nrms.length = 0;
@@ -915,6 +947,7 @@ function makeBuilder(seed, hex) {
     fineTile,
     attrNext,
     pixNext,
+    surfaceNext,
     dabAt,
     reseed,
     take,
