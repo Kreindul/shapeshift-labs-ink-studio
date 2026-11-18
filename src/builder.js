@@ -299,7 +299,8 @@ function makeBuilder(seed, hex) {
     if (an) {
       // kind, plus flags: 16 = leave out of outlines, 32 = glows (ignores haze and relighting)
       // 64 = behind everything, 256 = glass, 8192 = responds to horizontal airflow
-      data[o + 11] = (an.k || 0) + (an.nd ? 16 : 0) + (an.em ? 32 : 0) + (an.bk ? 64 : 0) + (an.gl ? 256 : 0) + (an.wind ? 8192 : 0);
+      data[o + 11] = (an.k || 0) + (an.nd ? 16 : 0) + (an.em ? 32 : 0) + (an.bk ? 64 : 0) + (an.gl ? 256 : 0) + (an.wind ? 8192 : 0)
+        + (an.coverage === undefined ? 0 : SampleCoverage.pack(an.coverage));
       if (an.bk) back.push(n);
       data[o + 12] = an.ph || 0;
       data[o + 13] = an.sp || 0;

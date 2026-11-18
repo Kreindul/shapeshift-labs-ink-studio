@@ -70,6 +70,7 @@ function makeSculpt(B, rest) {
   S.grp = k => ({ g: gid++, k }); // members of a group melt into each other over distance k
   S.pick = (ramp, t) => ramp[clamp(Math.floor(t * ramp.length), 0, ramp.length - 1)];
 
+  let hasOptionalProxy = false;
   function add(p, mat, o) {
     o = o || {};
     p.mat = Array.isArray(mat) ? { r: mat } : mat || {};
@@ -90,6 +91,7 @@ function makeSculpt(B, rest) {
     if (o.hold) return p; // held: made to be combined into another solid, not drawn by itself
     if (S.collide && (o.ghost || (p.mat.skip && !p.mat.solid))) return p; // when only what can be walked on matters, leave out what is drawn but not solid
     (o.ghost ? ghosts : o.neg ? neg : pos).push(p);
+    if (p.mat.omitFromProxy && !o.ghost && !o.neg) hasOptionalProxy = true;
     return p;
   }
   // a solid defined in its own space: centred on c, optionally turned by the frame o.ax
@@ -484,7 +486,7 @@ function makeSculpt(B, rest) {
           }
     }
   }
-  function field(x, y, z) {
+  function field(x, y, z, exclude, proxyOnly) {
     let d = 1e9,
       gd = 1e9,
       cur = -1,
@@ -499,6 +501,7 @@ function makeSculpt(B, rest) {
       list = grid[(ix * gdim[1] + iy) * gdim[2] + iz] || always;
     for (let i = 0; i < list.length; i++) {
       const p = list[i];
+      if (p === exclude || proxyOnly && p.mat.omitFromProxy) continue;
       if (p.g !== cur) {
         if (gd < d) {
           d = gd;
@@ -1364,8 +1367,8 @@ function makeSculpt(B, rest) {
   // ---------------- baking ----------------
   // the first surface below (x, y0, z): 1e9 if that point is inside something, -1e9 if nothing is found
   const negAll = []; // carved shapes are kept after baking so openings (arches, doorways) stay open to anything walking the scene
-  const fieldAll = (x, y, z) => {
-    let d = field(x, y, z);
+  const fieldAll = (x, y, z, proxyOnly) => {
+    let d = field(x, y, z, undefined, proxyOnly);
     for (let i = 0; i < negAll.length; i++) {
       const p = negAll[i],
         dx = x - p.bc[0],
@@ -1381,7 +1384,8 @@ function makeSculpt(B, rest) {
     }
     return d;
   };
-  S.sdf = fieldAll;
+  S.sdf = (x, y, z) => fieldAll(x, y, z);
+  S.proxySdf = () => hasOptionalProxy ? (x, y, z) => fieldAll(x, y, z, true) : S.sdf;
   /* Material and part ownership at a rest-pose surface. The distance field
      is retained even when the renderer samples it at a different resolution. */
   S.surfaceAt = (x, y, z) => {
@@ -1548,6 +1552,10 @@ function makeSculpt(B, rest) {
               d = psd(p, x, y, z);
             }
             if (Math.abs(d) > res * 0.5 || !p.mat.r || p.mat.skip) return;
+            if (S.capture) {
+              S.capture(p, p.mat, res, x, y, z, nx, ny, nz, 1);
+              return;
+            }
             curP = p;
             if (S.emit) {
               const n0 = B.count();
@@ -1684,8 +1692,11 @@ function makeSculpt(B, rest) {
     for (const k of ['res', 'sun', 'amb', 'sky', 'sunK', 'aoR', 'aoK', 'fat']) S2[k] = S[k];
     if (o.res) S2.res = o.res;
     const samples = [];
-    S2.capture = (pr, m, res, x, y, z, nx, ny, nz) =>
-      samples.push([x, y, z, nx, ny, nz, res, m, pr && pr.along ? pr.along(x, y, z) : 0]);
+    S2.capture = (pr, m, res, x, y, z, nx, ny, nz) => {
+      const sample = [x, y, z, nx, ny, nz, res, m, pr && pr.along ? pr.along(x, y, z) : 0];
+      if (pr?.whole) sample[9] = true;
+      samples.push(sample);
+    };
     build(S2);
     S2.bake();
     const lo = [1e9, 1e9, 1e9],
@@ -1699,6 +1710,7 @@ function makeSculpt(B, rest) {
     return {
       samples,
       sdf: S2.sdf,
+      proxySdf: S2.proxySdf(),
       bc,
       br: Math.hypot(hi[0] - bc[0], hi[1] - bc[1], hi[2] - bc[2]) + 0.05,
       foot: lo[1]
@@ -1706,6 +1718,7 @@ function makeSculpt(B, rest) {
   };
   S.place = (tpl, at, o) => {
     o = o || {};
+    const proxySdf = tpl.proxySdf || tpl.sdf;
     const sc = o.scale || 1,
       yw = o.yaw || 0,
       cy = Math.cos(yw),
@@ -1742,7 +1755,7 @@ function makeSculpt(B, rest) {
             dy = (y - at[1]) / sc,
             dz = (z - at[2]) / sc;
           return (
-            tpl.sdf(
+            proxySdf(
               R[0] * dx + R[3] * dy + R[6] * dz,
               R[1] * dx + R[4] * dy + R[7] * dz,
               R[2] * dx + R[5] * dy + R[8] * dz
@@ -1788,7 +1801,7 @@ function makeSculpt(B, rest) {
           y = I.at[1] + p[1] * I.sc,
           z = I.at[2] + p[2] * I.sc,
           res = q[6] * I.sc;
-        if (field(x, y, z) < -res * 0.6) continue; // buried in something else
+        if (field(x, y, z, q[9] ? I.proxy : undefined) < -res * 0.6) continue; // buried in another solid
         if (S.clip && !S.clip(x, y, z)) continue;
         INST.v = q[8];
         curP = INST;

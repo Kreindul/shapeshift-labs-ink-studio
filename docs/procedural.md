@@ -1975,3 +1975,19 @@ give their original edge index. Use the planes for intersection,
 occupied-volume sampling or keepout subtraction. Joining several prisms
 can approximate a shaped height field while assigning clearance only
 to exposed faces.
+### Withdrawing retained samples
+
+`KIT.procedural.sampleCoverage.cohort(x, y, z, spacing, seed)` assigns a stable
+integer rank to a point in a local grid. Pass that rank as `{coverage:rank}`
+alongside a dab's animation options. Drawing with a `sampleWithdrawal` between
+zero and one progressively hides marked samples. Unmarked samples remain visible
+at full withdrawal. The packed rank preserves the existing motion flags. Hosts
+can use `sampleCoverage.visible(code, amount)` or inject `sampleCoverage.glsl`
+into a vertex shader. The offline renderer accepts the same amount as a render
+option or world property.
+
+Keep independent layers in a single sculpt template. Mark a structural part
+with `{whole:true}` in the solid's options to retain samples behind other parts
+of its own instance. This still clips against neighboring solids. Set
+`omitFromProxy:true` on a material whose geometry draws in the template but
+should stay out of the placed instance's static field and shadows.

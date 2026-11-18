@@ -3,6 +3,7 @@
 const FOV = (38 * Math.PI) / 180,
   BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 const PixelLook = require('../src/pixel-look.js');
+const SampleCoverage = require('../src/sample-coverage.js');
 const surfaceShading = require('./surface-shading.js');
 const SceneOptics = require('../src/scene-optics.js');
 const { cameraRays, surfacePoint, reflectionSampler, applyAtmosphere } = require('./scene-optics.js');
@@ -168,6 +169,7 @@ function render(world, o) {
     depth = new Float32Array(N),
     add = new Float32Array(N),
     wet = new Float32Array(N);
+  const sampleWithdrawal = SampleCoverage.amount(o.sampleWithdrawal ?? world.sampleWithdrawal ?? 0);
   for (let i = 0, q = 0; i < N; i++, q += 16) {
     let x = d[q],
       y = d[q + 1],
@@ -180,6 +182,7 @@ function render(world, o) {
       sp = d[q + 13],
       rg = d[q + 14],
       ex = d[q + 15];
+    if (sampleWithdrawal > 0 && !SampleCoverage.visible(kraw, sampleWithdrawal)) al = 0;
     if (kind === 1) al *= 0.62 + 0.38 * Math.sin(t * sp + ph);
     else if (kind === 2) {
       const f = (t * sp) / rg + ph,
