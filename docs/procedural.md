@@ -66,6 +66,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `routes.tensor(components)`, `routes.followTensor(field, seeds)`, `routes.growStreets(seeds, options)`, `routes.parcels(outline)`, `routes.medial(rings)` | Directional street systems, connected seeded roads, frontage lots and medial paths |
 | `routes.layout(route, options)` | Fit bounded intervals on a polyline, catenary, or compatible curve. Place caller-chosen pieces using gapped endpoints and midpoint frames |
 | `routes.fitStairApproach(options)` | Fit a short stair flight from an exposed landing to a sampled carrier surface. |
+| `traceSignedIntervals(sample, options)` | Find where a signed field is negative along a bounded curve parameter. Supply a slope bound to skip homogeneous regions. |
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
 | `contacts.index(mesh, options)`, `contacts.intersections(a, b, options)`, `contacts.clipCurve(points, solids)` | Index named triangle groups, trace noncoplanar contacts, and trim contact or authored curves against closed indexed solids |
@@ -228,6 +229,22 @@ hold interval exposes an `engaged` pose before pursuing the target. Use
 `retarget(id, point)` during the cue to follow a moving marker. The caller
 controls how contacts are picked, which cues are available, and how the
 result is animated or rendered.
+
+### Signed intervals on a curve
+
+`traceSignedIntervals(sample, {range, maxSlope, step, tolerance, maxSamples})`
+returns ordered pairs `[low, high]` where `sample(t)` is negative. The
+parameter range defaults to `[0, 1]`. The sampler may be a signed distance
+evaluated along a route or a surface chart, or any signed scalar function.
+Supply a conservative `maxSlope` in field units per parameter unit to
+skip ranges that cannot cross zero. Without the bound, the trace refines
+uniformly to the discovery scale.
+
+`step` limits the undiscovered interval width and `tolerance` refines the
+endpoints of detected crossings. Features smaller than the discovery step
+may be missed. The result also reports `samples` and `complete`. When the
+trace exhausts `maxSamples`, it returns its best bounded approximation
+with `complete: false`.
 
 ### Terrain routes between pins
 
