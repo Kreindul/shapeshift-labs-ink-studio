@@ -24,6 +24,8 @@
         if(!name(key)||!Array.isArray(path)||path.length<2||path.length>9||!path.every(name)||
            !['appearance','parameters'].includes(path[0])||path[0]==='parameters'&&path[1]==='transform')
           throw Error('Appearance slots need a semantic key and a local appearance or parameter path');
+        if(slot.encode!==undefined&&typeof slot.encode!=='function')
+          throw Error('Appearance slot encoders must be functions');
       }
       return {family:result.family,label:result.label??result.family,entries};
     }
@@ -53,12 +55,14 @@
         const target=binding(e,s,sample);
         if(!target||!compatible(sample,target,e,s)){skipped.push({id,reason:'incompatible'});continue;}
         const paths=new Map();
-        for(const [key,{path,value}] of target.entries){
+        for(const [key,{path,value,encode}] of target.entries){
           if(!Object.hasOwn(sample.values,key))continue;
-          const next=sample.values[key], encoded=JSON.stringify(path);
+          const supplied=sample.values[key],next=encode?clone(encode(clone(supplied))):supplied,
+            encoded=JSON.stringify(path),same=equal(value,supplied);
           if(paths.has(encoded)){
             if(!equal(paths.get(encoded).next,next))throw Error('Appearance slots conflict on '+id);
-          }else paths.set(encoded,{path,next,same:equal(value,next)});
+            paths.get(encoded).same&&=same;
+          }else paths.set(encoded,{path,next,same});
         }
         if(!paths.size){skipped.push({id,reason:'no-common-slots'});continue;}
         const patch={};

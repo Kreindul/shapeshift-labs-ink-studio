@@ -1279,15 +1279,27 @@ undo. `groups.forget(doc, id)` removes just the saved selection.
 portable finish samples to an application's own fields. The descriptor
 receives `(entity, source, incoming?)` and returns `{family, label?, slots}`.
 Each named slot has an effective `value` and an array `path` into the target
-entity's appearance or parameters. For example, a semantic frame color can
-read through a material alias and map to the receiver's own material role.
-The default compatibility policy matches descriptor families.
+entity's appearance or parameters. A slot can supply `encode(value)` to
+write a receiver-specific JSON value while keeping the sample in its
+semantic form. For example, a sampled frame color can map to a material
+reference with local overrides. The default compatibility policy matches
+descriptor families.
 
 `capture(source, id)` returns a JSON-safe sample. `plan(source, ids, sample)`
 resolves target patches and reports skipped IDs for callers that need a live
 preview. `apply(doc, ids, sample)` applies the patches in one transaction.
 Callers choose the target set and which fields to expose. Shared finishes
 can use the separate document style catalog and `styleRef`.
+
+Material roles can refer to another role with a string or with an object
+such as `{alias: 'timber', color: '#428d9f'}`. Object properties override
+the referenced material. If the shared material changes later, fields
+without local overrides continue to follow it.
+
+`KIT.procedural.styles.recolor(profile, role, color)` prepares the material
+patch for a local color edit. It retains a string reference as `alias` so
+other fields still resolve through it. Apply the result as
+`{materials: {[role]: patch}}`. Both forms of references reject cycles.
 
 ## Incremental realization
 

@@ -124,3 +124,22 @@ test('style inheritance composes arbitrary channels and resolves reusable materi
   assert.throws(() => P.styles.catalog({ loop: { extends: 'missing' } }), /Unknown/);
   assert.throws(() => P.styles.material(P.styles.compose({ materials: { a: 'b', b: 'a' } }), 'a'), /Cyclic/);
 });
+
+test('material references retain inherited channels through a local recolor',()=>{
+  const base=P.styles.compose({materials:{
+    timber:{color:'#765745',shade:'#473527',roughness:.65},
+    panel:{alias:'timber',sun:'#d3ae8e'},
+    frame:'panel'
+  }});
+  const color=P.styles.recolor(base,'frame','#50a6a6');
+  assert.deepEqual(color,{alias:'panel',color:P.styles.rgb('#50a6a6')});
+  const recolored=P.styles.compose(base,{materials:{frame:color,timber:{roughness:.34}}});
+  assert.deepEqual(P.styles.material(recolored,'frame'),{
+    color:P.styles.rgb('#50a6a6'),shade:P.styles.rgb('#473527'),
+    sun:P.styles.rgb('#d3ae8e'),roughness:.34
+  });
+  assert.deepEqual(P.styles.material(recolored,'panel').color,P.styles.rgb('#765745'));
+  assert.throws(()=>P.styles.compose({materials:{bad:{alias:'__proto__'}}}),/Invalid material alias/);
+  const loop=P.styles.compose({materials:{first:{alias:'second'},second:{alias:'first',color:'#123456'}}});
+  assert.throws(()=>P.styles.material(loop,'first'),/Cyclic material role/);
+});

@@ -33,6 +33,8 @@
         if (typeof value === 'string' && !value.startsWith('#')) {
           if (!name(value)) throw new Error('Invalid material alias');
         } else if (record(value)) {
+          if (value.alias !== undefined && !K.materialReferences.reference(value.alias))
+            throw new Error('Invalid material alias');
           for (const key of colorFields) if (value[key] !== undefined) rgb(value[key]);
         } else {
           rgb(value);
@@ -48,19 +50,7 @@
     const own = role,
       saved = materialCache.get(profile);
     if (saved?.has(own)) return saved.get(own);
-    const materials = profile.materials || {},
-      seen = new Set();
-    let value;
-    while (true) {
-      if (seen.has(role)) throw new Error('Cyclic material alias: ' + role);
-      seen.add(role);
-      if (!Object.prototype.hasOwnProperty.call(materials, role)) throw new Error('Unknown material role: ' + role);
-      value = materials[role];
-      if (typeof value !== 'string' || value.startsWith('#')) break;
-      if (!name(value)) throw new Error('Invalid material alias');
-      role = value;
-    }
-    const result = record(value) ? clone(value) : { color: value };
+    const result = K.materialReferences.resolve(profile.materials || {}, role);
     for (const key of colorFields) if (key === 'color' || result[key] !== undefined) result[key] = rgb(result[key]);
     freeze(result);
     if (compiled.has(profile)) {
@@ -134,5 +124,9 @@
   }
 
   const empty = catalog();
-  P.styles = { catalog, compose: empty.resolve, sample, material, rgb };
+  function recolor(profile,role,color){
+    if(!record(profile)||!name(role))throw Error('Recoloring needs a profile and a material role');
+    return freeze(K.materialReferences.recolor(profile.materials?.[role],rgb(color)));
+  }
+  P.styles = { catalog, compose: empty.resolve, sample, material, recolor, rgb };
 })(KIT);

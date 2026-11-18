@@ -58,3 +58,28 @@ test('a portable sample can map to a different receiver and incompatible paths f
   assert.equal(doc.serialize(),before);
   assert.throws(()=>api.plan(doc,['receiver'],{...sample,values:JSON.parse('{"__proto__":{}}')}),/Invalid portable/);
 });
+
+test('slot encoders write receiver-specific values without changing the sampled color',()=>{
+  const {doc,api}=fixture(), sample=api.capture(doc,'source'), before=doc.serialize();
+  const bound=A.appearanceTransfer.create({
+    describe(e){
+      const role=e.parameters.role;
+      return {family:'panel',slots:{face:{
+        path:['appearance','materials',role],value:[0,0,0],
+        encode:color=>({alias:'amber',color})
+      }}};
+    }
+  });
+  const result=bound.apply(doc,['receiver'],sample);
+  assert.deepEqual(result.edits[0].patch.appearance.materials.paint,{alias:'amber',color:sample.values.face});
+  assert.deepEqual(doc.get('receiver').appearance.materials.paint,{alias:'amber',color:sample.values.face});
+  assert.deepEqual(bound.capture(doc,'receiver').values.face,[0,0,0]);
+  doc.undo();assert.equal(doc.serialize(),before);
+
+  const broken=A.appearanceTransfer.create({
+    describe(e){return {family:'panel',slots:{face:{path:['appearance','color'],
+      encode:e.id==='another'?()=>{throw Error('Invalid receiver');}:color=>color}}};}
+  });
+  assert.throws(()=>broken.apply(doc,['receiver','another'],sample),/Invalid receiver/);
+  assert.equal(doc.serialize(),before);
+});
