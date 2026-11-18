@@ -425,6 +425,51 @@
       dz = apz - abz * v - acz * w;
     return dx * dx + dy * dy + dz * dz;
   };
+  M.gridSampler = (lo, n, h, D) => {
+    const [n0, n1, n2] = n;
+    return (x, y, z) => {
+      let gx = (x - lo[0]) / h,
+        gy = (y - lo[1]) / h,
+        gz = (z - lo[2]) / h,
+        out = 0;
+      if (gx < 0) {
+        out += gx * gx;
+        gx = 0;
+      } else if (gx > n0 - 1) {
+        out += (gx - n0 + 1) * (gx - n0 + 1);
+        gx = n0 - 1;
+      }
+      if (gy < 0) {
+        out += gy * gy;
+        gy = 0;
+      } else if (gy > n1 - 1) {
+        out += (gy - n1 + 1) * (gy - n1 + 1);
+        gy = n1 - 1;
+      }
+      if (gz < 0) {
+        out += gz * gz;
+        gz = 0;
+      } else if (gz > n2 - 1) {
+        out += (gz - n2 + 1) * (gz - n2 + 1);
+        gz = n2 - 1;
+      }
+      const i = Math.min(n0 - 2, gx | 0),
+        j = Math.min(n1 - 2, gy | 0),
+        k = Math.min(n2 - 2, gz | 0),
+        fx = gx - i,
+        fy = gy - j,
+        fz = gz - k,
+        q = i + n0 * (j + n1 * k),
+        q2 = q + n0 * n1;
+      const c00 = D[q] + (D[q + 1] - D[q]) * fx,
+        c10 = D[q + n0] + (D[q + n0 + 1] - D[q + n0]) * fx,
+        c01 = D[q2] + (D[q2 + 1] - D[q2]) * fx,
+        c11 = D[q2 + n0] + (D[q2 + n0 + 1] - D[q2 + n0]) * fx,
+        c0 = c00 + (c10 - c00) * fy,
+        c1 = c01 + (c11 - c01) * fy;
+      return c0 + (c1 - c0) * fz + (out > 0 ? Math.sqrt(out) * h : 0);
+    };
+  };
   M.field = (mesh, o) => {
     o = o || {};
     const P = mesh.pos,
@@ -570,48 +615,7 @@
       D[i] = s;
     }
     const hi = [lo[0] + (n0 - 1) * h, lo[1] + (n1 - 1) * h, lo[2] + (n2 - 1) * h];
-    const sd = (x, y, z) => {
-      let gx = (x - lo[0]) / h,
-        gy = (y - lo[1]) / h,
-        gz = (z - lo[2]) / h,
-        out = 0;
-      if (gx < 0) {
-        out += gx * gx;
-        gx = 0;
-      } else if (gx > n0 - 1) {
-        out += (gx - n0 + 1) * (gx - n0 + 1);
-        gx = n0 - 1;
-      }
-      if (gy < 0) {
-        out += gy * gy;
-        gy = 0;
-      } else if (gy > n1 - 1) {
-        out += (gy - n1 + 1) * (gy - n1 + 1);
-        gy = n1 - 1;
-      }
-      if (gz < 0) {
-        out += gz * gz;
-        gz = 0;
-      } else if (gz > n2 - 1) {
-        out += (gz - n2 + 1) * (gz - n2 + 1);
-        gz = n2 - 1;
-      }
-      const i = Math.min(n0 - 2, gx | 0),
-        j = Math.min(n1 - 2, gy | 0),
-        k = Math.min(n2 - 2, gz | 0),
-        fx = gx - i,
-        fy = gy - j,
-        fz = gz - k,
-        q = i + n0 * (j + n1 * k),
-        q2 = q + n0 * n1;
-      const c00 = D[q] + (D[q + 1] - D[q]) * fx,
-        c10 = D[q + n0] + (D[q + n0 + 1] - D[q + n0]) * fx,
-        c01 = D[q2] + (D[q2 + 1] - D[q2]) * fx,
-        c11 = D[q2 + n0] + (D[q2 + n0 + 1] - D[q2 + n0]) * fx,
-        c0 = c00 + (c10 - c00) * fy,
-        c1 = c01 + (c11 - c01) * fy;
-      return c0 + (c1 - c0) * fz + (out > 0 ? Math.sqrt(out) * h : 0);
-    };
+    const sd = M.gridSampler(lo, n, h, D);
     const tri = (x, y, z) =>
       near[
         Math.max(0, Math.min(n0 - 1, Math.round((x - lo[0]) / h))) +

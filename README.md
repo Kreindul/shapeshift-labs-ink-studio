@@ -16,9 +16,11 @@ The package includes geometry, materials, lighting, animation, character control
 - [Particles and interaction](#particles-and-interaction)
 - [Physics and persistent effects](#physics-and-persistent-effects)
 - [Importing meshes](#importing-meshes)
+- [Importing depth maps](#importing-depth-maps)
 - [Procedural worlds](#procedural-worlds)
 - [Rendering and command reference](#rendering-and-command-reference)
 - [View-dependent surface materials](#view-dependent-surface-materials)
+- [Reflections, ripples and atmosphere](#reflections-ripples-and-atmosphere)
 - [Embedding and custom scene collections](#embedding-and-custom-scene-collections)
 - [Module reference](#module-reference)
 - [Validation and development](#validation-and-development)
@@ -500,6 +502,10 @@ console.log(world.count);
 
 The file example assumes the current working directory is this repository. OBJ supports a companion MTL; glTF supports companion buffers; GLB is read from binary data. Material and vertex colors become palette ramps. Texture images are not imported. Open meshes become sheets with thickness. Imported geometry becomes a distance-field solid, so it can join, be carved, receive materials and break like authored geometry.
 
+## Importing depth maps
+
+`ink-studio depth` converts a grayscale PNG or numeric depth map into Gaussian splats, a backed signed-distance field and an OBJ mesh. Add an aligned RGB or RGBA PNG with `--image` to project its colour onto the observed surface. `KIT.depth.fromMap()` gives scene authors the same conversion and accepts typed arrays directly. See the [depth import guide](docs/depth-maps.md) for camera calibration, output formats, and converting a signed field back into mesh geometry or splats.
+
 ## Procedural worlds
 
 The environment tools produce normal solids, placements or stage systems, so their outputs use the same lighting, tags and interaction APIs:
@@ -544,6 +550,7 @@ Each module opens with signatures and option descriptions. Use `ink-studio catal
 | `clip <scene> --from 0 --to 3 --fps 12` | Save an animated PNG. |
 | `ghost <scene> --t 1 --spacing 0.12 --n 2` | Overlay neighboring animation poses. |
 | `mesh <file.obj\|.gltf\|.glb>` | Import, inspect and render a mesh from multiple angles. |
+| `depth <map.png or map.json> [--image color.png]` | Build a splat preview, signed field and OBJ from a depth map. |
 | `validate <file.json>` | Report scene-data errors and suggestions. |
 | `ramps <scene>` | Inspect the scene's color ramps. |
 | `values <scene>` | Check readability in dark, middle and light tones. |
@@ -573,6 +580,7 @@ Common rendering controls:
 | `--ortho` | Use a parallel projection. |
 | `--edges off` | Hide the edge sprites attached to materials in a per-pixel scene. |
 | `--surface off` | Render without the view-dependent finish layers. |
+| `--reflections off` / `--atmosphere off` | Toggle planar captures or atmosphere volumes. |
 | `--w`, `--h`, `--out` | Output viewport size and destination. The renderer resolves a lower-resolution pixel grid derived from the scene's detail settings. |
 | `--seed` | Override the scene seed. |
 | `--colored` | Use palette-aware smoothing of silhouettes and body-colored contours. |
@@ -594,6 +602,13 @@ For per-pixel materials, set `S.pixel = true` before baking and finish the world
 ## View-dependent surface materials
 
 `KIT.surface` adds finishes to ordinary sculpt materials. The builder records which finish and surface normal a splat uses. The renderer evaluates the layers with the current camera and light direction, so orbiting needs no rebake. You can use the 40 named presets as supplied, override an individual layer, or compose your own finish. See the [surface material guide](docs/surface-materials.md) for the full preset list, options, JSON examples, and rendering commands.
+
+## Reflections, ripples and atmosphere
+
+Use `K.reflection` for planar captures of scene geometry, `K.ripple.field` for timed ring sources, and
+`K.atmosphere` for height fog, local mist and light shafts. The [scene optics guide](docs/scene-optics.md)
+shows the core APIs and a runnable pool scene. The [depth import guide](docs/depth-maps.md) covers
+`K.sdf.toMesh`, `K.sdf.solid` and `K.sdf.toSplats`.
 
 ## Embedding and custom scene collections
 
@@ -632,6 +647,7 @@ Then `ink-studio scenes`, `render`, `snap` and other commands operate on that co
 | `sculpt.js` | Base distance-field solids, materials, surface attributes, sampling and baking. |
 | `pixel-look.js` | Palette-aware pixel resolve and shader helpers. |
 | `surface-look.js` | Reusable view-dependent finish evaluation and splat metadata format. |
+| `scene-optics.js` | Reflected camera transforms, normal slopes and ray integration through atmosphere. |
 | `kit/k0-math.js` | Vectors, matrices, easing, keyed values and springs. |
 | `kit/k1-stage.js` | Stage, painter stack, rigs, pools, selection, sockets and bones. |
 | `kit/k2-motion.js` | Spines, IK, clips, state machines, ropes and gait. |

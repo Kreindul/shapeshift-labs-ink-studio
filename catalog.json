@@ -1276,6 +1276,36 @@
       "tags": ["material", "anisotropy", "iridescence", "specular", "glints"]
     },
     {
+      "id": "look.planar-reflection",
+      "kind": "material",
+      "status": "ready",
+      "title": "Planar reflections and ripple emitters",
+      "what": "Render the world around a named mirror plane and distort it with surface normal variation. Drop sources add travelling rings after the scene is baked.",
+      "use": "K.reflection.plane({ id: 'pool' }) · K.reflection.material(base, 'pool') · K.ripple.field(options)",
+      "where": "docs/scene-optics.md",
+      "tags": ["water", "reflection", "mirror", "ripples", "normal"]
+    },
+    {
+      "id": "look.atmosphere-volumes",
+      "kind": "op",
+      "status": "ready",
+      "title": "Height fog, mist volumes and light shafts",
+      "what": "Integrate world-space fog, local spheres and boxes, and tinted beams along the camera ray up to the nearest opaque surface.",
+      "use": "B.finish({ cam, atmosphere: [K.atmosphere.fog({ top: 0.4 }), K.atmosphere.sphere({ at, radius })] })",
+      "where": "docs/scene-optics.md",
+      "tags": ["atmosphere", "mist", "fog", "shaft", "depth"]
+    },
+    {
+      "id": "convert.signed-field",
+      "kind": "op",
+      "status": "ready",
+      "title": "Signed fields into meshes and splats",
+      "what": "Polygonize a bounded signed-distance function, use it in an existing sculpt, or bake it into a splat world with a fitted camera.",
+      "use": "K.sdf.toMesh(sd, { bounds }) · K.sdf.solid(S, sd, mat, { bounds }) · K.sdf.toSplats(sd, { bounds })",
+      "where": "docs/depth-maps.md",
+      "tags": ["sdf", "mesh", "splats", "conversion"]
+    },
+    {
       "id": "place.props",
       "kind": "op",
       "status": "ready",
@@ -1304,6 +1334,16 @@
       "use": "ink-studio lint <scene> or ink-studio shimmer <scene> --mode orbit",
       "where": "cli/crisp.js and cli/critic.js",
       "tags": ["lint", "crisp", "compare", "review", "shimmer"]
+    },
+    {
+      "id": "import.depth",
+      "kind": "op",
+      "status": "ready",
+      "title": "Depth maps into splats, signed fields and meshes",
+      "what": "Unproject a calibrated raster, preserve holes and depth breaks, project an optional RGB image, and build a backed closed solid from the visible surface.",
+      "use": "ink-studio depth input.png --image aligned.png",
+      "where": "docs/depth-maps.md",
+      "tags": ["depth", "mesh", "sdf", "splats", "projection", "import"]
     },
     {
       "id": "sim.sandbox",

@@ -36,6 +36,19 @@ test('grazing reflection, coverage and thin-film colour respond independently to
   assert.notDeepEqual(Surface.shade(film, front, base).slice(0, 3), Surface.shade(film, grazing, base).slice(0, 3));
 });
 
+test('ripple fronts move from fixed sources and only affect samples they pass', () => {
+  const water = Surface.prepare({
+    direction: 'x',
+    normal: { type: 'rings', amplitude: 0.55, speed: 1, scale: 0.45, width: 0.6, drops: [{ at: [0, 0, 0], start: 0.5 }] },
+    layers: { highlight: { type: 'specular', roughness: 0.12 } }
+  }, [], [0, 1, 0]);
+  const sample = { position: [1.0, 0, 0], normal: [0, 1, 0], view: [0, 1, 0] };
+  const still = Surface.shade(water, { ...sample, time: 0.3 }, base);
+  assert.deepEqual(Surface.shade(water, { ...sample, time: 0.7 }, base), still);
+  assert.notDeepEqual(Surface.shade(water, { ...sample, time: 1.40 }, base), still);
+  assert.deepEqual(Surface.shade(water, { ...sample, time: 2.4 }, base), still);
+});
+
 test('glints stay anchored, respond to the angle, and fade once they are subpixel', () => {
   const shader = prepare({
     seed: 7, layers: { flakes: { type: 'glints', scale: 1, density: 1, tilt: 0, roughness: 0.08 } }

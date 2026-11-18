@@ -4,6 +4,8 @@ const FOV = (38 * Math.PI) / 180,
   BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 const PixelLook = require('../src/pixel-look.js');
 const surfaceShading = require('./surface-shading.js');
+const SceneOptics = require('../src/scene-optics.js');
+const { cameraRays, surfacePoint, reflectionSampler, applyAtmosphere } = require('./scene-optics.js');
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x),
   sstep = (a, b, x) => {
     const t = clamp((x - a) / (b - a), 0, 1);
@@ -72,7 +74,15 @@ function render(world, o) {
     const native = render(world, Object.assign({}, o, { colored: false, samples: true, worked: true }));
     const samples = render(
       world,
-      Object.assign({}, o, { colored: false, samples: true, pick: undefined, px: px / 2, w: W * px, h: H * px })
+      Object.assign({}, o, {
+        colored: false,
+        samples: true,
+        pick: undefined,
+        px: px / 2,
+        w: W * px,
+        h: H * px,
+        reflectionScale: 2
+      })
     );
     const palette = world.pal.map(h => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255]);
     const img = PixelLook.resolve(
@@ -90,7 +100,9 @@ function render(world, o) {
   const ortho = !!o.ortho,
     oh = dist * Math.tan(FOV / 2),
     eyeD = ortho ? dist + 2 * world.radius + 4 : dist,
-    V = viewMatrix(yaw, pitch, eyeD, T),
+    reflectionPlane = o.reflectionPlane,
+    view = viewMatrix(yaw, pitch, eyeD, T),
+    V = reflectionPlane ? SceneOptics.reflectedView(view, reflectionPlane) : view,
     focal = ortho ? H / 2 / oh : H / 2 / Math.tan(FOV / 2),
     near = Math.max(0.4, 0.15 * dist),
     tp = 1 / Math.tan(FOV / 2),
@@ -102,16 +114,46 @@ function render(world, o) {
       const h = world.pal[i];
       return [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255];
     },
-    bg = hex(0),
+    bg = o.captureCoverage ? [0, 0, 0] : hex(0),
     fog = hex(world.fog.c),
     limx = (1.3 * 0.5 * W) / focal,
     limy = (1.3 * 0.5 * H) / focal;
+  const eye = [
+    -(V[0] * V[12] + V[1] * V[13] + V[2] * V[14]),
+    -(V[4] * V[12] + V[5] * V[13] + V[6] * V[14]),
+    -(V[8] * V[12] + V[9] * V[13] + V[10] * V[14])
+  ];
+  const volumes =
+    o.atmosphere !== false && world.atmosphere?.length ? SceneOptics.prepareVolumes(world.atmosphere, world.pal) : [];
+  const axialDepth = volumes.length ? new Float32Array(W * H).fill(Infinity) : null;
+  const rayAt = cameraRays(V, eye, W, H, focal, ortho);
+  const captured = o.captureCoverage ? new Float32Array(W * H) : null;
+  // The reflected pass uses the same projection and reads only the plane's front side.
+  const reflection =
+    o.surface !== false && o.reflections !== false && world.reflections?.length
+      ? reflectionSampler(
+          world.reflections,
+          plane =>
+            render(world, {
+              ...o,
+              samples: false,
+              colored: false,
+              worked: false,
+              pick: undefined,
+              reflectionPlane: plane,
+              captureCoverage: true,
+              atmosphere: false,
+              reflections: false,
+              edges: false
+            }),
+          V,
+          eye,
+          o.reflectionScale ?? 1
+        )
+      : null;
   const surface = surfaceShading(world, o, {
-    eye: [
-      -(V[0] * V[12] + V[1] * V[13] + V[2] * V[14]),
-      -(V[4] * V[12] + V[5] * V[13] + V[6] * V[14]),
-      -(V[8] * V[12] + V[9] * V[13] + V[10] * V[14])
-    ],
+    eye,
+    reflection,
     parallel: ortho ? [V[2], V[6], V[10]] : null,
     footprint: (dist * 2) / (tp * H),
     time: t
@@ -241,6 +283,12 @@ function render(world, o) {
       y = Y[i],
       z = Z[i];
     if (al <= 0 || y < -30) continue;
+    if (
+      reflectionPlane &&
+      (SceneOptics.planeDistance(reflectionPlane, x, y, z) <= reflectionPlane.bias ||
+        (reflectionPlane.select && !reflectionPlane.select(i, x, y, z, world)))
+    )
+      continue;
     const cx = V[0] * x + V[4] * y + V[8] * z + V[12],
       cy = V[1] * x + V[5] * y + V[9] * z + V[13],
       cz = V[2] * x + V[6] * y + V[10] * z + V[14];
@@ -302,25 +350,30 @@ function render(world, o) {
       sy = Math.floor(sy) + 0.5;
     }
     if (sx + ex < 0 || sx - ex > W || sy + ey < 0 || sy - ey > H) continue;
-    let coverage = 1, glint = 0;
-    if (hasSurface && !PIX?.[i * 8]) {
+    let coverage = 1,
+      glint = 0;
+    const planar = surface?.planar(i);
+    const pixelSurface = PIX?.[i * 8] && (!planar || (al >= 1 && !(flags & 1)));
+    if (hasSurface && !pixelSurface && !planar) {
       [r, g, b, coverage, glint] = surface.shade(i, x, y, z, x, y, z, r, g, b);
     }
-    if (!(flags & 2) && world.fog.max > 0 && world.fog.start < 1) {
-      // Fog starting at the far edge would otherwise divide by zero inside smoothstep.
-      const k = sstep(world.fog.start, 1, dn) * world.fog.max;
-      r += (fog[0] - r) * k;
-      g += (fog[1] - g) * k;
-      b += (fog[2] - b) * k;
+    const fogMix =
+      !(flags & 2) && world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dn) * world.fog.max : 0;
+    const reflectInRaster = planar && !pixelSurface;
+    const normal = reflectInRaster ? surface.surfaceNormal(i) : null;
+    if (fogMix && !reflectInRaster) {
+      r += (fog[0] - r) * fogMix;
+      g += (fog[1] - g) * fogMix;
+      b += (fog[2] - b) * fogMix;
     }
     const solid = al >= 1,
-      wd = solid && coverage === 1 && !(flags & 1),
+      writesDepth = solid && coverage === 1 && !(flags & 1),
       glass = (flags & 16) !== 0,
       x0 = Math.max(0, Math.floor(sx - ex)),
       x1 = Math.min(W - 1, Math.ceil(sx + ex)),
       y0 = Math.max(0, Math.floor(sy - ey)),
       y1 = Math.min(H - 1, Math.ceil(sy + ey));
-    const coat = PIX && hasSurface && !wd;
+    const coat = PIX && hasSurface && (!writesDepth || reflectInRaster);
     if (coat && !surfaceOverlay) surfaceOverlay = new Float32Array(W * H * 4);
     r = Math.min(r, 1);
     g = Math.min(g, 1);
@@ -332,8 +385,7 @@ function render(world, o) {
       i00 = 0,
       i01 = 0,
       i10 = 0,
-      i11 = 0,
-      fk = 0;
+      i11 = 0;
     if (FN && FN[i * 12 + 11] && FN[i * 12 + 7] === pk && !add[i] && kind !== 5 && kind !== 12 && kind !== 13) {
       const f = i * 12,
         sc = SC[i],
@@ -348,7 +400,6 @@ function render(world, o) {
         i01 = -m01 / dt;
         i10 = -m10 / dt;
         i11 = m00 / dt;
-        fk = flags & 2 ? 0 : sstep(world.fog.start, 1, dn) * world.fog.max;
       }
     }
     for (let iy = y0; iy <= y1; iy++) {
@@ -360,28 +411,45 @@ function render(world, o) {
         const gg = al * Math.exp(pw);
         let a = Math.min(0.99, gg);
         if (!o.soft && solid) a = 0.99 * sstep(0.38, 0.62, gg);
-        a *= coverage;
         if (a < 0.004) continue;
-        const p = iy * W + ix,
-          p3 = p * 3,
-          ia = 1 - a;
         let pr = r,
           pg = g,
-          pb = b;
+          pb = b,
+          alpha = coverage,
+          highlight = glint;
         if (fi >= 0) {
           const u = clamp(Math.floor((i00 * dx + i01 * dy) * 2 + 2), 0, 3),
             v = clamp(Math.floor((i10 * dx + i11 * dy) * 2 + 2), 0, 3),
             c = FPAL[Math.floor(FN[fi + v] / (u === 0 ? 1 : u === 1 ? 64 : u === 2 ? 4096 : 262144)) % 64];
           if (c) {
-            pr = c[0] + (fog[0] - c[0]) * fk;
-            pg = c[1] + (fog[1] - c[1]) * fk;
-            pb = c[2] + (fog[2] - c[2]) * fk;
+            pr = c[0];
+            pg = c[1];
+            pb = c[2];
+            if (!reflectInRaster) {
+              pr += (fog[0] - pr) * fogMix;
+              pg += (fog[1] - pg) * fogMix;
+              pb += (fog[2] - pb) * fogMix;
+            }
           }
         }
+        if (reflectInRaster) {
+          const hit = surfacePoint(rayAt(ix + 0.5, iy + 0.5), normal, x, y, z, -cz, R);
+          [pr, pg, pb, alpha, highlight] = surface.shade(i, ...hit, x, y, z, pr, pg, pb, ix + 0.5, iy + 0.5);
+          pr += (fog[0] - pr) * fogMix;
+          pg += (fog[1] - pg) * fogMix;
+          pb += (fog[2] - pb) * fogMix;
+        }
+        a *= alpha;
+        if (a < 0.004) continue;
+        const p = iy * W + ix,
+          p3 = p * 3,
+          ia = 1 - a,
+          wd = writesDepth && alpha === 1;
         col[p3] = pr * a + col[p3] * ia;
         col[p3 + 1] = pg * a + col[p3 + 1] * ia;
         col[p3 + 2] = pb * a + col[p3 + 2] * ia;
-        if (surfaceGlint && a > 0.5) surfaceGlint[p] = glint > 0.22;
+        if (captured) captured[p] = a + captured[p] * ia;
+        if (surfaceGlint && a > 0.5) surfaceGlint[p] = highlight > 0.22;
         if (surfaceOverlay) {
           const j = p * 4;
           if (wd && a > 0.5) surfaceOverlay.fill(0, j, j + 4);
@@ -395,7 +463,10 @@ function render(world, o) {
         if (wd) {
           dep[p] = dn * a + dep[p] * ia;
           gls[p] *= ia;
-          if (win && a > 0.5) win[p] = i;
+          if (a > 0.5) {
+            if (win) win[p] = i;
+            if (axialDepth) axialDepth[p] = -cz;
+          }
         } else if (glass) gls[p] = Math.min(1, gls[p] + a * 0.5);
         else if (win && !coat && a > 0.5) win[p] = -1;
       }
@@ -643,14 +714,22 @@ function render(world, o) {
         }
         if (!PALC[ci]) continue;
         const base = PALC[ci],
-          c = surface?.has(i) ? surface.shade(i, HX[p], HY[p], HZ[p], X[i], Y[i], Z[i], ...base) : base,
+          c = surface?.has(i)
+            ? surface.shade(i, HX[p], HY[p], HZ[p], X[i], Y[i], Z[i], ...base, x + 0.5, y + 0.5)
+            : base,
           kf = world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dep[p]) * world.fog.max : 0;
         if (surfaceGlint) surfaceGlint[p] = c[4] > 0.22;
         col[p * 3] = c[0] + (fog[0] - c[0]) * kf;
         col[p * 3 + 1] = c[1] + (fog[1] - c[1]) * kf;
         col[p * 3 + 2] = c[2] + (fog[2] - c[2]) * kf;
+        if (captured) {
+          const coat = surfaceOverlay?.[p * 4 + 3] || 0;
+          const baseAlpha = (captured[p] - coat) / Math.max(1e-6, 1 - coat);
+          for (let channel = 0; channel < 3; channel++) col[p * 3 + channel] *= clamp(baseAlpha, 0, 1);
+        }
         if (surfaceOverlay) {
-          const j = p * 4, through = 1 - surfaceOverlay[j + 3];
+          const j = p * 4,
+            through = 1 - surfaceOverlay[j + 3];
           for (let channel = 0; channel < 3; channel++) {
             col[p * 3 + channel] = surfaceOverlay[j + channel] + col[p * 3 + channel] * through;
           }
@@ -765,12 +844,15 @@ function render(world, o) {
         col[q * 3] = c[0];
         col[q * 3 + 1] = c[1];
         col[q * 3 + 2] = c[2];
+        if (axialDepth) axialDepth[q] = eyeD - R + sprD[q] * 2 * R;
         dep[q] = sprD[q]; // (so the clean-up sees it as part of the thing, and leaves it as drawn)
         pixed[q] = 1;
         sprM[q] = 1;
       }
     }
   }
+  if (axialDepth) applyAtmosphere(volumes, col, axialDepth, rayAt, W, H, eyeD + 2 * R);
+  if (captured) return { w: W, h: H, rgb: col, coverage: captured };
   if (o.samples) {
     // (the picture the contour look takes its insides from is worked on first, as the page does: glass bends it, contact shade darkens it)
     let c2 = col;

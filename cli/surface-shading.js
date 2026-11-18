@@ -4,9 +4,13 @@ const SurfaceLook = require('../src/surface-look.js');
 function surfaceShading(world, options, camera) {
   if (options.surface === false || !world.surfaceData || !world.surfaces?.length) return null;
   const { data, surfaceData } = world;
-  const { eye, parallel, footprint, time } = camera;
+  const { eye, parallel, footprint, time, reflection } = camera;
   const { STRIDE } = SurfaceLook;
   const materials = world.surfaces.map(({ settings, light }) => SurfaceLook.prepare(settings, world.pal, light));
+  const planarMaterials = materials.map(
+    material =>
+      reflection && material.layers.some(layer => layer.type === 'planarReflection' && reflection.has(layer.plane))
+  );
   const sample = {
     position: [0, 0, 0],
     normal: [0, 0, 0],
@@ -31,7 +35,16 @@ function surfaceShading(world, options, camera) {
     return [c * normal[0] + s * normal[2], normal[1], c * normal[2] - s * normal[0]];
   }
 
-  function shade(i, x, y, z, centerX, centerY, centerZ, r, g, b) {
+  function planar(i) {
+    return !!planarMaterials[surfaceData[i * STRIDE] - 1];
+  }
+
+  function surfaceNormal(i) {
+    const offset = i * STRIDE;
+    return normalAt(i, [surfaceData[offset + 1], surfaceData[offset + 2], surfaceData[offset + 3]]);
+  }
+
+  function shade(i, x, y, z, centerX, centerY, centerZ, r, g, b, sx, sy) {
     const offset = i * STRIDE;
     const { position, normal, view } = sample;
     const prepared = materials[surfaceData[offset] - 1];
@@ -59,13 +72,21 @@ function surfaceShading(world, options, camera) {
     view[2] = s * vx + c * vz;
     const [lx, ly, lz] = prepared.sun;
     sample.lightDirection = angle ? [c * lx - s * lz, ly, s * lx + c * lz] : undefined;
+    sample.reflection =
+      planar(i) && sx !== undefined
+        ? (layer, n, original) => {
+            const dx = n[0] - original[0],
+              dz = n[2] - original[2];
+            return reflection(layer, sx, sy, c * dx + s * dz, n[1] - original[1], c * dz - s * dx);
+          }
+        : undefined;
     rgb[0] = r;
     rgb[1] = g;
     rgb[2] = b;
     return SurfaceLook.shade(prepared, sample, rgb, result);
   }
 
-  return { has, normalAt, shade };
+  return { has, normalAt, surfaceNormal, planar, shade };
 }
 
 module.exports = surfaceShading;

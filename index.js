@@ -9,7 +9,7 @@ const fs = require('fs'),
 const KIT_DIR = path.join(__dirname, 'src', 'kit'),
   read = f => fs.readFileSync(f, 'utf8').replace(/\nif \(typeof module[^\n]*\n?$/, '\n');
 const files = () =>
-  ['src/pixel-look.js', 'src/surface-look.js', 'src/builder.js', 'src/sculpt.js']
+  ['src/pixel-look.js', 'src/scene-optics.js', 'src/surface-look.js', 'src/builder.js', 'src/sculpt.js']
     .map(f => path.join(__dirname, f))
     .concat(
       fs
@@ -21,7 +21,7 @@ const files = () =>
 const demoFiles = () => [path.join(__dirname, 'demos', 'labscenes.js')];
 // the names the bundle defines at top level (add them to your own module.exports)
 const EXPORTS =
-  'makeBuilder, makeSculpt, basis, flame, motes, pondMat, lilies, courses, PALETTES, PAL_HEX, KIT, PixelLook, SurfaceLook, VOX';
+  'makeBuilder, makeSculpt, basis, flame, motes, pondMat, lilies, courses, PALETTES, PAL_HEX, KIT, PixelLook, SurfaceLook, SceneOptics, VOX';
 module.exports = {
   files,
   demoFiles,

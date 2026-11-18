@@ -1,6 +1,7 @@
 /* View-dependent surface finishes for splats. The shader works on a surface sample
    in world space and is shared by the software renderer and script bundle. */
 const SurfaceLook = (() => {
+  const optics = typeof SceneOptics === 'undefined' ? require('./scene-optics.js') : SceneOptics;
   const STRIDE = 8; // binding ID (one-based), normal XYZ, visibility, optional tangent XYZ
   const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
   const WHITE = [1, 1, 1];
@@ -116,9 +117,17 @@ const SurfaceLook = (() => {
   }
 
   function bump(settings, n, t, b, p, time, footprint, seed) {
+    if (settings?.type === 'rings' && typeof settings.sample === 'function') {
+      const slope = settings.sample(p, time, footprint);
+      return unit(
+        n.map((value, i) => value + slope[i]),
+        n
+      );
+    }
     if (!settings?.amplitude) return n;
     const scale = positive(settings.scale, 0.3);
     const amp = settings.amplitude * (1 - smooth(scale * 0.35, scale * 0.85, footprint));
+    if (!amp) return n;
     const u = dot(p, vector(settings.axis)) / scale;
     const v = dot(p, vector(settings.cross, AXES.z)) / scale;
     const phase = time * (settings.speed ?? 0);
@@ -154,6 +163,12 @@ const SurfaceLook = (() => {
       const blend = smooth(0, 0.8, Math.abs(up));
       for (let i = 0; i < 3; i++) col[i] = mix(layer.horizon[i], tint[i], blend);
       return fresnel(q.nv, layer.f0 ?? 0.04, layer.power ?? 5);
+    },
+    planarReflection(layer, q, col) {
+      const reflected = q.reflection?.(layer, q.n, q.geometricNormal);
+      if (!reflected) return 0;
+      for (let i = 0; i < 3; i++) col[i] *= reflected.rgb[i];
+      return reflected.coverage * fresnel(q.nv, layer.f0 ?? 0.04, layer.power ?? 5);
     },
     sheen(layer, q) {
       const directional = clamp(layer.directional ?? 0);
@@ -247,11 +262,36 @@ const SurfaceLook = (() => {
       if (!isRecord(settings.opacity)) throw new TypeError('Surface opacity must be an object');
       numeric(settings.opacity, ['facing', 'grazing', 'power'], 'surface.opacity');
     }
+    let normal = settings.normal;
     if (settings.normal) {
       if (!isRecord(settings.normal)) throw new TypeError('Surface normal variation must be an object');
       numeric(settings.normal, ['amplitude', 'scale', 'speed'], 'surface.normal');
-      if (settings.normal.type && !['noise', 'waves'].includes(settings.normal.type))
+      if (settings.normal.type && !['noise', 'waves', 'rings'].includes(settings.normal.type))
         throw new RangeError('Unknown surface normal pattern: ' + settings.normal.type);
+      if (settings.normal.type === 'rings' && typeof settings.normal.sample !== 'function') {
+        numeric(settings.normal, ['width', 'damping'], 'surface.normal');
+        if (!Array.isArray(settings.normal.drops) || settings.normal.drops.length > 64)
+          throw new TypeError('Ripple rings need a list of up to 64 drops');
+        for (const drop of settings.normal.drops) {
+          if (!isRecord(drop) || !Array.isArray(drop.at) || drop.at.length !== 3 || !drop.at.every(Number.isFinite))
+            throw new TypeError('Each ripple drop needs a finite XYZ position');
+          numeric(drop, ['start', 'repeat', 'strength'], 'ripple drop');
+          if (drop.repeat !== undefined && drop.repeat <= 0) throw new RangeError('Ripple repeat must be positive');
+        }
+        const scale = positive(normal.scale, 0.3);
+        normal = {
+          type: 'rings',
+          sample: optics.ringSampler(() => settings.normal.drops, {
+            along: unit(vector(normal.axis)),
+            across: unit(vector(normal.cross, AXES.z)),
+            amplitude: normal.amplitude || 0,
+            scale,
+            speed: positive(normal.speed, 1),
+            width: positive(normal.width, scale * 2.5),
+            damping: Math.max(0, normal.damping ?? 0.3)
+          })
+        };
+      }
     }
     const layers = Object.entries(settings.layers || {})
       .filter(([, layer]) => layer && layer.strength !== 0)
@@ -285,10 +325,18 @@ const SurfaceLook = (() => {
             'density',
             'radius',
             'tilt',
-            'response'
+            'response',
+            'distortion',
+            'blur'
           ],
           id
         );
+        if (layer.type === 'planarReflection') {
+          if (typeof layer.plane !== 'string' || !layer.plane.trim())
+            throw new TypeError(id + '.plane must be a reflection plane ID');
+          if ((layer.blur ?? 0) < 0 || (layer.distortion ?? 0) < 0)
+            throw new RangeError(id + ' needs nonnegative blur and distortion');
+        }
         if (layer.mask) {
           if (!isRecord(layer.mask)) throw new TypeError(id + '.mask must be an object');
           if (!['noise', 'stripes', 'checker'].includes(layer.mask.type))
@@ -323,7 +371,7 @@ const SurfaceLook = (() => {
           sine: Math.sin(layer.rotation || 0)
         };
       });
-    return { settings, layers, sun: unit(vector(lightDirection, AXES.y)) };
+    return { settings, normal, layers, sun: unit(vector(lightDirection, AXES.y)) };
   }
 
   /* Inputs are RGB in 0..1 and a world-space sample. Output packs RGB, the opacity
@@ -339,7 +387,8 @@ const SurfaceLook = (() => {
     const seed = settings.seed || 0;
     let n = unit(normal),
       t = tangent(sample.tangent ?? directionAt(settings.direction, p, n), n);
-    n = bump(settings.normal, n, t, cross(n, t), p, sample.time || 0, footprint, seed);
+    const geometricNormal = n;
+    n = bump(prepared.normal, n, t, cross(n, t), p, sample.time || 0, footprint, seed);
     t = tangent(t, n);
     const b = cross(n, t),
       v = unit(view, n),
@@ -349,7 +398,19 @@ const SurfaceLook = (() => {
       );
     const visibility = clamp(sample.visibility ?? 1);
     const nv = clamp(dot(n, v));
-    const shading = { p, n, v, nv, footprint, seed, nt: dot(n, half), nl: dot(n, sun), light: visibility };
+    const shading = {
+      p,
+      n,
+      v,
+      nv,
+      footprint,
+      seed,
+      geometricNormal,
+      reflection: sample.reflection,
+      nt: dot(n, half),
+      nl: dot(n, sun),
+      light: visibility
+    };
     const tx = dot(t, half),
       bx = dot(b, half),
       tv = dot(t, v),

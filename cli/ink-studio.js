@@ -206,6 +206,8 @@ const view = extra =>
       clean: !!opt.clean,
       ortho: !!opt.ortho,
       surface: opt.surface === 'off' ? false : undefined,
+      reflections: opt.reflections === 'off' ? false : undefined,
+      atmosphere: opt.atmosphere === 'off' ? false : undefined,
       edges: opt.edges === 'off' ? false : undefined
     },
     extra
@@ -248,6 +250,7 @@ const CMD = {
         '  acts                        the ready clips, reactions, easings and cues, by name',
         '  motion <id> [--from 0 --to 12]   numbers about how it moves: speed, jumps, what goes underground',
         '  mesh <file.obj|.gltf|.glb>  bring a mesh in: what it is made of, and a sheet of it from all round as splats',
+        '  depth <map.png|map.json> [--image aligned.png --out-dir folder]  import a depth map as splats, a mesh and an SDF',
         '                              [--size 6 --cells 64 --res 0.09 --hues 6 --shades 4 --up z --spin 0.5 --thick 0.1]; a mesh file also works wherever an id does',
         '  validate <file.json>        check a diorama written as data: every mistake listed, with what was probably meant',
         '                              a .json diorama also works wherever an id does; --style slate|moss|ember puts it in another style',
@@ -265,7 +268,7 @@ const CMD = {
         '                              against the pixel-art references (--map: where the stray pixels and drawn edges are)',
         '',
         'any command that plays a diorama takes --poke 2:x,y,z (tap it at 2 seconds, toward that point; several with ;)',
-        'view options: --surface off (no finish layers) --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (lone pixels removed) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n'
+        'view options: --surface off (no finish layers) --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (lone pixels removed) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n'
       ].join('\n')
     );
   },
@@ -665,6 +668,9 @@ const CMD = {
     if (!pos[0]) die('validate which file?');
     const s = dataScene(pos[0]);
     console.log(pos[0] + ': sound (' + s.id + ', "' + s.name + '")');
+  },
+  depth() {
+    require('./depth.js')(pos[0], opt, lib(), path.join(OUT, 'depth-import'));
   },
   mesh() {
     const w = build(pos[0]),
