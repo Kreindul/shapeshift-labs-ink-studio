@@ -1091,6 +1091,27 @@ the transaction and rolls back a rule chain that fails to converge.
 surface anchors. `context.style(id)` combines the environment, related hosts
 and entity overrides through the same style catalog as the pure API.
 
+`KIT.authoring.groups.select(source, ids)` resolves selected IDs, independent
+transform roots, and the closure of parented, anchored, and generated children.
+Capture the roots with `groups.capture(source, ids, {frame, pivot})` and apply
+`groups.apply(doc, capture, {translate, yaw, pivot}, {write})`. Reuse one
+capture for a drag to measure each preview against the original state. The
+default writes the document's free-root transform format. A custom
+`write(entity, worldPose, change, source)` supplies an entity patch for
+terrain binding or an application-specific frame.
+
+`groups.copy(doc, ids, {change, plan, remap})` duplicates the closure in one
+transaction. It keeps seeds, generated overrides, and locally named surfaces.
+Parent, anchor, and generation links within the copied set receive new IDs.
+`remap(fields, lookup, original, source)` can map references stored in
+type-specific parameters. The result lists copied member IDs and a mapping
+from source IDs. `groups.remove(doc, ids)` batches normal retained deletion.
+
+`groups.remember(doc, ids, {id, name})` stores a named selection in
+`environment.presentation.groups`. `groups.bookmarks(source)` reports saved
+membership and currently active IDs, so a deleted member can reappear after
+undo. `groups.forget(doc, id)` removes just the saved selection.
+
 ## Incremental realization
 
 `P.chunks.create({preview, refine})` accepts synchronous builders or promises.
