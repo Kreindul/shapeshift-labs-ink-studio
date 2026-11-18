@@ -56,6 +56,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `hydrology.breach(basin)`, `hydrology.incise(basin)`, `hydrology.meander(route)`, `hydrology.corridor(routes, height)`, `hydrology.habitat(basin)` | Watershed edits, river migration and cutoff routes, levees, floodplain masks and climate fields |
 | `routes.visibility(start, end, obstacles)`, `routes.spline(route, options)`, `routes.travelTime(sources, options)` | Polygon visibility paths, clearance-tested corner fitting and fast-marching travel-time fields |
 | `geometry.delaunay(points, options)`, `geometry.triangulatePolygon(rings)`, `routes.network(points)`, `routes.steiner(points, edges, terminals)` | Constrained planar triangulation, graph layouts with optional loops, and shared branch networks |
+| `routes.tensor(components)`, `routes.followTensor(field, seeds)`, `routes.growStreets(seeds, options)`, `routes.parcels(outline)`, `routes.medial(rings)` | Directional street systems, connected seeded roads, frontage lots and medial paths |
 | `routes.layout(route, options)` | Fit bounded intervals on a polyline, catenary, or compatible curve. Place caller-chosen pieces using gapped endpoints and midpoint frames |
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
@@ -247,6 +248,31 @@ or terrain-aware connectors.
 
 The two versions of `examples/branching-networks.js` show a road tree
 with extra loops and shared conduits serving a terminal subset.
+
+### Street systems, parcels, and medial paths
+
+- `routes.tensor(components)` blends `grid`, `radial` and `ring` direction
+  fields. A component has an XZ `origin`, optional orientation `angle`,
+  `strength` and falloff `radius`. The sampler gives orthogonal major
+  and minor directions.
+- `routes.followTensor(field, seeds, {bounds, height, mask})` traces
+  streets in both directions. A seed can be an XZ point or a record
+  with `point`, `family` and `id`.
+- `routes.growStreets(seeds, options)` grows a connected road graph
+  from seeds with `point` and `angle`. An optional tensor biases the
+  heading. Terrain grade, allowed areas, and a travel penalty affect
+  proposals. Crossing roads split at a shared junction. Segment and
+  work limits return the valid graph realized up to that point.
+- `routes.parcels(outline, {edge, pitch, depth, gap})` fits lots along
+  one road-facing edge of a simple block. It clips strips to the outline
+  and keeps fragments connected to the frontage. Each lot has a stable
+  slot ID, area and XZ fragments usable as SDF extrusion profiles.
+- `routes.medial(rings, {spacing, minRadius, height})` approximates an
+  interior medial graph from nearest boundary samples, including holes.
+  Nodes report clearance radii and edges provide world routes.
+
+`examples/street-layouts.js` compares street traces and seeded growth beside
+the same street-front lots.
 
 ### Watersheds and river networks
 
