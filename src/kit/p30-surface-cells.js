@@ -73,7 +73,7 @@
     if (
       !Array.isArray(cells) ||
       !Array.isArray(holes) ||
-      holes.length > 256 ||
+      holes.length > 4096 ||
       !Number.isSafeInteger(budget) ||
       budget < 1 ||
       budget > 65536 ||
@@ -125,7 +125,10 @@
       }
       if (!polygon.length) continue;
       let fragments = [polygon];
+      const footprint = bounds(polygon);
       for (const hole of cutouts) {
+        if (footprint.min[0] >= hole.bounds.max[0] || footprint.max[0] <= hole.bounds.min[0] ||
+            footprint.min[1] >= hole.bounds.max[1] || footprint.max[1] <= hole.bounds.min[1]) continue;
         const next = [];
         for (const fragment of fragments) {
           next.push(...subtract(fragment, hole));

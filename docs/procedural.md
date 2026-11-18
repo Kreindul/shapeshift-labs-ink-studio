@@ -1879,3 +1879,7 @@ The plan puts the first chain before the second. It supplies `reverseFirst`, `re
 `P.periodicCoordinates.wrap(value, period = 1)` returns a station in the half-open interval from zero to the period. `delta(value, origin, period = 1)` measures the signed shortest displacement, with a half-turn choosing the negative direction. Supply finite stations and a finite positive period.
 
 `unwrap(values, period = 1)` returns stations in the smallest continuous interval covering the supplied positions. It cuts the loop at the largest empty gap and preserves the input order. This lets tools order nearby objects, measure distances or compute centers without splitting a group at the chart seam. Wrap the result of an average to store it as a station on the original chart.
+
+### Path clearances for fitted cells
+
+`surfaceCells.pathMask(paths, { facets })` buffers chart-local polylines into convex strips with rounded polygonal caps. Each path supplies `{ points, radius }`. The result exposes `holes` for cell clipping and `distance(u, v)` for field evaluation against the same footprints. The default uses four edges on each cap. Distance is negative inside the union. A single point creates a round clearance, and consecutive collinear stations share one strip.
