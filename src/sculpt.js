@@ -81,6 +81,10 @@ function makeSculpt(B) {
     if (p.bump) p.br += p.bump[0];
     p.reach = o.reach || 0;
     p.whole = !!o.whole;
+    if (o.lowerBound !== undefined) {
+      if (typeof o.lowerBound !== 'function') throw new Error('A field lower bound must be a function');
+      p.lowerBound = o.lowerBound;
+    }
     if (o.born !== undefined) p.born = o.born;
     if (o.hold) return p; // held: made to be combined into another solid, not drawn by itself
     if (S.collide && (o.ghost || (p.mat.skip && !p.mat.solid))) return p; // when only what can be walked on matters, leave out what is drawn but not solid
@@ -505,6 +509,10 @@ function makeSculpt(B) {
           dy = y - p.bc[1],
           dz = z - p.bc[2];
         if (m <= 0 || dx * dx + dy * dy + dz * dz > m * m) continue;
+      }
+      if (p.lowerBound) {
+        const limit = Math.min(d,gd) + gk + (p.bump ? p.bump[0] : 0) + 1e-9;
+        if (p.lowerBound(x,y,z,limit) > limit) continue;
       }
       const pd = psd(p, x, y, z);
       // A distance function may be undefined outside its solid. Keep that sample out of the smooth union.

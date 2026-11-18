@@ -1290,3 +1290,22 @@ triangle model into a self-contained JSON recipe with fitted ground
 coordinates and bounded face colors. `assetMeshes.recipe(mesh, {size})`
 uses an already parsed mesh. The recipe carries geometry and base colors.
 The caller selects the placement, material and rendering rules.
+
+### Bounded field probes
+
+`KIT.boundedFields.halfspaces(planes)` compiles convex plane fields into
+a scalar probe. With no limit it returns the maximum plane distance. With
+a finite limit it can return early once a plane proves the result exceeds
+that limit. A caller can compare the result with the limit to cull the
+solid during a union or shadow query.
+
+`KIT.boundedFields.heightMask({height, mask, scale, minimumHeight, minimumScale})`
+returns the maximum of a signed horizontal mask and a scaled height distance.
+Supply a conservative minimum height and a distance scale in
+`[minimumScale, 1]`. The probe skips the height and scale callbacks whenever
+the horizontal mask determines the exact result.
+
+Pass a world-space `lowerBound(x, y, z, limit)` callback to a sculpt
+primitive to apply a conservative probe during field traversal. Include all
+geometry that can affect the primitive's raw signed distance in the bound.
+The traversal accounts for the primitive's blend width and bump amplitude.
