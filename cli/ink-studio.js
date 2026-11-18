@@ -265,6 +265,7 @@ const CMD = {
         '  selftest                    every lab module checked in numbers, and the lab dioramas run for a while',
         '  snap <id|all> [--t 0,2]     keep reference pictures',
         '  check [id ...]              draw again and compare with the reference pictures',
+        '  render <id> [--text ascii|symbols|braille|blocks --tg 2 --tcolour scene|ink|mono]  drawn as text, with the characters as <id>.txt',
         '  compare <id> <ref.png> [--px 2 --colours 32]  a diorama beside a reference at true pixel size, both measured',
         '  paint export <id> [view options]   a view at true pixel size to paint over (paint.png), with where each pixel lies',
         '  paint absorb <id> [--png file]     the painted pixels kept as decals pinned to the surface (#ff00ff erases); paint clear <id>',
@@ -467,6 +468,13 @@ const CMD = {
     const t0 = Date.now(),
       im = R.render(w, view({ t }));
     console.log('drawn in', Date.now() - t0, 'ms');
+    /* --text [ascii|symbols|braille|blocks]: drawn as text (K.ascii.draw), --tg screen pixels a font pixel (2), --tcolour scene|ink|mono;
+       the characters themselves are written beside it, as <id>.txt */
+    if (opt.text && lib().KIT.ascii) {
+      const T = lib().KIT.ascii.draw(im, { set: opt.text === true ? 'ascii' : opt.text, g: num('tg', 2), px: opt.px1 ? 1 : im.px, colour: opt.tcolour || 'scene', pal: w.pal });
+      const f = save(w.id + '.png', T), ft = f.replace(/\.png$/i, '') + '.txt'; fs.writeFileSync(ft, T.text + '\n'); console.log('wrote', ft); console.log('as text:', T.cols, 'x', T.rows, 'characters');
+      return;
+    }
     save(w.id + '.png', R.upscale(im, opt.px1 ? 1 : im.px));
   },
   /* the ramps a diorama is shaded on, most used first, and what kind each is: one hue darker and lighter, or turning as it darkens.
