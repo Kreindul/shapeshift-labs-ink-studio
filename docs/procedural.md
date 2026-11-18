@@ -50,6 +50,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `fitSurfaceBands({domain, opening, edges, obstructions, clearance})` | Keep bands mounted to a chart feature's edges and shorten or omit them to fit nearby boundaries and obstructions |
 | `fitFootprintContact({center, tangent, size, height, blocked, maxSpread, samples, interval, includePoints})` | Seat an upright footprint on a sampled support and check space above it |
 | `createFootprintReservations({clearance, cellSize})` | Reserve space for oriented upright objects and test nearby candidates |
+| `matchIntervals(previous, next, {maxShift, accept})` | Match spans across an edit using overlap and optional center displacement |
 | `environmentFields.evaluate(settings, elapsed)`, `environmentFields.opticalDepth(from, to, medium)`, `environmentFields.scatter(from, to, light, medium)`, `environmentFields.deposition(sample)` | Cyclic sun and sky tint, height-dependent fog, local scattering, and slope-sensitive surface loads |
 | `populations.layout(boundsList, evaluate, options)` | Seeded world-space candidates ranked by density. Expanding the work region preserves existing candidate identities |
 | `sampling.poisson(options)` | Seeded Bridson samples in finite 2D and 3D bounds, with masks, variable radii, pins and axis scaling |
@@ -224,6 +225,14 @@ footprints. Heights must overlap for a conflict, so the same XZ footprint
 can fit on multiple decks. Insert claims in your preferred order to settle
 competing candidates deterministically. The `cellSize` changes lookup
 granularity and keeps the overlap test identical.
+
+`matchIntervals` compares two lists of disjoint `[low, high]` spans in the
+same units. An entry in its result points to the original index of the
+previous span paired with that next span. An unmatched entry is `-1`.
+Each previous span can be paired once. Greater overlap takes precedence,
+followed by smaller center displacement and earlier station. Use
+`maxShift` to allow disjoint spans to match within a center displacement,
+or `accept(previousIndex, nextIndex)` to filter candidate pairs.
 
 `panelFrames` fits to the carrier dimensions and exposes its member footprints
 as `parts`. Pass those to `surfaceCells.clip` for openings, then loft the
