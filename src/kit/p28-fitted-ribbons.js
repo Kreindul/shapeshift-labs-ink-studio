@@ -10,7 +10,7 @@
     return a.map((v, i) => v + (b[i] - v) * t);
   };
 
-  function fittedRibbon({ inner, outer, pitch, gap = 0, closed = false, phase = 0, sections, budget = 8192 } = {}) {
+  function fittedRibbon({ inner, outer, pitch, gap = 0, closed = false, phase = 0, sections, measure, budget = 8192 } = {}) {
     const dimension = inner?.[0]?.length;
     if (
       ![2, 3].includes(dimension) ||
@@ -24,6 +24,10 @@
           point => Array.isArray(point) && point.length === dimension && Array.from(point).every(Number.isFinite)
         )
       ) ||
+      (measure !== undefined && (!Array.isArray(measure) || measure.length !== inner.length ||
+        !Array.from(measure).every(
+          point => Array.isArray(point) && point.length === dimension && Array.from(point).every(Number.isFinite)
+        ))) ||
       !Number.isFinite(pitch) ||
       pitch <= 0 ||
       !Number.isFinite(gap) ||
@@ -41,13 +45,14 @@
       throw new Error('Fitted ribbons need matching finite rails, positive pitch and a bounded budget');
     const a = inner.map(point => point.slice());
     const b = outer.map(point => point.slice());
+    const metric = measure ?? a;
     const edges = [];
     let length = 0;
     for (let edge = 0; edge < a.length - (closed ? 0 : 1); edge++) {
       const next = (edge + 1) % a.length;
-      const size = Math.hypot(...a[edge].map((v, axis) => a[next][axis] - v));
+      const size = Math.hypot(...metric[edge].map((v, axis) => metric[next][axis] - v));
       if (size <= EPS || !Number.isFinite(length + size) || length + size === length)
-        throw new Error('Fitted ribbons need distinct consecutive inner vertices');
+        throw new Error('Fitted ribbons need distinct consecutive measuring vertices');
       edges.push({ edge, next, start: length, size });
       length += size;
     }

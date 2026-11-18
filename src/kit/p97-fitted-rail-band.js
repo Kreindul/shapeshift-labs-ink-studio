@@ -4,13 +4,13 @@
   const EPS=1e-7;
   const vector=p=>Array.isArray(p)&&p.length===3&&Array.from(p).every(Number.isFinite);
   function fittedRailBand(spec={}) {
-    const {inner,outer,pitch,gap=0,closed=false,phase=0,sections,depth,direction,cellStyle,budget=1024}=spec;
+    const {inner,outer,pitch,gap=0,closed=false,phase=0,sections,measure,depth,direction,cellStyle,budget=1024}=spec;
     const validDepth=range=>Array.isArray(range)&&range.length===2&&range.every(Number.isFinite)&&range[1]-range[0]>=EPS;
     if(!validDepth(depth)||cellStyle!==undefined&&typeof cellStyle!=='function'||
        typeof direction!=='function'||!Array.isArray(inner)||!Array.isArray(outer)||
        !Array.from(inner).every(vector)||!Array.from(outer).every(vector))
       throw new Error('Fitted rail bands need paired 3D rails, a direction sampler and increasing depths');
-    const layout=P.fittedRibbon({inner,outer,pitch,gap,closed,phase,sections,budget});
+    const layout=P.fittedRibbon({inner,outer,pitch,gap,closed,phase,sections,measure,budget});
     const triangleFaces=[[0,1,2],[3,4,5],[0,1,4,3],[1,2,5,4],[2,0,3,5]];
     const quadFaces=[[0,1,2,3],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]];
     return Object.freeze({layout,pieces(meta={}) {

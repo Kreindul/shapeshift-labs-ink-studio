@@ -34,8 +34,8 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
 | `courseRelief(layout, {profile, rise, slope})` | Give fitted cells independent relief with stable local coordinates when clipped or wrapped |
 | `panelFrames(spec)` | Keyed rails, posts and braces that fit chart dimensions, with optional openings and fitted surrounds |
-| `fittedRibbon({inner, outer, pitch, gap, closed, phase, budget})` | Fit repeating bands along paired 2D or 3D rails. Each logical cell contains quadrilateral footprints split at source edges |
-| `fittedRailBand({inner, outer, pitch, gap, closed, phase, depth, direction, budget})` | Fit closed solid pieces along paired 3D rails. |
+| `fittedRibbon({inner, outer, pitch, gap, closed, phase, sections, measure, budget})` | Fit repeating bands along paired 2D or 3D rails. Each logical cell contains quadrilateral footprints split at source edges |
+| `fittedRailBand({inner, outer, pitch, gap, closed, phase, sections, measure, depth, direction, cellStyle, budget})` | Fit closed solid pieces along paired 3D rails. |
 | `clippedLattice({panels, runs, edges, edgeWidth, budget})` | Fit bar families and frames to convex chart patches, keeping gaps and member identities across patches. |
 | `surfaceCells.clip(cells, {boundary, holes, budget, work})` | Intersect convex cell footprints with a convex chart boundary and subtract convex holes. Group fragments by logical cell key |
 | `surfaceCells.loft(layout, {sample, levels, step, metadata, budget}, builder?)` | Map each fitted footprint onto two levels of a curved carrier. Emit closed, outward-wound fragments with shared cap and side vertices |
@@ -1783,6 +1783,22 @@ sets the profile orientation. Each path segment needs an extent perpendicular
 to it. Use a backing strip when the chosen treatment needs continuous
 coverage through joints and turns.
 
+### Offset rail pairs
+
+`KIT.procedural.offsetRails({ path, halfWidth, up, closed, miterLimit })`
+returns matching `left` and `right` rails around a sequence of 3D points.
+`halfWidth` can be one positive distance or an array for a tapered run.
+The solver measures lateral offsets in the plane perpendicular to `up`
+without flattening station heights. Closed paths use a single shared seam
+station, so supply each point once. Miters contract on very short or acute
+segments. The result flags those stations in `contracted`; split the run
+at any station listed in `reversals` before extruding the ribbon.
+
+Pass the original spine as `measure` to `fittedRibbon` or `fittedRailBand`
+to space joints along the center. It must have one point of the same
+dimension for every rail station. Each fragment still interpolates both
+actual rails. The same operation works for caps, strips, paths and bands.
+
 ### Ribbon sections
 
 `KIT.procedural.fittedRibbon({ inner, outer, pitch, gap, sections })` accepts
@@ -1802,9 +1818,9 @@ uniform fit.
 
 ### Fitted rail bands
 
-`KIT.procedural.fittedRailBand({inner, outer, pitch, gap, closed, phase, sections, depth, direction, cellStyle, budget})`
+`KIT.procedural.fittedRailBand({inner, outer, pitch, gap, closed, phase, sections, measure, depth, direction, cellStyle, budget})`
 fits repeated solids between two matching 3D rails. Layout uses the inner rail's
-length, with a pitch and joint gap in world units. `depth` is a pair of signed
+length or the optional measuring spine, with a pitch and joint gap in the same units. `depth` is a pair of signed
 offsets along the normalized vector returned by `direction(point, fragment, cell)`.
 Optional `cellStyle(cell)` can provide a different `depth` pair and `material`
 role for the entire logical cell. A planar convex footprint produces one prism. Warped footprints are split into
