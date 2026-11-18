@@ -364,13 +364,30 @@
     compiled.set(recipe,result);
     return result;
   }
-  function shade({color,normal,roughness=1,emission=[0,0,0]}, {irradiance=1,light,view}={}) {
-    let highlight=0;
-    if(normal&&light&&view&&roughness<1) {
-      const {V}=K, midpoint=V.norm(V.add(light,view)), gloss=1-roughness;
-      highlight=.20*gloss*Math.max(0,V.dot(normal,midpoint))**(4+56*gloss**2);
-    }
-    return color.map((value,i)=>srgb(K.clamp(linear(value)*irradiance+highlight+emission[i],0,1)));
+  const specularGain=.20, minPower=4, glossPower=56;
+  function highlight(normal,roughness,light,view) {
+    const {V}=K, gloss=1-K.clamp(roughness,0,1);
+    if (!gloss || V.dot(normal,light)<=0 || V.dot(normal,view)<=0) return 0;
+    const midpoint=V.norm(V.add(light,view),[0,0,0]);
+    return specularGain*gloss*Math.max(0,V.dot(normal,midpoint))**(minPower+glossPower*gloss**2);
   }
-  A.assetTextures=Object.freeze({validate,checkPrimitive,read,sampler,shade});
+  const highlightGLSL=`
+float assetHighlight(vec3 normal, float roughness, vec3 light, vec3 view) {
+  float gloss = 1.0 - clamp(roughness, 0.0, 1.0);
+  if (gloss <= 0.0 || dot(normal, light) <= 0.0 || dot(normal, view) <= 0.0) return 0.0;
+  vec3 halfVector = light + view;
+  halfVector *= inversesqrt(max(dot(halfVector, halfVector), 1e-18));
+  return ${specularGain} * gloss * pow(max(0.0, dot(normal, halfVector)), ${minPower.toFixed(1)} + ${glossPower.toFixed(1)} * gloss * gloss);
+}
+vec3 assetAddHighlight(vec3 color, float linearGain) {
+  vec3 linearColor = mix(pow((color + 0.055) / 1.055, vec3(2.4)), color / 12.92, lessThanEqual(color, vec3(0.04045)));
+  linearColor = clamp(linearColor + linearGain, 0.0, 1.0);
+  return mix(1.055 * pow(linearColor, vec3(1.0 / 2.4)) - 0.055, 12.92 * linearColor, lessThanEqual(linearColor, vec3(0.0031308)));
+}
+`;
+  function shade({color,normal,roughness=1,emission=[0,0,0]}, {irradiance=1,light,view}={}) {
+    const extra=normal&&light&&view?highlight(normal,roughness,light,view):0;
+    return color.map((value,i)=>srgb(K.clamp(linear(value)*irradiance+extra+emission[i],0,1)));
+  }
+  A.assetTextures=Object.freeze({validate,checkPrimitive,read,sampler,shade,highlight,highlightGLSL});
 })(KIT);

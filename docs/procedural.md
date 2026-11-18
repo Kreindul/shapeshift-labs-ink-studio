@@ -1616,6 +1616,15 @@ the emissive factor and optional emissive strength.
 a diffuse gain, a roughness-dependent highlight and additive emission.
 `light` and `view` are normalized directions in the sample's frame.
 
+For camera-dependent shading, bake the diffuse color and emission by
+omitting `light` and `view`. Keep the sample's shading normal and
+roughness alongside that color. Each frame, use
+`assetMeshes.highlight(normal, roughness, light, view)` to get the
+additive linear highlight. Renderers can include
+`assetMeshes.highlightGLSL` for the matching `assetHighlight` kernel
+and `assetAddHighlight` to apply it to an sRGB color. Keep geometric
+normals separately for shape, collision, and surface coating.
+
 `assetMeshes.thumbnail(recipe, {size, padding, yaw, pitch, light})`
 renders the asset's materials into a transparent square RGBA buffer.
 The returned `{width, height, pixels}` uses orthographic framing and

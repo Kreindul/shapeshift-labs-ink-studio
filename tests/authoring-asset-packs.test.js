@@ -166,6 +166,12 @@ test('material channels share embedded images and retain tangent normals, roughn
   const glossy=A.assetMeshes.shadeMaterial({...sample,emission:[0,0,0]},
     {irradiance:.2,light:sample.normal,view:sample.normal});
   assert(glossy.every((value,i)=>value>matte[i]));
+  const {normal,roughness}=sample;
+  const aligned=A.assetMeshes.highlight(normal,roughness,normal,normal);
+  assert(Math.abs(aligned-.20*(1-roughness))<1e-8);
+  assert(A.assetMeshes.highlight(normal,roughness,normal,[1,0,0])<aligned);
+  assert.equal(A.assetMeshes.highlight(normal,roughness,normal,normal.map(v=>-v)),0);
+  assert.equal(A.assetMeshes.highlight(normal,1,normal,normal),0);
 });
 
 test('GLB sockets preserve nested node positions and forward axes when fitted',()=>{

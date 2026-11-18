@@ -235,5 +235,7 @@
   }
 
   A.assetMeshes = Object.freeze({ recipe, validate, fromGLB, importGLB, colorSampler,
-    shadeMaterial: (material,options)=>A.assetTextures.shade(material,options), thumbnail });
+    shadeMaterial: (material,options)=>A.assetTextures.shade(material,options),
+    highlight: (normal,roughness,light,view)=>A.assetTextures.highlight(normal,roughness,light,view),
+    get highlightGLSL(){return A.assetTextures.highlightGLSL;}, thumbnail });
 })(KIT);
