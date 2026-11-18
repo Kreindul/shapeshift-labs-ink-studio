@@ -70,6 +70,8 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `layouts.bsp(options)`, `layouts.cave(options)`, `layouts.pack(items, options)`, `layouts.floorPlan(rooms, options)` | Connected room partitions and caves, constrained rectangle packing and named room adjacencies |
 | `growth.lsystem(axiom, rules, options)`, `growth.turtle(tokens, options)`, `growth.venation(outline, options)`, `growth.roots(starts, options)`, `growth.pipe(nodes, options)` | Growth grammars, SDF branch runs, venation, obstacle-aware roots and pipe taper |
 | `growth.aggregate(options)`, `growth.grayScottGrid(options)`, `growth.grayScottSurface(points, links, options)`, `growth.dispersal(options)`, `growth.succession(options)` | Grid and surface patterns, seed dispersal and habitat competition |
+| `forms.superquadric(spec)`, `forms.loft(sections)`, `forms.skeleton(nodes)`, `forms.periodic(spec)`, `forms.shell(host, options)` | Bounded analytic forms and locally variable shells for the sculptor |
+| `grammar.symmetry(scope, rules, options)` | Reflected or radial grammar instances with optional variations and stable copy keys |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -678,6 +680,39 @@ It emits marks at `L` by default. Pass the result directly to
 `examples/vegetation-growth.js` bakes branch runs, root paths, and leaf
 veins. `examples/colony-patterns.js` uses aggregation and reaction–diffusion
 to color native voxel tiles.
+
+### Implicit forms
+
+Each form returns a signed, negative-inside field `sd(x, y, z)` and
+finite `bounds`. `S.implicitForm(form, material, options)` adds it to
+the sculptor as a native solid and samples its zero crossings for the
+splat bake. Use `cell` to resolve small openings or thin walls. The sampler
+checks its work budget and needs enough resolution to detect the feature.
+
+- `forms.superquadric({radii, exponents, pose})` controls the XZ and
+  vertical exponents independently. Values below one give concave
+  profiles, two gives an ellipsoid, and large exponents approach a box.
+- `forms.loft(sections, {pose})` blends polygon distance fields along
+  increasing Y. Each input has `y`, an XZ `profile`, and optional `center`,
+  `scale`, and `roll`. Profiles can have different vertex counts.
+- `forms.skeleton(nodes, {blend, pose})` sweeps linearly varying spheres
+  between points supplied as `{point, radius, parent}`. Parents precede
+  their children. Set `blend` for smoother junctions.
+- `forms.periodic({bounds, type, period, phase, mode, thickness, host})`
+  makes gyroid, Schwarz P, and diamond sheets or solid phases in a bounded
+  volume. An optional signed host field clips the result.
+- `forms.shell(host, {inner, outer, maxOuter})` selects a band on either
+  side of the host's zero surface. Each thickness can be a scalar or a
+  world-space callback. Callback outer thickness requires an explicit
+  maximum for conservative bounds. Re-distance the host when a physical
+  shell thickness is important and the input is only an implicit field.
+- `grammar.symmetry(scope, rules, {mode, axis, count, origin, copies})`
+  mirrors a grammar or repeats it radially. Custom copies can use their
+  own symbol, seed, offset, turn, or scale. Parts carry oriented axes and
+  handedness. Sockets carry transformed normals and stable keys.
+
+`examples/sculptural-fields.js` combines an open pottery loft, a
+gyroid inside a rounded carrier, and a mirrored medial ornament.
 
 ## Optional retained authoring
 
