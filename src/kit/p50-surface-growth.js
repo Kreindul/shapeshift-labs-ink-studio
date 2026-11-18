@@ -12,7 +12,10 @@
   function frame(hit) {
     if (!hit || !vector(hit.point) || !vector(hit.normal) || V.len(hit.normal) < 1e-8)
       throw new Error('Growth projections need a finite point and normal');
-    return { ...hit, point: hit.point.slice(), normal: V.norm(hit.normal) };
+    const { point, normal, ...metadata } = hit;
+    for (const key of Object.keys(metadata))
+      if (metadata[key] && typeof metadata[key] === 'object') metadata[key] = P.data.clone(metadata[key]);
+    return { ...metadata, point: point.slice(), normal: V.norm(normal) };
   }
 
   function trace({ roots, project, connect = () => [], step = .19, steps = 22, branchEvery = 5,

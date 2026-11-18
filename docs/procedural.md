@@ -417,8 +417,8 @@ tips, budget, bias, attraction, spread, seed})` builds a graph of rooted walks.
 Each root has a unique string `key`, an XYZ `point`, and an optional starting
 `direction`. The `project(point, previous, step, root)` callback returns
 an accepted XYZ `point` and `normal`, or `null`. The previous frame is null
-at a root. Extra frame metadata, such as a chart or host ID, travels with
-the output. Root and branch keys depend on authored identity and traversal
+at a root. Optional JSON frame metadata, such as a chart or host ID, is
+copied into the output. Root and branch keys depend on authored identity and traversal
 order, so an unchanged path keeps its keys when surface IDs change.
 
 The optional `connect(from, to, step)` callback can reject a segment with

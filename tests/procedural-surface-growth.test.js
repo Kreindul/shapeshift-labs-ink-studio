@@ -17,6 +17,14 @@ test('surface growth yields deterministic branching with stable, unique keys acr
   assert(Object.isFrozen(whole.edges[0].frames));
 });
 
+test('freezing a growth graph leaves the projector’s reusable metadata mutable', () => {
+  const tag = { chart: ['wall'] };
+  const result = P.surfaceGrowth.trace({ roots, project: p => ({ ...plane(p), tag }), steps: 2 });
+  tag.chart.push('top');
+  assert.deepEqual(result.nodes[0].tag.chart, ['wall']);
+  assert(Object.isFrozen(result.nodes[0].tag.chart));
+});
+
 test('link validation blocks thin gaps and can supply intermediate carrier frames', () => {
   const config = { roots: roots.slice(0, 1), project: plane, step: .2, steps: 24, spread: 0 };
   const graph = P.surfaceGrowth.trace({ ...config, connect(a, b) {
