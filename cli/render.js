@@ -71,7 +71,7 @@ function render(world, o) {
     const native = render(world, Object.assign({}, o, { colored: false, samples: true, worked: true }));
     const samples = render(
       world,
-      Object.assign({}, o, { colored: false, samples: true, px: px / 2, w: W * px, h: H * px })
+      Object.assign({}, o, { colored: false, samples: true, pick: undefined, px: px / 2, w: W * px, h: H * px })
     );
     const palette = world.pal.map(h => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255]);
     const img = PixelLook.resolve(
@@ -84,8 +84,13 @@ function render(world, o) {
     );
     return Object.assign(img, { px, drawn: samples.drawn });
   }
-  const V = viewMatrix(yaw, pitch, dist, T),
-    focal = H / 2 / Math.tan(FOV / 2),
+  /* orthographic (o.ortho): no perspective, every ray parallel, the picture as big as the perspective one is at the target. The eye
+     is set well back, so nothing comes behind it however far in the camera zooms; the zoom is the size of the view */
+  const ortho = !!o.ortho,
+    oh = dist * Math.tan(FOV / 2),
+    eyeD = ortho ? dist + 2 * world.radius + 4 : dist,
+    V = viewMatrix(yaw, pitch, eyeD, T),
+    focal = ortho ? H / 2 / oh : H / 2 / Math.tan(FOV / 2),
     near = Math.max(0.4, 0.15 * dist),
     tp = 1 / Math.tan(FOV / 2),
     asp = W / H,
@@ -203,7 +208,16 @@ function render(world, o) {
     dep[i] = 1;
   }
   let drawn = 0;
-  const FN = o.fine && world.fine && world.fine.length >= N * 12 ? world.fine : null,
+  // colour per pixel (look.pixel): which dab is in front at each pixel, to be coloured afterwards from where the pixel lands on it
+  const PIX =
+      (o.pixel || (world.look && world.look.pixel)) && !o.raw && world.pix && world.pix.length >= N * 8
+        ? world.pix
+        : null,
+    win = PIX ? new Int32Array(W * H).fill(-1) : null;
+  let pixed = null,
+    sprM = null;
+  const FN =
+      (o.fine || (world.look && world.look.fine)) && world.fine && world.fine.length >= N * 12 ? world.fine : null,
     FPAL = FN ? world.pal.map((h, i) => hex(i)) : null;
   for (let n = 0; n < N; n++) {
     const i = order[n],
@@ -231,7 +245,7 @@ function render(world, o) {
       g *= 1 - 0.38 * wet[i];
       b *= 1 - 0.3 * wet[i];
     }
-    const dn = clamp((-cz - (dist - R)) / (2 * R), 0, 1);
+    const dn = clamp((-cz - (eyeD - R)) / (2 * R), 0, 1);
     if (!(flags & 2) && world.fog.max > 0 && world.fog.start < 1) {
       // (no haze is asked for when it starts at the far edge: and a smooth step from 1 to 1 is 0 / 0, which blacks out the pixel)
       const k = sstep(world.fog.start, 1, dn) * world.fog.max;
@@ -242,9 +256,9 @@ function render(world, o) {
     const iz = -1 / cz,
       tx = clamp(cx * iz, -limx, limx) / iz,
       ty = clamp(cy * iz, -limy, limy) / iz,
-      j00 = focal * iz,
-      j02 = focal * tx * iz * iz,
-      j12 = focal * ty * iz * iz;
+      j00 = ortho ? focal : focal * iz,
+      j02 = ortho ? 0 : focal * tx * iz * iz,
+      j12 = ortho ? 0 : focal * ty * iz * iz;
     const a0 = j00 * V[0] + j02 * V[2],
       a1 = j00 * V[4] + j02 * V[6],
       a2 = j00 * V[8] + j02 * V[10],
@@ -273,8 +287,8 @@ function render(world, o) {
       k2 = A / det,
       ex = Math.min(3 * Math.sqrt(A), 2048),
       ey = Math.min(3 * Math.sqrt(C), 2048);
-    let sx = ((((tp / asp) * cx) / -cz) * 0.5 + 0.5) * W,
-      sy = (((tp * cy) / -cz) * 0.5 + 0.5) * H;
+    let sx = ortho ? ((cx / (oh * asp)) * 0.5 + 0.5) * W : ((((tp / asp) * cx) / -cz) * 0.5 + 0.5) * W,
+      sy = ortho ? ((cy / oh) * 0.5 + 0.5) * H : (((tp * cy) / -cz) * 0.5 + 0.5) * H;
     if (kind === 1) {
       sx = Math.floor(sx) + 0.5;
       sy = Math.floor(sy) + 0.5;
@@ -348,7 +362,372 @@ function render(world, o) {
         if (wd) {
           dep[p] = dn * a + dep[p] * ia;
           gls[p] *= ia;
+          if (win && a > 0.5) win[p] = i;
         } else if (glass) gls[p] = Math.min(1, gls[p] + a * 0.5);
+        else if (win && a > 0.5) win[p] = -1;
+      }
+    }
+  }
+  /* colour per pixel. Each pixel's line of sight is met with the plane of the dab in front there (the way its surface truly faces),
+     and the pixel is coloured at that exact place: by its pattern, if it has one, or by its ramp. How lit it is is the mean over the
+     pixels round it that lie on the same ramp and surface, so the edges between bands are drawn by the pixels, not by the dabs */
+  if (PIX) {
+    const PT = world.pixTex || [],
+      RP = world.ramps || [],
+      R00 = V[0],
+      R01 = V[4],
+      R02 = V[8],
+      R10 = V[1],
+      R11 = V[5],
+      R12 = V[9],
+      R20 = V[2],
+      R21 = V[6],
+      R22 = V[10],
+      ex = -(R00 * V[12] + R10 * V[13] + R20 * V[14]),
+      ey = -(R01 * V[12] + R11 * V[13] + R21 * V[14]),
+      ez = -(R02 * V[12] + R12 * V[13] + R22 * V[14]),
+      lit = new Float32Array(W * H),
+      PALC = world.pal.map((h, k) => hex(k)),
+      VW = world.pixView,
+      shaper = o.lightShape === undefined ? !!(world.look && world.look.pixel) : !!o.lightShape;
+    // (patterns drawn as little upright pictures need to know where the picture is looked at from, and which pixel is asked about)
+    if (VW)
+      Object.assign(VW, {
+        on: true,
+        t,
+        R: [R00, R01, R02, R10, R11, R12, R20, R21, R22],
+        e: [ex, ey, ez],
+        tp,
+        ortho,
+        oh,
+        asp,
+        W,
+        H
+      });
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const p = y * W + x,
+          i = win[p];
+        if (i < 0 || !PIX[i * 8]) continue;
+        /* the light, smoothed over the same surface round the pixel: three by three; with the light shaper (o.lightShape, on for
+           pixel-art dioramas, as on the page) also over seven by seven, only where the surface faces much the same way, so light and
+           shade fall in a few big shapes with smooth edges. Near the edge of a surface the big window is cut in half and its mean
+           would pull a lit rim toward the middle (shading that follows the outline): there the three by three is kept */
+        let sum = 0,
+          cnt = 0,
+          s7 = 0,
+          c7 = 0;
+        const rad = shaper ? 3 : 1;
+        for (let dy = -rad; dy <= rad; dy++)
+          for (let dx = -rad; dx <= rad; dx++) {
+            const X2 = x + dx,
+              Y2 = y + dy;
+            if (X2 < 0 || Y2 < 0 || X2 >= W || Y2 >= H) continue;
+            const q = Y2 * W + X2,
+              j = win[q];
+            if (j < 0 || PIX[j * 8] !== PIX[i * 8]) continue;
+            const dd = Math.abs(dep[q] - dep[p]);
+            if (dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1 && dd <= 0.01) {
+              sum += PIX[j * 8 + 1];
+              cnt++;
+            }
+            if (
+              shaper &&
+              ((dx + dy) & 1) === 0 && // (the wide window every other pixel, a checkerboard, as on the page)
+              dd <= 0.03 &&
+              PIX[i * 8 + 3] * PIX[j * 8 + 3] + PIX[i * 8 + 4] * PIX[j * 8 + 4] + PIX[i * 8 + 5] * PIX[j * 8 + 5] >= 0.8
+            ) {
+              s7 += PIX[j * 8 + 1];
+              c7++;
+            }
+          }
+        lit[p] = sum / cnt;
+        if (shaper && c7) {
+          const k = Math.min(1, Math.max(0, (c7 / 25 - 0.5) / 0.35)),
+            sm = k * k * (3 - 2 * k);
+          lit[p] += (s7 / c7 - lit[p]) * sm;
+        }
+      }
+    pixed = new Uint8Array(W * H);
+    const HX = new Float32Array(W * H),
+      HY = new Float32Array(W * H),
+      HZ = new Float32Array(W * H);
+    const key = new Float64Array(W * H).fill(NaN),
+      cB = new Int16Array(W * H).fill(-1),
+      cBelow = new Int16Array(W * H),
+      cAbove = new Int16Array(W * H),
+      cLeft = new Int16Array(W * H),
+      CELL = world.pixCell || { body: 0, below: 0, above: 0, left: 0 };
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const p = y * W + x,
+          i = win[p];
+        if (i < 0 || !PIX[i * 8]) continue;
+        const f = i * 8,
+          ramp = RP[PIX[f] - 1],
+          nx = PIX[f + 3],
+          ny = PIX[f + 4],
+          nz = PIX[f + 5],
+          vx = (((x + 0.5) / W) * 2 - 1) * (ortho ? oh * asp : asp / tp),
+          vy = (((y + 0.5) / H) * 2 - 1) * (ortho ? oh : 1 / tp),
+          // (orthographic: each ray starts at its own point on the picture's plane, and all run straight ahead)
+          ox0 = ortho ? ex + R00 * vx + R10 * vy : ex,
+          oy0 = ortho ? ey + R01 * vx + R11 * vy : ey,
+          oz0 = ortho ? ez + R02 * vx + R12 * vy : ez,
+          dxw = ortho ? -R20 : R00 * vx + R10 * vy - R20,
+          dyw = ortho ? -R21 : R01 * vx + R11 * vy - R21,
+          dzw = ortho ? -R22 : R02 * vx + R12 * vy - R22,
+          den = nx * dxw + ny * dyw + nz * dzw,
+          sd = Math.abs(den) > 1e-6 ? (nx * (X[i] - ox0) + ny * (Y[i] - oy0) + nz * (Z[i] - oz0)) / den : 0,
+          px = sd ? ox0 + dxw * sd : X[i],
+          py = sd ? oy0 + dyw * sd : Y[i],
+          pz = sd ? oz0 + dzw * sd : Z[i],
+          pat = PIX[f + 2],
+          ev = pat ? PT[pat - 1] : null,
+          /* (how big a screen pixel is, for the patterns' detail: one for the whole picture, from the camera's distance alone, as on the
+             page; from each surface's slant it would differ from pixel to pixel and change as the view turns, and details flicker) */
+          fp = (dist * 2) / (tp * H);
+        if (VW) ((VW.x = x), (VW.y = y));
+        HX[p] = px;
+        HY[p] = py;
+        HZ[p] = pz;
+        if (ev && ev.cell) {
+          key[p] = ev.cell(
+            px,
+            py,
+            pz,
+            ny,
+            lit[p],
+            nx,
+            nz,
+            null,
+            fp,
+            ramp,
+            world.pixUnfold ? world.pixUnfold(PIX[f + 6], PIX[f + 7]) : null
+          );
+          cB[p] = CELL.body;
+          cBelow[p] = CELL.below;
+          cAbove[p] = CELL.above;
+          cLeft[p] = CELL.left;
+        } else
+          cB[p] = ev
+            ? ev.tex(
+                px,
+                py,
+                pz,
+                ny,
+                lit[p],
+                nx,
+                nz,
+                null,
+                fp,
+                ramp,
+                world.pixUnfold ? world.pixUnfold(PIX[f + 6], PIX[f + 7]) : null
+              )
+            : ramp
+              ? ramp[clamp(Math.floor(lit[p] * ramp.length), 0, ramp.length - 1)]
+              : -1;
+      }
+    if (VW) VW.on = false;
+    // a pixel at the edge of its cell takes that edge's colour: lower edge first, then the side, then the upper edge
+    const kAt = (x, y) => (x < 0 || y < 0 || x >= W || y >= H ? NaN : key[y * W + x]),
+      differs = (k, q) => q === q && q !== k;
+    /* outlines (look.outline), as on the page: a pixel at the edge of a thing, where it meets another material, the background, or
+       something well behind it, and is the nearer of the two, takes a darker step of its own ramp (two by default), so each thing is
+       ringed in its own darker colour and a lit edge in a softer one. A material with line: false (clouds, water) has none */
+    const OLo = (world.look || {}).outline,
+      OL = OLo ? (OLo === true ? {} : OLo) : null,
+      olK = OL && OL.k !== undefined ? OL.k : 2,
+      olEps = OL ? (OL.eps === undefined ? 0.6 : OL.eps) / (world.detail || 12) / (2 * R) : 0,
+      olGap = OL ? (OL.gap === undefined ? 0.3 : OL.gap) / (2 * R) : 0,
+      OFF = world.rampOff || [],
+      N4 = [
+        [-1, 0],
+        [1, 0],
+        [0, -1],
+        [0, 1]
+      ];
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const p = y * W + x;
+        let ci = cB[p];
+        if (ci < 0) continue;
+        const k = key[p];
+        if (k === k) {
+          if (differs(k, kAt(x, y - 1))) ci = cBelow[p];
+          else if (differs(k, kAt(x - 1, y))) ci = cLeft[p];
+          else if (differs(k, kAt(x, y + 1))) ci = cAbove[p];
+        }
+        if (OL) {
+          const i = win[p],
+            rid = PIX[i * 8];
+          if (!OFF[rid - 1]) {
+            let edge = false,
+              sky = false;
+            for (const [dx, dy] of N4) {
+              const X2 = x + dx,
+                Y2 = y + dy;
+              if (X2 < 0 || Y2 < 0 || X2 >= W || Y2 >= H) continue;
+              const q = Y2 * W + X2,
+                dd = dep[q] - dep[p];
+              if (dd <= olEps) continue;
+              const j = win[q];
+              if (j < 0 || PIX[j * 8] !== rid || dd > olGap) {
+                edge = true;
+                sky = dep[q] >= 0.995;
+                break;
+              }
+            }
+            /* (and a crease: where its own surface turns sharply, as the edge of a block of stone or a crate, the lit side of the turn
+                takes a step lighter and the other a step darker, a bevel two pixels wide. Not in leaves or grass) */
+            let crease = 0;
+            const pk = PIX[i * 8 + 2] ? (world.pats[PIX[i * 8 + 2] - 1] || {}).kind : null;
+            if (!edge && OL.crease !== false && pk !== 'leaves' && pk !== 'turf')
+              for (const [dx, dy] of N4) {
+                const X2 = x + dx,
+                  Y2 = y + dy;
+                if (X2 < 0 || Y2 < 0 || X2 >= W || Y2 >= H) continue;
+                const q = Y2 * W + X2,
+                  j = win[q];
+                if (j < 0 || PIX[j * 8] !== rid || Math.abs(dep[q] - dep[p]) > olGap) continue;
+                if (
+                  PIX[i * 8 + 3] * PIX[j * 8 + 3] + PIX[i * 8 + 4] * PIX[j * 8 + 4] + PIX[i * 8 + 5] * PIX[j * 8 + 5] >
+                  0.7
+                )
+                  continue;
+                crease = PIX[i * 8 + 1] >= PIX[j * 8 + 1] ? 1 : -1;
+                break;
+              }
+            if (edge || crease) {
+              const ramp = RP[rid - 1],
+                b = ramp.indexOf(ci);
+              /* (a rim in the light takes a softer line than one in shade, or none against another thing, as on the page: so the outline
+                 does not darken a shape all round, whichever way it faces, which is pillow shading) */
+              const k2 = b * 2 >= ramp.length ? (sky ? 1 : 0) : olK;
+              if (b >= 0) ci = ramp[Math.max(0, Math.min(ramp.length - 1, edge ? b - k2 : b + crease))];
+            }
+          }
+          pixed[p] = 1;
+        }
+        if (!PALC[ci]) continue;
+        const c = PALC[ci],
+          kf = world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dep[p]) * world.fog.max : 0;
+        col[p * 3] = c[0] + (fog[0] - c[0]) * kf;
+        col[p * 3 + 1] = c[1] + (fog[1] - c[1]) * kf;
+        col[p * 3 + 2] = c[2] + (fog[2] - c[2]) * kf;
+      }
+    // (o.pick: where on the surface each pixel lies, for the paint-over tool; rows from the bottom, as everything here)
+    if (o.pick) Object.assign(o.pick, { W, H, X: HX, Y: HY, Z: HZ, win, PIX, dep });
+    /* edge sprites (K.pixel.edge; o.edges, on by default), as on the page: little pixel pictures stood on points pinned to the
+       surface (K.pixel.anchors; the world's pixAnchors), each moving with the dab it stands on, turned the way its surface faces
+       on the screen (up, to a side, down), and shown only past the edge of that surface: over the background, over something well
+       behind, or over anything that is not its own surface; never over what is nearer. So as the view turns, a sprite whose point
+       goes round behind an edge sinks behind it a pixel at a time. Where two cover a pixel the nearer wins */
+    const AN = o.edges !== false && world.pixAnchors ? world.pixAnchors(world) : null;
+    if (AN && AN.n) {
+      const EP = (world.pats || []).map(pt => pt && pt.edge),
+        OLe = (world.look || {}).outline,
+        eGap = (OLe && OLe !== true && OLe.gap !== undefined ? OLe.gap : 0.3) / (2 * R),
+        fpe = (dist * 2) / (tp * H),
+        keep = Math.min(1, (0.25 * (1 / (world.detail || 12))) / fpe),
+        tol = 3 * fpe + 0.02,
+        OD = [
+          [0, 1],
+          [1, 0],
+          [-1, 0],
+          [0, -1]
+        ],
+        TD = [
+          [1, 0],
+          [0, -1],
+          [0, 1],
+          [1, 0]
+        ],
+        A = AN.data,
+        sprD = new Float32Array(W * H).fill(9),
+        sprC = new Int16Array(W * H).fill(-1);
+      for (let a = 0; a < AN.n; a++) {
+        const q0 = a * 12,
+          ed = EP[A[q0 + 8]];
+        if (!ed || A[q0 + 7] >= keep * (ed.share === undefined ? 0.7 : ed.share)) continue;
+        const i = A[q0 + 3],
+          ax = A[q0] + X[i] - d[i * 16],
+          ay = A[q0 + 1] + Y[i] - d[i * 16 + 1],
+          az = A[q0 + 2] + Z[i] - d[i * 16 + 2],
+          nx = A[q0 + 4],
+          ny = A[q0 + 5],
+          nz = A[q0 + 6],
+          cx = V[0] * ax + V[4] * ay + V[8] * az + V[12],
+          cy = V[1] * ax + V[5] * ay + V[9] * az + V[13],
+          cz = V[2] * ax + V[6] * ay + V[10] * az + V[14];
+        if (cz > -near) continue;
+        const sx = ortho ? ((cx / (oh * asp)) * 0.5 + 0.5) * W : ((((tp / asp) * cx) / -cz) * 0.5 + 0.5) * W,
+          sy = ortho ? ((cy / oh) * 0.5 + 0.5) * H : (((tp * cy) / -cz) * 0.5 + 0.5) * H,
+          px1 = Math.floor(sx),
+          py1 = Math.floor(sy);
+        if (px1 < -8 || py1 < -8 || px1 > W + 8 || py1 > H + 8) continue;
+        // which way the surface faces on the screen; one that faces the eye has no way out, and stands nothing
+        const vx = V[0] * nx + V[4] * ny + V[8] * nz,
+          vy = V[1] * nx + V[5] * ny + V[9] * nz,
+          vz = V[2] * nx + V[6] * ny + V[10] * nz,
+          cl = Math.hypot(cx, cy, cz),
+          facing = ortho ? -vz : (vx * cx + vy * cy + vz * cz) / cl;
+        if (Math.abs(facing) > 0.95) continue;
+        let dx = ortho ? vx : -vx * cz + cx * vz,
+          dy = ortho ? vy : -vy * cz + cy * vz;
+        const dl = Math.hypot(dx, dy);
+        if (dl < 1e-12) continue;
+        dx /= dl;
+        dy /= dl;
+        const cat = dy > 0.38 ? 0 : dy < -0.38 ? 3 : dx > 0 ? 1 : 2,
+          list = cat === 0 ? ed.up : cat === 3 ? ed.down : ed.side;
+        if (!list.length) continue;
+        const sp = list[Math.min(list.length - 1, Math.floor(A[q0 + 11] * list.length))],
+          ramp = RP[A[q0 + 9]],
+          b = clamp(Math.floor(A[q0 + 10] * ramp.length), 0, ramp.length - 1),
+          dA = (-cz - (eyeD - R)) / (2 * R),
+          [odx, ody] = OD[cat],
+          [tdx, tdy] = TD[cat];
+        for (let r = 0; r < sp.h; r++)
+          for (let c = 0; c < sp.w; c++) {
+            const v = sp.cells[r * sp.w + c];
+            if (!v) continue;
+            const ou = r + 1 - sp.sink,
+              al = c - sp.ax,
+              X2 = px1 + odx * ou + tdx * al,
+              Y2 = py1 + ody * ou + tdy * al;
+            if (X2 < 0 || Y2 < 0 || X2 >= W || Y2 >= H) continue;
+            const q = Y2 * W + X2,
+              dp = dep[q];
+            if (dA >= sprD[q]) continue;
+            let show;
+            if (dp >= 0.995) show = true;
+            else if (dp < dA - 0.008)
+              show = false; // (something nearer stands here)
+            else if (r < sp.sink)
+              show = true; // (the root rows lie over the thing itself)
+            else {
+              const j = win[q];
+              show =
+                j < 0 || !PIX[j * 8]
+                  ? dp - dA > eGap
+                  : Math.abs((HX[q] - ax) * nx + (HY[q] - ay) * ny + (HZ[q] - az) * nz) > tol;
+            }
+            if (!show) continue;
+            sprD[q] = dA;
+            sprC[q] = v >= 100 ? v - 100 : ramp[clamp(b + v - 8, 0, ramp.length - 1)];
+          }
+      }
+      sprM = new Uint8Array(W * H);
+      for (let q = 0; q < W * H; q++) {
+        if (sprC[q] < 0 || !PALC[sprC[q]]) continue;
+        const c = PALC[sprC[q]];
+        col[q * 3] = c[0];
+        col[q * 3 + 1] = c[1];
+        col[q * 3 + 2] = c[2];
+        dep[q] = sprD[q]; // (so the clean-up sees it as part of the thing, and leaves it as drawn)
+        pixed[q] = 1;
+        sprM[q] = 1;
       }
     }
   }
@@ -393,7 +772,13 @@ function render(world, o) {
   const edge = world.outline && world.outline.edge ? world.outline.edge / (2 * R) : 0,
     line = hex(world.outline ? world.outline.c : 0),
     dith = (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither,
-    use = new Uint32Array(np);
+    use = new Uint32Array(np),
+    look = world.look || {},
+    ln = look.lines ? (look.lines === true ? {} : look.lines) : null,
+    lines = !!ln,
+    lineGap = ln ? (ln.gap || 0.3) / (2 * R) : 1,
+    lineK = ln && ln.k !== undefined ? ln.k : 0.55,
+    lineLit = ln && ln.lit !== undefined ? ln.lit : 1.15;
   const D = (x, y) => dep[clamp(y, 0, H - 1) * W + clamp(x, 0, W - 1)],
     G = (x, y) => gls[clamp(y, 0, H - 1) * W + clamp(x, 0, W - 1)];
   // (as in the page: glass bends what is behind it, by how its own thickness changes across the picture; and, where a diorama asks for it,
@@ -449,6 +834,22 @@ function render(world, o) {
       }
       const dc = dep[p],
         dm = dc - Math.max(2 * dc - D(x - 1, y) - D(x + 1, y), 2 * dc - D(x, y + 1) - D(x, y - 1));
+      // part lines (look.lines), as on the page: the near side of a break in depth, darker, or lighter toward the light
+      // (not where an outline was already worked out per pixel)
+      if (lines && !(pixed && pixed[p])) {
+        const dl = D(x - 1, y),
+          dr = D(x + 1, y),
+          du = D(x, y + 1),
+          dd = D(x, y - 1),
+          sx = dl + dr - 2 * dc,
+          sy = du + dd - 2 * dc;
+        if (Math.max(sx, sy) > lineGap) {
+          const k = (sx >= sy ? dl > dr : du > dd) ? lineLit : lineK;
+          r *= k;
+          g *= k;
+          b *= k;
+        }
+      }
       if (edge > 0 && dc - dm > edge) {
         r = line[0];
         g = line[1];
@@ -485,32 +886,133 @@ function render(world, o) {
         out[q + 2] = h & 255;
       }
     }
-  /* pixel clean-up (an option): a lone pixel, unlike all eight round it, on the same surface as they are (not a mote in the air in
-     front of something far off), takes the colour most of its four neighbours have. Checkered shading is left alone: there every
-     pixel has its like at the corners. */
-  if (o.clean && !o.raw) {
+  /* pixel clean-up (an option, or a diorama's look.clean), as on the page: a speck (a pixel with no like neighbour of the eight round
+     it, or one of a pair that has no other) takes the colour most of its eight neighbours share, if at least three share it, they are
+     on the same surface, and it is not much brighter or darker than they are (a glint, an eye or a flower is kept). */
+  if ((o.clean || look.clean) && !o.raw) {
     const src = out.slice(),
+      keep = look.clean && look.clean.keep !== undefined ? look.clean.keep : 0.3,
       at = (x, y) => (clamp(y, 0, H - 1) * W + clamp(x, 0, W - 1)) * 3,
-      same = (a, b) => src[a] === src[b] && src[a + 1] === src[b + 1] && src[a + 2] === src[b + 2];
+      same = (a, b) => src[a] === src[b] && src[a + 1] === src[b + 1] && src[a + 2] === src[b + 2],
+      lum = a => (src[a] * 0.3 + src[a + 1] * 0.55 + src[a + 2] * 0.15) / 255,
+      depA = a => {
+        const i = a / 3;
+        return dep[(H - 1 - Math.floor(i / W)) * W + (i % W)];
+      },
+      N8 = [
+        [-1, 0],
+        [1, 0],
+        [0, -1],
+        [0, 1],
+        [-1, -1],
+        [1, -1],
+        [-1, 1],
+        [1, 1]
+      ];
+    const likes = (x, y, q) => {
+      let n = 0,
+        one = null;
+      for (const [dx, dy] of N8)
+        if (same(q, at(x + dx, y + dy))) {
+          n++;
+          one = [x + dx, y + dy];
+        }
+      return [n, one];
+    };
+    const empty = (x, y) => depA(at(x, y)) >= 0.995,
+      lineClean = o.lineClean === undefined ? !!(world.look && world.look.pixel) : !!o.lineClean;
     for (let y = 0; y < H; y++)
       for (let x = 0; x < W; x++) {
         const q = at(x, y);
-        let lone = true;
-        for (let dy = -1; dy <= 1 && lone; dy++)
-          for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && same(q, at(x + dx, y + dy))) lone = false;
-        if (!lone) continue;
-        const ns = [at(x - 1, y), at(x + 1, y), at(x, y - 1), at(x, y + 1)],
-          dq = dep[(H - 1 - y) * W + x];
-        let best = -1,
-          bn = 0;
-        for (let a = 0; a < 4; a++) {
-          let c = 0;
-          for (let b = 0; b < 4; b++) if (same(ns[a], ns[b])) c++;
-          if (c > bn) ((bn = c), (best = ns[a]));
+        if (sprM && sprM[(H - 1 - y) * W + x]) continue; // (an edge sprite, drawn as its author drew it)
+        // outlines, as on the page: a notch is filled from what is round it, a bump against the background taken off
+        const e0 = empty(x, y),
+          N4 = N8.slice(0, 4),
+          en = N4.filter(([dx, dy]) => empty(x + dx, y + dy)).length;
+        if (e0 && en <= 1) {
+          let kb = 0,
+            best = -1;
+          for (const [dx, dy] of N4) {
+            if (empty(x + dx, y + dy)) continue;
+            const a = at(x + dx, y + dy);
+            let k = 0;
+            for (const [ex, ey] of N4) if (same(a, at(x + ex, y + ey))) k++;
+            if (k > kb) ((kb = k), (best = a));
+          }
+          if (best >= 0) {
+            out[q] = src[best];
+            out[q + 1] = src[best + 1];
+            out[q + 2] = src[best + 2];
+            continue;
+          }
         }
-        if (bn < 2) continue;
-        const dn2 = dep[(H - 1 - clamp(Math.floor(best / 3 / W), 0, H - 1)) * W + ((best / 3) % W)];
-        if (Math.abs(dq - dn2) > 0.03) continue;
+        if (!e0 && en >= 3) {
+          const [dx, dy] = N4.find(([ex, ey]) => empty(x + ex, y + ey)),
+            a = at(x + dx, y + dy);
+          out[q] = src[a];
+          out[q + 1] = src[a + 1];
+          out[q + 2] = src[a + 2];
+          continue;
+        }
+        /* the line cleaner (an option, on for pixel-art dioramas, as on the page): a one-pixel kink in a straight edge between two
+           colours taken off, and on a dark line one pixel thick the double at the inside corner of a step given the colour beside it */
+        if (lineClean) {
+          let to = -1;
+          for (const [dx, dy] of N8.slice(0, 4)) {
+            const ex = dy,
+              ey = dx,
+              X = at(x + dx, y + dy);
+            if (same(X, q) || !same(at(x + ex, y + ey), X) || !same(at(x - ex, y - ey), X)) continue;
+            if (
+              same(at(x - dx, y - dy), q) &&
+              same(at(x - dx + ex, y - dy + ey), q) &&
+              same(at(x - dx - ex, y - dy - ey), q)
+            ) {
+              to = X;
+              break;
+            }
+          }
+          if (to < 0) {
+            const lum = a => src[a] * 0.3 + src[a + 1] * 0.55 + src[a + 2] * 0.15,
+              l0 = lum(q);
+            for (const [gx, gy] of N8.slice(4)) {
+              if (
+                !same(at(x + gx, y), q) ||
+                !same(at(x, y + gy), q) ||
+                same(at(x + gx, y + gy), q) ||
+                same(at(x - gx, y), q) ||
+                same(at(x, y - gy), q)
+              )
+                continue;
+              const goH = same(at(x + 2 * gx, y), q) || same(at(x + 2 * gx, y - gy), q),
+                goV = same(at(x, y + 2 * gy), q) || same(at(x - gx, y + 2 * gy), q),
+                a = at(x - gx, y),
+                b = at(x, y - gy);
+              if (goH && goV && lum(a) > l0 + 15 && lum(b) > l0 + 15) {
+                to = same(a, b) ? a : at(x - gx, y - gy);
+                break;
+              }
+            }
+          }
+          if (to >= 0) {
+            out[q] = src[to];
+            out[q + 1] = src[to + 1];
+            out[q + 2] = src[to + 2];
+            continue;
+          }
+        }
+        const [n, one] = likes(x, y, q);
+        if (!(n === 0 || (n === 1 && likes(one[0], one[1], q)[0] === 1))) continue;
+        const nb = N8.map(([dx, dy]) => at(x + dx, y + dy));
+        let kb = 0,
+          best = -1;
+        for (const a of nb) {
+          if (same(a, q)) continue;
+          let k = 0;
+          for (const b of nb) if (same(a, b)) k++;
+          if (k > kb) ((kb = k), (best = a));
+        }
+        if (kb < 3 || Math.abs(depA(q) - depA(best)) > 0.03 || Math.abs(lum(q) - lum(best)) >= keep) continue;
         out[q] = src[best];
         out[q + 1] = src[best + 1];
         out[q + 2] = src[best + 2];

@@ -139,7 +139,66 @@ function makeBuilder(seed, hex) {
      tile on the surface, and the colour the dab was given, so a dab recoloured later is known and drawn plain. */
   let fine = null,
     attr = null,
-    attrN = null;
+    attrN = null,
+    pix = null,
+    pixHas = false;
+  /* colour worked out per pixel (a diorama's look.pixel): for a dab laid next, the ramp it is coloured from, how lit it is, the pattern
+     laid on it (a K.pixel material's pat) and the way its surface faces; the picture then decides each pixel from these, not from the
+     dab's one colour. Eight numbers a dab; the ramps and patterns are kept once each */
+  const pixN = new Float32Array(8),
+    ramps = [],
+    rampOff = [],
+    rampIx = new Map(),
+    rampNoIx = new Map(),
+    rampByText = new Map(),
+    pats = [],
+    patIx = new Map();
+  /* (fx, fy, fz: the way the shape it is lit as faces, if that is not its own: folded into two numbers; 9, 9 when there is none.
+      noLine: the material draws no outline, as clouds and water. Ramps with the same colours are one ramp, so an outline is drawn
+      only where one material meets another) */
+  const pixNext = (ramp, t, pat, nx, ny, nz, fx, fy, fz, noLine) => {
+    const ix = noLine ? rampNoIx : rampIx;
+    let r = ix.get(ramp);
+    if (r === undefined) {
+      const text = (noLine ? '!' : '') + Array.from(ramp).join(',');
+      r = rampByText.get(text);
+      if (r === undefined) {
+        r = ramps.push(Array.from(ramp)) - 1;
+        rampOff.push(!!noLine);
+        rampByText.set(text, r);
+      }
+      ix.set(ramp, r);
+    }
+    let pi = 0;
+    if (pat) {
+      pi = patIx.get(pat);
+      if (pi === undefined) {
+        pi = pats.push(pat);
+        patIx.set(pat, pi);
+      }
+    }
+    pixN[0] = r + 1;
+    pixN[1] = t;
+    pixN[2] = pi;
+    pixN[3] = nx;
+    pixN[4] = ny;
+    pixN[5] = nz;
+    if (fx === undefined) pixN[6] = pixN[7] = 9;
+    else {
+      const l = Math.abs(fx) + Math.abs(fy) + Math.abs(fz) || 1;
+      let a = fx / l,
+        b = fz / l;
+      if (fy < 0) {
+        const a2 = (1 - Math.abs(b)) * (a >= 0 ? 1 : -1),
+          b2 = (1 - Math.abs(a)) * (b >= 0 ? 1 : -1);
+        a = a2;
+        b = b2;
+      }
+      pixN[6] = a;
+      pixN[7] = b;
+    }
+    pixHas = true;
+  };
   /* attributes (see the sculptor's S.keepAttrs): four numbers a dab, for the dabs laid next */
   const attrNext = (a, b, c, d) => {
     attrN = attrN || new Float32Array(4);
@@ -182,6 +241,16 @@ function makeBuilder(seed, hex) {
         attr = f;
       }
       attr.set(attrN, n * 4);
+    }
+    if (pixHas || pix) {
+      if (!pix || pix.length < cap * 8) {
+        const f = new Float32Array(cap * 8);
+        if (pix) f.set(pix);
+        pix = f;
+      }
+      if (pixHas) pix.set(pixN, n * 8);
+      else pix.fill(0, n * 8, n * 8 + 8);
+      pixHas = false;
     }
     if (fine && fine[n * 12 + 11] === 1)
       fine[n * 12 + 11] = 2; // the tile laid for this dab is now its own
@@ -766,11 +835,26 @@ function makeBuilder(seed, hex) {
     stick(x, y, z, UP, s2, s2 * 0.12 + 0.012, P[c], 3, an);
   }
   function finish(meta) {
+    /* paint-over decals (ink-studio paint): pixels painted over a view of the diorama, each pinned where it fell on the surface, as a
+       flat dab one pixel across of that palette colour just in front of it. Whatever builds the diorama puts its decals in
+       INK_DECAL_NEXT as [x, y, z, nx, ny, nz, palette index] (the game's build embeds them as INK_PAINT, by diorama) */
+    const dec = typeof globalThis !== 'undefined' ? globalThis.INK_DECAL_NEXT : null;
+    if (dec && dec.length) {
+      globalThis.INK_DECAL_NEXT = null;
+      const px = 1 / ((meta && meta.detail) || 12);
+      for (const [x, y, z, nx, ny, nz, c] of dec)
+        if (P[c])
+          disc(x + nx * px * 0.3, y + ny * px * 0.3, z + nz * px * 0.3, [nx, ny, nz], px * 0.6, px * 0.12, P[c], 3);
+    }
     return Object.assign(
       {
         data: data.subarray(0, n * 16),
         count: n,
         attr: attr ? Float32Array.from({ length: n * 4 }, (_, i) => attr[i] || 0) : undefined,
+        pix: pix ? Float32Array.from({ length: n * 8 }, (_, i) => pix[i] || 0) : undefined,
+        ramps: pix ? ramps.map(r => r.slice()) : undefined,
+        rampOff: pix ? rampOff.slice() : undefined,
+        pats: pix ? pats.slice() : undefined,
         fine: fine
           ? fine.length >= n * 12
             ? fine.subarray(0, n * 12)
@@ -797,6 +881,8 @@ function makeBuilder(seed, hex) {
     fine = null;
     attr = null;
     attrN = null;
+    pix = null;
+    pixHas = false;
     bounced = 0;
     cidx.length = 0;
     nrms.length = 0;
@@ -828,6 +914,7 @@ function makeBuilder(seed, hex) {
     wet: v => (wetV = v === undefined || v === null || !isFinite(v) ? null : v),
     fineTile,
     attrNext,
+    pixNext,
     dabAt,
     reseed,
     take,

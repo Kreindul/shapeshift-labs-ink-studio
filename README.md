@@ -24,7 +24,7 @@ The package includes geometry, materials, lighting, animation, character control
 
 ## Install and run
 
-Requires **Node 18 or later**. There are no declared runtime dependencies. This is a private package; the scoped package name does not mean it has been published to a package registry.
+Requires **Node 18 or later**. There are no declared runtime dependencies. The package is available from GitHub.
 
 From a checkout:
 
@@ -36,7 +36,7 @@ node cli/ink-studio.js render watcher --t 2.6 --colored
 npm test
 ```
 
-Install from GitHub with credentials that can read the private repository:
+Install from GitHub:
 
 ```sh
 npm install github:siliconjungle/shapeshift-labs-ink-studio
@@ -51,7 +51,7 @@ npx ink-studio help
 npx ink-studio render watcher --colored
 ```
 
-The installed package is named `@shapeshift-labs/ink-studio`; its executable remains `ink-studio`. A private Git repository install requires Git access to that repository. The `private` setting prevents accidental registry publication.
+The installed package is named `@shapeshift-labs/ink-studio`, and its executable is `ink-studio`. The `private` setting prevents accidental registry publication.
 
 Generated pictures normally go into `studio/out/`. Image baselines go into `studio/snaps/`. Use `--out file.png` for an explicit output path, or configure the directories with `ink-studio.config.js`.
 
@@ -408,10 +408,13 @@ There are several simulation levels:
 | `K.breaker`, `K.rubble`, `K.debris` | Breaking, unsupported pieces, falling rubble and loose fragments. |
 | `K.jelly`, `K.sand` | Lightweight shape deformation or granular motion. |
 | `K.mpm` | A material-point solver for elastic jelly, yielding clay, granular sand and water. |
+| `K.sandbox` | A cellular material simulation with fluid flow, heat, phase changes and reactions. |
 | `K.inside` | Interior splats revealed by bites and cuts. |
 | `K.xpbd.sim`, `K.cloth`, `K.hair` | Constraint-based points, cloth and groomed strands with pins, collisions and wind. |
 | `K.xpbd.rope`, `K.xpbd.carry`, `K.xpbd.blades` | Ropes, chains, objects carried by simulated points, kelp and reeds. |
 | `K.voxels` | Persistent per-cell channels, spreading fire/frost/growth, and support queries. |
+
+Use `K.sandbox.grid({ at, size, cell })` to set up a material grid. Add volumes with `grid.box(lo, hi, material)` and assign sculpted surfaces with `grid.walls(S.sdf, { as: 'stone' })`. Pass `grid.spec()` as `sandbox` when finishing the world, then use `K.sandbox.attach(world)` to add the simulation to the scene. Browser hosts can supply a worker that runs `K.sandbox.serve(self)`.
 
 A complete cloth scene:
 
@@ -543,6 +546,14 @@ Each module opens with signatures and option descriptions. Use `ink-studio catal
 | `validate <file.json>` | Report scene-data errors and suggestions. |
 | `ramps <scene>` | Inspect the scene's color ramps. |
 | `values <scene>` | Check readability in dark, middle and light tones. |
+| `crisp <scene>` | Measure isolated pixels, fine detail, edges and palette use. |
+| `lint <scene>` | Flag pixel-art artifacts such as jaggies, banding and pillow shading. |
+| `review <scene>` | Save a contact sheet of fixed camera views and report lint for each. |
+| `shimmer <scene> --mode orbit` | Measure pixels that change and quickly change back across frames, and save a GIF. |
+| `compare <scene> <ref.png>` | Render the scene alongside a reference and measure both at the reference's pixel size. |
+| `paint export <scene>` | Export `paint.png` and the surface coordinates of the rendered view. |
+| `paint absorb <scene>` | Convert edited pixels in `paint.png` into surface-pinned decals. |
+| `paint clear <scene>` | Clear the scene's saved decals. |
 | `stats <scene>` | Report splat counts, extents, palette use, build and animation costs. |
 | `perf <scene> --secs 5 --fps 60` | Measure animation work and changed-data upload estimates. |
 | `motion <scene> --from 0 --to 3` | Inspect speed, jumps, low points, still regions and loop error. |
@@ -558,6 +569,8 @@ Common rendering controls:
 | --- | --- |
 | `--t`, `--from`, `--to`, `--n`, `--fps` | Time, frame count and sampling rate, depending on command. |
 | `--yaw`, `--pitch`, `--zoom`, `--target x,y,z` | Camera controls; angles are radians. |
+| `--ortho` | Use a parallel projection. |
+| `--edges off` | Hide the edge sprites attached to materials in a per-pixel scene. |
 | `--w`, `--h`, `--out` | Output viewport size and destination. The renderer resolves a lower-resolution pixel grid derived from the scene's detail settings. |
 | `--seed` | Override the scene seed. |
 | `--colored` | Use palette-aware smoothing of silhouettes and body-colored contours. |
@@ -571,6 +584,10 @@ Common rendering controls:
 | `--poke '1:x,y,z;2:x,y,z'` | Script timed taps into a simulated scene. |
 
 The default look uses palette quantization and dithering. `--colored` preserves native interior detail while smoothing silhouettes; it does not fit a new palette every frame. `PixelLook` exposes shared CPU and shader helpers for hosts implementing the same look.
+
+For per-pixel materials, set `S.pixel = true` before baking and finish the world with `look: { pixel: true }`. `K.pixel` provides surface patterns such as turf, masonry and shingles. Use `K.pixel.edge(material, { up: 'grass', every: 5, share: 0.55 })` to attach sprites that follow the surface as the camera moves. `K.sprite.art` accepts text art for custom sprites, and `K.props` can scatter small objects along paths and at wall bases.
+
+`paint export` and `paint absorb` work with per-pixel scenes. By default, files live in `studio/paint/<scene-id>/`, where `<scene-id>` is the ID returned by the scene. Edit `paint.png` in the scene palette and use magenta (`#ff00ff`) to erase earlier paint. If you choose a custom folder with `--dir`, pass the same folder to `paint` and `render`.
 
 ## Embedding and custom scene collections
 
@@ -634,6 +651,10 @@ Then `ink-studio scenes`, `render`, `snap` and other commands operate on that co
 | `kit/kn-effects.js` | Window light, reflections, shatter and dissolve. |
 | `kit/ko-grow.js` | Scattering, species, branching, instancing and iterative growth. |
 | `kit/kp-curve.js` | Curve construction, sampling and sweeping. |
+| `kit/kpx-pixel.js` | Per-pixel material patterns and pixel-sized geometry. |
+| `kit/kpy-props.js` | Seeded prop placement and reusable prop libraries. |
+| `kit/kpz-sprite.js` | Text and procedural sprite art with surface anchors. |
+| `kit/kq-sandbox.js` | Material grid simulation and worker integration. |
 | `kit/kr-tex.js` | Procedural texture fields and remapping. |
 | `kit/ks-xpbd.js` | Constraint solver, cloth, hair and wind. |
 | `kit/kt-nodes.js` | Text, engraving, displacement and distance-grid processing. |

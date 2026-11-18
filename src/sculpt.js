@@ -38,6 +38,7 @@ function makeSculpt(B) {
     /* inked detail: 0 is off. Set to 1 and every plain dab also carries a 4 by 4 picture of the surface under it (its pattern, the
        edge of a shadow, the edge of the next thing along), which the page looks up for each pixel when its Inked detail option is on */
     fine: typeof globalThis !== 'undefined' && globalThis.INK_FINE ? 1 : 0,
+    pixel: typeof globalThis !== 'undefined' && !!globalThis.INK_PIXEL,
     /* bounce light: null is off. { k, reach, rays, glow } and, after each bake, every dab is also lit by the lit things round it, in
        their colours (B.bounce). The page's Bounce light option sets it for a whole diorama so the two looks can be compared */
     bounce: typeof globalThis !== 'undefined' && globalThis.INK_BOUNCE ? {} : null,
@@ -506,6 +507,8 @@ function makeSculpt(B) {
         if (m <= 0 || dx * dx + dy * dy + dz * dz > m * m) continue;
       }
       const pd = psd(p, x, y, z);
+      // A distance function may be undefined outside its solid. Keep that sample out of the smooth union.
+      if (Number.isNaN(pd)) continue;
       if (gk > 0 && gd < 1e8) {
         const h = Math.max(gk - Math.abs(gd - pd), 0) / gk;
         if (pd < gd) go = p;
@@ -690,6 +693,15 @@ function makeSculpt(B) {
     B.wet(wt === undefined || wt === null ? null : typeof wt === 'function' ? wt(x, y, z, ny) : wt);
     let AA = null;
     if (!PRB) LLS.length = 0;
+    /* form: the shape this is lit as, not the one it has (a crown lit as the few balls it is made of, a rock as its flat faces):
+       m.form(x, y, z, nx, ny, nz) -> [nx, ny, nz], or nothing to keep its own */
+    const gx = nx,
+      gy = ny,
+      gz = nz;
+    if (m.form) {
+      const f = m.form(x, y, z, nx, ny, nz);
+      if (f) ((nx = f[0]), (ny = f[1]), (nz = f[2]));
+    }
     let ramp = m.rf ? m.rf(x, y, z) || m.r : m.r,
       t,
       ao = 1,
@@ -1092,11 +1104,27 @@ function makeSculpt(B) {
       }
       return;
     }
-    if (S.fine && !m.glass && (m.a === undefined || m.a >= 1 || glint))
+    if ((S.fine || m0.fine) && !m.glass && (m.a === undefined || m.a >= 1 || glint))
       fineTile(m0, res, x, y, z, nx, ny, nz, full, ci);
     if (S.bounce && !flat && !m.em)
       ((BTAP.ramp[B.count()] = ramp), (BTAP.t[B.count()] = t)); /* kept for the bounce pass */
     if (S.tap) S.tap(ramp, t, nx, ny, nz, flat || !!m.em, ci); // whoever is listening learns how this splat was lit (it is the next one made)
+    /* colour worked out per pixel (S.pixel, for a diorama whose look.pixel is on): the dab says which ramp, how lit, which pattern and
+       which way its surface truly faces; each pixel is then coloured from those where it lands. A colour a material chose itself
+       (a texture with no pattern behind it), a glowing thing, glass and a glint keep the dab's own colour */
+    if (S.pixel && !m.em && !m.glass && !glint && (m.a === undefined || m.a >= 1) && (!flat || m.pat))
+      B.pixNext(
+        ramp,
+        t,
+        m.pat || null,
+        gx,
+        gy,
+        gz,
+        m0.form || m.form ? nx : undefined,
+        ny,
+        nz,
+        m0.line === false || m.line === false
+      );
     // (a: how solid it is, 1 and over is solid, under 1 lets what is behind show through; glass also bends what is behind it)
     if (S.follow && !m.glass) {
       formDab(res, x, y, z, nx, ny, nz, P[ci], m.a === undefined || glint ? 3 : m.a, fl);
@@ -1944,7 +1972,9 @@ function makeSculpt(B) {
   };
   // A tree: a twisted trunk and roots; main limbs leaving the upper trunk; two to four side
   // branches off each limb; a leaf cluster at the end of every side branch and limb, and one over the top.
-  // o: h (trunk height), r, lean [x, z], nb (limbs), spread (reach of the limbs), cr (cluster size), bark, leaf, roots, res, leaves (count)
+  // o: h (trunk height), r, lean [x, z], nb (limbs), spread (reach of the limbs), cr (cluster size), bark, leaf, roots, res, leaves (count),
+  // shade (false: the crown casts no shadow of its own, for when S.mask says where its shade falls), crown (false: the leaves wait for
+  // .leaves(), so what the crown's clusters are can be known first). -> { top, tips, clusters, leaves }
   S.tree = (x, y, z, o) => {
     const { rr, path } = B,
       h = o.h || 5,
@@ -2029,14 +2059,20 @@ function makeSculpt(B) {
       const c = L0 * rr(0.2, 0.33);
       clusters.push({ p: at(pts, 1), r: [c * 1.25, c * 0.72, c * 1.25] });
     }
+    let leaves = () => 0;
     if (o.leaf) {
       const top = tr(1),
         sn = h / 6.2,
         ls = o.ls || clamp(sn, 0.5, 1.6);
       clusters.push({ p: [top[0], top[1] + L0 * 0.32, top[2]], r: [L0 * 0.36, L0 * 0.24, L0 * 0.36] });
-      S.crown(clusters, o.leaf, o.leaves || Math.round(1900 * Math.min(1, (sn / ls) * (sn / ls))), { scale: ls });
+      leaves = () =>
+        S.crown(clusters, o.leaf, o.leaves || Math.round(1900 * Math.min(1, (sn / ls) * (sn / ls))), {
+          scale: ls,
+          shade: o.shade
+        });
+      if (o.crown !== false) leaves();
     }
-    return { top: tr(1), tips };
+    return { top: tr(1), tips, clusters, leaves };
   };
   return S;
 }

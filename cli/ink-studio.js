@@ -97,6 +97,7 @@ function scene(id) {
   if (!s) die('no diorama called "' + id + '"');
   return s;
 }
+const paintDirectory = id => path.resolve(CWD, opt.dir || path.join(cfg.paint || 'studio/paint', id));
 function build(id) {
   if (opt.focus) {
     const f = list('focus'); // uneven detail: x,y,z then near, far, coarse
@@ -109,9 +110,23 @@ function build(id) {
         : { stretch: +String(opt.follow).split(',')[0], broad: +String(opt.follow).split(',')[1] || undefined };
   if (opt.bounce) globalThis.INK_BOUNCE = true; // bounce light: every dab is also lit by the lit things round it
   if (opt.fine) globalThis.INK_FINE = true; // inked detail: dabs are baked with a tile of the surface under them
-  const s = scene(id),
-    t0 = Date.now(),
-    w = s.build(opt.seed === undefined ? s.seed : +opt.seed);
+  const s = scene(id);
+  // Load paint by scene ID so rendering the same file from another path finds its decals.
+  const decalFile = path.join(paintDirectory(s.id), 'decals.json');
+  globalThis.INK_DECAL_NEXT = fs.existsSync(decalFile)
+    ? JSON.parse(fs.readFileSync(decalFile, 'utf8')).decals
+    : (globalThis.INK_PAINT || {})[s.id] || null;
+  const t0 = Date.now(),
+    seed = opt.seed === undefined ? s.seed : +opt.seed;
+  let w = s.build(seed);
+  if (s.animate) w = s.animate(w, seed) || w; // a diorama in two halves: what stands, then what sets it moving
+  if (w.sandbox && !w.anim) lib().KIT.sandbox.attach(w); // and one whose stuff is a sandbox gets its grid going
+  if (w.pix && lib().KIT.pixel)
+    ((w.pixTex = lib().KIT.pixel.evaluators(w)),
+      (w.pixCell = lib().KIT.pixel.CELL),
+      (w.pixView = lib().KIT.pixel.VIEW),
+      (w.pixUnfold = lib().KIT.pixel.unfold),
+      (w.pixAnchors = lib().KIT.pixel.anchors)); // (colour per pixel: its patterns, to be called for each pixel; where edge sprites stand)
   w.buildMs = Date.now() - t0;
   w.id = s.id;
   w.name = s.name;
@@ -188,7 +203,9 @@ const view = extra =>
       raw: !!opt.raw,
       colored: !!opt.colored,
       fine: !!opt.fine,
-      clean: !!opt.clean
+      clean: !!opt.clean,
+      ortho: !!opt.ortho,
+      edges: opt.edges === 'off' ? false : undefined
     },
     extra
   );
@@ -237,9 +254,17 @@ const CMD = {
         '  selftest                    every lab module checked in numbers, and the lab dioramas run for a while',
         '  snap <id|all> [--t 0,2]     keep reference pictures',
         '  check [id ...]              draw again and compare with the reference pictures',
+        '  compare <id> <ref.png> [--px 2 --colours 32]  a diorama beside a reference at true pixel size, both measured',
+        '  paint export <id> [view options]   a view at true pixel size to paint over (paint.png), with where each pixel lies',
+        '  paint absorb <id> [--png file]     the painted pixels kept as decals pinned to the surface (#ff00ff erases); paint clear <id>',
+        '  lint <id ...> [--map]              pixel-art lint: orphans, doubles, jaggies, banding, pillow shading, noise, colours',
+        '  review <id> [--ref pic --px 2]     a sheet of fixed shots (four sides, top, low, far, near, close), beside the last one',
+        '  shimmer <id> [--mode orbit|zoom|pan|still --frames 24]  how many pixels flicker over a move, and a GIF of it',
+        '  crisp <id ...|all> [--t 2 --map]   how crisp at its own pixel size: stray pixels, specks, flat area, finest frequencies,',
+        '                              against the pixel-art references (--map: where the stray pixels and drawn edges are)',
         '',
         'any command that plays a diorama takes --poke 2:x,y,z (tap it at 2 seconds, toward that point; several with ;)',
-        'view options: --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (lone pixels removed) --cols 4 --out file.png --seed n'
+        'view options: --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (lone pixels removed) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n'
       ].join('\n')
     );
   },
@@ -874,6 +899,393 @@ const CMD = {
       }
       console.log('kept', w.id, 'at', ts.join(', '));
     }
+  },
+  /* a diorama beside a reference picture, both at true pixel size: the reference brought down to its art pixels (--px: how many of
+     its pixels make one, as 2 for a picture shown at twice its size), the diorama drawn at the same size in art pixels, the two side
+     by side scaled up alike (--up, 3), and the crisp measures of each, so a look can be held to a picture it is after */
+  /* pixel-art lint: the mistakes pixel artists name, at a diorama's own pixel size, beside what the references come to (the medians
+     of the pixel-art references at their own size): orphan pixels, doubles (lines two pixels thick at a step), jaggies (uneven steps
+     along an edge), banding (tones that only echo an edge), pillow shading (darker all round the rim, whichever way it faces), noise
+     (clusters of three pixels or fewer) and colours. --map writes where each is: orphans red, doubles magenta, jaggies yellow,
+     banding cyan */
+  lint() {
+    const Cr = require('./critic.js'),
+      ids = pos.length ? pos : die('lint <id ...> [--map --ortho]'),
+      keys = ['orphans', 'doubles', 'jaggies', 'banding', 'pillow', 'noise', 'colours'],
+      fmt = (k, v) => (k === 'colours' ? String(v) : (v * 100).toFixed(1) + '%');
+    console.log(''.padEnd(16) + keys.map(k => k.padStart(10)).join(''));
+    console.log('references'.padEnd(16) + keys.map(k => fmt(k, Cr.REFERENCE[k]).padStart(10)).join(''));
+    for (const id of ids) {
+      const t = num('t', 2),
+        w = build(id);
+      pose(w, t);
+      const im = R.render(w, view({ t })),
+        img = { w: im.w, h: im.h, rgb: im.rgb || im.color },
+        r = Cr.lint(img, { bg: w.pal[0] });
+      console.log(w.id.padEnd(16) + keys.map(k => fmt(k, r[k]).padStart(10)).join(''));
+      if (opt.map) save(w.id + '-lint.png', R.upscale(Cr.lintMap(img, r), im.px));
+    }
+  },
+  /* a review sheet: the diorama from a fixed set of shots (its own view, its four sides, from above, from low down, far, near and
+     close), one sheet, with the lint of each under its label in the log; beside the last sheet of it (kept as -review-before.png),
+     so a change can be seen. --ref picture.png --px 2 puts a reference first */
+  review() {
+    const Cr = require('./critic.js'),
+      [id] = pos.length ? pos : die('review <id> [--ref picture.png --px 2 --ortho]'),
+      t = num('t', 2),
+      w = build(id),
+      c = w.cam || {},
+      shots = [];
+    pose(w, t);
+    for (const [label, dy, pitch, zoom] of Cr.SHOTS) {
+      const im = R.render(
+        w,
+        view({
+          t,
+          w: num('w', 480),
+          h: num('h', 340),
+          yaw: (opt.yaw === undefined ? c.yaw || 0 : +opt.yaw) + dy,
+          pitch: pitch === null ? (opt.pitch === undefined ? c.pitch : +opt.pitch) : pitch,
+          zoom
+        })
+      );
+      const img = { w: im.w, h: im.h, rgb: im.rgb || im.color },
+        r = Cr.lint(img, { bg: w.pal[0] });
+      console.log(
+        label.padEnd(8),
+        ['orphans', 'doubles', 'jaggies', 'banding', 'pillow']
+          .map(k => k + ' ' + (r[k] * 100).toFixed(1) + '%')
+          .join('  ')
+      );
+      shots.push(R.upscale(img, im.px));
+    }
+    if (opt.ref) {
+      const k = num('px', 1),
+        src = PNG.read(path.resolve(opt.ref)),
+        W = Math.floor(src.w / k),
+        H = Math.floor(src.h / k),
+        ref = { w: W, h: H, rgb: new Uint8Array(W * H * 3) };
+      for (let y = 0; y < H; y++)
+        for (let x = 0; x < W; x++) {
+          const s0 =
+            (Math.min(src.h - 1, Math.floor(y * k + k / 2)) * src.w + Math.min(src.w - 1, Math.floor(x * k + k / 2))) *
+            3;
+          ref.rgb.set(src.rgb.subarray(s0, s0 + 3), (y * W + x) * 3);
+        }
+      const up = Math.max(1, Math.round(shots[0].h / H));
+      shots.unshift(R.upscale(ref, up));
+    }
+    // (the shots padded to one size, for the sheet)
+    const SW = Math.max(...shots.map(q => q.w)),
+      SH = Math.max(...shots.map(q => q.h)),
+      pad = q => {
+        const o = { w: SW, h: SH, rgb: new Uint8Array(SW * SH * 3) };
+        for (let y = 0; y < q.h; y++) o.rgb.set(q.rgb.subarray(y * q.w * 3, (y + 1) * q.w * 3), y * SW * 3);
+        return o;
+      },
+      sheet = R.grid(shots.map(pad), num('cols', 3)),
+      file = path.join(OUT, w.id + '-review.png'),
+      before = path.join(OUT, w.id + '-review-before.png');
+    fs.mkdirSync(OUT, { recursive: true });
+    if (fs.existsSync(file)) fs.copyFileSync(file, before);
+    save(w.id + '-review.png', sheet);
+    if (fs.existsSync(before)) {
+      const b = PNG.read(before);
+      if (b.w === sheet.w && b.h === sheet.h) save(w.id + '-review-vs-before.png', R.grid([b, sheet], 2));
+    }
+  },
+  /* shimmer: the diorama over a short move of the camera (--mode orbit, zoom, pan, or still: the camera at rest while time runs),
+     frame by frame at one pixel size; the share of pixels that change and change back (A, B, A over three frames), which a smooth
+     move should not cause, and an animated GIF of it (--frames 24, --step: how far each frame moves) */
+  shimmer() {
+    const Cr = require('./critic.js'),
+      [id] = pos.length ? pos : die('shimmer <id> [--mode orbit|zoom|pan|still --frames 24 --step s --ortho]'),
+      t0 = num('t', 2),
+      n = num('frames', 24),
+      mode = opt.mode || 'orbit',
+      w = build(id),
+      c = w.cam || {},
+      frames = [];
+    const st = num('step', mode === 'orbit' ? 0.004 : mode === 'zoom' ? 0.012 : mode === 'pan' ? 0.02 : 1 / 12);
+    let px = 0;
+    for (let k = 0; k < n; k++) {
+      const t = mode === 'still' ? t0 + k * st : t0;
+      pose(w, t);
+      const v = view({ t, w: num('w', 480), h: num('h', 340) }),
+        T = (v.target || c.target || [0, 0, 0]).slice();
+      if (mode === 'orbit') v.yaw = (v.yaw === undefined ? c.yaw || 0 : v.yaw) + k * st;
+      if (mode === 'zoom') v.zoom = (v.zoom || 1) * (1 + k * st);
+      if (mode === 'pan') v.target = [T[0] + k * st, T[1], T[2] + k * st * 0.5];
+      if (px) v.px = px;
+      const im = R.render(w, v);
+      px = px || im.px;
+      frames.push({ w: im.w, h: im.h, rgb: im.rgb || im.color });
+    }
+    const fl = Cr.flicker(frames, { bg: w.pal[0] });
+    console.log(w.id + ' ' + mode + ': ' + (fl * 100).toFixed(2) + '% of pixels flicker (change and change back)');
+    fs.mkdirSync(OUT, { recursive: true });
+    const f = opt.out ? path.resolve(opt.out) : path.join(OUT, w.id + '-shimmer-' + mode + '.gif');
+    fs.writeFileSync(
+      f,
+      Cr.gif(
+        frames.map(q => R.upscale(q, Math.max(1, Math.min(4, px)))),
+        Math.round(num('delay', 8))
+      )
+    );
+    console.log('wrote', f);
+  },
+  /* paint-over: a view of the diorama at its own pixel size, to be painted over by hand or by a script, and the painted pixels taken
+     back as decals: each pinned to the place on the surface it fell on (a pixel painted just past an edge is put on the surface beside
+     it, carried on), so it stays put from every view. The decals are kept in studio/paint/<id>/decals.json; the game's build puts
+     them in the page, and the CLI draws them at once */
+  paint() {
+    const [sub, id] = pos;
+    if (!['export', 'absorb', 'clear'].includes(sub) || !id)
+      die(
+        'paint export <id> [view options] | paint absorb <id> [--png painted.png] | paint clear <id>   [--dir studio/paint/<id>]'
+      );
+    const world = sub === 'export' ? build(id) : null,
+      dir = paintDirectory(opt.dir ? id : world ? world.id : scene(id).id),
+      dfile = path.join(dir, 'decals.json');
+    if (sub === 'clear') {
+      if (fs.existsSync(dfile)) fs.unlinkSync(dfile);
+      console.log('cleared', dfile);
+      return;
+    }
+    if (sub === 'export') {
+      const t = num('t', 2),
+        w = world;
+      pose(w, t);
+      const pick = {},
+        vw = view({ t, pick }),
+        im = R.render(w, vw);
+      if (!pick.W)
+        die('paint: ' + id + ' is not drawn per pixel (its look.pixel), so there is nothing to pin paint to');
+      fs.mkdirSync(dir, { recursive: true });
+      const { W, H } = pick,
+        buf = new Float32Array(W * H * 6).fill(NaN);
+      for (let r = 0; r < H; r++)
+        for (let x = 0; x < W; x++) {
+          const q = (H - 1 - r) * W + x,
+            i = pick.win[q];
+          if (i < 0 || !pick.PIX[i * 8]) continue;
+          buf.set(
+            [pick.X[q], pick.Y[q], pick.Z[q], pick.PIX[i * 8 + 3], pick.PIX[i * 8 + 4], pick.PIX[i * 8 + 5]],
+            (r * W + x) * 6
+          );
+        }
+      PNG.write(path.join(dir, 'view.png'), im.w, im.h, im.rgb);
+      PNG.write(path.join(dir, 'paint.png'), im.w, im.h, im.rgb);
+      fs.writeFileSync(path.join(dir, 'view.bin'), Buffer.from(buf.buffer));
+      fs.writeFileSync(
+        path.join(dir, 'view.json'),
+        JSON.stringify(
+          {
+            id,
+            w: W,
+            h: H,
+            t,
+            view: { yaw: vw.yaw, pitch: vw.pitch, zoom: vw.zoom, target: vw.target, ortho: vw.ortho },
+            detail: w.detail,
+            pal: w.pal.map(c => '#' + c.toString(16).padStart(6, '0')),
+            how:
+              'paint over paint.png in the palette colours (#ff00ff takes paint off), then: ink-studio paint absorb ' +
+              id
+          },
+          null,
+          1
+        )
+      );
+      console.log(
+        'wrote',
+        path.join(dir, 'paint.png'),
+        W + 'x' + H,
+        '(paint over it, then: ink-studio paint absorb ' + id + ')'
+      );
+      return;
+    }
+    // absorb
+    const meta = JSON.parse(fs.readFileSync(path.join(dir, 'view.json'), 'utf8')),
+      raw = fs.readFileSync(path.join(dir, 'view.bin')),
+      buf = new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / 4),
+      a = PNG.read(path.join(dir, 'view.png')),
+      b = PNG.read(path.resolve(opt.png || path.join(dir, 'paint.png'))),
+      W = meta.w,
+      H = meta.h;
+    if (b.w !== a.w || b.h !== a.h)
+      die('paint: the painted picture is ' + b.w + 'x' + b.h + ', the view ' + a.w + 'x' + a.h);
+    const pal = meta.pal.map(h => parseInt(h.slice(1), 16)),
+      nearest = (r, g, bl) => {
+        let best = 0,
+          bd = 1e9;
+        pal.forEach((c, i) => {
+          const d = (((c >> 16) & 255) - r) ** 2 + (((c >> 8) & 255) - g) ** 2 + ((c & 255) - bl) ** 2;
+          if (d < bd) ((bd = d), (best = i));
+        });
+        return [best, bd];
+      },
+      ok = (x, y) => x >= 0 && y >= 0 && x < W && y < H && buf[(y * W + x) * 6] === buf[(y * W + x) * 6],
+      P3 = (x, y) => Array.from(buf.subarray((y * W + x) * 6, (y * W + x) * 6 + 6)),
+      px = 1 / (meta.detail || 12);
+    let off = 0,
+      lost = 0;
+    const fresh = [],
+      erase = [];
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const k = (y * W + x) * 3;
+        if (a.rgb[k] === b.rgb[k] && a.rgb[k + 1] === b.rgb[k + 1] && a.rgb[k + 2] === b.rgb[k + 2]) continue;
+        const del = b.rgb[k] === 255 && b.rgb[k + 1] === 0 && b.rgb[k + 2] === 255;
+        let at = null;
+        if (ok(x, y)) at = P3(x, y);
+        else {
+          // (past the edge of a thing: the nearest pixel that has a surface, carried on across the picture by how it changes there)
+          for (let r = 1; r <= 4 && !at; r++)
+            for (let dy = -r; dy <= r && !at; dy++)
+              for (let dx = -r; dx <= r && !at; dx++) {
+                if (Math.max(Math.abs(dx), Math.abs(dy)) !== r || !ok(x + dx, y + dy)) continue;
+                const nx = x + dx,
+                  ny = y + dy,
+                  q = P3(nx, ny),
+                  gx = ok(nx + 1, ny)
+                    ? P3(nx + 1, ny)
+                    : ok(nx - 1, ny)
+                      ? P3(nx - 1, ny).map((v, i) => 2 * q[i] - v)
+                      : q,
+                  gy = ok(nx, ny + 1)
+                    ? P3(nx, ny + 1)
+                    : ok(nx, ny - 1)
+                      ? P3(nx, ny - 1).map((v, i) => 2 * q[i] - v)
+                      : q;
+                at = q.slice();
+                for (let i = 0; i < 3; i++) at[i] = q[i] + (gx[i] - q[i]) * -dx + (gy[i] - q[i]) * -dy;
+              }
+        }
+        if (!at) {
+          lost++;
+          continue;
+        }
+        if (del) {
+          erase.push(at);
+          continue;
+        }
+        const [ci, d] = nearest(b.rgb[k], b.rgb[k + 1], b.rgb[k + 2]);
+        if (d > 12) off++;
+        fresh.push([...at.map(v => Math.round(v * 1e4) / 1e4), ci]);
+      }
+    const old = fs.existsSync(dfile) ? JSON.parse(fs.readFileSync(dfile, 'utf8')).decals || [] : [],
+      near = (d, e) => Math.hypot(d[0] - e[0], d[1] - e[1], d[2] - e[2]) < px * 0.45,
+      kept = old.filter(d => !fresh.some(e => near(d, e)) && !erase.some(e => near(d, e))),
+      decals = kept.concat(fresh);
+    fs.writeFileSync(dfile, JSON.stringify({ id, detail: meta.detail, decals }));
+    console.log(
+      `${fresh.length} pixels painted, ${erase.length} taken off; ${decals.length} decals in ${dfile}` +
+        (off ? `; ${off} were not palette colours (the nearest was taken)` : '') +
+        (lost ? `; ${lost} had no surface within 4 pixels and were left out` : '')
+    );
+  },
+  compare() {
+    const C = require('./crisp.js'),
+      [id, ref] = pos;
+    if (!id || !ref) die('compare <id> <reference.png> [--px 2 --up 3]');
+    const k = num('px', 1),
+      src = PNG.read(path.resolve(ref)),
+      W = Math.floor(src.w / k),
+      H = Math.floor(src.h / k),
+      rimg = { w: W, h: H, rgb: new Uint8Array(W * H * 3) };
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const s0 =
+          (Math.min(src.h - 1, Math.floor(y * k + k / 2)) * src.w + Math.min(src.w - 1, Math.floor(x * k + k / 2))) * 3;
+        rimg.rgb.set(src.rgb.subarray(s0, s0 + 3), (y * W + x) * 3);
+      }
+    // (a reference with more colours than a pixel artist's palette, as a JPEG has, is brought to --colours of them, 32 by default)
+    const seen = new Set();
+    for (let i = 0; i < W * H && seen.size <= 256; i++)
+      seen.add((rimg.rgb[i * 3] << 16) | (rimg.rgb[i * 3 + 1] << 8) | rimg.rgb[i * 3 + 2]);
+    if (seen.size > 256 || opt.colours) Object.assign(rimg, C.quantize(rimg, num('colours', 32)));
+    const t = num('t', 2),
+      w = build(id);
+    pose(w, t);
+    // Use one art pixel per reference pixel, regardless of the scene's detail setting.
+    const im = R.render(w, view({ t, w: W, h: H, px: 1 })),
+      cols = ['stray', 'specks', 'flat', 'fine', 'edges', 'spread', 'cool', 'colours'],
+      fmt = (c, v) => {
+        if (!Number.isFinite(v)) return 'n/a';
+        if (c === 'fine') return v.toFixed(3);
+        return c === 'colours' ? String(v) : (v * 100).toFixed(1) + '%';
+      },
+      mr = C.measure(rimg, { bg: (rimg.rgb[0] << 16) | (rimg.rgb[1] << 8) | rimg.rgb[2] }), // (its corner colour, joined to the edge, is its background)
+      md = C.measure(im, { bg: w.pal[0] });
+    console.log(''.padEnd(16) + cols.map(c => c.padStart(10)).join(''));
+    console.log(path.basename(ref).slice(0, 15).padEnd(16) + cols.map(c => fmt(c, mr[c]).padStart(10)).join(''));
+    console.log(w.id.padEnd(16) + cols.map(c => fmt(c, md[c]).padStart(10)).join(''));
+    const up = num('up', 3),
+      a = R.upscale(rimg, up),
+      b = R.upscale(im, up);
+    save(w.id + '-vs-' + path.basename(ref).replace(/\.[a-z]+$/i, '') + '.png', R.grid([a, b], 2));
+  },
+  /* how crisp a diorama is at its own pixel size, beside what the pixel-art references came to: stray pixels (unlike all eight round
+     them), specks (in same-colour patches of 3 or fewer), flat area (like all eight), the share of brightness variation at the finest
+     frequencies, how much of it runs straight across or down, checker (dither) and how many colours make up 95% of it.
+     A mark (!) is a target missed. --map writes where the stray pixels are. --t, and the view options, as for render */
+  crisp() {
+    const C = require('./crisp.js'),
+      ids = pos[0] === 'all' ? lib().SCENES.map(s => s.id) : pos;
+    if (!ids.length) die('crisp which diorama? (or: all)');
+    const t = num('t', 2),
+      pc = v => (v * 100).toFixed(1) + '%',
+      cols = ['stray', 'specks', 'flat', 'fine', 'straight', 'edges', 'spread', 'cool', 'checker', 'colours'],
+      fmt = (k, v) => {
+        if (!Number.isFinite(v)) return 'n/a';
+        if (k === 'fine' || k === 'straight') return v.toFixed(3);
+        return k === 'colours' ? String(v) : pc(v);
+      },
+      miss = (k, v) =>
+        C.FLOORS[k] !== undefined
+          ? v >= C.FLOORS[k]
+            ? ' '
+            : '!'
+          : C.TARGETS[k] === undefined
+            ? ' '
+            : (k === 'flat' ? v >= C.TARGETS[k] : v <= C.TARGETS[k])
+              ? ' '
+              : '!';
+    console.log('diorama'.padEnd(16) + cols.map(c => c.padStart(11)).join(''));
+    console.log(
+      'references'.padEnd(16) +
+        cols.map(c => (C.REFERENCE[c] ? fmt(c, C.REFERENCE[c][2]) : '').padStart(10) + ' ').join('') +
+        '  (median of 8 at true pixel size)'
+    );
+    console.log(
+      'targets'.padEnd(16) +
+        cols
+          .map(
+            c =>
+              (C.FLOORS[c] !== undefined
+                ? '>' + fmt(c, C.FLOORS[c])
+                : C.TARGETS[c] === undefined
+                  ? ''
+                  : (c === 'flat' ? '>' : '<') + fmt(c, C.TARGETS[c])
+              ).padStart(10) + ' '
+          )
+          .join('')
+    );
+    let missed = 0;
+    for (const id of ids) {
+      const w = build(id);
+      pose(w, t);
+      const im = R.render(w, view({ t })),
+        m = C.measure(im, { bg: w.pal[0] });
+      const marks = cols.map(c => (Number.isFinite(m[c]) ? miss(c, m[c]) : ' '));
+      missed += marks.some(x => x === '!') ? 1 : 0;
+      console.log(w.id.padEnd(16) + cols.map((c, i) => fmt(c, m[c]).padStart(10) + marks[i]).join(''));
+      if (opt.map) {
+        save(w.id + '-stray.png', R.upscale(C.strayMap(im, { bg: w.pal[0] }), im.px));
+        save(w.id + '-edges.png', R.upscale(C.edgeMap(im, { bg: w.pal[0] }), im.px));
+      }
+    }
+    if (ids.length > 1) console.log(missed + ' of ' + ids.length + ' miss a target');
   },
   check() {
     const files = fs.existsSync(SNAPS)

@@ -1256,6 +1256,56 @@
       ]
     },
     {
+      "id": "look.edge-sprites",
+      "kind": "material",
+      "status": "ready",
+      "title": "Surface-anchored edge sprites",
+      "what": "Tiny pixel sprites attach to fixed surface points and appear beyond the silhouette. The same points are kept as the scene changes detail level.",
+      "use": "K.pixel.edge(material, { up: 'grass', every: 5, share: 0.55 })",
+      "where": "src/kit/kpz-sprite.js and cli/render.js",
+      "tags": ["pixel art", "sprite", "tuft", "silhouette"]
+    },
+    {
+      "id": "place.props",
+      "kind": "op",
+      "status": "ready",
+      "title": "Seeded prop placement",
+      "what": "Reusable libraries place small objects in an area, along a path, around a solid or at the foot of a wall. Each library uses roles to map its props to the scene materials.",
+      "use": "K.props.clutter(S, K.props.starter, materials, rules)",
+      "where": "src/kit/kpy-props.js",
+      "tags": ["scatter", "props", "decoration", "path"]
+    },
+    {
+      "id": "studio.paint",
+      "kind": "cli",
+      "status": "ready",
+      "title": "Paint surface-pinned decals",
+      "what": "Export a per-pixel view and its surface coordinates, then turn edited pixels into palette-colored decals that stay in place from every camera angle.",
+      "use": "ink-studio paint export <scene> and ink-studio paint absorb <scene>",
+      "where": "cli/ink-studio.js and src/builder.js",
+      "tags": ["paint", "decal", "pixel art"]
+    },
+    {
+      "id": "studio.pixel-critique",
+      "kind": "cli",
+      "status": "ready",
+      "title": "Measure pixel-art renders",
+      "what": "Check isolated pixels and unwanted shading patterns, review fixed camera angles, compare a reference or measure flicker as the view moves.",
+      "use": "ink-studio lint <scene> or ink-studio shimmer <scene> --mode orbit",
+      "where": "cli/crisp.js and cli/critic.js",
+      "tags": ["lint", "crisp", "compare", "review", "shimmer"]
+    },
+    {
+      "id": "sim.sandbox",
+      "kind": "op",
+      "status": "ready",
+      "title": "Cellular material sandbox",
+      "what": "A seeded grid simulates liquids, powders, gases, heat and phase changes. The simulation can run in a worker and draw its cells as splats.",
+      "use": "const grid = K.sandbox.grid({ at, size, cell }); const sim = K.sandbox(grid.spec())",
+      "where": "src/kit/kq-sandbox.js",
+      "tags": ["simulation", "heat", "matter", "worker"]
+    },
+    {
       "id": "chance.seeded",
       "kind": "op",
       "status": "ready",
