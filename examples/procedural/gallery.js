@@ -211,6 +211,27 @@
     return [support, ...resolved];
   }
 
+  function surfaceContact() {
+    const lower = box([0, 0, 0], [2, 0.1, 1.15], 'basalt');
+    const upright = box([0, 0.45, -0.17], [1.65, 0.6, 0.15], 'glaze');
+    const cover = box([0.25, 0.26, 0.3], [0.4, 0.16, 0.35], 'cream');
+    // Two named carrier surfaces define a seam. A separate solid hides its middle.
+    const top = P.geometry.builder(),
+      face = P.geometry.builder();
+    top.quad([-2, 0.105, -1], [-2, 0.105, 1], [2, 0.105, 1], [2, 0.105, -1], { surface: 'plate' });
+    face.quad([-1.65, -0.12, -0.01], [1.65, -0.12, -0.01], [1.65, 1.05, -0.01], [-1.65, 1.05, -0.01], {
+      surface: 'face'
+    });
+    const paths = P.contacts.intersections(P.contacts.index(top.finish()), P.contacts.index(face.finish()));
+    const solids = [{ id: 'cover', index: P.contacts.index(cover) }];
+    const seams = paths
+      .flatMap(path => P.contacts.clipCurve(path.points, solids))
+      // Lift the trim off the seam so the palette is visible in the preview.
+      .map(run => run.points.map(point => K.V.add(point, [0, 0.045, 0.065])))
+      .flatMap(points => points.slice(1).map((point, i) => tube(points[i], point, 0.038, 'coral')));
+    return [lower, upright, cover, ...seams];
+  }
+
   const examples = [
     ['Fitted courses', 'Staggered units fit the domain and preserve physical joints.', courses],
     ['Masked cells', 'Clipped prisms follow an annular mask with real gaps.', cells],
@@ -227,7 +248,8 @@
       'Inherited appearance',
       'The same dimensions and geometry use overridden material roles.',
       () => fittedRoute('warm')
-    ]
+    ],
+    ['Surface contacts', 'The seam follows the intersecting faces and stops where a solid covers it.', surfaceContact]
   ];
 
   function triangles(meshes) {

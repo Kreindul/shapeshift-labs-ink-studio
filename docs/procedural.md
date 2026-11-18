@@ -45,6 +45,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `routes.layout(route, options)` | Fit bounded intervals on a polyline, catenary, or compatible curve. Place caller-chosen pieces using gapped endpoints and midpoint frames |
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
+| `contacts.index(mesh, options)`, `contacts.intersections(a, b, options)`, `contacts.clipCurve(points, solids)` | Index named triangle groups, trace noncoplanar contacts, and trim contact or authored curves against closed indexed solids |
 
 Heights and distances use world units. Planar masks take XZ and use negative
 distance for the interior. Compiled carrier callbacks should be deterministic.
@@ -127,3 +128,10 @@ The gallery's **Retained assemblies** example combines these APIs. Resizing
 the left mount changes generated attachments and replaces that mount's visual
 chunk. The right payload is reused. Undo and Redo operate on the retained
 document and trigger the same realization path.
+
+Contact curves follow the input mesh resolution. `contacts.index` can restrict
+the index to named surface groups and exposes bounds queries and segment
+crossings. Use a closed shell for point containment and curve occlusion.
+`intersections` returns paired surface names and stitched world points.
+`clipCurve` returns exposed runs with source segment coordinates and blocker
+IDs. The caller can send those runs to a route, sweep, or trim material.
