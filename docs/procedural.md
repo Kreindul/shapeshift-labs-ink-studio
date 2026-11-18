@@ -1387,6 +1387,21 @@ coordinates and bounded face colors. `assetMeshes.recipe(mesh, {size})`
 uses an already parsed mesh. The recipe carries geometry and base colors.
 The caller selects the placement, material and rendering rules.
 
+### Surface lighting overrides
+
+`KIT.procedural.surfaceLighting.override(options)` prepares an immutable
+material override for an inspection view. Configure a normalized RGB
+`albedo`, a `fallback` irradiance for surfaces without lighting data, and
+an optional RGB `background`. The boolean `preserveEmission` and
+`preserveLiquid` settings default to true so a renderer can preserve
+light sources and water. A renderer applies these settings to its own
+surface classifications.
+
+`surfaceLighting.shade(irradiance, style)` multiplies the configured
+albedo by the attributed irradiance and clamps the output channels.
+Pass `undefined` to use the fallback. The override can change independently
+of the original model, material palette, and recorded lighting values.
+
 ### Paint domains
 
 `KIT.procedural.clipPaintDomain(field, domain, { mode })` limits a resolved
