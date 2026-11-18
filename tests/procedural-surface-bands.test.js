@@ -33,3 +33,21 @@ test('a short carrier limits the span and outward reach without moving the edge'
   assert.deepEqual(band.bounds, { min: [-.8, -.55], max: [-.5, .38] });
   assert.throws(() => fitSurfaceBands({ domain, opening, edges: { left: { reach: NaN } } }), /positive/);
 });
+
+test('panel bands split span at a seam and stay on their own mounting panel', () => {
+  const panels = [{ id: 'a', min: [-2, -2], max: [-.05, 2] },
+    { id: 'b', min: [.05, -2], max: [2, 2] }];
+  const opening = { min: [-.7, -.6], max: [.7, .6] };
+  const side = { reach: .8, minReach: .15 };
+  const edges = { left: side, right: side, bottom: { reach: .4, span: 1.5, minSpan: .2 } };
+  const bands = fitSurfaceBands({ panels, opening, edges,
+    obstructions: [{ min: [1.05, -.4], max: [1.6, .4] }] });
+  assert.deepEqual(bands.map(r => [r.panel, r.edge]), [
+    ['a', 'left'], ['a', 'bottom'], ['b', 'right'], ['b', 'bottom']
+  ]);
+  assert.equal(bands[1].bounds.max[0], -.05);
+  assert.equal(bands[3].bounds.min[0], .05);
+  assert.equal(bands[1].hinge[1], bands[3].hinge[1]);
+  assert(Math.abs(bands[2].reach - .35) < 1e-8);
+  assert.throws(() => fitSurfaceBands({ panels: [panels[0], panels[0]], opening, edges }), /uniquely/);
+});

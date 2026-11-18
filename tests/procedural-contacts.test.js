@@ -58,3 +58,16 @@ test('a ray that only grazes a solid edge does not hide a nearby curve', () => {
   assert.equal(runs.length, 1);
   assert.deepEqual(runs[0].points, [start, end]);
 });
+
+test('a contact ray returns the nearest triangle owner and surface at a physical distance', () => {
+  const { KIT } = require('..').load(), P = KIT.procedural;
+  const mesh = P.geometry.builder();
+  for (const [height, owner] of [[0, 'ground'], [2, 'fitting']]) {
+    mesh.triangle([-1, height, -1], [-1, height, 1], [1, height, 0], { owner, surface: owner + '-face' });
+  }
+  const index = P.contacts.index(mesh.finish());
+  const hit = index.raycast([0, 5, 0], [0, -8, 0], 6);
+  assert.deepEqual(hit, { p: [0, 2, 0], n: [0, 1, 0], distance: 3, owner: 'fitting', surface: 'fitting-face' });
+  assert.equal(index.raycast([0, 5, 0], [0, -8, 0], 2), null);
+  assert.equal(index.raycast([6, 5, 0], [0, -8, 0], 6), null);
+});

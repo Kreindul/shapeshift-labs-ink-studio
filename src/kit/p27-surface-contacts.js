@@ -116,6 +116,23 @@
       if (!finitePoint(a) || !finitePoint(b)) throw new Error('Crossings need finite endpoints');
       return castSegment(a, b);
     }
+    function raycast(origin, direction, max) {
+      if (!finitePoint(origin) || !finitePoint(direction) || !Number.isFinite(max) || max < 0)
+        throw new Error('Contact rays need finite points and nonnegative reach');
+      const length = V.len(direction);
+      if (max < EPS || length < EPS || !root) return null;
+      const ray = V.mul(direction, max / length), end = V.add(origin, ray);
+      let nearest = Infinity, picked;
+      for (const triangle of query(A.spatial.expand(box([origin, end]), EPS))) {
+        const at = triangleRay(triangle, origin, ray, EPS / max);
+        if (at !== null && at < nearest) {
+          nearest = at;
+          picked = triangle;
+        }
+      }
+      return picked ? { p: V.mad(origin, ray, nearest), n: picked.n.slice(), distance: nearest * max,
+        owner: picked.owner, surface: picked.surface } : null;
+    }
     function onSurface(p) {
       if (!finitePoint(p)) throw new Error('Contact queries need a finite point');
       return query(A.spatial.expand({ min: p, max: p }, EPS)).some(t => {
@@ -146,6 +163,7 @@
       bounds: root && A.data.freeze(root.bounds),
       query: b => query(A.spatial.bounds(b)),
       crossings,
+      raycast,
       contains,
       onSurface
     });

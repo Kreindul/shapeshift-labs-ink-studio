@@ -47,7 +47,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `spans.catenary(a, b, options)` | Gravity-aware sagging curve with arc-length sampling, finite frames and closest-point queries |
 | `proximity.connect(sockets, options)` | Deterministic matching of named sockets with reach, degree and compatibility limits |
 | `attachments.layout(slots, families, options)` | Stable weighted selection for framed, typed attachment slots, with fit and clearance callbacks |
-| `fitSurfaceBands({domain, opening, edges, obstructions, clearance})` | Keep bands mounted to a chart feature's edges and shorten or omit them to fit nearby boundaries and obstructions |
+| `fitSurfaceBands({domain, panels, opening, edges, obstructions, clearance})` | Keep bands mounted to a chart feature's edges and shorten or omit them to fit nearby boundaries and obstructions |
 | `fitFootprintContact({center, tangent, size, height, blocked, maxSpread, samples, interval, includePoints})` | Seat an upright footprint on a sampled support and check space above it |
 | `createFootprintReservations({clearance, cellSize})` | Reserve space for oriented upright objects and test nearby candidates |
 | `matchIntervals(previous, next, {maxShift, accept})` | Match spans across an edit using overlap and optional center displacement |
@@ -86,6 +86,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
 | `contacts.index(mesh, options)`, `contacts.intersections(a, b, options)`, `contacts.clipCurve(points, solids)` | Index named triangle groups, trace noncoplanar contacts, and trim contact or authored curves against closed indexed solids |
+| `contacts.index(mesh).raycast(origin, direction, max)` | Find the nearest triangle hit and report its point, normal, distance, owner and named surface. Reach is measured in world units. |
 | `contacts.traceSdf(chart, sd, options)`, `contacts.expose(curves, occluder, options)`, `contacts.field(curves)`, `contacts.runoff(curves, project, options)` | Trace SDF contacts, expose visible runs, derive distance masks and follow downhill paths |
 | `tiles.compile(definitions)`, `tiles.solve(model, options)`, `tiles.learn(swatch)`, `tiles.overlap(bank, options)`, `tiles.wang(model, options)`, `tiles.refine(coarse, model, options)` | Weighted matched sockets, example-based synthesis, world-stable patterns and coarse-to-fine layouts |
 | `fields.simplex(options)`, `fields.periodic(options)`, `fields.compile(expression, options)` | Seeded analytic noise and serializable field composition for SDFs, materials and placement |
@@ -200,6 +201,14 @@ coordinates. Configure any of the left, right, bottom, and top edges with
 Each result has a stable edge key, a mount midpoint in `hinge`, and fitted
 `bounds`. An obstruction shortens the band along its outward axis. The planner
 omits the band when its remaining space falls below the configured minimum.
+
+For a segmented carrier, pass `panels: [{id, min, max}, ...]` in place of
+`domain`. Panels, obstructions and the feature share one unfolded chart.
+Bands independently fit each panel and report its `panel` ID. A span that
+crosses a seam splits at the panel bounds while keeping the original mount
+coordinate along the outward axis. A band only extends into a panel that
+contains its mount. Leave a gap between panel bounds for seams or stock
+overhang. The caller maps each result back onto its physical surface.
 
 `fitFootprintContact` samples an oriented rectangular footprint in world XZ.
 The `center` supplies the horizontal origin and `tangent` sets the width

@@ -6,15 +6,29 @@
   const point = v => Array.isArray(v) && v.length === 2 && Array.from(v).every(Number.isFinite);
   const box = b => point(b?.min) && point(b?.max) && b.min.every((v, i) => v < b.max[i]);
 
-  function fitSurfaceBands({ domain, opening, edges, obstructions = [], clearance = 0 } = {}) {
+  function fitSurfaceBands({ domain, panels, opening, edges, obstructions = [], clearance = 0 } = {}) {
     if (
-      !box(domain) || !box(opening) || !edges || typeof edges !== 'object' || Array.isArray(edges) ||
+      !box(opening) || !edges || typeof edges !== 'object' || Array.isArray(edges) ||
       Object.keys(edges).some(key => !sides.some(([side]) => side === key)) ||
       !Array.isArray(obstructions) || obstructions.length > 4096 || !Array.from(obstructions).every(box) ||
       !Number.isFinite(clearance) || clearance < 0
     ) throw new Error('Surface bands need finite chart boxes, edge rules and bounded obstructions');
 
+    if (panels === undefined) {
+      if (!box(domain)) throw new Error('Surface bands need a finite chart domain');
+      panels = [domain];
+    } else if (
+      domain !== undefined || !Array.isArray(panels) || panels.length > 64 ||
+      !Array.from(panels).every(panel => box(panel) && typeof panel.id === 'string' && panel.id.length > 0) ||
+      new Set(panels.map(panel => panel.id)).size !== panels.length
+    ) throw new Error('Surface bands need up to 64 uniquely named panel domains');
+
     const bands = [];
+    for (const panel of panels) fitPanel(panel, opening, edges, obstructions, clearance, bands, domain === undefined);
+    return P.data.freeze(bands);
+  }
+
+  function fitPanel(domain, opening, edges, obstructions, clearance, bands, named) {
     for (const [edge, axis, sign] of sides) {
       if (edges[edge] === undefined || edges[edge] === false) continue;
       const cross = 1 - axis;
@@ -47,9 +61,9 @@
       max[cross] = hi;
       hinge[axis] = mount;
       hinge[cross] = (lo + hi) / 2;
-      bands.push({ edge, axis, sign, reach: room, span: hi - lo, bounds: { min, max }, hinge });
+      bands.push({ edge, axis, sign, reach: room, span: hi - lo, bounds: { min, max }, hinge,
+        ...(named && { panel: domain.id }) });
     }
-    return P.data.freeze(bands);
   }
 
   P.fitSurfaceBands = fitSurfaceBands;
