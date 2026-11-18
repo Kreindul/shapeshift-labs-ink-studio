@@ -33,6 +33,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
 | `fittedRibbon({inner, outer, pitch, gap, closed, phase, budget})` | Fit repeating bands along paired 2D or 3D rails. Each logical cell contains quadrilateral footprints split at source edges |
 | `fittedRailBand({inner, outer, pitch, gap, closed, phase, depth, direction, budget})` | Fit closed solid pieces along paired 3D rails. |
+| `clippedLattice({panels, runs, edges, edgeWidth, budget})` | Fit bar families and frames to convex chart patches, keeping gaps and member identities across patches. |
 | `surfaceCells.clip(cells, {boundary, holes, budget, work})` | Intersect convex cell footprints with a convex chart boundary and subtract convex holes. Group fragments by logical cell key |
 | `surfaceCells.loft(layout, {sample, levels, step, metadata, budget}, builder?)` | Map each fitted footprint onto two levels of a curved carrier. Emit closed, outward-wound fragments with shared cap and side vertices |
 | `panelFrames({width, height, unit, beam, braceWidth, braces, periodic, budget})` | Fit posts, rails and optional diagonal braces to rectangular bays. Get stable keyed footprints and a signed chart query |
@@ -1348,6 +1349,28 @@ returns closed convex pieces with bounds, a mesh, signed distance, ray
 intersections and surface samples. Piece keys include the cell, fragment and
 split index. Callers supply rails, normals and any clearance fields to compose
 with the band, for example along an opening, on a curved wall or at a deck edge.
+
+### Clipped lattices
+
+`KIT.procedural.clippedLattice({panels, runs, edges, edgeWidth, budget})`
+fits strips across a group of convex polygons in a common 2D chart. Each
+panel supplies a unique `key` and `polygon`. A run supplies `axis` (a
+2D vector perpendicular to its bars), `pitch`, `width` and an optional
+`phase` in fractions of the fitted pitch from `-.5` to `.5`. Each run
+fits a whole number of evenly spaced bars. Optional `edges` are pairs of
+chart points. They become frame strips of `edgeWidth` before clipping.
+Specify the exposed edges when multiple panels share a seam.
+
+`lattice.members` contains stable keys, bar or frame roles, and convex
+`{panel, polygon}` fragments. `lattice.pieces({map, direction, depth,
+owner, key, material, frameMaterial})` extrudes each fragment.
+`map(panel, point)` supplies a 3D position and keeps each panel planar.
+The direction can be a vector or a function of the panel key and need
+not be perpendicular to the panel. `depth` contains the two signed
+offsets along the normalized direction. Solid pieces support meshes,
+distance queries, ray hits and sampling. Use a panel per facet to map
+the same layout onto a curved carrier. The caller supplies the profile
+and decides when to insert the lattice.
 
 ### Bounded field probes
 
