@@ -57,6 +57,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `contacts.traceSdf(chart, sd, options)`, `contacts.expose(curves, occluder, options)`, `contacts.field(curves)`, `contacts.runoff(curves, project, options)` | Trace SDF contacts, expose visible runs, derive distance masks and follow downhill paths |
 | `tiles.compile(definitions)`, `tiles.solve(model, options)`, `tiles.learn(swatch)`, `tiles.overlap(bank, options)`, `tiles.wang(model, options)`, `tiles.refine(coarse, model, options)` | Weighted matched sockets, example-based synthesis, world-stable patterns and coarse-to-fine layouts |
 | `fields.simplex(options)`, `fields.periodic(options)`, `fields.compile(expression, options)` | Seeded analytic noise and serializable field composition for SDFs, materials and placement |
+| `grammar.expand(scope, rules, options)`, `grammar.children(layout)` | Bounded shape grammar with named partitions, fitted repeats, pinned spans, sockets and retained child specs |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -363,6 +364,48 @@ heights, shading, and displaced solids.
 ```sh
 node cli/ink-studio.js render examples/composed-fields.js --seed 0 --ortho --colored
 node cli/ink-studio.js render examples/composed-fields.js --seed 1 --ortho --colored
+```
+
+### Shape grammar and pinned bays
+
+`P.grammar.expand({id, symbol, bounds}, rules, options)` lays out named,
+axis-aligned scopes in local XYZ units. A production can reference another
+rule by its name. Use `null` to reserve an empty scope. The result contains
+parts and sockets with stable keys and a work count.
+
+- `split` divides a scope on an `axis`. Give each `parts` entry a `key`
+  and a production in `use`. A fixed `size` reserves world units.
+  `weight` shares the remaining space among flexible parts.
+- `repeat` fits cells at a nominal `pitch` on an `axis`. Supply `use`
+  for each bay and optional `gap` between bays. Pass inline `pins` or
+  use a `pinSet` name with `options.pinSets`. Each pin has a stable
+  `id`, absolute `at` coordinate and `span`. It can specify its own
+  `use` or use the operation's `pinUse` production.
+- `inset` moves the faces inwards by `margin`, or different XYZ `min` and
+  `max` margins. An `optional` inset may omit a scope too small to fit.
+- `group` evaluates named `children` in the same scope. A `choice`
+  picks one named production from positive weighted `options` using
+  the seed and scope lineage.
+- `emit` returns the scope's `bounds`, `center` and `half` dimensions
+  with a material or geometry `role`. Emitters are supplied by the caller.
+  A `socket` returns a `name`, point, and normal on the selected `axis`
+  and `side`. The other two positions come from normalized XYZ `at`.
+  Both can carry JSON `data`.
+
+Around a pin, bay keys count out from the pinned end of the span. When
+resizing adds bays towards an outer edge, the nearby keys stay stable.
+Call `grammar.children(layout)` and pass those child specs to
+`doc.derive(owner, rule, children)` so the existing authoring document
+preserves hand edits. Emit geometry with standard SDF nodes such as
+`S.box(part.center, part.half, material)`.
+
+The sample changes the width of a façade around a pinned entrance.
+The edited blue window, neighboring trim and socket attachments are
+realized from the retained document and baked to splats.
+
+```sh
+node cli/ink-studio.js render examples/pinned-facade.js --seed 0 --ortho --colored
+node cli/ink-studio.js render examples/pinned-facade.js --seed 1 --ortho --colored
 ```
 
 ## Optional retained authoring
