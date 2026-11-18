@@ -263,6 +263,14 @@ hold interval exposes an `engaged` pose before pursuing the target. Use
 controls how contacts are picked, which cues are available, and how the
 result is animated or rendered.
 
+`suspend(id)` temporarily puts a member under external control. Its pose
+has mode `suspended` and no point. The member keeps its identity and no
+longer participates in habitat queries or separation. Use
+`resume(id, context, point?)` to project a release point back onto the
+current habitat. Omitting the point starts the search from the member's
+last position. Both methods return whether the state changed. The caller
+can use the same member on a moving platform or during a scripted scene.
+
 ### Ordered paint coverage
 
 `materials.paintMixer([{id, coverage, operation}, ...])` accepts layers in

@@ -22,7 +22,7 @@
       const spec = Object.freeze({ id, kind, home: Object.freeze(home.slice()), speed, radius, range,
         rest: Object.freeze(rest.slice()), turn, seed: P.data.hash('ambient-motion/' + id, seed) });
       entries.set(id, { spec, point: null, last: null, yaw: angle(yaw), lastYaw: angle(yaw), distance: 0, lastDistance: 0,
-        serial: 0, mode: 'rest', until: 0, target: null, signal: null, detour: null });
+        serial: 0, mode: 'rest', until: 0, target: null, signal: null, detour: null, suspended: false });
     }
     const states = [...entries.values()].sort((a, b) => a.spec.id < b.spec.id ? -1 : 1);
     let tick = 0, remainder = 0;
@@ -35,7 +35,7 @@
     }
     function spaced(point, state) {
       return states.every(other => {
-        if (other === state || !other.point) return true;
+        if (other === state || other.suspended || !other.point) return true;
         const distance = state.spec.radius + other.spec.radius;
         if (V.dist(point, other.point) >= distance - 1e-6) return true;
         // Permit a member to increase separation after a habitat change.
@@ -67,7 +67,8 @@
       }
     }
     function reconcile(context) {
-      for (const state of states) settle(state, state.point || state.spec.home, tick * step, context);
+      for (const state of states)
+        if (!state.suspended) settle(state, state.point || state.spec.home, tick * step, context);
     }
     function goal(state, context) {
       const { spec } = state, serial = state.serial++;
@@ -96,6 +97,7 @@
       state.yaw = angle(state.yaw + Math.max(-cap, Math.min(cap, delta)));
     }
     function integrate(state, now, context) {
+      if (state.suspended) return;
       const { spec, point } = state;
       state.last = point;
       state.lastYaw = state.yaw;
@@ -159,7 +161,7 @@
     }
     function attract(id, point, { hold = .55, duration = 5, stop = .65 } = {}) {
       const state = entries.get(id);
-      if (!state?.point || !vector(point) || !within(duration, .05, 60) ||
+      if (!state?.point || state.suspended || !vector(point) || !within(duration, .05, 60) ||
           !within(hold, 0, duration) || !within(stop, .02, 10))
         throw Error('Ambient attraction needs an active member, target and bounded timing');
       state.target = null;
@@ -171,16 +173,37 @@
       const state = entries.get(id);
       if (state?.signal) state.signal.point = point.slice();
     }
+    function suspend(id) {
+      const state = entries.get(id);
+      if (!state || state.suspended) return false;
+      state.suspended = true;
+      state.signal = null;
+      state.target = null;
+      state.detour = null;
+      state.lastYaw = state.yaw;
+      state.lastDistance = state.distance;
+      return true;
+    }
+    function resume(id, context, point) {
+      const state = entries.get(id);
+      if (!state?.suspended) return false;
+      if (point !== undefined && !vector(point)) throw Error('Ambient release point must be an XYZ point');
+      const now = tick * step;
+      settle(state, point || state.point || state.spec.home, now, context);
+      if (state.point) rest(state, now);
+      state.suspended = false;
+      return true;
+    }
     function poses() {
       const blend = remainder / step;
       return states.map(state => ({
-        id: state.spec.id, kind: state.spec.kind, mode: state.mode,
-        point: state.point && V.mad(state.last, V.sub(state.point, state.last), blend),
+        id: state.spec.id, kind: state.spec.kind, mode: state.suspended ? 'suspended' : state.mode,
+        point: !state.suspended && state.point ? V.mad(state.last, V.sub(state.point, state.last), blend) : null,
         yaw: angle(state.lastYaw + angle(state.yaw - state.lastYaw) * blend),
         distance: state.lastDistance + (state.distance - state.lastDistance) * blend
       }));
     }
-    return Object.freeze({ reconcile, advance, attract, retarget, poses, get time() { return tick * step; } });
+    return Object.freeze({ reconcile, advance, attract, retarget, suspend, resume, poses, get time() { return tick * step; } });
   }
   P.ambientMotion = Object.freeze({ create });
 })(KIT);

@@ -68,3 +68,35 @@ test('habitat edits relocate or suspend a member while retaining its identity', 
   assert(a.poses()[0].point[0] > 1);
   assert.throws(() => a.advance(2), /elapsed/);
 });
+
+test('a suspended member yields its space and resumes on the current habitat', () => {
+  const queries = [];
+  const a = ambientMotion.create(roster, {
+    place: ([x, , z], spec, y) => {
+      queries.push(spec.id);
+      return [x, y, z];
+    },
+    move
+  });
+  a.reconcile(0);
+  a.attract('a', [1, 0, 0]);
+  assert.equal(a.suspend('a'), true);
+  assert.equal(a.suspend('a'), false);
+  assert.equal(a.suspend('missing'), false);
+  const paused = a.poses()[0];
+  assert.equal(paused.mode, 'suspended');
+  assert.equal(paused.point, null);
+  queries.length = 0;
+  a.reconcile(2);
+  a.attract('b', [-.3, 0, 0], { hold: 0, duration: 4, stop: .02 });
+  a.advance(.95, 2);
+  assert(!queries.includes('a'));
+  assert(a.poses()[1].point[0] < -.22);
+  assert.deepEqual(a.poses()[0], paused);
+  assert.throws(() => a.resume('a', 2, [NaN, 0, 0]), /release point/);
+  assert.equal(a.poses()[0].mode, 'suspended');
+  assert(a.resume('a', 2, [3, 5, 4]));
+  assert.deepEqual(a.poses()[0].point, [3, 2, 4]);
+  assert.equal(a.poses()[0].mode, 'rest');
+  assert.equal(a.resume('a', 2), false);
+});
