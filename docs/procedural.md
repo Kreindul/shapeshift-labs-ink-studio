@@ -1584,6 +1584,13 @@ namespaced family ID. Compile an ordered list of active pack IDs for each
 scene. Later entries take precedence. The resulting resolver keeps the
 authored family IDs intact, validates cycles, and reports missing packs.
 
+`assetPacks.reviseFamily(pack, familyId, patch)` prepares a portable
+replacement for a family in an installed pack. The patch can update its
+variants, bounds, sockets, label, and tags. A changed family advances
+its version and the pack revision while keeping the stable IDs and
+required sockets. Identical content keeps the current revision. Hosts
+can use this operation with a file watcher or a manual replacement.
+
 `KIT.authoring.assetMeshes.fromGLB(bytes, {size})` imports a small static
 triangle model into a self-contained JSON recipe with fitted ground
 coordinates and bounded face colors. `assetMeshes.recipe(mesh, {size})`

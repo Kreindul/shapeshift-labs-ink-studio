@@ -28,6 +28,26 @@
       families, replacements });
   }
 
+  // Live imports can update the contents of a family while scenes retain its ID.
+  function reviseFamily(input, id, changes) {
+    const pack = manifest(input), index = pack.families.findIndex(f => f.id === id);
+    if (index === -1) throw Error('Unknown asset family: ' + id);
+    const fields = ['label','tags','bounds','sockets','variants'];
+    if (!object(changes) || Object.keys(changes).some(key => !fields.includes(key)))
+      throw Error('Asset revision needs editable family fields');
+
+    const previous = pack.families[index], families = pack.families.slice();
+    families[index] = { ...previous, ...changes };
+    const staged = manifest({ ...pack, families });
+    const compare = value => JSON.stringify(value, (_, node) => object(node)
+      ? Object.fromEntries(Object.keys(node).sort().map(key => [key,node[key]]))
+      : node);
+    if (compare(previous) === compare(staged.families[index])) return pack;
+
+    families[index] = { ...staged.families[index], version: previous.version + 1 };
+    return manifest({ ...pack, revision: pack.revision + 1, families });
+  }
+
   function create({ families = [], packs = [] } = {}) {
     if (!Array.isArray(families) || !Array.isArray(packs)) throw Error('Asset catalog needs family and pack arrays');
     const registry = A.assets();
@@ -83,5 +103,5 @@
       compile
     });
   }
-  A.assetPacks = Object.freeze({ create, manifest });
+  A.assetPacks = Object.freeze({ create, manifest, reviseFamily });
 })(KIT);

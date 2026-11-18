@@ -29,6 +29,23 @@ test('asset catalogs expose additions and resolve ordered compatible replacement
   assert.throws(()=>A.assetPacks.create({packs:[first,first]}),/Duplicate/);
 });
 
+test('source revisions keep identity and replacement order, and skip identical content',()=>{
+  const base=family('lamp'), blue=extension('blue',{lamp:'blue/lamp'});
+  const next=A.assetPacks.reviseFamily(blue,'blue/lamp',{variants:[{id:'one',recipe:{type:'example',size:2}}]});
+  assert.equal(next.id,blue.id);
+  assert.equal(next.revision,2);
+  assert.equal(next.families[0].id,blue.families[0].id);
+  assert.equal(next.families[0].version,2);
+  const catalog=A.assetPacks.create({families:[base],packs:[next,extension('clay',{lamp:'clay/lamp'})]});
+  assert.equal(catalog.compile(['clay','blue']).choose('lamp','slot',3).recipe.size,2);
+  assert.deepEqual(A.assetPacks.reviseFamily(next,'blue/lamp',{
+    variants:[{recipe:{size:2,type:'example'},id:'one',weight:1}]
+  }),next);
+  assert.equal(blue.families[0].variants[0].recipe.size,1);
+  assert.throws(()=>A.assetPacks.reviseFamily(next,'blue/lamp',{id:'blue/new'}),/editable/);
+  assert.throws(()=>A.assetPacks.reviseFamily(next,'blue/lamp',{sockets:{}}),/required socket/);
+});
+
 function makeGLB(nodes=[{mesh:0}]) {
   const positions=[-1,0,0,1,0,0,0,1,0];
   const bin=Buffer.alloc(36);
