@@ -25,19 +25,20 @@
       if (!drawing) throw new Error('Frame splat commands are only available inside its draw callback');
     }
 
-    function style({ width = 0.04, color = 1, density = 2, emissive = true }) {
+    function style({ width = 0.04, color = 1, rgb, density = 2, emissive = true }) {
       if (
         !(width > 0) ||
         !Number.isFinite(width) ||
         !(density >= 0) ||
         !Number.isFinite(density) ||
-        !Number.isInteger(color) ||
-        color < 0 ||
-        color >= palette.length
+        (rgb === undefined ? !Number.isInteger(color) || color < 0 || color >= palette.length :
+          !finiteVector(rgb, 3) || !Array.from(rgb).every(value => value >= 0 && value <= 1))
       ) {
         throw new Error('A stroke needs a positive width, a palette index and a nonnegative density');
       }
-      return { width, packed: palette[color], density, flags: emissive ? NO_DEPTH | EMISSIVE : NO_DEPTH };
+      const packed = rgb === undefined ? palette[color] :
+        Math.round(rgb[0] * 255) + Math.round(rgb[1] * 255) * 256 + Math.round(rgb[2] * 255) * 65536;
+      return { width, packed, density, flags: emissive ? NO_DEPTH | EMISSIVE : NO_DEPTH };
     }
 
     function putStreak(a, b, paint) {
@@ -52,6 +53,10 @@
     }
 
     const draw = Object.freeze({
+      point(position, options) {
+        return draw.streak(position, position, options);
+      },
+
       streak(a, b, options = {}) {
         requireFrame();
         if (!finiteVector(a, 3) || !finiteVector(b, 3)) throw new Error('A streak needs two finite endpoints');
@@ -160,6 +165,8 @@
     });
 
     return {
+      first: pool.first,
+      count: capacity,
       bind(st) {
         if (stage) throw new Error('A frame splat system can only be attached once');
         if (pool.first + capacity > st.N) throw new Error('Allocate frame splats before finishing the world');

@@ -89,6 +89,13 @@ In JSON, `mat.surface` accepts a preset ID or a settings object. Add a `preset` 
 
 The browser script bundle exposes `SurfaceLook` alongside `PixelLook`. Host renderers can cache `SurfaceLook.prepare(settings, palette, lightDirection)` and call `SurfaceLook.shade(prepared, sample, baseRgb, result)`. A sample takes world-space `position`, `normal` and `view` toward the eye, plus optional `tangent`, `visibility`, `footprint` and `time`. The result contains normalized RGB, a coverage multiplier and a glint weight. The finished world includes `surfaces` with material bindings and `surfaceData` with one row per baked splat. `SurfaceLook.STRIDE` is the row length. Row fields are the one-based binding ID (zero for an ordinary splat), XYZ normal, direct-light visibility and optional XYZ tangent. Hosts with skeletal or procedural transforms should supply the rest-space material position and transform the frame consistently with their geometry and lighting.
 
+## Project animated paint and patterns
+
+Use a `projected` layer for animated pixel rasters, field-driven patterns,
+or a JavaScript shader. Existing finish layers can read the same fields
+through a field mask. See the [projected effects guide](projected-effects.md)
+for field authoring, local palettes, and emitters.
+
 ## Animate the finish light
 
 Set `light.surfaceDirection` in a JSON scene, or pass `surfaceLight` to

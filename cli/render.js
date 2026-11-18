@@ -103,15 +103,19 @@ function render(world, o) {
       })
     );
     const palette = world.pal.map(h => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255]);
+    const local = native.localAt && {
+      at: native.localAt, palettes: native.localPalettes, output: PixelLook.outputPalettes(world.pal, native.localPalettes)
+    };
     const img = PixelLook.resolve(
       Object.assign(samples, {
         palette,
+        local,
         grade: world.anim && world.anim.grade,
         interiorColor: native.color,
         dither: (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither
       })
     );
-    return Object.assign(img, { px, drawn: samples.drawn });
+    return Object.assign(img, { px, drawn: samples.drawn }, native.detail && { detail: native.detail });
   }
   /* orthographic (o.ortho): no perspective, every ray parallel, the picture as big as the perspective one is at the target. The eye
      is set well back, so nothing comes behind it however far in the camera zooms; the zoom is the size of the view */
@@ -177,6 +181,10 @@ function render(world, o) {
     time: t
   });
   const surfaceGlint = surface ? new Uint8Array(W * H) : null;
+  const localAt = surface?.palettes.length && !o.raw ? new Uint32Array(W * H) : null;
+  const hasEffectInk = world.effectParticles?.length || world.surfaces?.some(({ settings }) =>
+    Object.values(settings.layers || {}).some(layer => layer?.type === 'projected'));
+  const detail = hasEffectInk ? new Uint8Array(W * H) : null;
   // where each splat is at this moment, and what it looks like
   const X = new Float32Array(N),
     Y = new Float32Array(N),
@@ -395,14 +403,17 @@ function render(world, o) {
     let coverage = 1,
       glint = 0;
     const planar = surface?.planar(i);
-    const pixelSurface = PIX?.[i * 8] && (!planar || (al >= 1 && !(flags & 1)));
-    if (hasSurface && !pixelSurface && !planar) {
+    const pixelSurface = PIX?.[i * 8] && !surface?.reveals(i) && (!planar || (al >= 1 && !(flags & 1)));
+    const projected = surface?.projected(i);
+    const fragmentSurface = !pixelSurface && (planar || projected);
+    const detailParticle = world.effectParticles?.some(({ first, count }) => i >= first && i < first + count);
+    if (hasSurface && !pixelSurface && !fragmentSurface) {
       [r, g, b, coverage, glint] = surface.shade(i, x, y, z, x, y, z, r, g, b);
     }
     const fogMix =
       !(flags & 2) && world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dn) * world.fog.max : 0;
     const reflectInRaster = planar && !pixelSurface;
-    const normal = reflectInRaster ? surface.surfaceNormal(i) : null;
+    const normal = fragmentSurface ? surface.surfaceNormal(i) : null;
     if (fogMix && !reflectInRaster) {
       r += (fog[0] - r) * fogMix;
       g += (fog[1] - g) * fogMix;
@@ -415,7 +426,7 @@ function render(world, o) {
       x1 = Math.min(W - 1, Math.ceil(sx + ex)),
       y0 = Math.max(0, Math.floor(sy - ey)),
       y1 = Math.min(H - 1, Math.ceil(sy + ey));
-    const coat = PIX && hasSurface && (!writesDepth || reflectInRaster);
+    const coat = PIX && hasSurface && (!writesDepth || reflectInRaster || surface.reveals(i));
     if (coat && !surfaceOverlay) surfaceOverlay = new Float32Array(W * H * 4);
     r = Math.min(r, 1);
     g = Math.min(g, 1);
@@ -458,7 +469,8 @@ function render(world, o) {
           pg = g,
           pb = b,
           alpha = coverage,
-          highlight = glint;
+          highlight = glint,
+          paletteId = 0;
         if (fi >= 0) {
           const u = clamp(Math.floor((i00 * dx + i01 * dy) * 2 + 2), 0, 3),
             v = clamp(Math.floor((i10 * dx + i11 * dy) * 2 + 2), 0, 3),
@@ -481,12 +493,14 @@ function render(world, o) {
           pg = Math.min(1, pg * exposure + (tint?.[1] ?? 0));
           pb = Math.min(1, pb * exposure + (tint?.[2] ?? 0));
         }
-        if (reflectInRaster) {
+        if (fragmentSurface) {
           const hit = surfacePoint(rayAt(ix + 0.5, iy + 0.5), normal, x, y, z, -cz, R);
-          [pr, pg, pb, alpha, highlight] = surface.shade(i, ...hit, x, y, z, pr, pg, pb, ix + 0.5, iy + 0.5);
-          pr += (fog[0] - pr) * fogMix;
-          pg += (fog[1] - pg) * fogMix;
-          pb += (fog[2] - pb) * fogMix;
+          [pr, pg, pb, alpha, highlight, paletteId] = surface.shade(i, ...hit, x, y, z, pr, pg, pb, ix + 0.5, iy + 0.5);
+          if (reflectInRaster) {
+            pr += (fog[0] - pr) * fogMix;
+            pg += (fog[1] - pg) * fogMix;
+            pb += (fog[2] - pb) * fogMix;
+          }
         }
         a *= alpha;
         if (a < 0.004) continue;
@@ -498,7 +512,13 @@ function render(world, o) {
         col[p3 + 1] = pg * a + col[p3 + 1] * ia;
         col[p3 + 2] = pb * a + col[p3 + 2] * ia;
         if (captured) captured[p] = a + captured[p] * ia;
-        if (surfaceGlint && a > 0.5) surfaceGlint[p] = highlight > 0.22;
+        if (surfaceGlint && a > 0.5) surfaceGlint[p] = highlight > 0.22 || detailParticle;
+        if (localAt && a > 0.5) localAt[p] = paletteId || 0;
+        if (detail) {
+          const q = (H - 1 - iy) * W + ix;
+          if (a > 0.5) detail[q] = 0;
+          if (a > 0.24 && (detailParticle || (projected && highlight > 0.22))) detail[q] = 1;
+        }
         if (surfaceOverlay) {
           const j = p * 4;
           if (wd && a > 0.5) surfaceOverlay.fill(0, j, j + 4);
@@ -513,7 +533,7 @@ function render(world, o) {
           dep[p] = dn * a + dep[p] * ia;
           gls[p] *= ia;
           if (a > 0.5) {
-            if (win) win[p] = i;
+            if (win) win[p] = surface?.reveals(i) ? -1 : i;
             if (axialDepth) axialDepth[p] = -cz;
           }
         } else if (glass) gls[p] = Math.min(1, gls[p] + a * 0.5);
@@ -768,6 +788,10 @@ function render(world, o) {
             : base,
           kf = world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dep[p]) * world.fog.max : 0;
         if (surfaceGlint) surfaceGlint[p] = c[4] > 0.22;
+        if ((surfaceOverlay?.[p * 4 + 3] || 0) < 0.5) {
+          if (localAt) localAt[p] = c[5] || 0;
+          if (detail && surface?.projected(i) && c[4] > 0.22) detail[(H - 1 - y) * W + x] = 1;
+        }
         col[p * 3] = c[0] + (fog[0] - c[0]) * kf;
         col[p * 3 + 1] = c[1] + (fog[1] - c[1]) * kf;
         col[p * 3 + 2] = c[2] + (fog[2] - c[2]) * kf;
@@ -894,6 +918,8 @@ function render(world, o) {
         col[q * 3 + 1] = c[1];
         col[q * 3 + 2] = c[2];
         if (axialDepth) axialDepth[q] = eyeD - R + sprD[q] * 2 * R;
+        if (localAt) localAt[q] = 0;
+        if (detail) detail[(H - 1 - Math.floor(q / W)) * W + q % W] = 0;
         dep[q] = sprD[q]; // (so the clean-up sees it as part of the thing, and leaves it as drawn)
         pixed[q] = 1;
         sprM[q] = 1;
@@ -933,7 +959,10 @@ function render(world, o) {
           c2[p * 3 + 2] = col[q * 3 + 2] * k;
         }
     }
-    return { w: W, h: H, color: Uint8Array.from(c2, v => Math.round(clamp(v, 0, 1) * 255)), depth: dep, drawn };
+    return {
+      w: W, h: H, color: Uint8Array.from(c2, v => Math.round(clamp(v, 0, 1) * 255)), depth: dep, drawn,
+      ...(localAt && { localAt, localPalettes: surface.palettes }), ...(detail && { detail })
+    };
   }
   // the second pass: an outline where the picture steps back sharply, a little ordered noise, then the nearest colour of the palette
   const out = new Uint8Array(W * H * 3),
@@ -943,7 +972,8 @@ function render(world, o) {
   const edge = world.outline && world.outline.edge ? world.outline.edge / (2 * R) : 0,
     line = hex(world.outline ? world.outline.c : 0),
     dith = (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither,
-    use = new Uint32Array(tone ? tone.palette.length : np),
+    localOutput = localAt && PixelLook.outputPalettes(tone?.palette || world.pal, surface.palettes),
+    use = new Uint32Array(localOutput?.packed.length ?? (tone ? tone.palette.length : np)),
     ln = look.lines ? (look.lines === true ? {} : look.lines) : null,
     lines = !!ln,
     lineGap = ln ? (ln.gap || 0.3) / (2 * R) : 1,
@@ -1026,9 +1056,11 @@ function render(world, o) {
         g = line[1];
         b = line[2];
       }
-      if (tone) {
-        const index = PixelLook.toneIndex(tone, r, g, b, x, yo);
-        const color = tone.palette[index];
+      const localId = outlined ? 0 : localAt?.[p];
+      if (tone || localId) {
+        const index = localId ? localOutput.rows[localId - 1][PixelLook.nearest([r, g, b], surface.palettes[localId - 1], false)] :
+          PixelLook.toneIndex(tone, r, g, b, x, yo);
+        const color = (localOutput?.packed || tone.palette)[index];
         use[index]++;
         out[q] = color >> 16;
         out[q + 1] = (color >> 8) & 255;
@@ -1106,7 +1138,7 @@ function render(world, o) {
       for (let x = 0; x < W; x++) {
         const q = at(x, y);
         const pixel = (H - 1 - y) * W + x;
-        if (sprM?.[pixel] || surfaceGlint?.[pixel]) continue;
+        if (sprM?.[pixel] || surfaceGlint?.[pixel] || detail?.[q / 3]) continue;
         // outlines, as on the page: a notch is filled from what is round it, a bump against the background taken off
         const e0 = empty(x, y),
           N4 = N8.slice(0, 4),
@@ -1200,7 +1232,11 @@ function render(world, o) {
         out[q + 2] = src[best + 2];
       }
   }
-  return { w: W, h: H, px, rgb: out, drawn, use, ...(tone && { palette: tone.palette }) };
+  return {
+    w: W, h: H, px, rgb: out, drawn, use,
+    ...((localOutput || tone) && { palette: localOutput?.packed || tone.palette }),
+    ...(detail && { detail })
+  };
 }
 // make every art pixel k screen pixels wide, the way the page shows it
 function upscale(img, k) {

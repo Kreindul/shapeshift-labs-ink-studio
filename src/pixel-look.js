@@ -84,12 +84,26 @@ const PixelLook = (() => {
     }
     return best;
   }
+  function outputPalettes(base, locals) {
+    const packed = base.slice();
+    const indices = new Map(packed.map((color, index) => [color, index]));
+    const rows = locals.map(palette => palette.map(([r, g, b]) => {
+      const color = (Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255);
+      if (!indices.has(color)) {
+        indices.set(color, packed.length);
+        packed.push(color);
+      }
+      return indices.get(color);
+    }));
+    return { packed, rows };
+  }
+
   function ink(body) {
     const shade = body.map(v => v * 0.64), luma = shade.reduce((n, v, k) => n + v * weights[k], 0);
     return shade.map(v => Math.min(1, v * Math.max(1, 0.12 / Math.max(luma, 0.001))));
   }
-  function resolve({ color, depth, w, h, palette, grade, interiorColor, dither = 0 }) {
-    const width = w / 2, height = h / 2, rgb = new Uint8Array(width * height * 3), use = new Uint32Array(palette.length);
+  function resolve({ color, depth, w, h, palette, grade, interiorColor, dither = 0, local }) {
+    const width = w / 2, height = h / 2, rgb = new Uint8Array(width * height * 3), use = new Uint32Array(local?.output.packed.length ?? palette.length);
     const mapped = i => grade ? grade.slice(i * 3, i * 3 + 3) : palette[i];
     const at = (x, y) => Math.max(0, Math.min(h - 1, y)) * w + Math.max(0, Math.min(w - 1, x));
     const z = (x, y) => Math.min(...[at(x * 2, y * 2), at(x * 2 + 1, y * 2), at(x * 2, y * 2 + 1), at(x * 2 + 1, y * 2 + 1)].map(i => depth[i]));
@@ -100,6 +114,17 @@ const PixelLook = (() => {
       const base = (y * width + x) * 3;
       const native = interiorColor ? [0, 1, 2].map(k => interiorColor[base + k] / 255) : average;
       const noise = interiorColor ? (bayerRank(x, y) - 0.5) * dither : 0;
+      const localId = local?.at[y * width + x];
+      if (localId) {
+        const id = localId - 1;
+        const index = local.output.rows[id][nearest(native, local.palettes[id], false)];
+        const tone = local.output.packed[index], q = ((height - 1 - y) * width + x) * 3;
+        rgb[q] = tone >> 16;
+        rgb[q + 1] = (tone >> 8) & 255;
+        rgb[q + 2] = tone & 255;
+        use[index]++;
+        continue;
+      }
       let selected = nearest(native.map(v => Math.max(0, Math.min(1, v + noise))), palette, false);
       let c = Array.from(mapped(selected));
       const votes = new Map(); let best = -1, score = 0, coverage = 0;
@@ -126,7 +151,7 @@ const PixelLook = (() => {
       const q = ((height - 1 - y) * width + x) * 3;
       c.forEach((v, k) => { rgb[q + k] = Math.round(Math.max(0, Math.min(1, v)) * 255); });
     }
-    return { w: width, h: height, rgb, use };
+    return { w: width, h: height, rgb, use, ...(local && { palette: local.output.packed }) };
   }
   const glsl = `
 int pixelNearest(vec3 c, bool solid) {
@@ -196,6 +221,6 @@ vec3 inkToneResolve(vec3 color, ivec2 pixel) {
   float rank = texelFetch(u_inkToneRanks, pixel % textureSize(u_inkToneRanks, 0), 0).r;
   return share >= mix(0.5, rank, u_inkToneAmount) ? b.rgb : a.rgb;
 }`;
-  return { nearest, ink, resolve, glsl, presets, toneSettings, prepareTone, toneIndex, toneGlsl, bayerRank };
+  return { nearest, ink, resolve, glsl, presets, toneSettings, prepareTone, toneIndex, toneGlsl, bayerRank, outputPalettes };
 })();
 if (typeof module !== 'undefined') module.exports = PixelLook;

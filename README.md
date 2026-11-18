@@ -22,6 +22,7 @@ The package includes geometry, materials, lighting, animation, character control
 - [Retained authoring](#retained-authoring)
 - [Rendering and command reference](#rendering-and-command-reference)
 - [View-dependent surface materials](#view-dependent-surface-materials)
+- [Projected and procedural effects](#projected-and-procedural-effects)
 - [Reflections, ripples and atmosphere](#reflections-ripples-and-atmosphere)
 - [Embedding and custom scene collections](#embedding-and-custom-scene-collections)
 - [Module reference](#module-reference)
@@ -624,7 +625,7 @@ Use `ink-studio catalog <words>` to search catalog entries and follow their `whe
 | `render <scene> --t 1.5` | Render one PNG at a chosen time. |
 | `sheet <scene> --from 0 --to 3 --n 12` | Make a labeled sheet of animation frames. |
 | `turn <scene> --n 8` | Make a sheet from multiple viewing angles. |
-| `clip <scene> --from 0 --to 3 --fps 12` | Save an animated PNG. |
+| `clip <scene> --from 0 --to 3 --fps 12` | Save an animated PNG. Use `--text ascii\|symbols\|braille\|blocks` for animated text rendering. |
 | `ghost <scene> --t 1 --spacing 0.12 --n 2` | Overlay neighboring animation poses. |
 | `mesh <file.obj\|.gltf\|.glb>` | Import, inspect and render a mesh from multiple angles. |
 | `depth <map.png or map.json> [--image color.png]` | Build a splat preview, signed field and OBJ from a depth map. |
@@ -684,6 +685,14 @@ For per-pixel materials, set `S.pixel = true` before baking and finish the world
 ## View-dependent surface materials
 
 `KIT.surface` adds finishes to ordinary sculpt materials. The builder records which finish and surface normal a splat uses. The renderer evaluates the layers with the current camera and light direction, so orbiting needs no rebake. You can use the 40 named presets as supplied, override an individual layer, or compose your own finish. See the [surface material guide](docs/surface-materials.md) for the full preset list, options, JSON examples, and rendering commands.
+
+## Projected and procedural effects
+
+Use projected material layers to paint animated RGB or RGBA rasters and
+procedural patterns onto splat surfaces. Shared fields let a moving object
+reveal a surface, leave a wake, warp the surface pattern, or drive particle
+emission. The effects also render through the ASCII and Braille passes.
+See [projected splat effects](docs/projected-effects.md) for recipes and APIs.
 
 ## Reflections, ripples and atmosphere
 

@@ -2,6 +2,7 @@
    in world space and is shared by the software renderer and script bundle. */
 const SurfaceLook = (() => {
   const optics = typeof SceneOptics === 'undefined' ? require('./scene-optics.js') : SceneOptics;
+  const effects = typeof SplatEffects === 'undefined' ? require('./splat-effects.js') : SplatEffects;
   const STRIDE = 8; // binding ID (one-based), normal XYZ, visibility, optional tangent XYZ
   const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
   const WHITE = [1, 1, 1];
@@ -282,7 +283,7 @@ const SurfaceLook = (() => {
     }
   }
 
-  function prepare(settings, palette = [], lightDirection = [-0.55, 0.72, 0.43]) {
+  function prepare(settings, palette = [], lightDirection = [-0.55, 0.72, 0.43], context = {}) {
     if (!isRecord(settings)) throw new TypeError('Surface settings must be an object');
     numeric(settings, ['scale', 'seed', 'steps'], 'surface');
     if (settings.layers !== undefined && !isRecord(settings.layers))
@@ -330,7 +331,8 @@ const SurfaceLook = (() => {
     const layers = Object.entries(settings.layers || {})
       .filter(([, layer]) => layer && layer.strength !== 0)
       .map(([id, layer]) => {
-        if (!Object.hasOwn(models, layer.type)) throw new RangeError('Unknown surface layer: ' + layer.type);
+        if (layer.type !== 'projected' && !Object.hasOwn(models, layer.type))
+          throw new RangeError('Unknown surface layer: ' + layer.type);
         numeric(
           layer,
           [
@@ -371,11 +373,18 @@ const SurfaceLook = (() => {
           if ((layer.blur ?? 0) < 0 || (layer.distortion ?? 0) < 0)
             throw new RangeError(id + ' needs nonnegative blur and distortion');
         }
-        if (layer.mask && typeof layer.mask !== 'function') {
+        const fieldMask = layer.mask?.type === 'field' ? effects.fieldMask(layer.mask, context) : null;
+        if (layer.mask && typeof layer.mask !== 'function' && !fieldMask) {
           if (!isRecord(layer.mask)) throw new TypeError(id + '.mask must be an object');
           if (!['noise', 'stripes', 'checker'].includes(layer.mask.type))
             throw new RangeError('Unknown surface mask: ' + layer.mask.type);
           numeric(layer.mask, ['scale', 'low', 'high', 'seed', 'phase', 'width', 'feather'], id + '.mask');
+        }
+        if (layer.type === 'projected') {
+          const blend = layer.blend ?? 'mix';
+          if (!['mix', 'add', 'multiply'].includes(blend)) throw new RangeError('Unknown projected blend: ' + blend);
+          const effect = effects.layer(layer, context, value => color(value, palette));
+          return { ...layer, id, blend, strength: clamp(layer.strength ?? 1), effect, fieldMask };
         }
         if (layer.colors !== undefined && !Array.isArray(layer.colors))
           throw new TypeError(id + '.colors must be a list');
@@ -390,6 +399,7 @@ const SurfaceLook = (() => {
         return {
           ...layer,
           id,
+          fieldMask,
           model: models[layer.type],
           strength: clamp(layer.strength ?? 1),
           roughness: [roughness[0], roughness[1] ?? roughness[0]].map(v =>
@@ -405,11 +415,16 @@ const SurfaceLook = (() => {
           sine: Math.sin(layer.rotation || 0)
         };
       });
-    return { settings, normal, layers, sun: unit(vector(lightDirection, AXES.y)) };
+    return {
+      settings, normal, layers, sun: unit(vector(lightDirection, AXES.y)),
+      projected: layers.some(layer => layer.effect || layer.fieldMask),
+      reveals: layers.some(layer => layer.effect?.reveals)
+    };
   }
 
   /* Inputs are RGB in 0..1 and a world-space sample. Output packs RGB, the opacity
-     multiplier and a glint mask (used to keep the pixel cleanup pass from erasing highlights). */
+     multiplier, a glint mask and, for projected paint, an optional local palette.
+     Supply a normal Array when you want to retain the palette reference. */
   function shade(prepared, sample, base, output = [0, 0, 0, 1, 0]) {
     const { settings, layers } = prepared;
     const sun = sample.lightDirection ?? prepared.sun;
@@ -459,14 +474,29 @@ const SurfaceLook = (() => {
         )
       : 1;
     output[4] = 0;
+    if (prepared.projected || output.length > 5) output[5] = undefined;
     let maskFrame;
     for (const layer of layers) {
       if (typeof layer.mask === 'function' && !maskFrame) maskFrame = {
         normal: geometricNormal, tangent: geometricTangent, bitangent: cross(geometricNormal, geometricTangent),
-        footprint: sample.footprint || 0
+        footprint: sample.footprint || 0, time: sample.time || 0
       };
-      const strength = layer.strength * maskAt(layer.mask, p, seed, position, maskFrame);
+      const strength = layer.strength *
+        (layer.fieldMask ? layer.fieldMask(sample) : maskAt(layer.mask, p, seed, position, maskFrame));
       if (!strength) continue;
+      if (layer.effect) {
+        const result = layer.effect.sample(sample, output);
+        const amount = clamp(result[3] * strength);
+        output[3] *= mix(1, clamp(result[4]), strength);
+        output[4] = Math.max(output[4], clamp(result[5] * strength));
+        if (amount >= 0.5) output[5] = layer.effect.palette;
+        for (let i = 0; i < 3; i++) {
+          const next = layer.blend === 'add' ? output[i] + result[i] :
+            layer.blend === 'multiply' ? output[i] * result[i] : result[i];
+          output[i] = clamp(mix(output[i], next, amount));
+        }
+        continue;
+      }
       const { cosine: c, sine: s } = layer;
       shading.ht = tx * c + bx * s;
       shading.hb = bx * c - tx * s;

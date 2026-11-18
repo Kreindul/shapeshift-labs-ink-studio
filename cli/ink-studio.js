@@ -224,6 +224,15 @@ const save = (name, img) => {
   console.log('wrote', f, img.w + 'x' + img.h);
   return f;
 };
+const asciiFrame = (image, world) => lib().KIT.ascii.draw(image, {
+  set: opt.text === true ? 'ascii' : opt.text,
+  g: num('tg', 2),
+  px: opt.px1 ? 1 : image.px,
+  colour: opt.tcolour || 'scene',
+  pal: image.palette || world.pal
+});
+const displayFrame = (image, world) => opt.text ? asciiFrame(image, world) : R.upscale(image, opt.px1 ? 1 : image.px);
+const textSidecar = file => file.replace(/\.(?:a?png)$/i, '') + '.txt';
 const times = () =>
   opt.t !== undefined
     ? list('t')
@@ -250,7 +259,7 @@ const CMD = {
         '  values <id> [--t 1.5]       the value check: the picture sorted into dark, middle and light, and whether it reads in three tones',
         '  sheet <id> [--from 0 --to 6 --n 12 | --t 0,1,2]   the same view at several moments, on one sheet',
         '  turn <id> [--n 8] [--t 0]   the diorama from all round, on one sheet',
-        '  clip <id> [--from 0 --to 6 --fps 12]   an animated PNG of it moving',
+        '  clip <id> [--from 0 --to 6 --fps 12]   an animated PNG of it moving (also supports --text)',
         '  ghost <id> [--t 2 --spacing 0.12 --n 2 | --ghosts 1.6,1.8]   one moment with those either side laid faintly over it',
         '  acts                        the ready clips, reactions, easings and cues, by name',
         '  motion <id> [--from 0 --to 12]   numbers about how it moves: speed, jumps, what goes underground',
@@ -470,9 +479,9 @@ const CMD = {
     console.log('drawn in', Date.now() - t0, 'ms');
     /* --text [ascii|symbols|braille|blocks]: drawn as text (K.ascii.draw), --tg screen pixels a font pixel (2), --tcolour scene|ink|mono;
        the characters themselves are written beside it, as <id>.txt */
-    if (opt.text && lib().KIT.ascii) {
-      const T = lib().KIT.ascii.draw(im, { set: opt.text === true ? 'ascii' : opt.text, g: num('tg', 2), px: opt.px1 ? 1 : im.px, colour: opt.tcolour || 'scene', pal: w.pal });
-      const f = save(w.id + '.png', T), ft = f.replace(/\.png$/i, '') + '.txt'; fs.writeFileSync(ft, T.text + '\n'); console.log('wrote', ft); console.log('as text:', T.cols, 'x', T.rows, 'characters');
+    if (opt.text) {
+      const T = asciiFrame(im, w);
+      const f = save(w.id + '.png', T), ft = textSidecar(f); fs.writeFileSync(ft, T.text + '\n'); console.log('wrote', ft); console.log('as text:', T.cols, 'x', T.rows, 'characters');
       return;
     }
     save(w.id + '.png', R.upscale(im, opt.px1 ? 1 : im.px));
@@ -603,7 +612,7 @@ const CMD = {
     for (const t of ts) {
       pose(w, t);
       const im = R.render(w, view({ t, w: num('w', 600), h: num('h', 420) }));
-      imgs.push(R.upscale(im, im.px));
+      imgs.push(displayFrame(im, w));
     }
     save(
       w.id + '-sheet.png',
@@ -758,8 +767,7 @@ const CMD = {
     save(w.id + '-turn.png', R.grid(imgs, num('cols', 4), labs));
   },
   clip() {
-    const zlib = require('zlib'),
-      w = build(pos[0]),
+    const w = build(pos[0]),
       fps = num('fps', 12),
       from = num('from', 0),
       to = num('to', 6),
@@ -769,11 +777,16 @@ const CMD = {
       const t = from + k / fps;
       pose(w, t);
       const im = R.render(w, view({ t, w: num('w', 600), h: num('h', 420) }));
-      frames.push(R.upscale(im, im.px));
+      frames.push(displayFrame(im, w));
     }
     const f = opt.out ? path.resolve(opt.out) : path.join(OUT, w.id + '-clip.png');
     fs.mkdirSync(OUT, { recursive: true });
     PNG.animate(f, frames, fps);
+    if (opt.text) {
+      const textFile = textSidecar(f);
+      fs.writeFileSync(textFile, frames.map(frame => frame.text).join('\n\f\n') + '\n');
+      console.log('wrote', textFile);
+    }
     console.log('wrote', f, frames.length, 'frames at', fps, 'a second (an animated PNG: a browser will play it)');
   },
   motion() {

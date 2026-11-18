@@ -66,18 +66,47 @@
   //   -> { w, h, rgb (at screen pixels), cols, rows, text (the characters, a line a row), glyph (each cell's glyph), fg, bg (palette indexes) }
   function draw(pic, o) {
     o = o || {}; const A = atlas(), set = A.sets[o.set || 'ascii'] || A.sets.ascii, g = Math.max(1, o.g || 2), px = o.px || pic.px || 1;
-    const pal = (o.pal || [0x000000, 0xffffff]).map(h => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255]), lum = c => c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114;
+    const pal = (o.pal || pic.palette || [0x000000, 0xffffff]).map(h => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255]), lum = c => c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114;
     const snap = c => { let b = 0, bd = 1e9; pal.forEach((q, i) => { const d0 = c[0] - q[0], d1 = c[1] - q[1], d2 = c[2] - q[2], e = d0 * d0 * 0.3 + d1 * d1 * 0.59 + d2 * d2 * 0.11; if (e < bd) { bd = e; b = i; } }); return b; };
     let ink = o.ink; if (ink === undefined) { let il = -1; pal.forEach((c, i) => { if (lum(c) > il) { il = lum(c); ink = i; } }); }
     const W = pic.w * px, H = pic.h * px, cw = 6 * g, ch = 8 * g, cols = Math.ceil(W / cw), rows = Math.ceil(H / ch), cpx = [cw / px, ch / px], T = A.table.data, n = A.table.n;
     const at = (x, y) => { const i = (Math.min(pic.h - 1, Math.max(0, y | 0)) * pic.w + Math.min(pic.w - 1, Math.max(0, x | 0))) * 3; return [pic.rgb[i] / 255, pic.rgb[i + 1] / 255, pic.rgb[i + 2] / 255]; };
     const avg = (...cs) => [0, 1, 2].map(k => cs.reduce((s, c, i) => s + c[k] * (i ? 1 : 2), 0) / (cs.length + 1));
-    const glyph = new Int32Array(cols * rows), fgI = new Uint8Array(cols * rows), bgI = new Uint8Array(cols * rows), lines = [];
+    const Index = pal.length > 256 ? Uint32Array : Uint8Array;
+    const glyph = new Int32Array(cols * rows), fgI = new Index(cols * rows), bgI = new Index(cols * rows), lines = [];
     const rr = [A.r / 6 * cpx[0] * 0.6, A.r / 8 * cpx[1] * 0.6];
     for (let r = 0; r < rows; r++) { let line = '';
       for (let c = 0; c < cols; c++) { const x0 = c * cpx[0], y0 = r * cpx[1], L = [], C = []; let lo = 9, hi = -9, mean = [0, 0, 0];
         for (const [cx, cy] of A.circles) { const qx = x0 + cx / 6 * cpx[0], qy = y0 + cy / 8 * cpx[1], col = avg(at(qx, qy), at(qx + rr[0], qy), at(qx - rr[0], qy), at(qx, qy + rr[1]), at(qx, qy - rr[1]));
           C.push(col); const l = lum(col); L.push(l); lo = Math.min(lo, l); hi = Math.max(hi, l); mean = mean.map((m, k) => m + col[k] / 6); }
+        // The shape samples can miss a single marked art pixel between them.
+        // Keep sparse effect ink without turning ordinary all-dark cells into noise.
+        if (pic.detail && hi - lo < 0.16) {
+          let peak = Math.max(0.075, lum(mean) * 1.5), hit;
+          const right = Math.min(pic.w, Math.ceil(x0 + cpx[0] - 0.5));
+          const bottom = Math.min(pic.h, Math.ceil(y0 + cpx[1] - 0.5));
+          for (let y = Math.ceil(y0 - 0.5); y < bottom; y++)
+            for (let x = Math.ceil(x0 - 0.5); x < right; x++) {
+              if (!pic.detail[y * pic.w + x]) continue;
+              const light = at(x, y), brightness = lum(light);
+              if (brightness > peak) {
+                peak = brightness;
+                hit = { x: (x + 0.5 - x0) * 6 / cpx[0], y: (y + 0.5 - y0) * 8 / cpx[1], light };
+              }
+            }
+          if (hit) {
+            let nearest = 0, distance = Infinity;
+            A.circles.forEach(([x, y], i) => {
+              const d = (x - hit.x) ** 2 + (y - hit.y) ** 2;
+              if (d < distance) { nearest = i; distance = d; }
+            });
+            C[nearest] = hit.light;
+            L.fill(0);
+            L[nearest] = 1;
+            lo = 0;
+            hi = 1;
+          }
+        }
         let best = set[0], bd = 1e9, fg, bg;
         if (hi - lo < 0.16) { const want = Math.pow(Math.min(1, Math.max(0, lum(mean) / 0.75)), 0.9);
           for (let i = 0; i < set[1]; i++) { const e = set[0] + i, v = [T[e * 4], T[e * 4 + 1], T[e * 4 + 2], T[e * 4 + 3], T[(n + e) * 4], T[(n + e) * 4 + 1]], mu = v.reduce((a, b) => a + b, 0) / 6;

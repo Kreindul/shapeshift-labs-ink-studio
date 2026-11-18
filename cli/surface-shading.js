@@ -4,16 +4,45 @@ const SurfaceLook = require('../src/surface-look.js');
 function surfaceShading(world, options, camera) {
   if (options.surface === false || !world.surfaceData || !world.surfaces?.length) return null;
   const { data, surfaceData } = world;
+  const stageBase = world.anim?.base;
+  const rest = stageBase instanceof Float32Array && stageBase.length >= data.length ? stageBase : world.rest || data;
+  const rig = world.anim?.rig;
+  const rigFrames = new Map();
+  const projected = i => materials[surfaceData[i * STRIDE] - 1]?.projected;
+
+  function rigFrame(i) {
+    const part = rig?.bid[i];
+    if (!part || rig.free?.[i] || !projected(i)) return null;
+    if (!rigFrames.has(part)) {
+      const { M } = require('../index.js').load().KIT;
+      const matrix = rig.M.subarray(part * 12, part * 12 + 9);
+      if (Math.abs(M.det(matrix)) < 1e-8) return null;
+      const inverse = M.inv(matrix);
+      rigFrames.set(part, { inverse, normal: M.tr(inverse), apply: M.app });
+    }
+    return rigFrames.get(part);
+  }
   const { eye, parallel, footprint, time, reflection } = camera;
   const { STRIDE } = SurfaceLook;
   const liveLight = world.surfaceLight === undefined ? undefined : SurfaceLook.prepareLightTrack(world.surfaceLight)(time);
-  const materials = world.surfaces.map(({ settings, light }) => SurfaceLook.prepare(settings, world.pal, liveLight ?? light));
+  const materials = world.surfaces.map(({ settings, light }) =>
+    SurfaceLook.prepare(settings, world.pal, liveLight ?? light, world.surfaceEffects));
+  const ids = new Map();
+  const palettes = [];
+  for (const material of materials) {
+    for (const { effect } of material.layers) {
+      if (!effect?.palette) continue;
+      palettes.push(effect.palette);
+      ids.set(effect.palette, palettes.length);
+    }
+  }
   const planarMaterials = materials.map(
     material =>
       reflection && material.layers.some(layer => layer.type === 'planarReflection' && reflection.has(layer.plane))
   );
   const sample = {
     position: [0, 0, 0],
+    worldPosition: [0, 0, 0],
     normal: [0, 0, 0],
     view: [0, 0, 0],
     footprint,
@@ -42,7 +71,9 @@ function surfaceShading(world, options, camera) {
 
   function surfaceNormal(i) {
     const offset = i * STRIDE;
-    return normalAt(i, [surfaceData[offset + 1], surfaceData[offset + 2], surfaceData[offset + 3]]);
+    const normal = [surfaceData[offset + 1], surfaceData[offset + 2], surfaceData[offset + 3]];
+    const frame = rigFrame(i);
+    return normalAt(i, frame ? frame.apply(frame.normal, normal) : normal);
   }
 
   function shade(i, x, y, z, centerX, centerY, centerZ, r, g, b, sx, sy) {
@@ -55,9 +86,20 @@ function surfaceShading(world, options, camera) {
     const angle = rotation(i);
     const c = Math.cos(angle),
       s = Math.sin(angle);
-    position[0] = data[dab] + c * dx - s * dz;
-    position[1] = data[dab + 1] + y - centerY;
-    position[2] = data[dab + 2] + s * dx + c * dz;
+    const source = prepared.projected ? rest : data;
+    const frame = rigFrame(i);
+    const ox = c * dx - s * dz, oy = y - centerY, oz = s * dx + c * dz;
+    if (frame) {
+      const offsetFromCenter = frame.apply(frame.inverse, [ox, oy, oz]);
+      for (let k = 0; k < 3; k++) position[k] = source[dab + k] + offsetFromCenter[k];
+    } else {
+      position[0] = source[dab] + ox;
+      position[1] = source[dab + 1] + oy;
+      position[2] = source[dab + 2] + oz;
+    }
+    sample.worldPosition[0] = x;
+    sample.worldPosition[1] = y;
+    sample.worldPosition[2] = z;
     normal[0] = surfaceData[offset + 1];
     normal[1] = surfaceData[offset + 2];
     normal[2] = surfaceData[offset + 3];
@@ -73,6 +115,13 @@ function surfaceShading(world, options, camera) {
     view[2] = s * vx + c * vz;
     const [lx, ly, lz] = prepared.sun;
     sample.lightDirection = angle ? [c * lx - s * lz, ly, s * lx + c * lz] : undefined;
+    if (frame) {
+      const localView = frame.apply(frame.inverse, view);
+      for (let k = 0; k < 3; k++) view[k] = localView[k];
+      const ray = frame.apply(frame.inverse, sample.lightDirection || prepared.sun);
+      const length = Math.hypot(...ray);
+      sample.lightDirection = ray.map(x => x / length);
+    }
     sample.reflection =
       planar(i) && sx !== undefined
         ? (layer, n, original) => {
@@ -84,10 +133,16 @@ function surfaceShading(world, options, camera) {
     rgb[0] = r;
     rgb[1] = g;
     rgb[2] = b;
-    return SurfaceLook.shade(prepared, sample, rgb, result);
+    SurfaceLook.shade(prepared, sample, rgb, result);
+    if (ids.size) result[5] = ids.get(result[5]) || 0;
+    return result;
   }
 
-  return { has, normalAt, surfaceNormal, planar, shade };
+  return {
+    has, normalAt, surfaceNormal, planar, shade, palettes,
+    projected,
+    reveals: i => materials[surfaceData[i * STRIDE] - 1]?.reveals
+  };
 }
 
 module.exports = surfaceShading;

@@ -877,7 +877,7 @@ function makeBuilder(seed, hex) {
         if (P[c])
           disc(x + nx * px * 0.3, y + ny * px * 0.3, z + nz * px * 0.3, [nx, ny, nz], px * 0.6, px * 0.12, P[c], 3);
     }
-    return Object.assign(
+    const world = Object.assign(
       {
         data: data.subarray(0, n * 16),
         count: n,
@@ -905,6 +905,8 @@ function makeBuilder(seed, hex) {
       },
       meta
     );
+    if (world.surfaceEffects) world.surfaceEffects = KIT.splatEffects.context(world.surfaceEffects);
+    return world;
   }
   // hand over everything pushed so far and start again empty
   const take = () => {

@@ -276,6 +276,14 @@
       bad('style', 'there is no style called "' + spec.style + '"', 'styles: ' + Object.keys(DIO.styles).join(', '));
       return out;
     }
+    let surfaceEffects;
+    if (st.finish.surfaceEffects !== undefined) {
+      try {
+        surfaceEffects = K.splatEffects.context(st.finish.surfaceEffects);
+      } catch (error) {
+        bad('finish.surfaceEffects', error.message);
+      }
+    }
     const look = st.finish.look;
     if (look?.pixelSize !== undefined && (!Number.isSafeInteger(look.pixelSize) || look.pixelSize < 1))
       bad('finish.look.pixelSize', 'pixelSize must be a positive integer');
@@ -336,7 +344,7 @@
         }
         if (m.surface !== undefined) {
           try {
-            K.surface.prepare(applySurface({}, m.surface).surface, pal, st.sun);
+            K.surface.prepare(applySurface({}, m.surface).surface, pal, st.sun, surfaceEffects);
           } catch (error) {
             bad(path + '.surface', error.message);
           }
