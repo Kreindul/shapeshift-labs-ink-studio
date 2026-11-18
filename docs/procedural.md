@@ -48,6 +48,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `proximity.connect(sockets, options)` | Deterministic matching of named sockets with reach, degree and compatibility limits |
 | `attachments.layout(slots, families, options)` | Stable weighted selection for framed, typed attachment slots, with fit and clearance callbacks |
 | `fitSurfaceBands({domain, panels, opening, edges, obstructions, clearance})` | Keep bands mounted to a chart feature's edges and shorten or omit them to fit nearby boundaries and obstructions |
+| `alignedFeatureGroups(features, {axis, chartAxis, periods, separation})` | Group nearby aligned features on a measured chart and return ordered members and shared extents. |
 | `fitFootprintContact({center, tangent, size, height, blocked, maxSpread, samples, interval, includePoints})` | Seat an upright footprint on a sampled support and check space above it |
 | `createFootprintReservations({clearance, cellSize})` | Reserve space for oriented upright objects and test nearby candidates |
 | `matchIntervals(previous, next, {maxShift, accept})` | Match spans across an edit using overlap and optional center displacement |
@@ -209,6 +210,25 @@ crosses a seam splits at the panel bounds while keeping the original mount
 coordinate along the outward axis. A band only extends into a panel that
 contains its mount. Leave a gap between panel bounds for seams or stock
 overhang. The caller maps each result back onto its physical surface.
+
+`alignedFeatureGroups(features, options)` groups nearby features with
+compatible dimensions. Supply one compatible family with records
+`{id, at, units, size, gap, alignment, sizeTolerance, limit}`. `at` is a
+chart coordinate, `units` gives world distance per chart unit, and `size`
+is the feature's world width and height. The distance limits `gap` and
+`alignment` are in world units. `sizeTolerance` is the maximum fractional
+difference in the perpendicular size. `limit` caps how many members may
+share a group. Choose the feature's dimension with `axis` and the host
+coordinate with `chartAxis` if those axes differ. Set a nonzero value in
+`periods` for each cyclic chart coordinate. `separation` defaults to a
+quarter of the shorter feature's along-axis size.
+
+Connections are transitive. Ordered components split at the smallest
+member limit, and singleton results are omitted. Each group supplies
+`members` in chart order, world-distance `stations`, shared `units`,
+the occupied station `range`, array `size`, and a chart `anchor`.
+Cells, trim, and attachments can consume the same layout and independently
+choose their owners and appearance.
 
 `fitFootprintContact` samples an oriented rectangular footprint in world XZ.
 The `center` supplies the horizontal origin and `tangent` sets the width
