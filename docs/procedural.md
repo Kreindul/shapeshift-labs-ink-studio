@@ -41,6 +41,9 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
 | `clearance.field(solids).probe(bounds, options)` | Bounded sampled volume contacts for supplied solids with `id`, bounds, and distance functions |
 | `emitters.compile(spec)` | Deterministic looping samples with caller-supplied direction and drift. Sample at any finite time with `sample(index, time)` or `samples(time)` |
+| `routes.polyline(points, options)`, `routes.aroundConvex(outline, start, end, options)` | Arc-length routes with frames and closest queries. Convex XZ routes project endpoints onto an offset perimeter and interpolate world Y |
+| `routes.layout(route, options)` | Fit bounded intervals on a polyline, catenary, or compatible curve. Place caller-chosen pieces using gapped endpoints and midpoint frames |
+| `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 
 Heights and distances use world units. Planar masks take XZ and use negative
 distance for the interior. Compiled carrier callbacks should be deterministic.
@@ -60,3 +63,17 @@ return positive infinity. Clearance probes approximate contact at the selected
 spacing. Choose spacing and padding in relation to the smallest obstruction
 the caller needs to detect. Emitters describe visual trajectories and do not
 perform particle collision or fluid simulation.
+
+Route layout takes a positive `pitch`, optional physical `gap`, a normalized
+`from` / `to` range, and a `distribution` of `ceil`, `floor`, or `round`.
+For polylines the default policy fits independently across each straight
+segment, so an interval never bridges a bend. A route has `length` and
+`sample(t)` returning a `point` and optional frame metadata. For custom curves,
+the caller owns arc-length parameterization. The sample contract is shared
+with `spans.catenary`.
+
+Catalog definitions may name one or several parents using `extends`. A
+resolved profile merges named or inline layers in order. Object keys compose
+recursively, while arrays and scalar values replace earlier values.
+Material role values accept aliases, RGB colors, and attribute records.
+Use a complete material record or an inherited color when setting shades.

@@ -175,6 +175,42 @@
     ];
   }
 
+  const routeStyles = P.styles.catalog({
+    base: {
+      construction: { pitch: 0.48, gap: 0.055, depth: 0.12, width: 0.7 },
+      materials: { piece: '#2d887b', post: '#556e6a' }
+    },
+    warm: { extends: 'base', materials: { piece: '#dc9960', post: '#875c60' } }
+  });
+
+  function fittedRoute(styleName) {
+    const style = routeStyles.resolve(styleName);
+    const { pitch, gap, depth, width } = style.construction;
+    const outline = [
+      [-1.4, -0.85],
+      [1.4, -0.85],
+      [1.4, 0.85],
+      [-1.4, 0.85]
+    ];
+    const route = P.routes.aroundConvex(outline, [-1.15, 0.5, 0.85], [1.4, 0.98, -0.45], { offset: 0.6 });
+    const parts = P.routes.layout(route, { pitch, gap });
+    for (const role of ['piece', 'post']) {
+      colors[styleName + '/' + role] = P.styles.material(style, role).color.map(v => v * 255);
+    }
+    const support = box([0, 0.36, 0], [1.4, 0.36, 0.85], 'basalt');
+    const resolved = parts.flatMap((part, i) => {
+      const { point, side, normal, tangent } = part.frame;
+      const frame = K.M.cols(side, normal, tangent);
+      const board = P.pieces.box(K.V.mad(point, normal, -depth / 2), [width / 2, depth / 2, part.length / 2], frame, {
+        material: styleName + '/piece'
+      }).mesh;
+      if (i % 3 !== 0) return [board];
+      const [x, y, z] = point;
+      return [board, box([x, (y - depth) / 2, z], [0.07, (y - depth) / 2, 0.07], styleName + '/post')];
+    });
+    return [support, ...resolved];
+  }
+
   const examples = [
     ['Fitted courses', 'Staggered units fit the domain and preserve physical joints.', courses],
     ['Masked cells', 'Clipped prisms follow an annular mask with real gaps.', cells],
@@ -185,7 +221,13 @@
     ['Swept mask', 'A taper and an erase stroke define a solid with a hole.', sweptMask],
     ['Profile cut and lining', 'An extruded profile cuts through a solid with a separate lining.', profiledCut],
     ['Clearance probe', 'Coral indicates an occupied candidate. Green indicates a clear sample.', clearance],
-    ['Directional emitter', 'A fixed-time sample of seeded particles rising along a chosen direction.', emittedSamples]
+    ['Directional emitter', 'A fixed-time sample of seeded particles rising along a chosen direction.', emittedSamples],
+    ['Fitted route', 'A path wraps the supplied outline and fits pieces up to each bend.', () => fittedRoute('base')],
+    [
+      'Inherited appearance',
+      'The same dimensions and geometry use overridden material roles.',
+      () => fittedRoute('warm')
+    ]
   ];
 
   function triangles(meshes) {
