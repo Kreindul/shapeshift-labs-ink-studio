@@ -1883,3 +1883,9 @@ The plan puts the first chain before the second. It supplies `reverseFirst`, `re
 ### Path clearances for fitted cells
 
 `surfaceCells.pathMask(paths, { facets })` buffers chart-local polylines into convex strips with rounded polygonal caps. Each path supplies `{ points, radius }`. The result exposes `holes` for cell clipping and `distance(u, v)` for field evaluation against the same footprints. The default uses four edges on each cap. Distance is negative inside the union. A single point creates a round clearance, and consecutive collinear stations share one strip.
+
+### Height surface rays
+
+`P.heightSurface.raycast(surface, origin, direction, options)` finds the first crossing of a bounded height graph. Supply `bounds`, `height(x, z)` and optionally `inside(x, z)` and `normal(x, z)`. The result contains a world point, normal (when supplied), and distance along the normalized ray. A miss returns null.
+
+A caller can pass a certified `slopeBound` on the horizontal gradient. This allows steep rays to solve one bracket and other rays to skip intervals that cannot cross the surface. Without a bound the query samples at regular intervals. Vertical rays evaluate the height directly. `maxDistance` defaults to 10000 world units.
