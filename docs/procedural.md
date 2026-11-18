@@ -59,6 +59,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `surfaceGrowth.trace(options)` | Seeded, bounded branching paths over caller-supplied surfaces, with a link query for seams and obstacles |
 | `materialBands(spec)` | Nonoverlapping intervals with material and pattern metadata, plus optional spatial projection and period |
 | `masks.stroke(spec)`, `masks.compose(specs, options)` | Tapered and feathered swept discs, ordered addition and erasure, signed distance and visible source ownership |
+| `surfaceMasks.compile(strokes, {size, periodic})` | Ordered surface brush coverage in retained UVs with measured width and optional seam wrapping |
 | `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
 | `surfaceSection(chart, options)` | Convert between world coordinates and a section measured through the varying thickness of a surface chart |
 | `geometry.profileDistance(points)` | Compile a closed 2D ring into a reusable signed distance function `(x, y) => distance`. Concavity and either winding are supported |
@@ -132,6 +133,20 @@ return positive infinity. Clearance probes approximate contact at the selected
 spacing. Choose spacing and padding in relation to the smallest obstruction
 the caller needs to detect. Emitters describe visual trajectories and do not
 perform particle collision or fluid simulation.
+
+Use `surfaceMasks.compile(strokes, {size: [width, height], periodic})` to
+keep paint attached to a changing surface chart. Each stroke has normalized
+`points`, a physical `width`, optional `softness`, and an `operation` of
+`'add'` or `'erase'`. Recompile with the new chart dimensions to move the
+stroke centers with the surface while keeping the brush width in chart units.
+With `periodic: true`, successive U stations join by the shortest arc and the
+footprint continues across the seam. The chart supplies the metric, so
+`width` for a closed carrier is its full measured circumference.
+
+Call `mask.weight(u, v, initial = 0)` to compose strokes in their supplied
+order over existing coverage. Outside the finite chart it returns `initial`.
+One surface allows up to 256 strokes and 8,192 points. Use the weight for
+paint, coating loss, habitat, or other application-specific fields.
 
 Route layout takes a positive `pitch`, optional physical `gap`, a normalized
 `from` / `to` range, and a `distribution` of `ceil`, `floor`, or `round`.
