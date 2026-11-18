@@ -87,6 +87,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.simplifyQEM(mesh, options)`, `lod.mergeSplats(records, options)`, `lod.packSplats(result)` | Error-driven previews with retained material seams, ownership and protected samples |
 | `motion.streamline(field, start, options)`, `motion.obstacleWake(sdf, options)`, `motion.loopTrajectory(points, options)`, `motion.surfaceAdvection(chart, seeds, options)` | Field integration, wake and curl sampling, closed tracks and UV-attached motion |
 | `motion.stableFluid(options)`, `motion.shallowWater(options)` | Persistent density and velocity grids, and conservative terrain-aligned water |
+| `motion.surfaceWeather(options)`, `motion.materialStateGraph(machine, entities, options)` | Persistent wetness and thermal fields, and event-driven material changes |
 | `contours.march(field, options)` | Bounded marching-squares paths at a scalar level |
 
 Heights and distances use world units. Planar masks take XZ and use negative
@@ -1090,6 +1091,29 @@ balance. Flat water levels remain at rest over uneven terrain.
 
 `examples/fluid-grids.js` uses the two grids to show suspended ink and
 water flowing through a lowered point in a berm.
+
+### Weather and retained materials
+
+`motion.surfaceWeather({width, height, cell, origin, mask, initial,
+normal, clock})` tracks wetness, temperature, accumulated light
+exposure, snow and frost. Use `step(dt, {forcing})` to supply rain,
+snowfall, air temperature, humidity, wind, shelter and runoff.
+The forcing callback takes `(x, z, time, state)`. Optional `light`
+overrides the illumination from the existing scene clock. Wetness
+moves across the grid and dries as the surface warms. Ice and snow
+release moisture as they melt.
+
+`motion.materialStateGraph({initial, states, transitions}, entities)`
+tracks the state and material data of each named entity. Transitions
+specify `id`, `from`, `to`, and `event`, with optional priority,
+minimum age, a guard and an entity data patch. Dispatch a named
+event at a time or call `advance(time, events)` to apply a timeline.
+Omit the target for a broadcast. A snapshot can seed another controller,
+preserving entry times and revisions.
+
+`examples/persistent-weather.js` shows the same ground before and
+after thaw and uses rain, footfall and sun events to change four
+paving materials.
 
 ## Optional retained authoring
 
