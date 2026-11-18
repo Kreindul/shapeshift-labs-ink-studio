@@ -402,6 +402,34 @@ A stage's `poke(eye, direction)` picks the surface and dispatches the result to 
 
 Particle helpers include `dust`, `sparks`, `embers`, `smoke`, `chips`, `ring`, `bolt` and `rain`. `emit` exposes velocity, lifetime, gravity, drag, size, palette colors and flow response. Flow fields can combine wind, curl, vortices and sinks; `K.flow.around(flow, sdf, margin)` turns a current along solid boundaries.
 
+### Frame-local splat effects
+
+Use `K.frameSplats(B, capacity, render)` for effects whose geometry is redrawn each frame. Reserve the splats before `B.finish()` and attach the system with `stage.add(frame)`. The stage calls `render(draw, dt, time)` each update, and the system hides any rows left over from the previous frame. It can share a stage with `K.particles`.
+
+```js
+const model = K.frameSplats.capture(modelWorld, [0, 0, 0]);
+const frame = K.frameSplats(B, model.count + 48, (draw, dt, time) => {
+  const stretch = 1 + 0.5 * K.wobble(time / 0.8);
+  draw.model(model, [2, 1, 0], { matrix: K.M.stretch([0, 1, 0], stretch, true) });
+  draw.vortex([0, 0, 0], { phase: time * 4, radius: [0.2, 1.2], color: 3 });
+});
+const W = B.finish({ /* scene metadata */ });
+K.stage(W).add(frame);
+```
+
+- `capture(world, origin)` snapshots the visible splats around a local origin. Instances reuse the baked colors, densities and shapes. Surface material tables and shader motion are outside the snapshot.
+- `draw.model(model, at, { matrix, opacity })` sends the local origin to `at` and transforms both centers and covariance with a row-major 3×3 matrix. Defaults are the identity matrix and opacity 1.
+- `draw.streak(a, b, { width, color, density, emissive })` draws one splat. Width is a world-space half-width, and color is an index into the scene palette. Defaults are `0.04`, `1`, `2`, and `true`.
+- `draw.vortex(center, options)` draws `arms * segments` streaks. It accepts the streak options plus `axis` (Y up), `radius` (one radius or a base and tip pair), `height`, `turns`, `phase` in radians, `arms` (3), and `segments` per arm (16). Animate `phase` for rotation or vary `radius`, `height`, and `density` for a transition.
+
+Each draw call returns `false` and leaves the current frame intact if the whole effect can’t fit. `K.wobble(t, cycles = 2)` returns a signed, decaying offset over normalized time. Use `K.ease.back` for a single overshoot and `K.ease.elastic` for easing into a target with an oscillation.
+
+The [splat effects example](examples/splat-effects.js) shows both effects together.
+
+```sh
+npx ink-studio clip examples/splat-effects.js --from 0 --to 1.5 --fps 12
+```
+
 ## Physics and persistent effects
 
 There are several simulation levels:
@@ -672,6 +700,7 @@ Then `ink-studio scenes`, `render`, `snap` and other commands operate on that co
 | `kit/kl-vox.js` | Letter-grid model authoring. |
 | `kit/km-ramp.js` | Palette ramp construction and hue shifts. |
 | `kit/kn-effects.js` | Window light, reflections, shatter and dissolve. |
+| `kit/kn-frame-splats.js` | Frame-local strokes, model instances and vortices. |
 | `kit/ko-grow.js` | Scattering, species, branching, instancing and iterative growth. |
 | `kit/kp-curve.js` | Curve construction, sampling and sweeping. |
 | `kit/kpx-pixel.js` | Per-pixel material patterns and pixel-sized geometry. |
