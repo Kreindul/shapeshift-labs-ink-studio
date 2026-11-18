@@ -1584,6 +1584,19 @@ namespaced family ID. Compile an ordered list of active pack IDs for each
 scene. Later entries take precedence. The resulting resolver keeps the
 authored family IDs intact, validates cycles, and reports missing packs.
 
+`assetPacks.bundle(packs, ids)` creates one versioned JSON payload for
+sharing packs. Omit `ids` to include all packs. If a selected pack
+replaces a family owned by another installed pack, the bundle includes
+that pack and follows its replacement dependencies as well.
+`assetPacks.merge(installed, payload)` takes a single pack or a bundle,
+as data or JSON text, and returns the proposed pack list and the
+`added`, `updated`, `unchanged`, and `keptNewer` IDs. It preserves pack
+order, keeps newer installed revisions, and rejects differing content
+that claims the same ID and revision. Compile the proposed list with the
+receiving catalog and its active selection before committing it. The
+bundle carries pack assets and replacement declarations. Each scene
+keeps its own active replacement order.
+
 `assetPacks.reviseFamily(pack, familyId, patch)` prepares a portable
 replacement for a family in an installed pack. The patch can update its
 variants, bounds, sockets, label, and tags. A changed family advances

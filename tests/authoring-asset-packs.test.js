@@ -46,6 +46,27 @@ test('source revisions keep identity and replacement order, and skip identical c
   assert.throws(()=>A.assetPacks.reviseFamily(next,'blue/lamp',{sockets:{}}),/required socket/);
 });
 
+test('portable bundles walk replacement dependencies and merge an entire revision set without downgrades',()=>{
+  const root=extension('root',{lamp:'root/lamp'}), middle=extension('middle',{'root/lamp':'middle/lamp'});
+  const end=extension('end',{'middle/lamp':'end/lamp'}), unused=extension('unused',{});
+  const payload=A.assetPacks.bundle([end,unused,root,middle],['end']);
+  assert.deepEqual(payload.packs.map(p=>p.id),['end','root','middle']);
+  const newer=A.assetPacks.reviseFamily(root,'root/lamp',{label:'Revised root'});
+  const install=A.assetPacks.merge([unused,newer],JSON.stringify(payload));
+  assert.deepEqual(install.packs.map(p=>p.id),['unused','root','end','middle']);
+  assert.deepEqual(install.added,['end','middle']);
+  assert.deepEqual(install.keptNewer,['root']);
+  const catalog=A.assetPacks.create({families:[family('lamp')],packs:install.packs});
+  assert.equal(catalog.compile().resolve('lamp').id,'lamp');
+  assert.equal(catalog.compile(['root','middle','end']).resolve('lamp').id,'end/lamp');
+  assert.deepEqual(A.assetPacks.merge(install.packs,payload).unchanged,['end','middle']);
+  assert.deepEqual(A.assetPacks.merge([root,unused],newer).updated,['root']);
+  assert.equal(root.revision,1);
+  assert.throws(()=>A.assetPacks.merge([root],{...payload,packs:[end,{...root,title:'Conflicting title'}]}),/Conflicting/);
+  assert.throws(()=>A.assetPacks.merge([],{...payload,packs:[end,end]}),/Duplicate/);
+  assert.throws(()=>A.assetPacks.bundle([root],['missing']),/installed pack IDs/);
+});
+
 function makeGLB(nodes=[{mesh:0}]) {
   const positions=[-1,0,0,1,0,0,0,1,0];
   const bin=Buffer.alloc(36);

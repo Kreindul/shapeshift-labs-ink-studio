@@ -2,11 +2,16 @@
 (function (K) {
   const A = K.authoring, { clone, freeze } = A.data;
   const format = 'ink-studio/asset-pack';
+  const bundleFormat = 'ink-studio/asset-bundle';
   const identifier = value => typeof value === 'string' && /^[a-z][a-z0-9-]{0,47}$/.test(value);
   const object = value => value && typeof value === 'object' && !Array.isArray(value);
+  const parse = value => typeof value === 'string' ? JSON.parse(value) : value;
+  const canonical = value => JSON.stringify(value, (_, node) => object(node)
+    ? Object.fromEntries(Object.keys(node).sort().map(key => [key,node[key]]))
+    : node);
 
   function manifest(input) {
-    const value = clone(typeof input === 'string' ? JSON.parse(input) : input);
+    const value = clone(parse(input));
     if (!object(value) || value.format !== format || value.version !== 1 || !identifier(value.id) ||
         !Number.isSafeInteger(value.revision) || value.revision < 1 ||
         typeof value.title !== 'string' || !value.title.trim() || value.title.length > 100 ||
@@ -28,6 +33,63 @@
       families, replacements });
   }
 
+  function packMap(packs) {
+    if (!Array.isArray(packs)) throw Error('Expected an array of asset packs');
+    const index = new Map();
+    for (const raw of packs) {
+      const pack = manifest(raw);
+      if (index.has(pack.id)) throw Error('Duplicate asset pack: ' + pack.id);
+      index.set(pack.id,pack);
+    }
+    return index;
+  }
+
+  function bundle(packs, ids) {
+    const index = packMap(packs);
+    if (ids !== undefined && (!Array.isArray(ids) ||
+        !Array.from(ids).every(id => index.has(id)) || new Set(ids).size !== ids.length))
+      throw Error('Bundle selection needs unique installed pack IDs');
+    const include = new Set(ids ?? index.keys());
+    if (!include.size) throw Error('An asset bundle needs at least one pack');
+
+    // Follow replacement sources that belong to other packs in this catalog.
+    const owner = new Map();
+    for (const pack of index.values()) for (const family of pack.families) owner.set(family.id,pack.id);
+    for (const id of include) for (const familyId of Object.keys(index.get(id).replacements)) {
+      const dependency = owner.get(familyId);
+      if (dependency !== undefined) include.add(dependency);
+    }
+    return freeze({format:bundleFormat,version:1,packs:[...index.values()].filter(pack=>include.has(pack.id))});
+  }
+
+  function merge(installed, input) {
+    const index = packMap(installed), payload = parse(input);
+    let incoming;
+    if (payload?.format === bundleFormat) {
+      if (payload.version !== 1 || !Array.isArray(payload.packs) || !payload.packs.length)
+        throw Error('Invalid versioned asset bundle');
+      incoming = packMap(payload.packs).values();
+    } else incoming = [manifest(payload)];
+
+    const added = [], updated = [], unchanged = [], keptNewer = [];
+    for (const next of incoming) {
+      const previous = index.get(next.id);
+      if (previous && next.revision < previous.revision) {
+        keptNewer.push(next.id);
+        continue;
+      }
+      if (previous && next.revision === previous.revision) {
+        if (canonical(previous) !== canonical(next))
+          throw Error('Conflicting content for ' + next.id + ' revision ' + next.revision);
+        unchanged.push(next.id);
+        continue;
+      }
+      index.set(next.id,next);
+      (previous ? updated : added).push(next.id);
+    }
+    return freeze({packs:[...index.values()],added,updated,unchanged,keptNewer});
+  }
+
   // Live imports can update the contents of a family while scenes retain its ID.
   function reviseFamily(input, id, changes) {
     const pack = manifest(input), index = pack.families.findIndex(f => f.id === id);
@@ -39,29 +101,23 @@
     const previous = pack.families[index], families = pack.families.slice();
     families[index] = { ...previous, ...changes };
     const staged = manifest({ ...pack, families });
-    const compare = value => JSON.stringify(value, (_, node) => object(node)
-      ? Object.fromEntries(Object.keys(node).sort().map(key => [key,node[key]]))
-      : node);
-    if (compare(previous) === compare(staged.families[index])) return pack;
+    if (canonical(previous) === canonical(staged.families[index])) return pack;
 
     families[index] = { ...staged.families[index], version: previous.version + 1 };
     return manifest({ ...pack, revision: pack.revision + 1, families });
   }
 
   function create({ families = [], packs = [] } = {}) {
-    if (!Array.isArray(families) || !Array.isArray(packs)) throw Error('Asset catalog needs family and pack arrays');
+    if (!Array.isArray(families)) throw Error('Asset catalog needs a family array');
     const registry = A.assets();
     registry.load({ format: 'ink-studio/asset-families', version: 1, families });
-    const extensions = new Map(), owners = new Map();
-    for (const raw of packs) {
-      const pack = manifest(raw);
-      if (extensions.has(pack.id)) throw Error('Duplicate asset pack: ' + pack.id);
+    const extensions = packMap(packs), owners = new Map();
+    for (const pack of extensions.values()) {
       for (const family of pack.families) {
         if (registry.get(family.id)) throw Error('Duplicate asset family: ' + family.id);
         registry.register(family);
         owners.set(family.id, pack.id);
       }
-      extensions.set(pack.id, pack);
     }
     const listed = registry.list(), byId = new Map(listed.map(family => [family.id, family]));
     for (const pack of extensions.values()) {
@@ -103,5 +159,5 @@
       compile
     });
   }
-  A.assetPacks = Object.freeze({ create, manifest, reviseFamily });
+  A.assetPacks = Object.freeze({ create, manifest, bundle, merge, reviseFamily });
 })(KIT);
