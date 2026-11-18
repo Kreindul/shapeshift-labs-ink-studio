@@ -33,6 +33,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
 | `fittedRibbon({inner, outer, pitch, gap, closed, phase, budget})` | Fit repeating bands along paired 2D or 3D rails. Each logical cell contains quadrilateral footprints split at source edges |
 | `surfaceCells.clip(cells, {boundary, holes, budget, work})` | Intersect convex cell footprints with a convex chart boundary and subtract convex holes. Group fragments by logical cell key |
+| `surfaceCells.loft(layout, {sample, levels, step, metadata, budget}, builder?)` | Map each fitted footprint onto two levels of a curved carrier. Emit closed, outward-wound fragments with shared cap and side vertices |
 | `planarCells.layout(bounds, mask, options)`, `planarCells.prism(cell, options)` | Stable planar cells clipped to a mask, including disconnected fragments and holes. Prisms provide distance, ray, sampling and closed mesh operations |
 | `supportSkirt({outline, ground, embed, overlap, maxDrop})` | Fill vertically below a convex planar carrier and above the supplied height field, up to the configured drop |
 | `basins.surface(carrier, mask, options)`, `terraces.surface(carrier, configuration)` | Masked level cuts and configurable height bands. Carrier provides bounds, height, normal and domain predicates |
@@ -98,6 +99,12 @@ fragments in the same chart coordinates. Shared cell keys are grouped across
 chart seams and split pieces. Material assignment and mapping chart points
 onto the host are caller policies. The work budget counts vertices visited
 by the clip operations.
+
+`surfaceCells.loft` takes the clipped layout and calls `sample([u, v], level)`
+for each position. Supply an ordered pair of finite levels whose samples
+enclose a solid. Use `step` to subdivide in chart coordinates before mapping.
+Each convex fragment emits a closed shell. A metadata callback can assign
+owner, material and surface roles by the original logical cell key.
 
 Catalog definitions may name one or several parents using `extends`. A
 resolved profile merges named or inline layers in order. Object keys compose

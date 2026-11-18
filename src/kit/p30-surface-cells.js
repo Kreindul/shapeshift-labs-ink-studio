@@ -1,7 +1,7 @@
 /* Exact convex footprints in a carrier chart. Logical keys survive clipping
    into several pieces, so appearance and local edits can follow the cell. */
 (function (K) {
-  const P = K.procedural;
+  const P = K.procedural || K.authoring;
   const EPS = 1e-8;
   const point = p =>
     Array.isArray(p) && p.length === 2 && Array.from(p).every(v => Number.isFinite(v) && Math.abs(v) <= 1e6);

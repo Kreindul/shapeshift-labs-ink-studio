@@ -48,3 +48,31 @@ test('fitted-course fragments on a periodic chart seam retain one logical key', 
   assert(seam.fragments.some(polygon => polygon.some(([x]) => x === 6)));
   near(total(result), 12);
 });
+
+test('lofted cells follow a curved carrier with closed sides and a distinct material role', () => {
+  const layout = P.surfaceCells.clip([{ key: 'panel', polygon: rectangle(0, 0, 2, 1) }]);
+  const sample = ([u, v], level) => [u, u * u / 2 + level, v];
+  const mesh = P.surfaceCells.loft(layout, {
+    sample, levels: [-.05, .12], step: .3, metadata: key => ({ surface: key, material: 'ceramic' })
+  }).finish();
+  assert(mesh.positions.length > 36);
+  for (const group of mesh.groups) {
+    assert.equal(group.surface, 'panel');
+    assert.equal(group.material, 'ceramic');
+  }
+  const edges = new Map();
+  for (let i = 0; i < mesh.positions.length; i += 9) {
+    const points = [0, 3, 6].map(j => Array.from(mesh.positions.subarray(i + j, i + j + 3)));
+    for (const [j, [x, y, z]] of points.entries()) {
+      assert(x >= 0 && x <= 2 && z >= 0 && z <= 1);
+      assert([-.05, .12].some(level => Math.abs(y - x * x / 2 - level) < 1e-6));
+      const a = points[j].map(v => Math.round(v * 1e6)).join(',');
+      const b = points[(j + 1) % 3].map(v => Math.round(v * 1e6)).join(',');
+      const key = a < b ? a + '/' + b : b + '/' + a;
+      edges.set(key, (edges.get(key) || 0) + (a < b ? 1 : -1));
+    }
+  }
+  assert([...edges.values()].every(sum => sum === 0));
+  assert.throws(() => P.surfaceCells.loft(layout, { sample, step: .01, budget: 15 }), /triangle budget/);
+  assert.throws(() => P.surfaceCells.loft(layout, { sample: ([u, v]) => [u, 0, v] }), /volume/);
+});

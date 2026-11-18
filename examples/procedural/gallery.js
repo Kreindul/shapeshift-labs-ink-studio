@@ -261,22 +261,16 @@
       const angle = (i * Math.PI) / 12;
       return [2.5 + 0.78 * Math.cos(angle), 1.28 + 0.78 * Math.sin(angle)];
     })];
-    const { cells } = P.surfaceCells.clip(layout.cells, {
+    const cells = P.surfaceCells.clip(layout.cells, {
       boundary: [[0, 0], [width, 0], [4.65, 2.4], [2.5, height], [0.35, 2.4]],
       holes: [portal]
     });
-    return cells.flatMap(({ key, fragments }) =>
-      fragments.map((polygon, fragment) => {
-        const n = polygon.length;
-        const row = Number(key.split('/')[0]);
-        const indices = polygon.map((_, i) => i);
-        const vertices = [-0.13, 0.13].flatMap(z => polygon.map(([x, y]) => [x, y, z]));
-        const sides = indices.map(i => [i, (i + 1) % n, (i + 1) % n + n, i + n]);
-        return P.pieces.convex(vertices, [indices, indices.map(i => i + n), ...sides], {
-          key: key + '/' + fragment, material: row < 3 ? 'basalt' : 'glaze'
-        }).mesh;
-      })
-    );
+    return [P.surfaceCells.loft(cells, {
+      levels: [-0.13, 0.13],
+      step: 0.2,
+      sample: ([x, y], level) => [x, y, level + (x - 2.5) ** 2 * 0.065],
+      metadata: key => ({ surface: key, material: Number(key.split('/')[0]) < 3 ? 'basalt' : 'glaze' })
+    }).finish()];
   }
 
   const examples = [
@@ -299,7 +293,7 @@
     ['Surface contacts', 'The seam follows the intersecting faces and stops where a solid covers it.', surfaceContact],
     ['Fitted arch trim', 'Physical joints follow the inner profile through each bend.', () => fittedRibbon('arch', 'cream')],
     ['Fitted hatch trim', 'The same strip layout follows a closed panel profile.', () => fittedRibbon('hatch', 'glaze')],
-    ['Clipped surface courses', 'Courses share a physical opening and follow a sloped outline.', cutCourses]
+    ['Clipped surface courses', 'Courses follow a curved carrier and share a physical opening.', cutCourses]
   ];
 
   function triangles(meshes) {
