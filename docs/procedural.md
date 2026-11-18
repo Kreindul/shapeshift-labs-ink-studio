@@ -110,6 +110,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.dualContour(field, bounds, options)`, `geometry.surfaceNets(field, bounds, options)` | Cell-local surface samples, optional indexed preview triangles and tagged mesh output |
 | `geometry.octree(field, bounds, options)`, `geometry.stitchVoxelLevels(tree, options)`, `geometry.adaptiveSurface(field, bounds, options)` | Sparse field sampling, 2:1 voxel levels and stitched adaptive previews |
 | `geometry.simplifyQEM(mesh, options)`, `lod.mergeSplats(records, options)`, `lod.packSplats(result)` | Error-driven previews with retained material seams, ownership and protected samples |
+| `sampleVisibility.create(count)`, `splatOrder.compile(indices, depthAt)` | Packed visibility updates and reusable depth buckets for retained samples |
 | `motion.streamline(field, start, options)`, `motion.obstacleWake(sdf, options)`, `motion.loopTrajectory(points, options)`, `motion.surfaceAdvection(chart, seeds, options)` | Field integration, wake and curl sampling, closed tracks and UV-attached motion |
 | `motion.stableFluid(options)`, `motion.shallowWater(options)` | Persistent density and velocity grids, and conservative terrain-aligned water |
 | `motion.surfaceWeather(options)`, `motion.materialStateGraph(machine, entities, options)` | Persistent wetness and thermal fields, and event-driven material changes |
@@ -1688,6 +1689,30 @@ crossings. Use a closed shell for point containment and curve occlusion.
 `intersections` returns paired surface names and stitched world points.
 `clipCurve` returns exposed runs with source segment coordinates and blocker
 IDs. The caller can send those runs to a route, sweep, or trim material.
+
+### Incremental splat visibility and depth order
+
+`P.sampleVisibility.create(count)` creates a one-bit-per-sample mask. Pass a
+sorted, unique `Uint32Array` of hidden sample indices to `set`. It returns
+whether the mask is active. Supply an empty array to clear it. Read
+`changedRows` after each call for the changed texture span with exclusive
+`end`, or null when the words are unchanged. `words` holds the integer
+texture data in rows of `P.sampleVisibility.width` 32-bit words. Treat the
+buffer as read-only. The optional `glsl` snippet shares the same addressing
+for consumers using an R32UI texture.
+
+`P.splatOrder.compile(indices, depthAt, behind?)` stores a depth order and
+its bucket keys for fixed sample centers. Supply increasing nonnegative
+sample indices and a finite depth callback. The optional `behind(index)`
+predicate sends a sample to the far bucket. Rebuild the bank when its depths
+or membership change.
+
+`P.splatOrder.merge(bank, transientIndices, depthAt, behind, result, keys)`
+sorts disjoint transient indices in place and writes the combined order into
+the caller's result buffer. Use `Uint16Array` scratch storage for `keys`,
+large enough to index each transient sample. Bucket ties follow ascending
+sample index. A false return leaves the output untouched and signals that
+the full depth range needs to be recomputed.
 
 ### Keyframe tracks
 
