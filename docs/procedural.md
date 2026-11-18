@@ -1179,6 +1179,20 @@ from source IDs. `groups.remove(doc, ids)` batches normal retained deletion.
 membership and currently active IDs, so a deleted member can reappear after
 undo. `groups.forget(doc, id)` removes just the saved selection.
 
+`KIT.authoring.appearanceTransfer.create({describe, compatible?})` binds
+portable finish samples to an application's own fields. The descriptor
+receives `(entity, source, incoming?)` and returns `{family, label?, slots}`.
+Each named slot has an effective `value` and an array `path` into the target
+entity's appearance or parameters. For example, a semantic frame color can
+read through a material alias and map to the receiver's own material role.
+The default compatibility policy matches descriptor families.
+
+`capture(source, id)` returns a JSON-safe sample. `plan(source, ids, sample)`
+resolves target patches and reports skipped IDs for callers that need a live
+preview. `apply(doc, ids, sample)` applies the patches in one transaction.
+Callers choose the target set and which fields to expose. Shared finishes
+can use the separate document style catalog and `styleRef`.
+
 ## Incremental realization
 
 `P.chunks.create({preview, refine})` accepts synchronous builders or promises.
