@@ -77,3 +77,22 @@ test('fast marching traces around a blocked disk, chooses seeded outlets, and re
   assert.equal(wall.time(-2, 0), Infinity);
   assert.equal(wall.trace([-2, 0]).status, 'unreachable');
 });
+
+test('shared convex footprints reserve a disk margin around unordered and acute samples', () => {
+  const samples = [[3, 0], [-1, 1], [-1, -1], [0, 0], [-1, -1]];
+  const margin = 0.7, outline = routes.convexFootprint(samples, { margin });
+  assert.deepEqual(routes.convexFootprint(samples), [[-1, -1], [3, 0], [-1, 1]]);
+  for (const [x, z] of samples) for (let i = 0; i < 64; i++) {
+    const angle = 2 * Math.PI * i / 64, q = [x + margin * Math.cos(angle), z + margin * Math.sin(angle)];
+    assert(outline.every(([ax, az], j) => {
+      const [bx, bz] = outline[(j + 1) % outline.length];
+      return (bx - ax) * (q[1] - az) - (bz - az) * (q[0] - ax) >= -1e-8;
+    }));
+  }
+  const a = [-4, 0.2, 0], b = [5, 1.4, 0],
+    path = routes.visibility(a, b, [outline, routes.convexFootprint([[1, 1], [2, 1], [2, 3], [1, 3]], { margin })]);
+  assert.equal(path.status, 'ok');
+  assert.deepEqual(path.route.points[0], a);
+  assert.deepEqual(path.route.points.at(-1), b);
+  assert(path.route.points.length > 2);
+});

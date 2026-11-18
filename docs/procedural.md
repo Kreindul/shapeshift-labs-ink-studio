@@ -578,6 +578,14 @@ can touch polygon boundaries. Use expanded obstacle outlines to leave room
 for the width of the realized path. Intermediate elevations interpolate
 along the route.
 
+`P.routes.convexFootprint(samples, {margin})` builds a counterclockwise XZ
+hull from unordered samples, with interiors, duplicate samples and
+collinear edges removed. A positive margin expands it by a circumscribed
+octagon. This conservatively bounds a disk of that radius swept around the
+hull. Use it for plans around projected solids, clearance for a swept deck
+or an agent radius. Select the obstacles that intersect the relevant height
+range before passing their footprints to `visibility`.
+
 `P.routes.spline(route, {radius, spacing, clearance, minClearance})`
 rounds corners using quadratic splines, shrinking the trim when needed.
 Unfit corners stay in the route. The result contains the fitted control points
