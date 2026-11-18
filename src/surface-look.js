@@ -119,6 +119,30 @@ const SurfaceLook = (() => {
     if (!settings?.amplitude) return n;
     const scale = positive(settings.scale, 0.3);
     const amp = settings.amplitude * (1 - smooth(scale * 0.35, scale * 0.85, footprint));
+    if (!amp) return n;
+    if (settings.type === 'rings') {
+      const axis = unit(vector(settings.axis)), across = unit(vector(settings.cross, AXES.z));
+      const speed = positive(settings.speed, 1);
+      const width = positive(settings.width, scale * 2.5);
+      const damping = Math.max(0, settings.damping ?? 0.3);
+      let dx = 0, dz = 0;
+      for (const drop of settings.drops) {
+        let age = time - (drop.start ?? 0);
+        if (age < 0) continue;
+        if (drop.repeat) age %= drop.repeat;
+        const offset = p.map((v, i) => v - drop.at[i]);
+        const u = dot(offset, axis), v = dot(offset, across), radius = Math.hypot(u, v);
+        const travel = radius - speed * age;
+        if (radius < 1e-8 || Math.abs(travel) >= width) continue;
+        const envelope = (1 - smooth(width * 0.2, width, Math.abs(travel))) *
+          smooth(0, scale * 0.25, speed * age) * Math.exp(-damping * radius);
+        const k = Math.sin(TAU * travel / scale) * envelope * (drop.strength ?? 1) / radius;
+        dx += u * k;
+        dz += v * k;
+      }
+      // Tilt across the plane, leaving portions of an angled surface normal outside that plane alone.
+      return unit(n.map((value, i) => value + amp * (axis[i] * dx + across[i] * dz)), n);
+    }
     const u = dot(p, vector(settings.axis)) / scale;
     const v = dot(p, vector(settings.cross, AXES.z)) / scale;
     const phase = time * (settings.speed ?? 0);
@@ -250,8 +274,19 @@ const SurfaceLook = (() => {
     if (settings.normal) {
       if (!isRecord(settings.normal)) throw new TypeError('Surface normal variation must be an object');
       numeric(settings.normal, ['amplitude', 'scale', 'speed'], 'surface.normal');
-      if (settings.normal.type && !['noise', 'waves'].includes(settings.normal.type))
+      if (settings.normal.type && !['noise', 'waves', 'rings'].includes(settings.normal.type))
         throw new RangeError('Unknown surface normal pattern: ' + settings.normal.type);
+      if (settings.normal.type === 'rings') {
+        numeric(settings.normal, ['width', 'damping'], 'surface.normal');
+        if (!Array.isArray(settings.normal.drops) || settings.normal.drops.length > 64)
+          throw new TypeError('Ripple rings need a list of up to 64 drops');
+        for (const drop of settings.normal.drops) {
+          if (!isRecord(drop) || !Array.isArray(drop.at) || drop.at.length !== 3 || !drop.at.every(Number.isFinite))
+            throw new TypeError('Each ripple drop needs a finite XYZ position');
+          numeric(drop, ['start', 'repeat', 'strength'], 'ripple drop');
+          if (drop.repeat !== undefined && drop.repeat <= 0) throw new RangeError('Ripple repeat must be positive');
+        }
+      }
     }
     const layers = Object.entries(settings.layers || {})
       .filter(([, layer]) => layer && layer.strength !== 0)
