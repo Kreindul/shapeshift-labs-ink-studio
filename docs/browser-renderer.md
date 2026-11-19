@@ -52,6 +52,7 @@ tone mapping, and grading are inactive. Pass `reuseOrder: false` or
 | `edges`, `lightShape` | Toggle surface edge sprites and per-pixel line shading. |
 | `scale`, `stepAnimation` | Change the splat size or disable the shared per-pixel animation clock stepping. |
 | `water: false` | Compare the scene with water optics disabled. |
+| `portal`, `fade` | Render an oriented destination view or apply a scene fade. See [place travel and portals](portals.md). |
 
 Set `frame.target` to a same-context framebuffer descriptor with `framebuffer`,
 `width`, and `height` to draw offscreen. Its dimensions supply the defaults for

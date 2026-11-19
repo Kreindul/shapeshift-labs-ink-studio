@@ -9,6 +9,9 @@ For editable SDF-biome scenes, the
 navigation and splats together. Its packed render world can also be read
 with `K.world.query.fromScene`.
 
+[Place travel and portals](portals.md) connect separate authored places with
+prepared destination views, actor and camera handoffs, and fade-based travel.
+
 ## Run and compare a watershed
 
 Save the starting checkpoint after the reservoir has settled.

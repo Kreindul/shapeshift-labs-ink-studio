@@ -43,6 +43,7 @@ WaterStyle readWaterStyle(int i) {
 uniform mat4 u_waterView;
 uniform vec3 u_waterEye;
 uniform vec3 u_waterCamera;
+uniform vec4 u_arrivalPlane;
 uniform float u_waterTime;
 
 bool waterSlab(inout vec2 interval, float p, float d, float low, float high) {
@@ -270,6 +271,15 @@ vec3 waterPaint(vec3 color, vec2 pixel, vec2 size, float axial, out vec3 mark) {
   float rayScale = length(direction);
   vec3 ray = direction / rayScale;
   float limit = axial * rayScale;
+  float startSide = dot(u_arrivalPlane, vec4(eye, 1.0));
+  if (startSide < 0.0) {
+    float into = dot(u_arrivalPlane.xyz, ray);
+    if (into <= 0.0) return color;
+    float entrance = -startSide / into;
+    if (entrance >= limit) return color;
+    eye += ray * entrance;
+    limit -= entrance;
+  }
   #ifdef WATER_AIR_POCKETS
   vec2 air[8];
   int airCount = 0;

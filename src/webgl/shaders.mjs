@@ -21,6 +21,7 @@ uniform vec4 u_born;   // growth you can watch: when the diorama was shown, how 
 uniform vec2 u_cut;       // how wide a view is cleared between you and the eye, and how low it reaches
 uniform float u_wl, u_slice; uniform vec2 u_lid; uniform vec4 u_pit; uniform vec4 u_portal; uniform vec2 u_pdoor; uniform vec3 u_eye;   // a doorway standing square to z (centre x, sill y, z, and which side of it this place is on), its half-width and height, and where the eye is
 uniform vec3 u_fog;
+uniform vec4 u_arrivalPlane;
 uniform vec4 u_fogp;   // haze start, haze max, depth range near, depth range far
 layout(location=0) in vec2 a_corner;
 layout(location=1) in int a_index;
@@ -95,6 +96,7 @@ void main(){
     if ((pos.z - u_portal.z) * sg < -0.12 && (u_eye.z - u_portal.z) * sg > 0.05) { vec3 hp = u_eye + (pos - u_eye) * ((u_eye.z - u_portal.z) / (u_eye.z - pos.z)); thr = abs(hp.x - u_portal.x) < u_pdoor.x && hp.y > u_portal.y && hp.y < u_portal.y + u_pdoor.y; }
     if (pv ? !thr : (thr && stat)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; } }
   else if (pv) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  if (dot(u_arrivalPlane, vec4(pos, 1.0)) < 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   // under a roof, the storey over your head is not drawn at all: the cut comes down from above to just over head height, block by block
   if (u_lid.y > 0.0 && !pv) { float hl = fract(sin(dot(floor(pos.xyz / 0.5), vec3(12.9898, 78.233, 37.719))) * 43758.5453); if (pos.y > u_lid.x + (stat ? 0.0 : 0.9) + (1.0 - u_lid.y) * (7.0 + 3.0 * hl)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; } }
   // what moves (an enemy, a barrel, a saw, a rail's lights) is held to the same lit circle as the ground it stands on: nothing shows out in the black where there is no floor
@@ -761,6 +763,7 @@ void main() { o = vec4(texelFetch(u_src, ivec2(gl_FragCoord.xy), 0).rgb, 1.0); }
   const SPR_VS = `#version 300 es
 precision highp float; precision highp int;
 uniform highp sampler2D u_anc, u_dat, u_sprTex; uniform mat4 u_view, u_proj; uniform vec2 u_vp, u_rng; uniform float u_time, u_keep, u_ortho; uniform vec4 u_rmpN4[16];
+uniform vec4 u_arrivalPlane;
 flat out ivec2 v_a; flat out ivec4 v_i; flat out float v_dA; flat out vec3 v_P, v_N;
 vec4 sprT(int x, int y) { return texelFetch(u_sprTex, ivec2(x, y), 0); }
 int rlen(int r) { return int(u_rmpN4[r >> 2][r & 3] + 0.5) & 15; }
@@ -773,7 +776,7 @@ void main() {
   int j = int(t0.w + 0.5); vec4 m2 = texelFetch(u_dat, ivec2(((j & 511) << 2) + 2, j >> 9), 0), m3 = texelFetch(u_dat, ivec2(((j & 511) << 2) + 3, j >> 9), 0);
   vec3 pos = t0.xyz;
   if (int(m2.w + 0.5) % 16 == 11) { pos.x += m3.z * sin(u_time * m3.y + pos.y * 1.3 + pos.z * 0.9 + m3.x); pos.y += m3.z * 0.6 * sin(u_time * m3.y * 1.3 + pos.x * 1.1 + m3.x); }
-  vec4 cam = u_view * vec4(pos, 1.0); if (cam.z > -0.05) return;
+  vec4 cam = u_view * vec4(pos, 1.0); if (cam.z > -0.05 || dot(u_arrivalPlane, vec4(pos, 1.0)) < 0.0) return;
   vec4 clip = u_proj * cam; ivec2 a = ivec2(floor((clip.xy / clip.w * 0.5 + 0.5) * u_vp));
   vec3 N = t1.xyz, vn = mat3(u_view) * N, c = cam.xyz;
   float facing = u_ortho > 0.5 ? -vn.z : dot(vn, c) / length(c); if (abs(facing) > 0.95) return;

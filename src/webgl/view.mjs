@@ -34,13 +34,34 @@ export function makeCamera(world, frame, width, height) {
     : new Float32Array([scale / aspect, 0, 0, 0, 0, scale, 0, 0, 0, 0,
       (far + near) / (near - far), -1, 0, 0, 2 * far * near / (near - far), 0]);
   const depthCenter = ortho ? distance : dist;
-  return {
+  const result = {
     view, projection, eye, aspect, ortho, radius,
     tangent: ortho ? viewHeight : tanFov,
     footprint: dist * 2 * tanFov / height,
     clipNear: Math.max(0.4, 0.15 * dist),
     depthRange: [depthCenter - radius, depthCenter + radius]
   };
+  return camera.pose ? withCameraPose(result, camera.pose) : result;
+}
+
+export function cameraPose({ eye, view }) {
+  return { eye: eye.slice(), right: [view[0], view[4], view[8]],
+    up: [view[1], view[5], view[9]], back: [view[2], view[6], view[10]] };
+}
+
+export function withCameraPose(camera, { eye, right, up, back }) {
+  const axes = [right, up, back];
+  const valid = v => Array.isArray(v) && v.length === 3 && Array.from(v).every(Number.isFinite);
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  if (!valid(eye) || !axes.every(valid) || axes.some(axis => Math.abs(dot(axis, axis) - 1) > 1e-4) ||
+      Math.abs(dot(right, up)) > 1e-4 || Math.abs(dot(right, back)) > 1e-4 || Math.abs(dot(up, back)) > 1e-4 ||
+      dot([right[1] * up[2] - right[2] * up[1], right[2] * up[0] - right[0] * up[2],
+        right[0] * up[1] - right[1] * up[0]], back) < 0.9999)
+    throw new RangeError('Camera pose needs a finite eye and a right-handed orthonormal basis');
+  return { ...camera, eye: eye.slice(), view: new Float32Array([
+    right[0], up[0], back[0], 0, right[1], up[1], back[1], 0, right[2], up[2], back[2], 0,
+    -dot(right, eye), -dot(up, eye), -dot(back, eye), 1
+  ]) };
 }
 
 export function createDepthSorter() {

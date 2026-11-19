@@ -2,8 +2,9 @@ import { createResources } from './resources.mjs';
 import { createTargets } from './targets.mjs';
 import { createSplatPipeline } from './pipeline.mjs';
 import { pixelShaderSources } from './shaders.mjs';
-import { createDepthSorter, makeCamera } from './view.mjs';
+import { createDepthSorter, makeCamera, cameraPose, withCameraPose } from './view.mjs';
 import { waterBackgroundShader } from './water-optics.mjs';
+import { portalComposite } from './portal-composite.mjs';
 
 const zero = new Float32Array(4);
 const empty = new Float32Array(0);
@@ -81,6 +82,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     const dryGeometry = target(2), dryContours = target(2), owner = target(), key = target(1, { integer: true });
     const wetVariants = new Map();
     let wetGeometry, wetContours, waterTexture, packedWater;
+    let portalSource, portalDestination, portalDepth, portalProgram;
     let lastWater, lastWaterTime, waterWidth = 0, waterHeight = 0;
     const cleaned = target(), finished = target(), history = [target(), target()];
     const data = table(2048, 0, maxSize), bones = table(768, 4, maxSize);
@@ -199,7 +201,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       anchorCount = points.n;
     }
 
-    function waterUniforms(scene, camera, time) {
+    function waterUniforms(scene, camera, time, plane) {
       if (!scene) return null;
       waterTexture ??= resources.texture();
       textureUnit(3, waterTexture);
@@ -214,7 +216,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         }
         packedWater = uniforms;
       }
-      return { ...packedWater, u_waterData: 3, u_waterView: camera.view, u_waterEye: camera.eye,
+      return { ...packedWater, u_waterData: 3, u_waterView: camera.view, u_waterEye: camera.eye, u_arrivalPlane: plane,
         u_waterCamera: [camera.tangent * camera.aspect, camera.tangent, +camera.ortho], u_waterTime: time };
     }
 
@@ -232,6 +234,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       if (options.u_idx) {
         gl.disable(gl.BLEND);
         gl.clearBufferfv(gl.COLOR, 0, zero);
+        if (options.u_idx > 1) gl.clearBufferfv(gl.COLOR, 1, zero);
       } else {
         if (water) {
           wet.background ??= program(waterBackgroundShader(wet.airPockets, wet.layered, wet.atlas));
@@ -254,7 +257,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       pipeline.draw();
     }
 
-    function drawSprites(camera, world, width, height, time, pixelOutline, water, pal, wet) {
+    function drawSprites(camera, world, width, height, time, pixelOutline, water, pal, wet, plane) {
       spriteLayer.resize(width, height);
       data.bind();
       textureUnit(13, null);
@@ -271,7 +274,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       gl.useProgram(sprites.p);
       sprites.set({
         u_anc: 14, u_sprTex: 12, u_dat: 0, u_depth: 2, u_idxTex: 9, u_pixTex: 10,
-        u_view: camera.view, u_proj: camera.projection, u_vp: [width, height],
+        u_view: camera.view, u_proj: camera.projection, u_vp: [width, height], u_arrivalPlane: plane,
         u_rng: camera.depthRange, u_time: time, u_keep: toolkit.KIT.pixel.anchorKeep(world, camera.footprint),
         u_ortho: +camera.ortho, u_rmpN4: materials.gpu.lens, u_pview: camera.view, u_peye: camera.eye,
         u_tanF: camera.tangent, u_asp: camera.aspect, u_portho: +camera.ortho,
@@ -284,7 +287,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       textureUnit(13, spriteLayer.textures[0]);
     }
 
-    function render(world, frame, width, height, output) {
+    function render(world, frame, width, height, output, cameraOverride, plane = zero, cover) {
       const { raw = false, outline = true, dither = 0.35, scale = 1 } = frame;
       const look = world.look ?? {};
       const waterScene = frame.water !== false && world.water?.count ? world.water : null;
@@ -320,9 +323,9 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         history.forEach(buffer => buffer.resize(width, height));
       }
 
-      const camera = makeCamera(world, frame, width, height);
+      const camera = cameraOverride ?? makeCamera(world, frame, width, height);
       const t = frame.time ?? 0;
-      const water = waterUniforms(waterScene, camera, t);
+      const water = waterUniforms(waterScene, camera, t, plane);
       const wet = water && wetVariant(water);
       const time = frame.stepAnimation !== false && look.pixel ? Math.floor(t * 10) / 10 : t;
       const hasFine = !raw && !!world.fine;
@@ -359,7 +362,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const growth = world.grow ?? {};
       shader.set({
         u_data: 0, u_bones: 4, u_fine: 7, u_fineOn: +hasFine, u_fpal: pal, u_view: camera.view,
-        u_proj: camera.projection, u_time: time, u_scale: scale, u_ortho: +camera.ortho,
+        u_proj: camera.projection, u_time: time, u_scale: scale, u_ortho: +camera.ortho, u_arrivalPlane: plane,
         u_sampleWithdrawal: sampleCoverage?.amount(frame.sampleWithdrawal ?? world.sampleWithdrawal ?? 0) ?? 0,
         u_born: [frame.bornAt ?? 0, growth.rate ?? 1, growth.fade ?? 0.5, growth.loop ?? 0],
         u_crisp: +!raw, u_dilate: raw ? 0.3 : 0.15, u_near: camera.clipNear,
@@ -372,6 +375,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         drawGeometry(shader, contours, width, height, { u_idx: 0, u_snap: 1, u_hard: 0, background, tangent }, water, wet);
       if (patterned)
         drawGeometry(shader, owner, width, height, { u_idx: 1, u_snap: 1, u_hard: 0, tangent });
+      if (cover)
+        drawGeometry(shader, cover, width, height, { u_idx: 2, u_snap: +(!raw && !colored), u_hard: 0, tangent });
       gl.disable(gl.BLEND);
       textureUnit(1, geometry.textures[0]);
       textureUnit(2, geometry.textures[1]);
@@ -397,7 +402,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       }
       textureUnit(15, key.textures[0]);
       const sprites = patterned && anchorCount > 0 && frame.edges !== false;
-      if (sprites) drawSprites(camera, world, width, height, time, pixelOutline, water, pal, wet);
+      if (sprites) drawSprites(camera, world, width, height, time, pixelOutline, water, pal, wet, plane);
       const lines = outline && look.lines;
       const definition = raw || frame.tone === false ? null : (frame.tone ?? look.tone);
       const grade = world.anim?.grade;
@@ -470,8 +475,49 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       lastWaterTime = frame.time;
     }
 
+    function present(world, frame, width, height, output) {
+      const { portal, fade = 0 } = frame;
+      if (!portal && !fade) return render(world, frame, width, height, output);
+      const camera = makeCamera(world, frame, width, height), opening = portal?.opening;
+      const dotFrom = (a, b, axis) => a.reduce((sum, value, i) => sum + (value - b[i]) * axis[i], 0);
+      const visible = opening && dotFrom(camera.eye, opening.from.origin, opening.from.normal) > 1e-6;
+      if (!visible && !fade) return render(world, frame, width, height, output, camera);
+      if (width > maxSize || height > maxSize || width > viewportLimit[0] || height > viewportLimit[1])
+        throw new RangeError('Ink Studio frame exceeds the WebGL viewport or texture size limit');
+      if (!output) {
+        if (gl.canvas.width !== width) gl.canvas.width = width;
+        if (gl.canvas.height !== height) gl.canvas.height = height;
+      }
+      portalSource ??= target();
+      portalSource.resize(width, height);
+      if (visible) {
+        portalDestination ??= target();
+        portalDepth ??= target(2);
+        portalDestination.resize(width, height);
+        portalDepth.resize(width, height);
+        const nextCamera = withCameraPose(camera, opening.camera(cameraPose(camera)));
+        const { origin, normal } = opening.to;
+        const clip = [...normal, -dotFrom(origin, [0, 0, 0], normal)];
+        const { raw, outline, dither, scale, clean, lineClean, colored, tone, edges, water, time, stepAnimation } = frame;
+        render(portal.destination, { raw, outline, dither, scale, clean, lineClean, colored, tone, edges, water, time,
+          stepAnimation, ...portal.destinationFrame, damp: false }, width, height, portalDestination.framebuffer, nextCamera, clip);
+      }
+      render(world, visible ? { ...frame, damp: false } : frame, width, height, portalSource.framebuffer,
+        camera, zero, visible ? portalDepth : undefined);
+      portalProgram ??= program(portalComposite);
+      textureUnit(0, portalSource.textures[0]);
+      textureUnit(1, visible ? portalDestination.textures[0] : portalSource.textures[0]);
+      textureUnit(2, visible ? portalDepth.textures[1] : portalSource.textures[0]);
+      fullscreen(portalProgram, output, width, height, { u_source: 0, u_destination: 1, u_coverDepth: 2,
+        u_opening: visible ? (opening.shape === 'ellipse' ? 2 : 1) : 0, u_size: [width, height], u_fade: fade,
+        ...(visible ? { u_origin: opening.from.origin, u_right: opening.from.right, u_up: opening.from.up,
+          u_normal: opening.from.normal, u_half: [opening.halfWidth, opening.halfHeight],
+          u_eye: camera.eye, u_portalView: camera.view, u_portalProj: camera.projection,
+          u_settings: [camera.tangent * camera.aspect, camera.tangent, +camera.ortho] } : {}) });
+      gl.activeTexture(gl.TEXTURE0);
+    }
     const viewportLimit = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
-    return { render, dispose() { pipeline.dispose(); resources.dispose(); } };
+    return { render: present, dispose() { pipeline.dispose(); resources.dispose(); } };
   } catch (error) {
     pipeline?.dispose();
     resources.dispose();
@@ -496,23 +542,40 @@ export function createRenderer(canvas, { toolkit, specialize = true, reuseOrder 
     backend = null;
   };
   canvas.addEventListener?.('webglcontextlost', lose);
+  function validateWorld(world, frame) {
+    if (!(world?.data instanceof Float32Array) || !Number.isSafeInteger(world.count) ||
+        world.count < 0 || world.count * 16 > world.data.length || !world.pal?.length)
+      throw new TypeError('Render expects a world with packed splats, a count, and a palette');
+    if (world.fine && world.fine.length < world.count * 12 || world.pix && world.pix.length < world.count * 8)
+      throw new RangeError('Ink Studio material data is shorter than the splat count');
+    if (frame.order !== undefined &&
+        (!(frame.order instanceof Int32Array) || frame.order.length !== world.count ||
+         frame.order.some(index => index < 0 || index >= world.count)))
+      throw new TypeError('Draw order must contain valid Int32 splat indices');
+    if (frame.changedRows !== undefined &&
+        (!Array.isArray(frame.changedRows) || frame.changedRows.some(row =>
+          !Number.isInteger(row) || row < 0 || row >= Math.max(1, Math.ceil(world.count / 512)))))
+      throw new RangeError('changedRows must contain valid 512-splat row indices');
+    if (![frame.time ?? 0, frame.bornAt ?? 0, frame.scale ?? 1, frame.dither ?? 0.35].every(Number.isFinite))
+      throw new RangeError('Ink Studio frame parameters must be finite');
+  }
   return {
+    cameraPose(world, frame = {}) {
+      return cameraPose(makeCamera(world, frame, frame.width ?? frame.target?.width ?? canvas.width,
+        frame.height ?? frame.target?.height ?? canvas.height));
+    },
     render(world, frame = {}) {
       if (disposed) throw new Error('The Ink Studio renderer has been disposed');
       if (gl.isContextLost()) throw new Error('The Ink Studio WebGL context is lost');
-      if (!(world?.data instanceof Float32Array) || !Number.isSafeInteger(world.count) ||
-          world.count < 0 || world.count * 16 > world.data.length || !world.pal?.length)
-        throw new TypeError('Render expects a world with packed splats, a count, and a palette');
-      if (world.fine && world.fine.length < world.count * 12 || world.pix && world.pix.length < world.count * 8)
-        throw new RangeError('Ink Studio material data is shorter than the splat count');
-      if (frame.order !== undefined &&
-          (!(frame.order instanceof Int32Array) || frame.order.length !== world.count ||
-           frame.order.some(index => index < 0 || index >= world.count)))
-        throw new TypeError('Draw order must contain valid Int32 splat indices');
-      if (frame.changedRows !== undefined &&
-          (!Array.isArray(frame.changedRows) || frame.changedRows.some(row =>
-            !Number.isInteger(row) || row < 0 || row >= Math.max(1, Math.ceil(world.count / 512)))))
-        throw new RangeError('changedRows must contain valid 512-splat row indices');
+      validateWorld(world, frame);
+      if (frame.portal) {
+        const { source, destination, opening, destinationFrame = {} } = frame.portal;
+        if ((source && source !== world) || typeof opening?.camera !== 'function' || !opening.from || !opening.to)
+          throw new TypeError('Expected an oriented portal view for the rendered world');
+        validateWorld(destination, destinationFrame);
+      }
+      if (frame.fade !== undefined && (!Number.isFinite(frame.fade) || frame.fade < 0 || frame.fade > 1))
+        throw new RangeError('Scene fade opacity must be in [0, 1]');
       const target = frame.target;
       const width = frame.width ?? target?.width ?? canvas.width;
       const height = frame.height ?? target?.height ?? canvas.height;
@@ -521,8 +584,6 @@ export function createRenderer(canvas, { toolkit, specialize = true, reuseOrder 
         throw new TypeError('Draw target must match the frame size and use the renderer WebGL context');
       if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1)
         throw new RangeError('Ink Studio frame width and height must be positive integers');
-      if (![frame.time ?? 0, frame.bornAt ?? 0, frame.scale ?? 1, frame.dither ?? 0.35].every(Number.isFinite))
-        throw new RangeError('Ink Studio frame parameters must be finite');
       backend ??= createBackend(gl, toolkit, specialize, reuseOrder);
       backend.render(world, frame, width, height, output);
     },
