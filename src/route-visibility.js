@@ -288,7 +288,7 @@ const RouteVisibility = (() => {
   // elevation interval to account for the shape that will travel the route.
   function prismVisibility(start, end, prisms, {
     minHeight = -1e6, maxHeight = 1e6, maxGrade = 1, maxLength = 1e7,
-    maxVertices = 360, maxTests = 350000, waypoints = [], floor, spacing = .25
+    maxVertices = 360, maxTests = 350000, waypoints = [], links = [], floor, spacing = .25
   } = {}) {
     const distance = (a,b) => Math.hypot(b[0]-a[0],b[1]-a[1],b[2]-a[2]);
     if (!point(start,3) || !point(end,3) || distance(start,end)<=EPS ||
@@ -298,24 +298,41 @@ const RouteVisibility = (() => {
         !limit(maxVertices,2,3000) || !limit(maxTests,1,30000000) ||
         !Array.isArray(prisms) || prisms.length>500 ||
         !Array.isArray(waypoints) || !Array.from(waypoints).every(p=>point(p,3)) ||
+        !Array.isArray(links) || links.length>64 ||
         floor!==undefined&&typeof floor!=='function')
       throw new Error('Prism routes need finite pins, clearance volumes and valid search limits');
 
     const work={pairs:0,tests:0}, exhausted=Symbol('prism route budget');
-    const result=(status,points)=>Object.freeze({status,
-      ...(points&&{points:frozenPoints(points)}),work:Object.freeze({...work})});
+    const result=(status,points,traversed=[])=>Object.freeze({status,
+      ...(points&&{points:frozenPoints(points)}),
+      ...(traversed.length&&{links:Object.freeze(traversed.map(Object.freeze))}),
+      work:Object.freeze({...work})});
     const check=()=>{if(++work.tests>maxTests)throw exhausted;};
     const solids=[],sites=new Map(),heights=new Set([start[1],end[1]]);
-    const vertices=[start,end],seen=new Set(vertices.map(p=>p.join('/')));
+    const vertices=[start,end],ids=new Map(vertices.map((p,i)=>[p.join('/'),i]));
     const add=p=>{
       const key=p.join('/');
-      if(p[1]<minHeight||p[1]>maxHeight||seen.has(key)||
-        distance(start,p)+distance(p,end)>maxLength+EPS)return;
-      if(floor&&!aboveFloor(...p))return;
+      if(ids.has(key))return ids.get(key);
+      if(p[1]<minHeight||p[1]>maxHeight||
+        distance(start,p)+distance(p,end)>maxLength+EPS)return null;
+      if(floor&&!aboveFloor(...p))return null;
       if(vertices.length>=maxVertices)throw exhausted;
-      seen.add(key);
+      const id=vertices.length;
+      ids.set(key,id);
       vertices.push(p);
+      return id;
     };
+
+    const tunnels=Array.from(links,(link,index)=>{
+      const {points,through=[]}=link||{};
+      if(!Array.isArray(points)||points.length<2||points.length>18||
+        !Array.from(points).every(p=>point(p,3))||distance(points[0],points.at(-1))<=EPS||
+        !Array.isArray(through)||!Array.from(through).every(i=>limit(i,0,prisms.length-1)))
+        throw new Error('Prism links need distinct XYZ endpoints, at most sixteen bends and valid prism indices');
+      const spans=points.slice(1).map((p,i)=>distance(points[i],p));
+      if(spans.some(length=>length<=EPS))throw new Error('Prism links require nonzero spans');
+      return {index,points,spans,bypass:new Set(through),length:spans.reduce((sum,len)=>sum+len,0)};
+    });
 
     // Slab clipping along one segment parameter. The same interval gets
     // clipped by Y and the normalized footprint half-planes.
@@ -342,13 +359,17 @@ const RouteVisibility = (() => {
         throw new Error('A prism route floor must return an elevation');
       return y>=height-EPS;
     }
-    function permits(a,b,length){
+    function blockedPin(point){
+      return solids.some(s=>point[1]>s.min+EPS&&point[1]<s.max-EPS&&interval(point,point,s,EPS,false));
+    }
+    function permits(a,b,length,bypass){
       work.pairs++;
       if(Math.abs(b[1]-a[1])>maxGrade*Math.hypot(b[0]-a[0],b[2]-a[2])+EPS)return false;
       const box=bounds(plan(a),plan(b)),lo=Math.min(a[1],b[1]),hi=Math.max(a[1],b[1]);
       for(const solid of solids){
         check();
-        if(lo<solid.max-EPS&&hi>solid.min+EPS&&overlap(box,solid.box)&&interval(a,b,solid,EPS,true))return false;
+        if(!bypass?.has(solid.index)&&lo<solid.max-EPS&&hi>solid.min+EPS&&overlap(box,solid.box)&&
+          interval(a,b,solid,EPS,true))return false;
       }
       if(floor){
         const steps=Math.ceil(length/spacing);
@@ -362,7 +383,7 @@ const RouteVisibility = (() => {
     }
 
     try {
-      for(const prism of prisms){
+      for(const [index,prism] of prisms.entries()){
         const {ring,min,max}=prism||{};
         if(!Array.isArray(ring)||ring.length<3||ring.length>4096||
           !Array.from(ring).every(p=>point(p,2))||!point([min,max],2)||max-min<=EPS)
@@ -385,7 +406,7 @@ const RouteVisibility = (() => {
           box[2]=Math.max(box[2],x);box[3]=Math.max(box[3],z);
           sites.set(x+'/'+z,ring[i]);
         }
-        const solid={min,max,box,edges};
+        const solid={index,min,max,box,edges};
         solids.push(solid);
         for(const y of [min,max])if(y>=minHeight&&y<=maxHeight)heights.add(y);
         const hit=interval(start,end,solid,0,false);
@@ -397,16 +418,32 @@ const RouteVisibility = (() => {
       }
       for(const p of [start,end]){
         if(floor&&!aboveFloor(...p))return result('blocked-pin');
-        if(solids.some(s=>p[1]>s.min+EPS&&p[1]<s.max-EPS&&interval(p,p,s,EPS,false)))
-          return result('blocked-pin');
+        if(blockedPin(p))return result('blocked-pin');
       }
       const length=distance(start,end);
       if(length>maxLength+EPS)return result('unreachable');
       if(permits(start,end,length))return result('ok',[start,end]);
+      const linked=new Map();
+      function connect(from,to,tunnel,path){
+        if(!linked.has(from))linked.set(from,[]);
+        linked.get(from).push({to,index:tunnel.index,length:tunnel.length,path});
+      }
+      for(const tunnel of tunnels){
+        const {points,spans,bypass}=tunnel,first=points[0],last=points.at(-1);
+        if(tunnel.length+Math.min(distance(start,first)+distance(last,end),
+          distance(start,last)+distance(first,end))>maxLength+EPS||
+          points.some(p=>p[1]<minHeight||p[1]>maxHeight)||
+          blockedPin(first)||blockedPin(last)||
+          !spans.every((length,i)=>permits(points[i],points[i+1],length,bypass)))continue;
+        const a=add(first),b=add(last);
+        if(a===null||b===null)continue;
+        connect(a,b,tunnel,points);
+        connect(b,a,tunnel,points.slice().reverse());
+      }
       for(const p of waypoints)add(p);
       for(const [x,z] of sites.values())for(const y of heights)add([x,y,z]);
       const costs=new Float64Array(vertices.length).fill(Infinity),previous=new Int32Array(vertices.length).fill(-1),
-        visited=new Uint8Array(vertices.length),guess=vertices.map(p=>distance(p,end));
+        visited=new Uint8Array(vertices.length),guess=vertices.map(p=>distance(p,end)),used=new Map();
       costs[0]=0;
       for(;;){
         let current=-1,best=Infinity;
@@ -416,9 +453,17 @@ const RouteVisibility = (() => {
         }
         if(current===-1)return result('unreachable');
         if(current===1){
-          const path=[];
-          for(let id=1;id!==-1;id=previous[id])path.push(vertices[id]);
-          return result('ok',path.reverse());
+          const chain=[];
+          for(let id=1;id!==0;id=previous[id])chain.push(id);
+          const path=[start],traversed=[];
+          for(const id of chain.reverse()){
+            const tunnel=used.get(id),from=path.length-1;
+            if(tunnel){
+              path.push(...tunnel.path.slice(1));
+              traversed.push({link:tunnel.index,from,to:path.length-1});
+            }else path.push(vertices[id]);
+          }
+          return result('ok',path,traversed);
         }
         visited[current]=1;
         const a=vertices[current];
@@ -428,6 +473,14 @@ const RouteVisibility = (() => {
           if(cost>=costs[i]||cost+guess[i]>maxLength+EPS||!permits(a,b,length))continue;
           costs[i]=cost;
           previous[i]=current;
+          used.delete(i);
+        }
+        for(const tunnel of linked.get(current)||[]){
+          const i=tunnel.to,cost=costs[current]+tunnel.length;
+          if(visited[i]||cost>=costs[i]||cost+guess[i]>maxLength+EPS)continue;
+          costs[i]=cost;
+          previous[i]=current;
+          used.set(i,tunnel);
         }
       }
     }catch(error){

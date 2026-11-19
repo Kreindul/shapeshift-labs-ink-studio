@@ -289,3 +289,30 @@ test('bounded footprint simplification keeps the entire rounded clearance hull i
     assert((c-a)*(z-b)-(d-b)*(x-a)>=-1e-9);
   }
 });
+
+test('prism links preserve bent passage geometry while other obstacles still require elevation clearance', () => {
+  const box=(lo,hi,z)=>[[lo,-z],[hi,-z],[hi,z],[lo,z]];
+  const solids=[
+    {ring:box(3,4,5),min:-1,max:1.4},
+    {ring:box(7,8,5),min:-1,max:5}
+  ];
+  const points=[[6.8,1.4,.6],[7.4,1.4,.68],[8.2,1.4,.6]];
+  const pins=[[0,.45,0],[12,.45,0]],link={points,through:[1]};
+  const limits={minHeight:.2,maxHeight:2,maxGrade:.7,maxLength:14};
+  assert.equal(routes.prismVisibility(...pins,solids,limits).status,'unreachable');
+  const result=routes.prismVisibility(...pins,solids,{...limits,links:[link]});
+  assert.equal(result.status,'ok');
+  assert(result.points.some(([x,y])=>x>=3&&x<=4&&y>=1.4));
+  assert.deepEqual(result.points.slice(result.links[0].from,result.links[0].to+1),points);
+  assert(Object.isFrozen(result.links)&&Object.isFrozen(result.links[0]));
+  const reverse=routes.prismVisibility(pins[1],pins[0],solids,{...limits,links:[link]});
+  assert.deepEqual(reverse.points.slice(reverse.links[0].from,reverse.links[0].to+1),points.slice().reverse());
+  assert.equal(routes.prismVisibility(...pins,solids,{...limits,links:[{...link,through:[]}]}).status,'unreachable');
+  const other={ring:[[7.2,.4],[7.7,.4],[7.7,.9],[7.2,.9]],min:1,max:2};
+  assert.equal(routes.prismVisibility(...pins,[...solids,other],{...limits,links:[link]}).status,'unreachable');
+  const interior={...link,points:points.slice(1)};
+  assert.equal(routes.prismVisibility(...pins,solids,{...limits,links:[interior]}).status,'unreachable');
+  assert.equal(routes.prismVisibility(...pins,solids,{...limits,links:[link],
+    floor:(x,z)=>x>=7.2&&x<=7.8&&z>.35&&z<.9?1.6:0,spacing:.12}).status,'unreachable');
+  assert.throws(()=>routes.prismVisibility(...pins,solids,{...limits,links:[{...link,through:[2]}]}),/prism indices/);
+});

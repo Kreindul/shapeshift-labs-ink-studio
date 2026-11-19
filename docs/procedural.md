@@ -665,6 +665,16 @@ respect `maxGrade`, `minHeight`, `maxHeight`, and `maxLength`. An optional
 `ok`, `blocked-pin`, `unreachable`, or `budget` with work counters, and
 frozen XYZ points on success. Tangency to the clearance boundary is allowed.
 
+Supply `links: [{points, through}]` to attach explicitly cleared XYZ
+polylines to the graph. `through` lists zero-based indices of prisms whose
+clearance is already accounted for by the link, such as a door through a
+wall. Both endpoints must be outside the interiors of all prisms. The
+link is bidirectional and satisfies the same grade, height, floor and
+length checks as ordinary edges. Every unlisted prism is still tested.
+An accepted route includes `links: [{link, from, to}]` with the input link
+index and inclusive indices into the returned point list. Any bends within
+the link are preserved in traversal order.
+
 For dense rounded obstacles, supply `maxSides` to `P.routes.convexFootprint`.
 It caps the number of support planes and keeps the entire margin-expanded
 hull inside the result, so the planner can use fewer vertices while
