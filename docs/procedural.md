@@ -1804,6 +1804,21 @@ large enough to index each transient sample. Bucket ties follow ascending
 sample index. A false return leaves the output untouched and signals that
 the full depth range needs to be recomputed.
 
+`KIT.splatInteractionDetail.compile(world, cell, {preserveOwners})` builds a
+display-only density plan from a packed splat world. Use `indices` for the
+increasing list of original representatives. `scale[i] / scaleUnits + 1`
+is the covariance radius multiplier for representative index `i`.
+Groups stay within the same owner, material, flags, and quantized normal.
+The plan keeps animated, transparent, fine-tiled, and specially ordered
+samples individual. It retains the full baked data for editing or capture.
+
+`KIT.splatInteractionDetail.restore(level, edited, hidden, isHidden?)`
+returns `representatives` that should draw at their original size and
+`extras` to add at full resolution. Pass a visibility predicate to omit
+hidden extra samples. The host still owns visibility tests for the
+representative indices and decides when to draw each density level.
+
+
 ### Keyframe tracks
 
 `KIT.anim.keyframeTrack.create(schema, keys)` compiles a portable timeline once
@@ -2156,6 +2171,12 @@ The plan puts the first chain before the second. It supplies `reverseFirst`, `re
 ### Height surface rays
 
 `P.heightSurface.raycast(surface, origin, direction, options)` finds the first crossing of a bounded height graph. Supply `bounds`, `height(x, z)` and optionally `inside(x, z)` and `normal(x, z)`. The result contains a world point, normal (when supplied), and distance along the normalized ray. A miss returns null.
+
+`P.heightSurface.ceiling(level, regions)` prepares a proof of empty space
+above a height graph. The supplied regions must enclose every location
+that can rise above the level. Pass the result as the `ceiling` ray option
+to skip the empty prefix of a descending ray. `withNormal: false` skips
+normal sampling when the consumer needs only position and distance.
 
 Use `P.heightSurface.rangeOverPlan(height, outline, {spacing, budget})` for
 sampled `{min,max,samples}` over an XZ ring. The function samples every

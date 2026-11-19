@@ -3,7 +3,36 @@
   const P = K.procedural || K.authoring, EPS = 1e-8;
   const vector = p => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite);
 
-  function raycast(surface, origin, direction, { maxDistance = 10000, slopeBound } = {}) {
+  // An upper bound for a graph with local raised regions. The caller
+  // certifies that outside these XZ boxes the height is at most level.
+  function ceiling(level, regions) {
+    if (!Number.isFinite(level) || !Array.isArray(regions) ||
+        !regions.every(box => vector(box?.min) && vector(box?.max) &&
+          box.min[0] <= box.max[0] && box.min[2] <= box.max[2]))
+      throw new Error('Height surface ceiling needs a finite level and bounded regions');
+    const boxes = regions.map(({min,max}) => [min[0],max[0],min[2],max[2]]);
+    return (origin, dir, low, high) => {
+      if (dir[1] >= -EPS || origin[1] + dir[1] * low <= level) return low;
+      let earliest = Math.min(high, (level - origin[1]) / dir[1]);
+      for (const [x0,x1,z0,z1] of boxes) {
+        if ((dir[0] === 0 && (origin[0] < x0 || origin[0] > x1)) ||
+            (dir[2] === 0 && (origin[2] < z0 || origin[2] > z1))) continue;
+        let start = low, end = earliest;
+        if (dir[0] !== 0) {
+          const a = (x0-origin[0])/dir[0], b = (x1-origin[0])/dir[0];
+          start = Math.max(start, Math.min(a,b)); end = Math.min(end, Math.max(a,b));
+        }
+        if (dir[2] !== 0) {
+          const a = (z0-origin[2])/dir[2], b = (z1-origin[2])/dir[2];
+          start = Math.max(start, Math.min(a,b)); end = Math.min(end, Math.max(a,b));
+        }
+        if (start <= end) earliest = start;
+      }
+      return earliest;
+    };
+  }
+
+  function raycast(surface, origin, direction, { maxDistance = 10000, slopeBound, ceiling, withNormal = true } = {}) {
     if (!vector(origin) || !vector(direction) || K.V.len(direction) < EPS ||
         !Number.isFinite(maxDistance) || maxDistance <= 0 ||
         slopeBound !== undefined && (!Number.isFinite(slopeBound) || slopeBound < 0))
@@ -29,7 +58,7 @@
       const p = at(distance);
       if (inside && !inside(p[0], p[2])) return null;
       p[1] = knownHeight ?? height(p[0], p[2]);
-      const n = normal && normal(p[0], p[2]);
+      const n = withNormal ? normal && normal(p[0], p[2]) : undefined;
       return { p, n, distance };
     }
     if (dir[0] === 0 && dir[2] === 0) {
@@ -46,15 +75,23 @@
       }
       return hit(a + (b - a) / 2);
     }
+    const step = Math.max(.025, (high - low) / 1200);
+    const lateral = Math.hypot(dir[0], dir[2]);
+    const alongSlope = slopeBound === undefined ? Infinity : slopeBound * lateral;
+    if (ceiling) {
+      const start = ceiling(origin, dir, low, high);
+      if (!Number.isFinite(start) || start < low || start > high)
+        throw new Error('Height surface ceiling must return a distance within the ray bounds');
+      // Keep the original scan bracket, including the probe immediately
+      // before a possible crossing at the ceiling or a region edge.
+      low = Math.max(low, low + step * Math.floor((start - low - EPS) / step));
+    }
     let previous = low, a = value(low);
     if (Math.abs(a) < EPS) {
       const start = hit(low);
       if (start) return start;
     }
     if (high === low) return null;
-
-    const lateral = Math.hypot(dir[0], dir[2]);
-    const alongSlope = slopeBound === undefined ? Infinity : slopeBound * lateral;
     if (Math.abs(dir[1]) > alongSlope) {
       // A ray steeper than the terrain can cross its graph at most once.
       const b = value(high);
@@ -62,7 +99,6 @@
       return (a > 0) !== (b > 0) ? refine(low, high, a) : null;
     }
     const speed = Math.abs(dir[1]) + alongSlope;
-    const step = Math.max(.025, (high - low) / 1200);
     while (previous < high) {
       // A certified bound lets the scan skip intervals that cannot contain a hit.
       const advance = speed > 0 ? Math.max(step, .9 * Math.abs(a) / speed) : step;
@@ -113,5 +149,5 @@
     return { min, max, samples };
   }
 
-  P.heightSurface = { raycast, rangeOverPlan };
+  P.heightSurface = { raycast, ceiling, rangeOverPlan };
 })(KIT);
