@@ -4,7 +4,55 @@
   const vector = (p, n) => Array.isArray(p) && p.length === n && Array.from(p).every(Number.isFinite);
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1];
 
-  function inclinedPerimeter(outline, pose, { offset = 0, below = 0, above = 0 } = {}) {
+  function convexPerimeter(outline, {offset = 0, drift = [0,0], below = 0, above = 0, miterLimit = Infinity} = {}) {
+    if (!Array.isArray(outline) || outline.length < 3 || outline.length > 256 ||
+      !Array.from(outline).every(q => vector(q, 2)) || !vector(drift, 2) ||
+      ![offset, below, above].every(value => Number.isFinite(value) && value >= 0) ||
+      !(miterLimit >= 1) || typeof miterLimit !== 'number')
+      throw Error('A convex perimeter needs a valid outline and clearance');
+    const points=outline.map(q=>q.slice()),base=points[0];
+    const area=points.reduce((sum,[x,z],i)=>{
+      const b=points[(i+1)%points.length];
+      return sum+(x-base[0])*(b[1]-base[1])-(z-base[1])*(b[0]-base[0]);
+    },0);
+    if(!Number.isFinite(area)||Math.abs(area)<EPS)throw Error('Perimeter has no finite area');
+    const winding=Math.sign(area);
+    function pad(n){
+      const speed=dot(n,drift);
+      return offset+Math.max(0,-below*speed,above*speed);
+    }
+    const edges=points.map((a,i)=>{
+      const b=points[(i+1)%points.length],dx=b[0]-a[0],dz=b[1]-a[1],length=Math.hypot(dx,dz);
+      if(length<=EPS)throw Error('Perimeter has a repeated vertex');
+      const n=[winding*dz/length,-winding*dx/length];
+      return {a,n,pad:pad(n),edge:i,bevel:false};
+    });
+    let turn=0;
+    const planes=edges.flatMap((edge,i)=>{
+      const previous=edges[(i+edges.length-1)%edges.length],m=previous.n,n=edge.n,
+        cross=winding*(m[0]*n[1]-m[1]*n[0]),cosine=dot(m,n);
+      if(cross< -EPS||Math.abs(cross)<=EPS&&cosine<0)throw Error('Perimeter must be convex');
+      turn+=Math.atan2(Math.max(0,cross),cosine);
+      const sum=[m[0]+n[0],m[1]+n[1]],length=Math.hypot(...sum);
+      if(offset===0||length/2>=1/miterLimit)return [edge];
+      const normal=sum.map(value=>value/length);
+      return [{...edge,n:normal,pad:pad(normal),bevel:true},edge];
+    });
+    if(Math.abs(turn-2*Math.PI)>1e-6)throw Error('Perimeter must make one convex turn');
+    const poly=planes.map(({a,n,pad},i)=>{
+      const previous=planes[(i+planes.length-1)%planes.length],m=previous.n,
+        sum=[n[0]+m[0],n[1]+m[1]],delta=[n[0]-m[0],n[1]-m[1]],
+        cosine=dot(sum,sum)/2,sine=dot(delta,delta)/2;
+      if(cosine<.0008)throw Error('Perimeter offset is too acute');
+      const d=previous.pad+dot(m,[previous.a[0]-a[0],previous.a[1]-a[1]]),
+        normal=(pad+d)/(2*cosine),tangent=sine>EPS*EPS?(pad-d)/(2*sine):0;
+      return [a[0]+normal*sum[0]+tangent*delta[0],a[1]+normal*sum[1]+tangent*delta[1]];
+    });
+    const sections=planes.map(({edge,bevel})=>({edge,bevel}));
+    return P.data.freeze({poly,sections,planes});
+  }
+
+  function inclinedPerimeter(outline, pose, { offset = 0, below = 0, above = 0, miterLimit = Infinity } = {}) {
     if (!Array.isArray(outline) || outline.length < 3 || outline.length > 256 ||
       !Array.from(outline).every(q => vector(q, 2)) ||
       !vector(pose?.R, 9) || !vector(pose?.t, 3) ||
@@ -27,36 +75,13 @@
       return [origin[0] + R[0] * x + R[2] * z - drift[0] * y,
         origin[2] + R[6] * x + R[8] * z - drift[1] * y];
     });
-    const base = points[0], area = points.reduce((sum, [x, z], i) => {
-      const b = points[(i + 1) % points.length];
-      return sum + (x - base[0]) * (b[1] - base[1]) - (z - base[1]) * (b[0] - base[0]);
-    }, 0);
-    if (!Number.isFinite(area) || Math.abs(area) < EPS) throw Error('Inclined perimeter has no finite area');
-    const winding = Math.sign(area);
-    const edges = points.map((a, i) => {
-      const b = points[(i + 1) % points.length], dx = b[0] - a[0], dz = b[1] - a[1],
-        length = Math.hypot(dx, dz);
-      if (length <= EPS) throw Error('Inclined perimeter has a repeated vertex');
-      const n = [winding * dz / length, -winding * dx / length], speed = dot(n, drift);
-      if (points.some(p => dot(n, [p[0] - a[0], p[1] - a[1]]) > EPS))
-        throw Error('Inclined perimeter must be convex');
-      return { a, n, pad: offset + Math.max(0, -below * speed, above * speed) };
-    });
-    const poly = edges.map(({ a, n, pad }, i) => {
-      const previous = edges[(i + edges.length - 1) % edges.length], m = previous.n,
-        sum = [n[0] + m[0], n[1] + m[1]], delta = [n[0] - m[0], n[1] - m[1]],
-        cosine = dot(sum, sum) / 2, sine = dot(delta, delta) / 2;
-      if (cosine < .0008) throw Error('Inclined perimeter offset is too acute');
-      const normal = (pad + previous.pad) / (2 * cosine);
-      const tangent = sine > EPS * EPS ? (pad - previous.pad) / (2 * sine) : 0;
-      return [a[0] + normal * sum[0] + tangent * delta[0], datum,
-        a[1] + normal * sum[1] + tangent * delta[1]];
-    });
+    const contour=convexPerimeter(points,{offset,drift,below,above,miterLimit}),
+      poly=contour.poly.map(([x,z])=>[x,datum,z]);
     const raw = points.map(([x, z]) => [x, datum, z]);
 
     function crossing(a, b, tolerance) {
       let lo = 0, hi = 1;
-      for (const { a: q, n, pad } of edges) {
+      for (const { a: q, n, pad } of contour.planes) {
         const u = n[0] * (a[0] - q[0]) + n[1] * (a[2] - q[1]) - pad + tolerance,
           v = n[0] * (b[0] - q[0]) + n[1] * (b[2] - q[1]) - pad + tolerance;
         if (u >= 0 && v >= 0) return false;
@@ -78,8 +103,10 @@
       }
       return true;
     }
-    return Object.freeze({ raw: P.data.freeze(raw), poly: P.data.freeze(poly), frame, project, lift, allows });
+    return Object.freeze({ raw: P.data.freeze(raw), poly: P.data.freeze(poly), sections:contour.sections,
+      frame, project, lift, allows });
   }
 
+  P.geometry.convexPerimeter = convexPerimeter;
   P.geometry.inclinedPerimeter = inclinedPerimeter;
 })(KIT);

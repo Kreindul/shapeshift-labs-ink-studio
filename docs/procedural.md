@@ -92,6 +92,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `emitters.compile(spec)` | Deterministic looping samples with configurable emission direction and local drift. Set `windborne: true` and pass `{wind: [x, z]}` when sampling to advect by particle age. |
 | `routes.polyline(points, options)`, `routes.aroundConvex(outline, start, end, options)` | Arc-length routes with frames and closest queries. Convex XZ routes project endpoints onto an offset perimeter and interpolate world Y |
 | `geometry.inclinedPerimeter(outline, pose, {offset, below, above})` | Offset a convex affine extrusion for a world-upright swept section. Project and lift between the height-independent outline and world space |
+| `geometry.convexPerimeter(outline, options)` | Offset a convex XZ outline with bounded corner joins and source-edge identities |
 | `routes.terrain(start, end, options)` | Bounded, terrain-aware search between pinned points with slope, signed clearance, keep-out regions and turn costs |
 | `hydrology.analyze(height, options)` | Priority-Flood, D8 catchments, stream orders, channel routes, wetness and optional D-infinity flow |
 | `hydrology.breach(basin)`, `hydrology.incise(basin)`, `hydrology.meander(route)`, `hydrology.corridor(routes, height)`, `hydrology.habitat(basin)` | Watershed edits, river migration and cutoff routes, levees, floodplain masks and climate fields |
@@ -926,6 +927,16 @@ between frames. `allows(points, tolerance)` clips each XYZ leg in the
 reference frame and tests that it stays outside the expanded section.
 The local extrusion axis must have a positive world Y component at least
 one fifth of its length.
+
+`geometry.convexPerimeter(outline, {offset, drift, below, above, miterLimit})`
+returns a contour in XZ and a `sections` entry for each contour segment.
+The `edge` index identifies the input edge. A section marked `bevel`
+belongs to the input vertex at that index. When a convex miter exceeds
+the specified ratio, the contour adds a tangent plane at the bisector.
+The tangent encloses the same spatial clearance as the neighboring planes
+while shortening the join. The optional section drift pads all three
+planes for the same vertical sweep. `inclinedPerimeter` accepts the same
+`miterLimit` option and returns those section identities alongside `poly`.
 
 Supply `links: [{points, through}]` to attach explicitly cleared XYZ
 polylines to the graph. `through` lists zero-based indices of prisms whose
