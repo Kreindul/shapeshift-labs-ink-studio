@@ -106,6 +106,20 @@
     validatedViews.add(value);
     return value;
   }
+  // Preserve unchanged records while validating a patch received from another process.
+  function patchDocumentView(source, { metadata = {}, upserts = {}, removed = [] } = {}) {
+    if (!record(metadata) || !record(upserts) || own(metadata, 'entities') ||
+        !Array.isArray(removed) || !removed.every(idOK))
+      throw new Error('Invalid document view patch');
+    const before = documentView(source);
+    const entities = { ...before.entities, ...json(upserts) };
+    for (const id of removed) delete entities[id];
+    const next = freeze(validate({ ...before, ...json(metadata), entities }));
+    documentSnapshots.add(next);
+    validatedViews.add(next);
+    return next;
+  }
+
   function buildRecord(type, fields, id, seed) {
     if (!idOK(type)) throw new Error('Entity type must be a non-empty string');
     const out = Object.assign(
@@ -214,6 +228,7 @@
     freeze,
     isImmutable,
     documentView,
+    patchDocumentView,
     isDocumentView: value => documentSnapshots.has(value),
     merge,
     hash,

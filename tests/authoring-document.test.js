@@ -413,3 +413,22 @@ test('new writes, cancellation and worker failure settle pending edits without a
   assert.equal(await d.scheduleCommit(async()=>{throw Error('worker stopped');}),true);
   assert.equal(d.entities('label')[0].parameters.value,5);
 });
+
+test('patches validate references and retain unchanged document records', () => {
+  const doc = A.document();
+  const host = doc.create('envelope', { id: 'tower' });
+  const door = doc.create('opening', { id: 'door', parent: host, parameters: { width: 1 } });
+  const before = A.data.documentView(doc.snapshot());
+  const update = { ...before.entities[door], parameters: { width: 2 } };
+  const after = A.data.patchDocumentView(before, { upserts: { [door]: update }, metadata: { nextId: 3 } });
+  update.parameters.width = 10;
+  assert.equal(after.entities[door].parameters.width, 2);
+  assert.equal(before.entities[door].parameters.width, 1);
+  assert.equal(after.entities[host], before.entities[host]);
+  assert.equal(after.styles, before.styles);
+  assert.equal(after.nextId, 3);
+  assert.equal(A.data.documentView(after), after);
+  assert.throws(() => A.data.patchDocumentView(after, { removed: [host] }), /Missing or self parent/);
+  assert.throws(() => A.data.patchDocumentView(before, { metadata: { entities: {} } }), /Invalid document view patch/);
+  assert.deepEqual(Object.keys(A.data.patchDocumentView(after, { removed: [door] }).entities), [host]);
+});

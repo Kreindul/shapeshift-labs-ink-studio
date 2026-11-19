@@ -124,3 +124,13 @@ revision. The document exposes the draft for rendering during resolution.
 A new write, undo, or explicit commit settles the pending transaction using
 the local hooks. Cancellation discards the draft, and late replies are ignored.
 A failed resolver falls back to local hooks and ordinary rollback behavior.
+
+### Immutable document patches
+
+Use `A.data.documentView(snapshot)` to validate and freeze a worker's initial
+snapshot. `A.data.patchDocumentView(view, {metadata, upserts, removed})` applies
+later revisions to that view. `metadata` replaces supplied top-level JSON
+values, `upserts` maps entity IDs to complete records, and `removed` lists
+entity IDs to delete. The result validates references across the change and
+shares unchanged entity and style records with the previous view. This lets
+workers retain compiled geometry and material caches between messages.
