@@ -103,6 +103,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `edgeClearance.strip(a, b, options)`, `edgeClearance.ranges(a, b, strips)` | Split a straight edge into retained and removed ranges where it crosses sloped clearance strips. |
 | `edgeClearance.clipFieldPath(points, fields, {padding, spacing, tolerance})` | Split a polyline around bounded signed fields, preserving its unblocked vertices and bends. |
 | `snapping.resolve(point, features, options)` | Project to a bounded point or segment and return the winning feature with its caller-supplied identity. |
+| `planSnapping.compile(outline)`, `planSnapping.align(moving, translation, targets, options)` | Align convex footprints along finite faces or corners, with an optional retained contact and release distance. |
 | `railGuard(options, meta)` | Build closed rail and upright post pieces with adjustable height, spacing and rail levels. |
 | `cantileverSupports.sites(options)`, `cantileverSupports.fitMount(options, distance)`, `cantileverSupports.bracket(site, options, meta)` | Fit bearing sites along an edge or to a nearby solid field and build support profiles. |
 | `traceSignedIntervals(sample, options)` | Find where a signed field is negative along a bounded curve parameter. Supply a slope bound to skip homogeneous regions. |
@@ -632,6 +633,15 @@ finite segment. A feature can override `tolerance` or set a numeric `priority`.
 After the distance check, higher priority wins, followed by closest distance
 and then feature ID. Supply `axes: [0, 2]` to snap in plan and preserve height.
 Attach an owner or product-specific data to the feature for use after the snap.
+
+`planSnapping.compile` prepares a convex 2D outline in either winding.
+Call `align(moving, [x, y], [{id, plan}], {capture, release, latch})` during
+a translation gesture. Candidate corrections put the outlines in contact
+along a supporting face and respect the finite extent of that face. The
+result includes the corrected translation, contact endpoints and a latch.
+Pass that latch back on the next frame to keep the same contact within the
+larger release distance. Skip the call and clear the latch when free
+placement is active. Targets and plans can be reused for each pointer event.
 
 `railGuard({path, up, height, thickness, postWidth, postSpacing, levels,
 maxPieces}, meta)` returns closed construction pieces with the owner, material
