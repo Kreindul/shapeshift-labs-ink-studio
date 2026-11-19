@@ -125,6 +125,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `growth.lsystem(axiom, rules, options)`, `growth.turtle(tokens, options)`, `growth.venation(outline, options)`, `growth.roots(starts, options)`, `growth.pipe(nodes, options)` | Growth grammars, SDF branch runs, venation, obstacle-aware roots and pipe taper |
 | `growth.aggregate(options)`, `growth.grayScottGrid(options)`, `growth.grayScottSurface(points, links, options)`, `growth.dispersal(options)`, `growth.succession(options)` | Grid and surface patterns, seed dispersal and habitat competition |
 | `forms.superquadric(spec)`, `forms.loft(sections)`, `forms.skeleton(nodes)`, `forms.periodic(spec)`, `forms.shell(host, options)` | Bounded analytic forms and locally variable shells for the sculptor |
+| `measureSculptBounds(build)` | Measure a finite rest-pose recipe without generating splats |
 | `grammar.symmetry(scope, rules, options)` | Reflected or radial grammar instances with optional variations and stable copy keys |
 | `fracture.power(spec)`, `fracture.separate(graph, options)`, `fracture.crack(options)` | Anisotropic power cells, cumulative bond failure and stress-guided crack paths |
 | `grammar.assemble(route, modules, options)`, `construct.loadPaths(sockets, spans, options)`, `construct.supportGraph(parts)`, `construct.damage(parts, options)` | Dimensioned, socket-connected assemblies, stylized supports, support propagation and seeded part damage |
@@ -1652,6 +1653,16 @@ finite `bounds`. `S.implicitForm(form, material, options)` adds it to
 the sculptor as a native solid and samples its zero crossings for the
 splat bake. Use `cell` to resolve small openings or thin walls. The sampler
 checks its work budget and needs enough resolution to detect the feature.
+
+`measureSculptBounds(sculpt => { ... })` runs a finite recipe against
+the regular sculpt API and returns XYZ `min` and `max` bounds. It takes
+per-axis extents for boxes, ellipsoids, tubes and bounded lathes.
+For a lathe with a radius function, pass `maxRadius` with a conservative
+radius bound. Custom finite solids can use their existing enclosing sphere.
+The result includes the positive geometry before subtraction and allows
+for blends and surface bumps. It returns `null` for an empty recipe.
+The measurement does not generate surface samples or change the recipe's
+rendering resolution.
 
 - `forms.superquadric({radii, exponents, pose})` controls the XZ and
   vertical exponents independently. Values below one give concave

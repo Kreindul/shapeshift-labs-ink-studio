@@ -4,6 +4,24 @@ const { KIT: K, makeBuilder, makeSculpt } = require('..').load();
 const { forms, grammar } = K.procedural;
 const close = (a, b, error = 1e-7) => assert(Math.abs(a - b) < error, a + ' differs from ' + b);
 
+test('rest geometry measurement combines tight primitive bounds without sampling a sculpt', () => {
+  const {measureSculptBounds}=K.procedural, q=Math.SQRT1_2, frame=[[q,0,q],[0,1,0],[-q,0,q]];
+  const bounds=measureSculptBounds(S=>{
+    S.box([1,.4,0],[1,.4,.5],{}, {ax:frame});
+    S.ball([-2,.3,.1],[.3,.2,.15],{});
+    S.tube([[0,0,0],[0,2,0]],.2,.4,{});
+    S.lathe([.3,0,-1],.5,t=>t>.62&&t<.64?.6:.15,{}, {maxRadius:.6});
+    S.box([90,0,0],[2,2,2],{}, {neg:true});
+    S.box([30,0,0],[1,1,1],{}, {hold:true});
+  });
+  [-2.3,-.2,-1.6].forEach((n,i)=>close(bounds.min[i],n));
+  [1+1.5*q,2.4,1.5*q].forEach((n,i)=>close(bounds.max[i],n));
+  assert.deepEqual(measureSculptBounds(S=>{
+    S.solid([1,2,3],.25,()=>0,()=>{throw Error('unexpected surface sampling');},{});
+  }),{min:[.75,1.75,2.75],max:[1.25,2.25,3.25]});
+  assert.equal(measureSculptBounds(()=>{}),null);
+});
+
 test('superquadrics interpolate pointed and rounded-box shapes in a world pose', () => {
   const shape = forms.superquadric({ radii: [1, 2, 0.5] }),
     angular = forms.superquadric({ radii: [1, 2, 0.5], exponents: [1, 1] }),

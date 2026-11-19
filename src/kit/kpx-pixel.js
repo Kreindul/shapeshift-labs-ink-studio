@@ -1314,12 +1314,14 @@
         [x, y, z] = o.at,
         h = o.h || 0.5,
         r = o.r || 0.2;
-      S.lathe([x, y, z], h, t => r * (0.86 + 0.14 * Math.sin(Math.PI * t)), o.mat, { res: px * 0.7 });
-      for (const f of [0.18, 0.82])
-        S.lathe([x, y + h * f - px, z], px * 2, () => r * (0.88 + 0.14 * Math.sin(Math.PI * f)) + px * 0.5, o.hoop, {
+      S.lathe([x, y, z], h, t => r * (0.86 + 0.14 * Math.sin(Math.PI * t)), o.mat, { res: px * 0.7, maxRadius: r });
+      for (const f of [0.18, 0.82]) {
+        const rim = r * (0.88 + 0.14 * Math.sin(Math.PI * f)) + px * 0.5;
+        S.lathe([x, y + h * f - px, z], px * 2, rim, o.hoop, {
           res: px * 0.6
         });
-      S.lathe([x, y + h - px * 0.5, z], px, () => r * 0.8, o.lid || o.mat, { res: px * 0.6 });
+      }
+      S.lathe([x, y + h - px * 0.5, z], px, r * 0.8, o.lid || o.mat, { res: px * 0.6 });
     };
     // a crate: o.at (its foot), o.size [half x, half y, half z], o.mat (boards), o.edge (the frame round it)
     S.crate = o => {

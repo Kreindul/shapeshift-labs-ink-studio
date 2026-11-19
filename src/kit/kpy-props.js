@@ -498,7 +498,7 @@
           5 * q.unit,
           t => q.unit * (2 + 1.3 * Math.sin(Math.PI * Math.min(1, t * 1.15)) - (t > 0.85 ? 0.4 : 0)),
           M.clay,
-          { res: res(q, 0.6) }
+          { res: res(q, 0.6), maxRadius: 3.3 * q.unit }
         )
     }
   });

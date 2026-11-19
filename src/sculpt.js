@@ -96,6 +96,33 @@ function makeSculpt(B, rest) {
     if (p.mat.omitFromProxy && !o.ghost && !o.neg) hasOptionalProxy = true;
     return p;
   }
+  // A measurement pass records per-axis extents without changing sampling,
+  // grid bounds or shading for an ordinary sculpt.
+  const measureBounds = rest?.measureBounds === true;
+  function localBounds(p, center, half, frame, ellipsoid) {
+    if (!measureBounds) return;
+    const extent = frame ? half.map((_, axis) => {
+      const u = half[0] * frame[0][axis], v = half[1] * frame[1][axis], w = half[2] * frame[2][axis];
+      return ellipsoid ? Math.hypot(u, v, w) : Math.abs(u) + Math.abs(v) + Math.abs(w);
+    }) : half;
+    p.geometryBounds = {
+      min: center.map((v, i) => v - extent[i]),
+      max: center.map((v, i) => v + extent[i])
+    };
+  }
+  if (measureBounds) S.geometryBounds = () => {
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (const p of pos) {
+      if (!Number.isFinite(p.br) || p.br > 1e8) throw Error('Geometry measurement needs finite solids');
+      const bounds = p.geometryBounds, blend = Math.max(0, p.k);
+      const margin = blend + (bounds ? Math.max(0, p.bump?.[0] || 0) : p.br);
+      for (let i = 0; i < 3; i++) {
+        min[i] = Math.min(min[i], (bounds ? bounds.min[i] : p.bc[i]) - margin);
+        max[i] = Math.max(max[i], (bounds ? bounds.max[i] : p.bc[i]) + margin);
+      }
+    }
+    return pos.length ? { min, max } : null;
+  };
   // a solid defined in its own space: centred on c, optionally turned by the frame o.ax
   function local(c, br, sd0, sm0, mat, o) {
     const ax = o && o.ax,
@@ -163,6 +190,7 @@ function makeSculpt(B, rest) {
       mat,
       o
     );
+    if (measureBounds) localBounds(solid, c, [rx, ry, rz], o?.ax, true);
     solid.analytic = { kind: 'ellipsoid', center: c, radii: [rx, ry, rz], frame: o?.ax };
     return solid;
   };
@@ -170,7 +198,7 @@ function makeSculpt(B, rest) {
   S.box = (c, h, mat, o) => {
     const rd = (o && o.rd) || 0,
       hs = h;
-    return local(
+    const solid = local(
       c,
       Math.hypot(h[0], h[1], h[2]),
       (x, y, z) => {
@@ -199,15 +227,21 @@ function makeSculpt(B, rest) {
       mat,
       o
     );
+    if (measureBounds) localBounds(solid, c, h, o?.ax);
+    return solid;
   };
   // turned solid: c is the centre of the base, h the height, rf the radius (a number, [bottom, top], or a function of 0..1)
   S.lathe = (c, h, rf, mat, o) => {
     const fn = typeof rf === 'function' ? rf : rf.length ? t => rf[0] + (rf[1] - rf[0]) * t : () => rf;
     let rm = 0;
     for (let i = 0; i <= 16; i++) rm = Math.max(rm, fn(i / 16));
+    if (o?.maxRadius !== undefined) {
+      if (!Number.isFinite(o.maxRadius) || o.maxRadius < 0) throw Error('Lathe radius bound must be finite and nonnegative');
+      rm = Math.max(rm, o.maxRadius);
+    }
     const V = o && o.ax ? o.ax[1] : [0, 1, 0],
       cc = [c[0] + (V[0] * h) / 2, c[1] + (V[1] * h) / 2, c[2] + (V[2] * h) / 2];
-    return local(
+    const solid = local(
       cc,
       Math.hypot(rm, h / 2),
       (x, y, z) => {
@@ -238,6 +272,8 @@ function makeSculpt(B, rest) {
       mat,
       o
     );
+    if (measureBounds && (typeof rf !== 'function' || o?.maxRadius !== undefined)) localBounds(solid, cc, [rm, h / 2, rm], o?.ax);
+    return solid;
   };
   // ring lying flat (turn it with o.ax)
   S.torus = (c, R, r, mat, o) => {
@@ -376,6 +412,15 @@ function makeSculpt(B, rest) {
         sphere(pts[pts.length - 1], rf(1));
       }
     };
+    if (measureBounds && segs.length) {
+      const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+      for (const segment of segs) for (let i = 0; i < 3; i++) {
+        const a = segment[i], b = a + segment[i + 3];
+        min[i] = Math.min(min[i], a - segment[7], b - segment[8]);
+        max[i] = Math.max(max[i], a + segment[7], b + segment[8]);
+      }
+      p.geometryBounds = { min, max };
+    }
     return add(p, mat, o);
   };
   // the ground: flat at o.y, or a height function o.h(x, z); only a ragged disc of it (o.rad, o.zs squashes it front to back) is drawn
