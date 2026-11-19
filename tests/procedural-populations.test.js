@@ -2,6 +2,27 @@ const test = require('node:test'),
   assert = require('node:assert/strict'),
   P = require('..').load().KIT.procedural.populations;
 const box = r => ({ min: [-r, 0, -r], max: [r, 1, r] });
+test('seeded mixtures respect weights and keep winners when unrelated choices are removed', () => {
+  const entries=[{key:'fern',weight:1},{key:'stone',weight:2},{key:'grass',weight:5}];
+  const mix=P.mix(entries,{seed:29}),shuffled=P.mix([...entries].reverse(),{seed:29}),
+    reduced=P.mix(entries.slice(1),{seed:29}),counts={fern:0,stone:0,grass:0};
+  for(let seed=0;seed<4096;seed++){
+    const point=[2,-1],kind=mix(point,seed);
+    counts[kind]++;
+    assert.equal(kind,shuffled(point,seed));
+    if(kind!=='fern')assert.equal(kind,reduced(point,seed));
+  }
+  assert(Math.abs(counts.fern/4096-.125)<.025);
+  assert(Math.abs(counts.stone/4096-.25)<.035);
+  assert(Math.abs(counts.grass/4096-.625)<.04);
+  const local=P.mix(entries,{seed:29,patchSize:2,coherence:1}),
+    a=local([.2,.3],1);
+  assert.equal(local([.2,.3],3),a);
+  assert.equal(local([.201,.299],178),a);
+  assert(new Set(Array.from({length:32},(_,i)=>local([2*i,0],1))).size>1);
+  assert.throws(()=>P.mix([{key:'empty',weight:0}]),/positive weight/);
+  assert.throws(()=>P.mix(entries,{coherence:.5}),/patch size/);
+});
 test('ranked world candidates retain identity, pose and seed through density and domain extension', () => {
   const a = P.layout([box(1)], () => ({ density: 0.25 })),
     b = P.layout([box(2)], () => ({ density: 0.7 })),

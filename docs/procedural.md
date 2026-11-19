@@ -1216,6 +1216,14 @@ symmetric pair separation. A pair uses the maximum of its two sample distances
 and any matching species rules. Candidate and comparison budgets include work
 in the halo.
 
+`P.populations.mix([{key, weight}, ...], {seed, patchSize, coherence})` returns
+a sampler that takes an XZ point and an integer individual seed and returns
+a choice key. Weights are relative. Zero disables a choice. Keyed sampling
+preserves the ordering of the remaining choices if one choice is removed.
+Use the same inputs for overlapping regions. With coherence above zero,
+that fraction of individuals draws from the shared choice in its nearest
+jittered patch centre. Patch size is in world units.
+
 Use `P.sampling.poisson({bounds: {min, max}, radius, seed})` for a finite
 patch. Bounds and points have two or three coordinates. `mask(point)` can
 restrict the domain. `seeds` pins starting samples. `reseed` allows a bounded
