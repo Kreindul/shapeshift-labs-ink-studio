@@ -124,6 +124,58 @@
     });
   }
 
+  function fromSpans(grid, { id, optics: look } = {}) {
+    if (!name(id) || !P.verticalSpans.isGrid(grid) || grid.resolution.some(n => n > maxAxis))
+      throw new TypeError('Layered water needs an ID and a span grid up to 64 × 64');
+    const [nx, nz] = grid.resolution, [dx, dz] = grid.cell, { min, max } = grid.bounds;
+    const data = new Float32Array(nx * nz * 4), spans = [], labels = new Map();
+    let low = Infinity, high = -Infinity;
+    for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
+      const column = grid.column(x, z), start = spans.length / 4;
+      let count = 0, lower = 0, upper = 0;
+      column.forEach((row, i) => {
+        if (row.kind === 'solid' || (row.kind === 'air' && row.id === null)) return;
+        const key = row.id ?? id;
+        if (labels.has(key) && labels.get(key) !== row.kind)
+          throw new TypeError('Each span medium ID must refer to one kind');
+        labels.set(key, row.kind);
+        if (row.kind !== 'water') return;
+        if (count >= 32) throw new RangeError('Layered water supports up to 32 wet spans per column');
+        if (!column[i + 1] || column[i + 1].kind === 'air') {
+          if (count < 16) lower |= 1 << count;
+          else upper |= 1 << (count - 16);
+        }
+        count++;
+        low = Math.min(low, row.min);
+        high = Math.max(high, row.max);
+        spans.push(row.min, row.max, row.current[0], row.current[2]);
+      });
+      data.set([start, count, lower, upper], (z * nx + x) * 4);
+    }
+    const bounds = P.data.freeze({
+      min: [min[0], spans.length ? low : min[1], min[2]], max: [max[0], spans.length ? high : min[1], max[2]]
+    });
+    const media = Object.freeze(Array.from(labels, ([key, kind]) => {
+      const medium = { id: key, kind, bounds: grid.bounds, sdf(x, y, z) {
+        const row = grid.at(x, y, z);
+        return row?.kind === kind && (row.id ?? (kind === 'water' ? id : null)) === key ? -1 : 1;
+      } };
+      if (kind === 'air') return Object.freeze({ ...medium, priority: 1 });
+      return Object.freeze({ ...medium, surfaceAt(x, y, z) {
+        let row = grid.at(x, y, z);
+        do {
+          y = row.max;
+          row = grid.at(x, y, z);
+        } while (row?.kind === 'water');
+        return y;
+      },
+        current: (x, y, z) => grid.at(x, y, z).current });
+    }));
+    const body = Object.freeze({ id, bounds, grid, media });
+    states.set(body, { nx, nz, dx, dz, data, style: optics(look), empty: !spans.length, spans: Float32Array.from(spans) });
+    return body;
+  }
+
   function pocket({ id, bounds: source } = {}) {
     const triplet = v => Array.isArray(v) && v.length === 3 && Array.from(v).every(number);
     if (!name(id) || !triplet(source?.min) || !triplet(source?.max)) throw new TypeError('An air pocket needs an ID and finite XYZ bounds');
@@ -137,9 +189,41 @@
   const equalVector = (a, b) => a.every((v, i) => v === b[i]);
   const equalBounds = (a, b) => equalVector(a.min, b.min) && equalVector(a.max, b.max);
   function changedBody(before, after) {
-    if (!before || !after) return (before ?? after).bounds;
+    if (!before || !after) {
+      const body = before ?? after;
+      return body.grid?.bounds ?? body.bounds;
+    }
     if (before === after) return null;
-    const a = states.get(before), b = states.get(after), old = before.bounds, next = after.bounds;
+    const a = states.get(before), b = states.get(after), old = before.grid?.bounds ?? before.bounds,
+      next = after.grid?.bounds ?? after.bounds;
+    if (before.grid || after.grid) {
+      if (before.grid === after.grid) return null;
+      if (!before.grid || !after.grid || !equalBounds(old, next) || a.nx !== b.nx || a.nz !== b.nz)
+        return P.spatial.boxOf([old.min, old.max, next.min, next.max]);
+      const equalColumn = (x, z) => {
+        const left = before.grid.column(x, z), right = after.grid.column(x, z);
+        return left.length === right.length && left.every((row, i) => {
+          const other = right[i];
+          return row.min === other.min && row.max === other.max && row.kind === other.kind &&
+            row.id === other.id && row.material === other.material && equalVector(row.current, other.current);
+        });
+      };
+      const boxes = [];
+      for (let z = 0; z < a.nz; z++) {
+        let start = -1;
+        for (let x = 0; x <= a.nx; x++) {
+          if (x < a.nx && !equalColumn(x, z)) {
+            if (start === -1) start = x;
+          } else if (start !== -1) {
+            boxes.push({ min: [old.min[0] + start * a.dx, old.min[1], old.min[2] + z * a.dz],
+              max: [x === a.nx ? old.max[0] : old.min[0] + x * a.dx, old.max[1],
+                z === a.nz - 1 ? old.max[2] : old.min[2] + (z + 1) * a.dz] });
+            start = -1;
+          }
+        }
+      }
+      return boxes;
+    }
     if (a.nx !== b.nx || a.nz !== b.nz || a.dx !== b.dx || a.dz !== b.dz ||
         [0, 2].some(i => old.min[i] !== next.min[i] || old.max[i] !== next.max[i]))
       return P.spatial.boxOf([old.min, old.max, next.min, next.max]);
@@ -173,16 +257,38 @@
     if (new Set([...pockets, ...bodies].map(item => item.id)).size !== pockets.length + bodies.length)
       throw new TypeError('Water bodies and air pockets need distinct IDs');
     const sorted = bodies.slice().sort(compare), active = sorted.filter(body => !states.get(body).empty);
-    for (let i = 0; i < active.length; i++) for (let j = i + 1; j < active.length; j++) {
-      const a = active[i].bounds, b = active[j].bounds;
+    const physical = sorted.filter(body => body.grid || !states.get(body).empty);
+    for (let i = 0; i < physical.length; i++) for (let j = i + 1; j < physical.length; j++) {
+      const first = physical[i], second = physical[j], a = first.grid?.bounds ?? first.bounds, b = second.grid?.bounds ?? second.bounds;
       if (a.min.every((v, axis) => v < b.max[axis] && a.max[axis] > b.min[axis]))
-        throw new RangeError('Water body bounds overlap: ' + active[i].id + ' and ' + active[j].id);
+        throw new RangeError('Water body bounds overlap: ' + first.id + ' and ' + second.id);
     }
-    const media = Object.freeze([...sorted.map(body => body.medium), ...pockets]);
+    const labels = new Map();
+    for (const body of sorted) for (const row of body.media ?? [body.medium]) {
+      if (!labels.has(row.id)) labels.set(row.id, []);
+      labels.get(row.id).push({ row, layered: Boolean(body.grid) });
+    }
+    const media = Object.freeze([...Array.from(labels.values(), group => {
+      const { row: first } = group[0];
+      if (group.length === 1) return first;
+      if (group.some(({ row, layered }) => !layered || row.kind !== first.kind))
+        throw new TypeError('Repeated span IDs must refer to the same kind across layered tiles');
+      const sample = (x, y, z) => group.find(({ row }) => row.sdf(x, y, z) < 0)?.row;
+      const combined = { id: first.id, kind: first.kind, priority: first.priority,
+        bounds: P.data.freeze(P.spatial.boxOf(group.flatMap(({ row }) => [row.bounds.min, row.bounds.max]))),
+        sdf: (x, y, z) => sample(x, y, z) ? -1 : 1 };
+      if (first.kind === 'air') return Object.freeze(combined);
+      return Object.freeze({ ...combined, surfaceAt: (x, y, z) => sample(x, y, z).surfaceAt(x, y, z),
+        current: (x, y, z) => sample(x, y, z).current(x, y, z) });
+    }), ...pockets]);
+    const layered = active.some(body => body.grid);
     const { mediumAt } = P.biomes.create({ media });
     function pack() {
       const rows = active.reduce((sum, body) => sum + states.get(body).nz, 0);
-      const data = new Float32Array(maxAxis * Math.max(rows, 1) * 4);
+      const intervals = active.reduce((sum, body) => sum + (states.get(body).spans?.length ?? 0) / 4, 0);
+      const width = Math.max(maxAxis, Math.ceil(intervals / (2048 - rows)));
+      const height = Math.max(1, rows + Math.ceil(intervals / width));
+      const data = new Float32Array(width * height * 4), modes = new Int32Array(maxBodies);
       const boxesMin = new Float32Array(maxBodies * 4), boxesMax = new Float32Array(maxBodies * 4);
       const grids = new Float32Array(maxBodies * 4), tint = new Float32Array(maxBodies * 4);
       const extinction = new Float32Array(maxBodies * 4), highlights = new Float32Array(maxBodies * 4);
@@ -191,36 +297,47 @@
         airMin.set(bounds.min, i * 4);
         airMax.set(bounds.max, i * 4);
       });
-      let row = 0;
+      let row = 0, tail = rows * width;
       active.forEach((body, i) => {
-        const { nx, nz, dx, dz, data: grid, style } = states.get(body), o = i * 4;
+        const { nx, nz, dx, dz, data: grid, spans, style } = states.get(body), o = i * 4;
         boxesMin.set([...body.bounds.min, row], o);
         boxesMax.set([...body.bounds.max, style.refraction], o);
         grids.set([dx, dz, nx, nz], o);
         tint.set([...style.tint, style.foam], o);
         extinction.set([...style.extinction, style.caustics], o);
         highlights.set([...style.surfaceColor, style.surface], o);
-        for (let z = 0; z < nz; z++) data.set(grid.subarray(z * nx * 4, (z + 1) * nx * 4), (row + z) * maxAxis * 4);
+        for (let z = 0; z < nz; z++) {
+          const offset = (row + z) * width * 4;
+          data.set(grid.subarray(z * nx * 4, (z + 1) * nx * 4), offset);
+          if (spans) for (let x = 0; x < nx; x++) data[offset + x * 4] += tail;
+        }
+        if (spans) {
+          modes[i] = 1;
+          data.set(spans, tail * 4);
+          tail += spans.length / 4;
+        }
         row += nz;
       });
       const uniforms = { u_waterCount: active.length, u_waterMin: boxesMin, u_waterMax: boxesMax,
         u_waterGrid: grids, u_waterTint: tint, u_waterLoss: extinction, u_waterHighlight: highlights,
-        u_waterAirCount: pockets.length, u_waterAirMin: airMin, u_waterAirMax: airMax };
-      return { width: maxAxis, height: Math.max(rows, 1), data, uniforms };
+        u_waterAirCount: pockets.length, u_waterAirMin: airMin, u_waterAirMax: airMax,
+        u_waterLayered: +layered, u_waterSpanMode: modes };
+      return { width, height, data, uniforms };
     }
     function changesFrom(previous) {
       if (previous === result) return [];
-      const old = previous == null ? { active: [], pockets: [] } : sceneStates.get(previous);
+      const old = previous == null ? { physical: [], pockets: [] } : sceneStates.get(previous);
       if (!old) throw new TypeError('Expected a previous water scene');
       const changed = [];
       function compareRows(before, after, difference) {
         const a = new Map(before.map(row => [row.id, row])), b = new Map(after.map(row => [row.id, row]));
         for (const id of new Set([...a.keys(), ...b.keys()])) {
           const bounds = difference(a.get(id), b.get(id));
-          if (bounds) changed.push(bounds);
+          if (Array.isArray(bounds)) changed.push(...bounds);
+          else if (bounds) changed.push(bounds);
         }
       }
-      compareRows(old.active, active, changedBody);
+      compareRows(old.physical, physical, changedBody);
       compareRows(old.pockets, pockets, (a, b) => {
         if (!a || !b) return (a ?? b).bounds;
         return equalBounds(a.bounds, b.bounds) ? null :
@@ -228,10 +345,10 @@
       });
       return P.data.freeze(changed);
     }
-    const result = Object.freeze({ media, mediumAt, count: active.length, pack, changesFrom });
-    sceneStates.set(result, { active, pockets });
+    const result = Object.freeze({ media, mediumAt, count: active.length, layered, pack, changesFrom });
+    sceneStates.set(result, { physical, pockets });
     return result;
   }
 
-  P.waterBodies = Object.freeze({ create, fromShallowWater, scene });
+  P.waterBodies = Object.freeze({ create, fromShallowWater, fromSpans, scene });
 })(KIT);

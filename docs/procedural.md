@@ -1332,8 +1332,8 @@ drives the ground's splat palette and the placement of floodplain reeds.
 
 ### Water bodies
 
-A water body captures bed height, surface height, and current for each cell of
-an XZ grid. Use the same water frame for world queries and the
+A water body captures wet intervals and current for each cell of an XZ grid.
+Use the same water frame for world queries and the
 [WebGL renderer](browser-renderer.md#water-optics).
 
 ```js
@@ -1375,8 +1375,16 @@ const eyesMedium = environment.mediumAt(...eyePosition);
   new scene and build its biome query from the same revision when the solver
   advances. Previous frames remain readable.
 - A scene supports up to eight bodies with distinct IDs and nonoverlapping
-  XYZ bounding interiors. Bodies can sit at different heights at the same XZ.
-  Set each column's bed and surface to describe the wet interval.
+  XYZ bounding interiors. This uses the full span grid bounds for layered
+  bodies so tagged air and water agree across tiles. Bodies can sit at
+  different heights at the same XZ.
+- `W.fromSpans(grid, {id, optics})` packs up to 32 wet intervals per column
+  from a [vertical span grid](#vertical-spans). Interval IDs, XYZ flow and
+  named air are available in `scene.media`. Reuse a medium ID across
+  neighboring layered bodies to keep it continuous in gameplay queries.
+  Depth is measured to the top of each contiguous water run. The renderer
+  highlights a waterline only where air meets the top of the run. All
+  intervals in one body share its optical settings.
 - `W.scene(bodies, {airPockets: [{id, bounds}, ...]})` accepts up to eight
   axis-aligned XYZ air pockets. Their strict interiors override water
   membership and subtract dry intervals from the WebGL light path. Overlapping
@@ -1384,9 +1392,31 @@ const eyesMedium = environment.mediumAt(...eyePosition);
   and refraction. Use the scene's `media` to share the same pocket geometry
   with the biome query.
 - `next.changesFrom(previous)` returns conservative dirty bounds for
-  physical column or pocket changes. An unchanged grid gets one bounding
-  box over the modified columns. Optics-only edits use the new render
-  snapshot directly.
+  physical column or pocket changes. Layered bodies report adjacent columns
+  as runs within each grid row. Single-interval bodies return a bounding box
+  over their modified columns. Optics-only edits use the new render snapshot
+  directly.
+
+### Vertical spans
+
+`P.verticalSpans.create({bounds, resolution, sample, maxSpans})` captures
+ordered `{min, max, kind, id?, material?, current?}` intervals per XZ column.
+`sample(x,z,i,j)` receives the world-space cell center and grid indices.
+Kinds are `solid`, `air`, and `water`. Gaps are air. Each interval owns its
+lower Y boundary through to its upper boundary, exclusive. `grid.at(x,y,z)`
+returns the interval and `grid.column(i,j)` returns all intervals in ascending
+Y order. `grid.pack()` copies offsets, Float32 height pairs, label indices and
+the label palette for host processing.
+
+`P.verticalSpans.bake({bounds, resolution, solid, volumes, step, refine,
+maxSamples, maxSpans})` samples a solid SDF and signed volume fields at each
+column center. Each volume supplies `{id, kind, field, priority?, material?,
+current?}`. Negative samples are inside. Solid wins over every volume, then
+higher priorities win, with IDs breaking ties. Water currents can be an XYZ
+vector or an XYZ function sampled inside each interval. The baker refines sign
+changes between vertical samples. Choose a `step` small enough to sample the
+thinnest feature that must survive, and choose XZ resolution to fit the
+smallest relevant horizontal detail.
 
 ### Retained biome recipes
 
@@ -1478,7 +1508,7 @@ view.inspect(7, -9, 3, { species: 'glow-moss' });  // cave pool at the same XZ
 ### Headless biome world realization
 
 `P.biomeWorld.create({height, caves, cell, chunkCells, verticalCells,
-terrainSlope, layers, project, emit, palette, dependencyHalo, maxSplats})`
+terrainSlope, layers, project, emit, palette, materialRamps, dependencyHalo, maxSplats})`
 realizes a retained biome recipe view against caller-supplied terrain.
 The [headless coast example](../examples/biome-world.js) walks from a ridge
 through a marsh, dives through a flooded passage, and surfaces in an
@@ -1522,9 +1552,13 @@ const trip = frame.traceRoute(coast.itinerary(frame));
   The default emits one placeholder splat per placement.
 - Use `prepare` with the same water snapshot that the renderer should show.
   The frame takes its recipe media and air pockets from that snapshot.
+  Optional `bricks` supply sparse edits to the solid field and material
+  overrides with an entry in `materialRamps`. Each override is an array of
+  packed RGB colors. `frame.bakeSpans(options)` samples the same solid field,
+  and `frame.traversalGraph(options)` uses it for clearance checks.
   `update` accepts the full desired index set and publishes a patch of
   replaced chunks and removed keys. It compares retained recipe edits,
-  old and new route spans, and water changes, then checks the dependency
+  old and new route spans, water changes, and changed bricks, then checks the dependency
   halo of each chunk. Unchanged chunks retain their payloads. Updates
   serialize and publish only complete builds. Use `dependencyHalo` when
   a custom layer sampler, feature projection, or emitter reads beyond the
@@ -1535,6 +1569,63 @@ const trip = frame.traceRoute(coast.itinerary(frame));
   It accepts normal render metadata such as `cam`. Assemble on chunk
   changes and reuse the packed world across render frames. Water optics
   use the [WebGL renderer](browser-renderer.md#water-optics).
+
+### Sparse bricks
+
+`P.sparseBricks.create({cell, brickSize, base})` makes an empty snapshot around
+a stable negative-inside `base(x,y,z)` field. Bricks live on a signed integer
+XYZ lattice. Only edited bricks are stored. Each channel can collapse to a
+constant throughout a brick. `setBrick([i,j,k], {offset, material, medium})`
+sets uniform values and leaves omitted channels alone.
+
+`edit({bounds, sdf, operation, smooth, material, medium, maxSamples})` returns
+a new snapshot. `union` and `subtract` combine the current field with the
+signed brush and store the offset from the base at each edited lattice point.
+Pad `bounds` enough to contain the sculpt's full influence. `smooth` controls
+the blend distance. The default operation `paint` changes the material and
+medium IDs inside the brush or throughout the bounds when no brush is given.
+Pass `null` for a channel to clear its paint. Older snapshots share untouched
+brick data and remain readable.
+
+- `distance(x,y,z)` adds interpolated offsets to the analytical base,
+  reading neighboring bricks at seams.
+- `attributes(x,y,z)` returns the nearest sample's material and medium IDs.
+  `mediumField(id)` converts a painted label to a signed membership field
+  for a vertical span bake. A new water scene can then publish the result to
+  gameplay and WebGL together.
+- `changesFrom(previous)` returns bounds with the interpolation halo.
+  `stats` counts retained, uniform, dense and sculpted bricks.
+- For a biome world edit, create the brush snapshot with an unedited frame's
+  `distance` as its base, then call `prepare(view, {bricks, water})`. The
+  compiler samples its continuous field, applies the brick offsets and emits
+  Gaussian splats at the resulting zero crossings.
+
+### Traversal graph
+
+Pass aligned, nonoverlapping XZ span tiles to
+`P.traversalGraph.create({tiles, radius, height, stepUp, maxDrop, maxClimb,
+canClimb, swimStep, clearance, origin, maxNodes, maxChecks})`. The graph
+samples capsule-sized standing and swimming positions and checks paths across
+neighboring columns and tile seams. A supplied `clearance(x,y,z)` SDF checks
+the capsule axis with its radius. Without it the graph uses the occupied
+spans and an enclosing box. `canClimb(from,to)` authorizes climbs upward when
+the height change exceeds a step. Drops are directed. Use a common XZ
+`origin` for stable column IDs in streamed regions.
+
+`graph.route(start,end,{allow, maxSnap, weights})` accepts node IDs or XYZ
+agent centers and returns the ordered nodes, movement edges, waypoint
+positions and cost. `allow` limits the route to selected modes and `weights`
+sets positive per-mode cost multipliers. `next.changesFrom(previous)` reports
+changed edges with old and new modes and their endpoint media, including when
+a rising tide changed a walk into a swim.
+
+```js
+const { frame, tiles } = coast.layered(0.38);
+const graph = frame.traversalGraph({ tiles, radius: 0.14, height: 0.48 });
+const ridge = graph.nodes.find(node => node.supported && node.medium === 'air');
+const chamber = graph.nodes.find(node => node.mediumId === 'chamber-air');
+const route = graph.route(ridge.id, chamber.id);
+```
 
 ### Stable spacing and finite Poisson sampling
 

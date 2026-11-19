@@ -47,7 +47,7 @@
 
   function create({
     height, caves = [], cell = 0.25, chunkCells = 16, verticalCells = [-24, 24], terrainSlope = 1,
-    layers = [], project, emit, palette = [0x13232b, 0x435a58, 0x78927a, 0xbdba92, 0xede0b9],
+    layers = [], project, emit, palette = [0x13232b, 0x435a58, 0x78927a, 0xbdba92, 0xede0b9], materialRamps = {},
     dependencyHalo = 0, maxSplats = 50000
   } = {}) {
     if (typeof height !== 'function' || !positive(cell) || cell < 1e-6 || !integer(chunkCells) || chunkCells < 1 ||
@@ -60,6 +60,14 @@
         !Array.from(palette).every(v => integer(v) && v >= 0 && v <= 0xffffff) ||
         !finite(dependencyHalo) || dependencyHalo < 0 || !integer(maxSplats) || maxSplats < 1)
       throw new Error('Invalid headless biome world options');
+    if (!materialRamps || typeof materialRamps !== 'object' || Array.isArray(materialRamps))
+      throw new Error('Brick materials need a map of RGB ramps');
+    const ramps = new Map(Object.entries(materialRamps).map(([id, ramp]) => {
+      if (!named(id) || !Array.isArray(ramp) || !ramp.length || ramp.length > 64 ||
+          !Array.from(ramp).every(v => integer(v) && v >= 0 && v <= 0xffffff))
+        throw new Error('Brick material ramps need nonempty IDs and packed RGB colors');
+      return [id, ramp.map(v => [v >> 16, (v >> 8) & 255, v & 255])];
+    }));
     const pal = Object.freeze(palette.slice()), [bottom, top] = verticalCells, size = cell * chunkCells;
     const caveIndex = P.spatial.pointIndex(Array.from(caves, cave => {
       if (!coordinates(cave?.bounds?.min, 3) || !coordinates(cave?.bounds?.max, 3) || typeof cave.sdf !== 'function')
@@ -81,23 +89,25 @@
     const sun = V.norm([-0.43, 0.84, 0.31]), slopeFactor = 1 / Math.hypot(1, terrainSlope);
     const epsilon = cell * 0.027;
 
-    function prepare(source, { water = emptyWater, time = 0 } = {}) {
-      if (typeof source?.withEnvironment !== 'function' || typeof water?.changesFrom !== 'function' || !finite(time))
-        throw new Error('A world frame needs a biome recipe view, a water scene and finite time');
+    function prepare(source, { water = emptyWater, time = 0, bricks = null } = {}) {
+      if (typeof source?.withEnvironment !== 'function' || typeof water?.changesFrom !== 'function' || !finite(time) ||
+          (bricks !== null && !P.sparseBricks.isSnapshot(bricks)))
+        throw new Error('A world frame needs a biome recipe view, a water scene, finite time and optional sparse bricks');
       const terrain = source.withEnvironment({ media: water.media, solid: undefined, project: undefined });
       const heightAt = (x, z) => {
         const base = checked(height(x, z), 'Terrain height');
         return checked(base + terrain.heightOffsetAt(x, base, z, time), 'Realized height');
       };
       function field(sampleHeight) {
-        return function distance(x, y, z) {
+        function base(x, y, z) {
           const point = [x, y, z];
           let value = (y - sampleHeight(x, z)) * slopeFactor;
           caveIndex(point, ({ sdf }) => {
             value = Math.max(value, -checked(sdf(x, y, z), 'Cave field'));
           });
           return value;
-        };
+        }
+        return bricks?.stats.sculpted ? (x, y, z) => bricks.distance(x, y, z, base) : base;
       }
       const evaluate = field(heightAt);
       function distance(x, y, z) {
@@ -167,7 +177,9 @@
         }
         return freeze({ ok: true, clearance, count, media });
       }
-      const frame = Object.freeze({ water, view, time, ...geometry, traceRoute,
+      const frame = Object.freeze({ water, view, time, bricks, ...geometry, traceRoute,
+        bakeSpans: options => P.verticalSpans.bake({ ...options, solid: distance }),
+        traversalGraph: options => P.traversalGraph.create({ ...options, clearance: distance }),
         traversal: body => P.traversal.create({ ...body, supports, clearance: point => distance(...point) }) });
       frames.set(frame, { field, normalOf });
       return frame;
@@ -185,7 +197,7 @@
     function build(frame, index) {
       const internals = frames.get(frame);
       if (!internals) throw new Error('Expected a frame from this biome world');
-      const { key, grid, bounds } = address(index), { view, time } = frame;
+      const { key, grid, bounds } = address(index), { view, time, bricks } = frame;
       const columns = new Map();
       function heightAt(x, z) {
         const id = x + '/' + z;
@@ -206,15 +218,23 @@
         const point = surface.points[i], normal = surface.normals[i];
         const coord = surface.active[i].key.split('/').map((v, axis) => Number(v) + grid.min[axis]);
         const surfaceY = heightAt(point[0], point[2]);
-        const appearance = view.materialAt(...point, { surfaceY, time, probe: V.mad(point, normal, cell * 0.22) });
         const shade = Math.max(0, V.dot(normal, sun));
-        const color = appearance.ramp[Math.round(shade * (appearance.ramp.length - 1))].map(v => Math.round(v * 255));
+        const painted = bricks && ramps.size ? ramps.get(bricks.attributes(...V.mad(point, normal, -cell * 0.22)).material) : null;
+        const color = painted ? painted[Math.round(shade * (painted.length - 1))] : (() => {
+          const { ramp } = view.materialAt(...point, { surfaceY, time, probe: V.mad(point, normal, cell * 0.22) });
+          return ramp[Math.round(shade * (ramp.length - 1))].map(v => Math.round(v * 255));
+        })();
         builder.disc(...point, normal, cell * 0.52, cell * 0.11, color, 1);
         ids.push('surface/' + coord.join('/'));
       }
       const placements = [];
       const ground = (x, z) => {
         const y = heightAt(x, z);
+        if (bricks?.affectsColumn(x, z)) {
+          const found = frame.supports(x, z, bottom * cell, top * cell);
+          return found.reduce((nearest, support) => nearest === null || Math.abs(support.y - y) < Math.abs(nearest - y) ?
+            support.y : nearest, null);
+        }
         return distance(x, y - epsilon, z) < 0 ? y : null;
       };
       for (const layer of population) {
@@ -281,7 +301,8 @@
         const before = published;
         const intent = before && frame.view.changesFrom(before.view);
         const water = before ? frame.water.changesFrom(before.water) : [];
-        const dirty = before ? [...intent.regions, ...water] : [];
+        const changedBricks = before && (frame.bricks?.changesFrom(before.bricks) ?? before.bricks?.changesFrom(null));
+        const dirty = before ? [...intent.regions, ...water, ...(changedBricks ?? [])] : [];
         const all = before && (intent.global || before.time !== frame.time || dirty.length > 4096);
         building = frame;
         let patch;

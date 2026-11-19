@@ -83,7 +83,7 @@ test('water changes bound modified columns and carry strict interior air pockets
 
 function browserProbe(createRenderer, compileSprites, coastline) {
   const canvas = document.querySelector('canvas');
-  const { waterBodies } = KIT.procedural;
+  const { waterBodies, verticalSpans } = KIT.procedural;
   const renderer = createRenderer(canvas, { toolkit: { KIT, PixelLook } });
   const gl = canvas.getContext('webgl2'), size = 65, middle = 32;
   compileSprites(gl, PixelLook);
@@ -182,7 +182,30 @@ function browserProbe(createRenderer, compileSprites, coastline) {
   checkAttenuation(throughPockets, 1.5, 'water ray excludes the union of overlapping air boxes', [], { water: pockets });
   checkAttenuation({ ...throughPockets, dist: 2.1 }, 1, 'ray leaves an air pocket and re-enters water', [], { water: pockets });
 
-  const coast = coastline(KIT), frame = coast.compiler.prepare(coast.author.view(), { water: coast.water(0.38) });
+  const stackedGrid = verticalSpans.create({ bounds: { min: [-2, -3, -6], max: [2, 1, 3] },
+    sample: () => [
+      { min: -1.8, max: -1.3, kind: 'water', id: 'layer' },
+      { min: -1.3, max: -0.9, kind: 'air', id: 'dry-gap' },
+      { min: -0.9, max: -0.4, kind: 'water', id: 'layer' }
+    ] });
+  const stackedWater = waterBodies.scene([waterBodies.fromSpans(stackedGrid, { id: 'stacked', optics: blackWater })]);
+  const belowStack = { ...baseCamera, target: [0, -2, -2], pitch: Math.PI / 6 };
+  checkAttenuation(belowStack, 2, 'stacked intervals attenuate through both layers but skip the dry gap', [], { water: stackedWater });
+  checkAttenuation(belowStack, 2, 'layered background matches the geometry pass', [],
+    { water: stackedWater, blank: true, background: 0xffffff });
+
+  const surfaceOnly = { ...blackWater, extinction: [0, 0, 0], surfaceColor: [1, 0, 0], surface: 1 };
+  function roof(closed) {
+    const grid = verticalSpans.create({ bounds: stackedGrid.bounds, sample: () => [
+      { min: -0.9, max: -0.4, kind: 'water' }, ...(closed ? [{ min: -0.4, max: -0.25, kind: 'solid' }] : [])
+    ] });
+    return waterBodies.scene([waterBodies.fromSpans(grid, { id: 'roof', optics: surfaceOnly })]);
+  }
+  const roofImage = closed => draw(world(belowStack, { blank: true, water: roof(closed) }))();
+  close(roofImage(true), [0, 0, 0], 'solid ceiling has no waterline');
+  if (roofImage(false)[0] < 30) throw new Error('open layered water has no waterline');
+
+  const coast = coastline(KIT), { frame } = coast.layered();
   const route = frame.traceRoute(coast.itinerary(frame));
   if (!route.ok || route.media.map(row => row.kind).join(',') !== 'air,water,air' || route.media.at(-1).id !== 'chamber-air')
     throw new Error('coast traversal did not reach the air chamber');

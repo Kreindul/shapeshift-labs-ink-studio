@@ -1,9 +1,13 @@
 // Exact ray intervals through the published water columns. Distance is in
 // world units, independently of perspective, ortho, and the scene depth ramp.
-export const waterGLSL = airPockets => `
+export const waterGLSL = (airPockets, layered) => `
 ${airPockets ? '#define WATER_AIR_POCKETS' : ''}
 uniform highp sampler2D u_waterData;
 uniform int u_waterCount;
+${layered ? '#define WATER_LAYERED' : ''}
+#ifdef WATER_LAYERED
+uniform int u_waterSpanMode[8];
+#endif
 uniform vec4 u_waterMin[8], u_waterMax[8], u_waterGrid[8];
 uniform vec4 u_waterTint[8], u_waterLoss[8], u_waterHighlight[8];
 uniform mat4 u_waterView;
@@ -71,6 +75,46 @@ void waterSurface(int body, vec3 p, vec3 ray, vec4 column, inout vec3 light, ino
   }
 }
 
+void waterInterval(int body, vec3 eye, vec3 ray, float limit, float start, float end,
+                   vec4 column, bool exposed, bool layered,
+                   #ifdef WATER_AIR_POCKETS
+                   vec2 air[8], int airCount,
+                   #endif
+                   inout vec3 light, inout vec3 through, inout vec3 mark,
+                   inout float caustic, inout bool surfaceSeen) {
+  vec2 wet = vec2(start, end);
+  bool horizontal = abs(ray.y) < 1e-8;
+  bool inside = (eye.y > column.x || (layered && eye.y == column.x)) && eye.y < column.y;
+  if (horizontal ? inside : waterSlab(wet, eye.y, ray.y, column.x, column.y)) {
+    float top = horizontal ? -1.0 : (column.y - eye.y) / ray.y;
+    bool surface = exposed && (layered || !surfaceSeen) && top >= start && top <= end && top < limit;
+    float endpointY = eye.y + ray.y * limit;
+    bool endpoint = wet.y == limit && (!layered || (exposed && endpointY >= column.x && endpointY < column.y));
+    float distance = wet.y - wet.x;
+    #ifdef WATER_AIR_POCKETS
+    surface = surface && !inAir(top, air, airCount);
+    endpoint = endpoint && !inAir(limit, air, airCount);
+    distance = wetLength(wet, air, airCount);
+    #endif
+    if (surface && ray.y < 0.0)
+      waterSurface(body, eye + ray * top, ray, column, light, through, mark);
+    vec3 transmission = exp(-u_waterLoss[body].rgb * distance);
+    light += through * (1.0 - transmission) * u_waterTint[body].rgb;
+    through *= transmission;
+    if (surface && ray.y > 0.0)
+      waterSurface(body, eye + ray * top, ray, column, light, through, mark);
+    surfaceSeen = surfaceSeen || surface;
+    if (endpoint) {
+      vec3 p = eye + ray * limit;
+      float depth = column.y - p.y;
+      vec2 xz = p.xz - clamp(column.zw, vec2(-4.0), vec2(4.0)) * (u_waterTime * 0.17);
+      float a = sin(dot(xz, vec2(7.1, 3.8)) + u_waterTime * 2.1);
+      float b = sin(dot(xz, vec2(-5.2, 6.4)) - u_waterTime * 1.7);
+      caustic = smoothstep(0.78, 0.98, abs(a * b)) * exp(-max(0.0, depth) * 1.2) * u_waterLoss[body].w;
+    }
+  }
+}
+
 void waterColumns(int body, vec3 eye, vec3 ray, float limit,
                   #ifdef WATER_AIR_POCKETS
                   vec2 air[8], int airCount,
@@ -100,36 +144,30 @@ void waterColumns(int body, vec3 eye, vec3 ray, float limit,
   for (int cellStep = 0; cellStep < 128; cellStep++) {
     float end = max(start, min(range.y, min(next.x, next.y)));
     vec4 column = texelFetch(u_waterData, cell + ivec2(0, int(low.w)), 0);
-    if (end > start && column.y > column.x) {
-      vec2 wet = vec2(start, end);
-      bool horizontal = abs(ray.y) < 1e-8;
-      if (horizontal ? eye.y > column.x && eye.y < column.y : waterSlab(wet, eye.y, ray.y, column.x, column.y)) {
-        float top = horizontal ? -1.0 : (column.y - eye.y) / ray.y;
-        bool surface = !surfaceSeen && top >= start && top <= end && top < limit;
-        bool endpoint = wet.y == limit;
-        float distance = wet.y - wet.x;
-        #ifdef WATER_AIR_POCKETS
-        surface = surface && !inAir(top, air, airCount);
-        endpoint = endpoint && !inAir(limit, air, airCount);
-        distance = wetLength(wet, air, airCount);
-        #endif
-        if (surface && ray.y < 0.0)
-          waterSurface(body, eye + ray * top, ray, column, light, through, mark);
-        vec3 transmission = exp(-u_waterLoss[body].rgb * distance);
-        light += through * (1.0 - transmission) * u_waterTint[body].rgb;
-        through *= transmission;
-        if (surface && ray.y > 0.0)
-          waterSurface(body, eye + ray * top, ray, column, light, through, mark);
-        surfaceSeen = surfaceSeen || surface;
-        if (endpoint) {
-          vec3 p = eye + ray * limit;
-          float depth = column.y - p.y;
-          vec2 xz = p.xz - clamp(column.zw, vec2(-4.0), vec2(4.0)) * (u_waterTime * 0.17);
-          float a = sin(dot(xz, vec2(7.1, 3.8)) + u_waterTime * 2.1);
-          float b = sin(dot(xz, vec2(-5.2, 6.4)) - u_waterTime * 1.7);
-          caustic = smoothstep(0.78, 0.98, abs(a * b)) * exp(-max(0.0, depth) * 1.2) * u_waterLoss[body].w;
+    if (end > start) {
+      #ifdef WATER_LAYERED
+      if (u_waterSpanMode[body] == 1) {
+        int width = textureSize(u_waterData, 0).x, first = int(column.x), length = int(column.y);
+        for (int i = 0; i < 32; i++) {
+          if (i >= length) break;
+          int slot = ray.y < 0.0 ? length - 1 - i : i;
+          int offset = first + slot;
+          int flags = int(slot < 16 ? column.z : column.w);
+          bool exposed = (flags & (1 << (slot % 16))) != 0;
+          vec4 span = texelFetch(u_waterData, ivec2(offset % width, offset / width), 0);
+          waterInterval(body, eye, ray, limit, start, end, span, exposed, true,
+            #ifdef WATER_AIR_POCKETS
+            air, airCount,
+            #endif
+            light, through, mark, caustic, surfaceSeen);
         }
-      }
+      } else
+      #endif
+      if (column.y > column.x) waterInterval(body, eye, ray, limit, start, end, column, true, false,
+        #ifdef WATER_AIR_POCKETS
+        air, airCount,
+        #endif
+        light, through, mark, caustic, surfaceSeen);
     }
     if (end >= range.y) break;
     bvec2 crossFace = lessThanEqual(next, vec2(end));
@@ -200,9 +238,9 @@ vec3 waterPaint(vec3 color, vec2 pixel, vec2 size, float axial, out vec3 mark) {
 }
 `;
 
-export const waterBackgroundShader = airPockets => `#version 300 es
+export const waterBackgroundShader = (airPockets, layered) => `#version 300 es
 precision highp float;
-${waterGLSL(airPockets)}
+${waterGLSL(airPockets, layered)}
 uniform vec2 u_waterViewport;
 uniform vec3 u_waterBackground;
 layout(location=0) out vec4 scene;

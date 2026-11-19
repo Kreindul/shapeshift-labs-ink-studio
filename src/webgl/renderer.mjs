@@ -219,11 +219,12 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     }
 
     function wetVariant(water) {
-      const airPockets = Boolean(water.u_waterAirCount);
-      if (!wetVariants.has(airPockets)) wetVariants.set(airPockets, {
-        airPockets, sources: pixelShaderSources(toolkit.PixelLook, { water: true, airPockets })
+      const airPockets = Boolean(water.u_waterAirCount), layered = Boolean(water.u_waterLayered);
+      const key = +airPockets + 2 * layered;
+      if (!wetVariants.has(key)) wetVariants.set(key, {
+        airPockets, layered, sources: pixelShaderSources(toolkit.PixelLook, { water: true, airPockets, layered })
       });
-      return wetVariants.get(airPockets);
+      return wetVariants.get(key);
     }
     function drawGeometry(shader, buffer, width, height, options, water, wet) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, buffer.framebuffer);
@@ -233,7 +234,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         gl.clearBufferfv(gl.COLOR, 0, zero);
       } else {
         if (water) {
-          wet.background ??= program(waterBackgroundShader(wet.airPockets));
+          wet.background ??= program(waterBackgroundShader(wet.airPockets, wet.layered));
           gl.disable(gl.BLEND);
           fullscreen(wet.background, buffer.framebuffer, width, height, { ...water,
             u_waterViewport: [width, height], u_waterBackground: options.background.slice(0, 3) });
@@ -353,7 +354,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       gl.colorMask(true, true, true, true);
       gl.depthMask(true);
       gl.blendEquation(gl.FUNC_ADD);
-      const shader = pipeline.programFor(wet ? { water: true, airPockets: wet.airPockets } : undefined);
+      const shader = pipeline.programFor(wet ? { water: true, airPockets: wet.airPockets, layered: wet.layered } : undefined);
       gl.useProgram(shader.p);
       const growth = world.grow ?? {};
       shader.set({

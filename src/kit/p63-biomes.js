@@ -37,17 +37,19 @@
         throw new TypeError('Biome regions need a biome ID and weight in [0, 1] or a weight sampler');
       return { biome, weight };
     });
-    const mediumIndex = compileRows(media, 'media', ({ id, kind, priority = 0, sdf, surface, current }) => {
+    const mediumIndex = compileRows(media, 'media', ({ id, kind, priority = 0, sdf, surface, surfaceAt, current }) => {
       if ((kind !== 'air' && kind !== 'water') || !Number.isSafeInteger(priority) || !optionalField(sdf))
         throw new TypeError('Biome media need an air or water kind, integer priority and optional SDF');
       if (kind === 'air') {
-        if (surface !== undefined || current !== undefined) throw new TypeError('Only water has a surface and current');
+        if (surface !== undefined || surfaceAt !== undefined || current !== undefined)
+          throw new TypeError('Only water has a surface and current');
         return { priority, sdf, fixed: dryMedium(kind, id) };
       }
-      if (!(typeof surface === 'function' || finite(surface)) ||
+      if (!(surfaceAt === undefined ? typeof surface === 'function' || finite(surface) :
+        typeof surfaceAt === 'function' && surface === undefined) ||
           !(optionalField(current) || vector(current)))
         throw new TypeError('Biome water needs a finite surface height and optional XYZ current');
-      return { priority, sdf, surface, current: vector(current) ? Object.freeze(current.slice()) : current ?? zero };
+      return { priority, sdf, surface, surfaceAt, current: vector(current) ? Object.freeze(current.slice()) : current ?? zero };
     });
 
     function pointAt(x, y, z, time) {
@@ -67,11 +69,11 @@
       if (solid && inside(solid, x, y, z, time)) return rock;
       let winner, surfaceY;
       mediumIndex(point, row => {
-        const { id, priority, sdf, fixed, surface } = row;
+        const { id, priority, sdf, fixed, surface, surfaceAt } = row;
         if (sdf && !inside(sdf, x, y, z, time)) return;
         let height = null;
         if (!fixed) {
-          height = typeof surface === 'function' ? surface(x, z, time) : surface;
+          height = surfaceAt ? surfaceAt(x, y, z, time) : typeof surface === 'function' ? surface(x, z, time) : surface;
           if (!finite(height)) throw new RangeError('Biome water surface samples must be finite');
           if (y >= height) return;
         }

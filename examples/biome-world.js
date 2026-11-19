@@ -25,6 +25,28 @@ module.exports = function coast(K, snapshot) {
         surface: 0, refraction: 0, foam: 0, caustics: 0 }
     })], { airPockets: [pocket] });
   }
+  function layered(level = 0.38, view = author.view()) {
+    const base = compiler.prepare(view);
+    const air = cavity(pocket.bounds.min, pocket.bounds.max);
+    const sea = cavity([-9, -5.2, -2], [12, level, 2]);
+    const volumes = [
+      { id: pocket.id, kind: 'air', field: air.sdf, priority: 1 },
+      { id: 'coast-water', kind: 'water', field: sea.sdf, current: [0.21, 0, 0] }
+    ];
+    const tiles = Array.from({ length: 7 }, (_, i) => base.bakeSpans({
+      bounds: { min: [-16 + i * 4, -5.2, -2], max: [-12 + i * 4, 4, 2] },
+      resolution: [8, 8], volumes, step: 0.2
+    }));
+    const grid = K.procedural.verticalSpans.create({
+      bounds: { min: [-16, -5.2, -2], max: [12, 4, 2] }, resolution: [56, 8],
+      sample: (x, z, i, j) => tiles[Math.floor(i / 8)].column(i % 8, j)
+    });
+    const scene = waterBodies.scene([waterBodies.fromSpans(grid, { id: 'coast',
+      optics: { extinction: [0.42, 0.24, 0.14], tint: [0.03, 0.16, 0.23],
+        surface: 0, refraction: 0, foam: 0, caustics: 0 }
+    })]);
+    return { frame: compiler.prepare(view, { water: scene }), tiles, grid };
+  }
   const author = biomeRecipes.create({
     snapshot, seed: 63, fallback: 'ridge',
     conditions(x, y) { return { moisture: x < -5 ? 0.2 : 0.82, clarity: x < 4.2 ? 0.9 : 0.25, light: y < -1.8 ? 0.13 : 0.82 }; },
@@ -95,5 +117,5 @@ module.exports = function coast(K, snapshot) {
     });
     return steps.concat(frame.view.layout.routes.find(route => route.region === 'passage' && route.id === 'dive').points);
   }
-  return { author, compiler, water, indices, itinerary };
+  return { author, compiler, water, layered, indices, itinerary };
 };

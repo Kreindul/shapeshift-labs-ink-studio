@@ -42,12 +42,13 @@ export function createSplatPipeline(gl, { ascii, specialize = true, sampleCovera
       programFor(features) {
         check();
         if (features?.water) {
-          const airPockets = Boolean(features.airPockets);
-          if (!water.has(airPockets)) {
-            const wet = splatShaderSources(ascii, sampleCoverage, { water: true, airPockets });
-            water.set(airPockets, resources.program(wet.vertex, wet.fragment));
+          const airPockets = Boolean(features.airPockets), layered = Boolean(features.layered);
+          const key = +airPockets + 2 * layered;
+          if (!water.has(key)) {
+            const wet = splatShaderSources(ascii, sampleCoverage, { water: true, airPockets, layered });
+            water.set(key, resources.program(wet.vertex, wet.fragment));
           }
-          return water.get(airPockets);
+          return water.get(key);
         }
         if (!specialize || plainUnavailable || features?.lamps !== false ||
             features.fine !== false || features.textZones !== false) return full;

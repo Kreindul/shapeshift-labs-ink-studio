@@ -69,6 +69,9 @@ water behind an object cannot tint the object's own color. A frame can
 contain rays above, below, and crossing the waterline.
 Air pockets on the water snapshot subtract their shared XYZ bounds from
 each optical path, so a chamber can stay clear inside a flooded body.
+Layered bodies trace each wet interval in ray order. Caves can share the
+same XZ columns with water at other heights, and solid ceilings suppress the
+waterline highlights where no air touches the top of the water.
 
 Water bodies have optional `optics` controls. `tint` and `surfaceColor`
 take 0–1 RGB triples. `extinction` is a nonnegative RGB coefficient per
