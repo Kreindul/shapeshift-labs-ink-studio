@@ -32,3 +32,19 @@ test('retained depth buckets preserve full-sort ties, behind samples and moving 
   assert(splatOrder.merge(bank, Int32Array.from(tail), depths, behind, combined, keys));
   assert.deepEqual(combined, splatOrder.compile(values.map((_, i) => i), depths, behind).order);
 });
+
+test('large retained merges preserve ties across both depth bytes and changing tail sizes', () => {
+  const ids=Array.from({length:5600},(_,i)=>i),depths=i=>i===0?-32:i===1?32:((i*1079)%64000)/1024-31,
+    behind=i=>i%13===0,order=splatOrder.compile(ids,depths,behind).order,
+    combined=new Int32Array(ids.length),keys=new Uint16Array(ids.length);
+  const retained=ids.filter(i=>i<2||i%3===0),active=ids.filter(i=>i>=2&&i%3!==0);
+  const bank=splatOrder.compile(retained,depths,behind);
+  assert(splatOrder.merge(bank,Int32Array.from(active),depths,behind,combined,keys));
+  assert.deepEqual(combined,order);
+  assert(splatOrder.merge(bank,Int32Array.from(active.reverse()),depths,behind,combined,keys));
+  assert.deepEqual(combined,order);
+  const shorter=active.reverse().slice(0,950);
+  assert(splatOrder.merge(bank,Int32Array.from(shorter),depths,behind,combined,keys));
+  const reduced=splatOrder.compile(retained.concat(shorter).sort((a,b)=>a-b),depths,behind);
+  assert.deepEqual(combined.subarray(0,reduced.order.length),reduced.order);
+});
