@@ -48,3 +48,12 @@ test('a rotated approach sees interior cutouts and another patch can fill them',
     {id:'inlay',ids:['inlay','roof'],height:2,range:[1.99,2]});
   assert.throws(()=>q.matchPatches([{...roof,height:Infinity}]),/finite/);
 });
+
+test('clipping a full-size outline may add vertices without invalidating the floor',()=>{
+  const q=landingContact.create({sill:[0,1.5,1],facing:[0,0,1],width:1});
+  const footprint=Array.from({length:128},(_,i)=>{
+    const angle=i/128*2*Math.PI;
+    return [.025*Math.sin(angle),1.06999-.025*Math.cos(angle)];
+  });
+  assert.equal(q.matchPatches([{id:'partial-disk',height:1.5,footprint}]),null);
+});

@@ -5,6 +5,22 @@
   const vector = value => Array.isArray(value) && value.length === 3 &&
     Array.from(value).every(Number.isFinite);
 
+  function boundedFragments(polygon) {
+    if (polygon.length <= 128) return [polygon];
+    // Clipping can add vertices to a valid input. Split only the resulting
+    // oversized polygon so it can be reused as a surface-cell mask.
+    const [origin] = polygon, fragments = [];
+    for (let start = 1; start < polygon.length - 1; start += 126) {
+      const fan = polygon.slice(start,start+127);
+      const twiceArea = fan.slice(1).reduce((area,b,i) => {
+        const a = fan[i];
+        return area+(a[0]-origin[0])*(b[1]-origin[1])-(a[1]-origin[1])*(b[0]-origin[0]);
+      },0);
+      if (twiceArea > 2e-16) fragments.push([origin,...fan]);
+    }
+    return fragments;
+  }
+
   function create({ sill, facing, width, near = .045, far = .27,
     fraction = .84, verticalTolerance = .18, elevationSpread = .065 } = {}) {
     if (!vector(sill) || !vector(facing) ||
@@ -64,7 +80,8 @@
         if (patch.height < low || patch.height > high) return [];
         const { cells } = clip([{key:patch.id,polygon:patch.footprint}],
           {boundary:footprint,holes:patch.holes});
-        return cells.length ? [{id:patch.id,height:patch.height,fragments:cells[0].fragments}] : [];
+        return cells.length ? [{id:patch.id,height:patch.height,
+          fragments:cells[0].fragments.flatMap(boundedFragments)}] : [];
       });
       const heights = [...new Set(covered.map(patch => patch.height))];
       heights.sort((a,b) => Math.abs(a-y)-Math.abs(b-y) || a-b);
