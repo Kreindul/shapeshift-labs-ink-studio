@@ -62,6 +62,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `masks.stroke(spec)`, `masks.compose(specs, options)` | Tapered and feathered swept discs, ordered addition and erasure, signed distance and visible source ownership |
 | `surfaceMasks.compile(strokes, {size, periodic})` | Ordered surface brush coverage in retained UVs with measured width and optional seam wrapping |
 | `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
+| `geometry.recessedProfile({outline, recess, center, span, inset})` | Closed XY profile extruded along Z with a blind front recess, shared mesh edges and a solid backing |
 | `surfaceSection(chart, options)` | Convert between world coordinates and a section measured through the varying thickness of a surface chart |
 | `geometry.profileDistance(points)` | Compile a closed 2D ring into a reusable signed distance function `(x, y) => distance`. Concavity and either winding are supported |
 | `volumeCuts.compile(specs)` | Union keyed XZ profiles extruded along Y. Provides a signed field, host subtraction, bounded exposed-boundary sampling and ray hits |
@@ -2187,6 +2188,14 @@ from `sample(uv)`. Transformed planes reuse their constant world normal,
 including when multiple transforms are applied. A planar chart also
 provides `planePoint(uv)` when a caller only needs the position.
 Context adapters can supply the same optional method on their own charts.
+
+`geometry.recessedProfile` forms a solid from two XY rings and a Z span
+`[back, front]`. Supply a center visible from every edge of both rings.
+Each ring can use either winding, and the recess ring must lie strictly
+inside the exterior ring. The inset is measured back from the front and
+must leave positive backing thickness. Use `distance([x, y, z])` for
+inside/outside queries, `mesh(metadata)` for a closed surface, and
+`sample(spacing, emit)` for points on the same surface.
 
 Pass a world-space `lowerBound(x, y, z, limit)` callback to a sculpt
 primitive to apply a conservative probe during field traversal. Include all
