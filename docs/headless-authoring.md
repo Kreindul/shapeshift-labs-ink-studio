@@ -52,6 +52,16 @@ Connections read an exposed `input`, a `node` and optional `port`, a keyframe tr
 
 Try `ink-studio sheet examples/graph-study.js --from 0 --to 2.6 --n 4 --ortho` for a layered signal animation that drives a cached growth effect across field-aligned tiles.
 
+## Incremental authoring context
+
+`ctx.collection` can match exact scalar values in `parameters` alongside
+type and relationship filters. For a fact computed from multiple records,
+`ctx.watch(select)` tracks a pure selector against the immutable document
+view. Descriptors and rules rerun when the result changes by `Object.is`.
+Use a scalar or stable immutable reference for the result. Spatial queries
+made by a rule retain their type, tag and exclusion filters when deciding
+whether a change affects it.
+
 ## Flooded Shrine
 
 `procedural.floodedShrine.create({ seed, controls, snapshot })` owns a retained authoring document with an entrance, a hero silhouette and generated parts. Use `pin`, `setControls` and `regenerate` to steer the layout. Work with generated parts via the document's ordinary update, suppress, promote and undo APIs. The waterline, age, vegetation and path clearance can change while pinned anchors and authored overrides persist.

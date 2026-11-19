@@ -33,6 +33,7 @@
       jobs = new Map(),
       adapterReads = new Map(),
       adapterCollections = new Map(),
+      adapterWatches = new Map(),
       collectionCache = new Map();
     let previous = null,
       view = null,
@@ -43,6 +44,7 @@
       synchronizing = false,
       describing = null,
       describingCollections = null,
+      describingWatches = null,
       ensureRecord = null;
     let dirty = new Map(),
       stylesDirty = true;
@@ -100,6 +102,7 @@
         prepared = new Map(),
         preparedReads = new Map(),
         preparedCollections = new Map(),
+        preparedWatches = new Map(),
         collectionIds = new Map(),
         visiting = new Set();
       for (const id of new Set([...Object.keys(previous ? previous.entities : {}), ...Object.keys(next.entities)])) {
@@ -119,6 +122,8 @@
       };
       for (const [id, reads] of adapterCollections)
         if (reads.some(r => JSON.stringify(idsFor(r.filter)) !== JSON.stringify(r.ids))) changes.add(id);
+      for (const [id, watches] of adapterWatches)
+        if (!changes.has(id) && watches.some(watch => watchChanged(watch, next))) changes.add(id);
       let more = true;
       while (more) {
         more = false;
@@ -152,19 +157,24 @@
         for (const dep of [e.parent, e.anchor && e.anchor.host, e.derived && e.derived.owner]) if (dep) prepare(dep);
         const previousReads = describing,
           previousCollections = describingCollections,
+          previousWatches = describingWatches,
           reads = new Set(),
-          collections = [];
+          collections = [],
+          watches = [];
         describing = reads;
         describingCollections = collections;
+        describingWatches = watches;
         let raw;
         try {
           raw = adapter.describe(e, ctx);
         } finally {
           describing = previousReads;
           describingCollections = previousCollections;
+          describingWatches = previousWatches;
         }
         preparedReads.set(id, reads);
         preparedCollections.set(id, collections);
+        preparedWatches.set(id, watches);
         if (!raw) {
           prepared.set(id, null);
           visiting.delete(id);
@@ -219,16 +229,19 @@
         ensureRecord = null;
         describing = null;
         describingCollections = null;
+        describingWatches = null;
       }
       for (const id of changes) {
         const old = records.get(id),
           rec = prepared.get(id),
           pending = dirty.get(id);
-        dirty.set(id, { old: pending ? pending.old : old && old.bounds, next: rec && rec.bounds });
+        dirty.set(id, { old: pending ? pending.old : old, next: rec });
         unindex(id);
         if (rec) index(id, rec);
         if (preparedCollections.has(id)) adapterCollections.set(id, preparedCollections.get(id));
         else adapterCollections.delete(id);
+        if (preparedWatches.get(id)?.length) adapterWatches.set(id, preparedWatches.get(id));
+        else adapterWatches.delete(id);
         if (preparedReads.has(id)) adapterReads.set(id, preparedReads.get(id));
         else adapterReads.delete(id);
       }
@@ -265,7 +278,7 @@
       for (const key of ['types', 'tags', 'exclude'])
         if (f[key] && (!Array.isArray(f[key]) || !f[key].every(name)))
           throw new Error('Query ' + key + ' must be an array of names');
-      if (active) active.regions.push(b);
+      if (active) active.regions.push({ bounds: b, filter: f });
       const keys = cellKeys(b),
         candidates = keys ? new Set(large) : new Set(records.keys());
       if (keys) for (const key of keys) for (const id of grid.get(key) || []) candidates.add(id);
@@ -349,29 +362,36 @@
       if (!Number.isFinite(offset)) throw new Error('Anchor offset must be finite');
       return freeze(clone({ ...hit, p: V.mad(hit.p, hit.n, offset) }));
     }
-    function collect(state, f) {
+    function collect(state, filter) {
+      const parameters = filter.parameters && Object.entries(filter.parameters);
       return Object.values(state.entities)
-        .filter(
-          e =>
-            (f.type === undefined || e.type === f.type) &&
-            (f.anchorHost === undefined || (e.anchor && e.anchor.host === f.anchorHost)) &&
-            (f.parent === undefined || e.parent === f.parent)
+        .filter(e =>
+          (filter.type === undefined || e.type === filter.type) &&
+          (filter.anchorHost === undefined || e.anchor?.host === filter.anchorHost) &&
+          (filter.parent === undefined || e.parent === filter.parent) &&
+          (!parameters || parameters.every(([key, value]) => e.parameters[key] === value))
         )
         .sort((a, b) => order(a.id, b.id));
     }
     function collection(filter) {
       ready();
-      if (
-        !filter ||
-        (filter.type === undefined && filter.anchorHost === undefined && filter.parent === undefined) ||
-        (filter.type !== undefined && !name(filter.type)) ||
-        (filter.anchorHost !== undefined && !name(filter.anchorHost)) ||
-        (filter.parent !== undefined && !name(filter.parent))
-      )
-        throw new Error('Entity collections need a type or relation and valid identities');
+      if (!filter || (filter.type === undefined && filter.anchorHost === undefined &&
+          filter.parent === undefined && filter.parameters === undefined))
+        throw new Error('Entity collections need a type or relation, or a parameter filter');
       const f = {};
-      if (filter.type !== undefined) f.type = filter.type;
-      for (const k of ['anchorHost', 'parent']) if (filter[k] !== undefined) f[k] = filter[k];
+      for (const key of ['type', 'anchorHost', 'parent']) {
+        if (filter[key] === undefined) continue;
+        if (!name(filter[key])) throw new Error('Entity collection identities must be nonempty names');
+        f[key] = filter[key];
+      }
+      if (filter.parameters !== undefined) {
+        const entries = Object.entries(filter.parameters || {});
+        if (typeof filter.parameters !== 'object' || Array.isArray(filter.parameters) || !entries.length ||
+            !entries.every(([key, value]) => name(key) &&
+              (value === null || typeof value === 'string' || typeof value === 'boolean' || Number.isFinite(value))))
+          throw new Error('Collection parameters need named scalar values');
+        f.parameters = Object.fromEntries(entries);
+      }
       const key = JSON.stringify(f);
       if (!collectionCache.has(key)) collectionCache.set(key, freeze(collect(view, f)));
       const entities = collectionCache.get(key),
@@ -384,8 +404,20 @@
       }
       return entities;
     }
+    function watchChanged({ select, value }, next) {
+      return !Object.is(select(next), value);
+    }
+    function watch(select) {
+      if (typeof select !== 'function') throw new Error('Context watches require a snapshot selector');
+      ready();
+      const value = select(view), entry = { select, value };
+      if (describingWatches) describingWatches.push(entry);
+      if (active) (active.watches || (active.watches = [])).push(entry);
+      return value;
+    }
     function affected(job, changes, global) {
       if (global || !job) return true;
+      if (job.watches?.some(watch => watchChanged(watch, view))) return true;
       if (
         (job.collections || []).some(
           r => JSON.stringify(collect(view, r.filter).map(e => e.id)) !== JSON.stringify(r.ids)
@@ -395,9 +427,9 @@
       for (const [id, change] of changes) {
         if (job.ids.has(id)) return true;
         if (
-          job.regions.some(
-            region => (change.old && overlap(region, change.old)) || (change.next && overlap(region, change.next))
-          )
+          job.regions.some(({ bounds, filter }) => [change.old, change.next].some(record =>
+            record && matches(record, filter) && overlap(bounds, record.bounds)
+          ))
         )
           return true;
       }
@@ -505,6 +537,7 @@
       return () => rayFilters.get(id) === fn && rayFilters.delete(id);
     };
     ctx.collection = collection;
+    ctx.watch = watch;
     ctx.snapshot = () => {
       alive();
       return doc.snapshot();
@@ -558,7 +591,7 @@
           owner: j.owner,
           rule: j.rule,
           ids: [...j.ids].sort(),
-          regions: clone(j.regions)
+          regions: clone(j.regions.map(region => region.bounds))
         }))
       );
     const unsubscribe = doc.beforeCommit(() => evaluate());
@@ -573,6 +606,7 @@
       large.clear();
       adapterReads.clear();
       adapterCollections.clear();
+      adapterWatches.clear();
       collectionCache.clear();
     };
     return ctx;
