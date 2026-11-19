@@ -2215,6 +2215,14 @@ The plan puts the first chain before the second. It supplies `reverseFirst`, `re
 
 `unwrap(values, period = 1)` returns stations in the smallest continuous interval covering the supplied positions. It cuts the loop at the largest empty gap and preserves the input order. This lets tools order nearby objects, measure distances or compute centers without splitting a group at the chart seam. Wrap the result of an average to store it as a station on the original chart.
 
+`P.periodicCoordinates.loop([{key, length}, ...])` measures an ordered,
+closed chain of keyed spans. `station(key, fraction)` converts a
+span-local fraction to distance along the chain and accepts extrapolated
+fractions. `locate(station)` wraps that distance and returns
+`{key, fraction}` on the span containing it. At an exact seam, the next
+span owns the station. Use the same chart to group or move features across
+face boundaries while storing their local attachment coordinates.
+
 ### Path clearances for fitted cells
 
 `surfaceCells.pathMask(paths, { facets })` buffers chart-local polylines into convex strips with rounded polygonal caps. Each path supplies `{ points, radius }`. The result exposes `holes` for cell clipping and `distance(u, v)` for field evaluation against the same footprints. The default uses four edges on each cap. Distance is negative inside the union. A single point creates a round clearance, and consecutive collinear stations share one strip.
