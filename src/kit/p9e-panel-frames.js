@@ -63,17 +63,18 @@
     const holes = [], rims = [], openingIds = new Set();
     for (const {key, min, max, rim = true, rimEdges = rimNames} of openings) {
       if (typeof key !== 'string' || !key || openingIds.has(key) || !pair(min) || !pair(max) ||
-          min[0] >= max[0] || min[1] >= max[1] || periodic && max[0]-min[0] >= width || typeof rim !== 'boolean')
+          min[0] >= max[0] || min[1] >= max[1] || periodic && max[0]-min[0] > width || typeof rim !== 'boolean')
         throw new Error('Panel openings need unique keys and ordered bounds within one chart period');
       if(!Array.isArray(rimEdges)||rimEdges.length>4||new Set(rimEdges).size!==rimEdges.length||
          !Array.from(rimEdges).every(edge=>rimNames.includes(edge)))
         throw new Error('Panel rim edges must be unique sill, header, start or end roles');
       openingIds.add(key);
-      const wrap = periodic ? ((min[0] % width) + width) % width : min[0];
-      for (const shift of periodic ? [-width,0,width] : [0]) {
+      const full=periodic&&max[0]-min[0]===width;
+      const wrap=full?0:periodic?((min[0]%width)+width)%width:min[0];
+      for(const shift of periodic&&!full?[-width,0,width]:[0]){
         const x0=wrap+shift,x1=x0+max[0]-min[0],[,y0]=min,[,y1]=max;
         if(x0>width+beam || x1 < -beam || y0 > height+beam || y1 < -beam)continue;
-        holes.push({min:[x0,y0],max:[x1,y1]});
+        holes.push({min:[x0,y0],max:[x1,y1],full});
         if(!rim)continue;
         const prefix='opening/'+key+'/';
         for(const [name,role,a,b] of [
@@ -82,11 +83,11 @@
           ['start','post',[x0-beam,y0],[x0,y1]],
           ['end','post',[x1,y0],[x1+beam,y1]]
         ]){
-          if(!rimEdges.includes(name))continue;
+          if(!rimEdges.includes(name)||full&&(name==='start'||name==='end'))continue;
           const low=[Math.max(a[0],0),Math.max(a[1],0)],high=[Math.min(b[0],width),Math.min(b[1],height)];
           if(low[0]>=high[0]||low[1]>=high[1])continue;
           add(prefix+name,role,rectangle(...low,...high));
-          rims.push({min:low,max:high});
+          rims.push({min:low,max:high,full});
         }
       }
     }
@@ -111,8 +112,9 @@
       if (periodic) u = ((u % width) + width) % width;
       let d = Math.min(Math.abs(u - Math.round(u / du) * du), Math.abs(v - Math.round(v / dv) * dv)) - half;
       for (const part of bracesByBay.get(cell.id) || []) d = Math.min(d, braceDistance(part, u, v));
-      for(const rim of rims)d=Math.min(d,boxDistance(rim.min,rim.max,u,v));
-      for(const hole of holes)d=Math.max(d,-boxDistance(hole.min,hole.max,u,v));
+      const clearance=({min,max,full})=>full?Math.max(min[1]-v,v-max[1]):boxDistance(min,max,u,v);
+      for(const rim of rims)d=Math.min(d,clearance(rim));
+      for(const hole of holes)d=Math.max(d,-clearance(hole));
       const boundary = Math.max(periodic ? -Infinity : Math.max(-u, u - width), -v, v - height);
       return Math.max(boundary, d);
     }

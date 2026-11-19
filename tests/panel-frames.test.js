@@ -47,3 +47,15 @@ test('two charts meeting at a cut keep continuous rails with no artificial middl
     {key:'bad',min:[1,1],max:[2,2],rimEdges:['middle']}
   ]}),/rim edges/);
 });
+
+test('a full-period opening clears the entire ring and has no artificial end jamb',()=>{
+  const frame=P.panelFrames({...standard,periodic:true,openings:[{
+    key:'ring',min:[1.25,.62],max:[6.25,1.72]
+  }]});
+  for(const u of [0,.001,2.7,4.99,5,5.01]){
+    assert(frame.distance(u,1)>.1);
+    assert(frame.distance(u,1.79)<0);
+  }
+  const members=frame.parts.filter(part=>part.key.startsWith('opening/ring/'));
+  assert.deepEqual(members.map(part=>part.key),['opening/ring/sill','opening/ring/header']);
+});

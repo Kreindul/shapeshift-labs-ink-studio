@@ -72,6 +72,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `surfaceMasks.dirtyBounds(before, after, options)` | Bounded UV rectangles for repainting changed stroke coverage, including across chart seams |
 | `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
 | `geometry.profilePlaneSection({outline, span, frame, plane})` | Find the world-space edge intersections of a swept profile with a plane. Use the vertices for projected bounds, including concave outlines |
+| `geometry.profileCylinderSection({outline, span, frame, cylinder})` | Intersect a swept profile with a closed elliptical cylinder chart and return contact bands and per-station vertical intervals |
 | `geometry.recessedProfile({outline, recess, center, span, inset})` | Closed XY profile extruded along Z with a blind front recess, shared mesh edges and a solid backing |
 | `geometry.fitMonotoneOutline({outline, required})` | Fit a horizontal span at each height while preserving authored ledges and cutbacks where they have clearance |
 | `geometry.fitExteriorOutline({outline, required})` | Join two planar rings into one exterior while keeping exposed cutbacks, including profiles with multiple spans at a height |
@@ -210,8 +211,20 @@ clearance alone. `rimEdges` optionally lists the enabled members from
 `sill`, `header`, `start` and `end`. A panel sharing an opening with the
 next panel can omit the intervening jamb without filling the opening. A
 wrapped cut keeps the same member keys across both ends of
-the chart. The result exposes convex member footprints and a distance
+the chart. A cut exactly one period wide uses continuous sill and header
+rings and omits both end jambs. The result exposes convex member footprints and a distance
 sampler. Callers set materials and realize the infill and apertures.
+
+`geometry.profileCylinderSection` intersects a simple profile, including a
+concave outline, swept from `span[0]` to `span[1]` in its affine frame. The
+cylinder chart has four world-space vectors: `origin`, `cosine`, `sine`, and
+`axis`. At normalized coordinates `[u,v]`, its point is
+`origin + cosine*cos(2πu) + sine*sin(2πu) + axis*v`. The axis covers the full
+chart height from zero to one. The result's `at(u)` gives ordered, disjoint
+vertical intervals. Its `bands` give a bounds rectangle for each connected
+angular span. A contact through the seam has an upper station greater than
+one. Rectangular surrounds can use those bounds. Applications that need the
+actual vertical contour can query `at(u)`.
 
 `panelRelief({outline, layers, base, depthScale, budget})` fits convex
 ornaments, panel surrounds and other layered shapes to an existing planar or
