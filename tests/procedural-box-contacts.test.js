@@ -1,7 +1,33 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const K = require('..').load().KIT;
-const { orientedBox, boxContact, verticalPrism, volumeContact } = K.procedural.contacts;
+const { orientedBox, boxContact, verticalPrism, volumeContact, volumeSet, volumeSetsContact } = K.procedural.contacts;
+
+test('indexed volume sets match exhaustive contact for sparse mixed shapes',()=>{
+  const make=(offset)=>Array.from({length:31},(_,i)=>{
+    const x=i*.7,z=x+offset,y=i%4*.2;
+    return i%2===0
+      ?verticalPrism([[x,z],[x+.4,z],[x,z+.4]],y,y+.2)
+      :orientedBox([x,y,z],[.25,.11,.16],K.M.rot([0,1,0],i*.41));
+  });
+  const a=make(0),index=volumeSet(a);
+  for(const offset of [0,.1,.3,.56,1.1,-.21,-.77]){
+    const b=make(offset).reverse(),other=volumeSet(b);
+    for(const pad of [0,.02,.2]){
+      const exact=a.some(first=>b.some(second=>volumeContact(first,second,pad)));
+      assert.equal(volumeSetsContact(index,other,pad),exact,'offset '+offset+' pad '+pad);
+      assert.equal(volumeSetsContact(other,index,pad),exact);
+    }
+  }
+  const touching=volumeSet(a);
+  a.length=0;
+  assert.equal(index.size,31);
+  assert(Object.isFrozen(index.bounds.min));
+  assert(volumeSetsContact(index,touching));
+  assert(!volumeSetsContact(index,volumeSet([])));
+  assert.throws(()=>volumeSet([{}]),/boxes or prisms/);
+  assert.throws(()=>volumeSetsContact(index,touching,-1),/tolerance/);
+});
 
 test('vertical prism contact follows the fitted footprint and height',()=>{
   const ring=[[0,0],[2,0],[0,2]],a=verticalPrism(ring,0,1);

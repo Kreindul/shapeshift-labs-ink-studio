@@ -1647,6 +1647,14 @@ normals and the required edge cross axes. A tolerance gives the maximum
 allowed separation along those axes. Use the boolean result to connect
 parts in a support graph.
 
+`contacts.volumeSet(volumes)` builds a reusable bounding-volume tree
+over boxes and prisms. It owns the list of up to 16,384 volumes and
+exposes `size` and `bounds`. An empty set has null bounds.
+`contacts.volumeSetsContact(a, b, tolerance = 0)` tests only pairs whose
+bounds can meet and applies the same contact rule as `volumeContact`.
+Keep a set for a stationary compound shape and query it against new
+sets as other shapes move.
+
 `construct.loadPaths(sockets, spans, {ground, clear, maxSpan, maxDrop})`
 places beams, supporting columns and braces. Sockets use `{id, point}`
 with an optional `bearing` to indicate an existing support. Spans use

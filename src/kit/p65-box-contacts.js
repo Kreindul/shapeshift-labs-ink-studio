@@ -5,6 +5,7 @@
   const vector = p => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite);
   const boxes = new WeakSet();
   const prisms = new WeakMap();
+  const volumeTrees = new WeakMap();
   const vertical = [0,1,0];
   function overlaps(a,b,pad) {
     for (let i=0; i<3; i++)
@@ -111,5 +112,51 @@
     return true;
   }
 
-  Object.assign(P.contacts ||= {}, { orientedBox, boxContact, verticalPrism, volumeContact });
+  function volumeNode(volumes) {
+    const min = [Infinity,Infinity,Infinity], max = [-Infinity,-Infinity,-Infinity];
+    const first = [Infinity,Infinity,Infinity], last = [-Infinity,-Infinity,-Infinity];
+    const center = (volume,i) => volume.bounds.min[i]/2+volume.bounds.max[i]/2;
+    for (const volume of volumes) for (let i=0; i<3; i++) {
+      min[i] = Math.min(min[i],volume.bounds.min[i]);
+      max[i] = Math.max(max[i],volume.bounds.max[i]);
+      const middle = center(volume,i);
+      first[i] = Math.min(first[i],middle);
+      last[i] = Math.max(last[i],middle);
+    }
+    const bounds = {min,max}, size = volumes.length;
+    if (size<=8) return {bounds,size,volumes};
+    const span = last.map((value,i) => value-first[i]), axis = span.indexOf(Math.max(...span));
+    volumes.sort((a,b) => center(a,axis)-center(b,axis));
+    const split = size>>1;
+    return {bounds,size,left:volumeNode(volumes.slice(0,split)),right:volumeNode(volumes.slice(split))};
+  }
+
+  function volumeSet(volumes) {
+    if (!Array.isArray(volumes) || volumes.length>16384 ||
+        !Array.from(volumes).every(v => boxes.has(v)||prisms.has(v)))
+      throw Error('A contact set needs at most 16384 boxes or prisms');
+    const tree = volumes.length?volumeNode(volumes.slice()):null;
+    const set = P.data.freeze({size:volumes.length,bounds:tree?.bounds??null});
+    volumeTrees.set(set,tree);
+    return set;
+  }
+
+  function volumeSetsContact(a,b,tolerance=0) {
+    if (!volumeTrees.has(a) || !volumeTrees.has(b) || !Number.isFinite(tolerance) || tolerance<0)
+      throw Error('Contact between sets needs two volume sets and a nonnegative tolerance');
+    function meets(a,b) {
+      if (!overlaps(a,b,tolerance)) return false;
+      if (a.volumes&&b.volumes)
+        return a.volumes.some(first => b.volumes.some(second => volumeContact(first,second,tolerance)));
+      if (b.volumes||a.left&&a.size>=b.size)
+        return meets(a.left,b)||meets(a.right,b);
+      return meets(a,b.left)||meets(a,b.right);
+    }
+    const left=volumeTrees.get(a), right=volumeTrees.get(b);
+    return Boolean(left&&right&&meets(left,right));
+  }
+
+  Object.assign(P.contacts ||= {}, {
+    orientedBox, boxContact, verticalPrism, volumeContact, volumeSet, volumeSetsContact
+  });
 })(KIT);
