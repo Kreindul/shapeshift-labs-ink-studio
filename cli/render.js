@@ -128,6 +128,9 @@ function render(world, o) {
   if (look.pixelSize !== undefined && (!Number.isSafeInteger(look.pixelSize) || look.pixelSize < 1))
     throw new RangeError('look.pixelSize must be a positive integer');
   const tone = o.raw || o.samples || o.captureCoverage ? null : toneFor(world, o.tone ?? look.tone);
+  const remap = styled && !tone && PixelLook.prepareRemap(o.paletteRemap ?? look.paletteRemap, world.pal, world.paletteRoles);
+  const grade = remap ? remap.grade(world.anim?.grade) : world.anim?.grade;
+  const remappedPalette = remap ? PixelLook.gradePalette(grade) : undefined;
   const rel = c.dist / dist0,
     rho = world.detail * Math.pow(rel, rel > 1 ? 0.5 : 0.25),
     px = o.px || look.pixelSize || clamp(Math.round(ch / (2 * tangent * rho * dist0)), 1, 18),
@@ -160,16 +163,18 @@ function render(world, o) {
     const basePalette = tone?.palette || world.pal;
     const palette = basePalette.map(h => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255]);
     const local = native.localAt && {
-      at: native.localAt, palettes: native.localPalettes, output: PixelLook.outputPalettes(basePalette, native.localPalettes)
+      at: native.localAt, palettes: native.localPalettes,
+      output: PixelLook.outputPalettes(remappedPalette || basePalette, native.localPalettes)
     };
     const amount = (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither;
     const img = specializedResolve ? ArtStability.resolve(native, samples, stable, palette, PixelLook, amount,
-      { local, tone, grade: !tone && world.anim?.grade }) :
+      { local, tone, grade: !tone && grade }) :
       PixelLook.resolve(Object.assign(samples, {
-        palette, local, contour: !ink, grade: world.anim && world.anim.grade, interiorColor: native.color, dither: amount,
+        palette, local, contour: !ink, grade, interiorColor: native.color, dither: amount,
         ditherAt: anchoring ? (x, y) => ArtStability.ditherCoordinates(stable, native.passes, (H - 1 - y) * W + x, x, y) : null
       }));
     return finishLook(Object.assign(img, { px, drawn: samples.drawn },
+      remappedPalette && !local && { palette: remappedPalette },
       !specializedResolve && native.detail && { detail: native.detail },
       native.motionReference && { motionReference: native.motionReference },
       native.alpha && { alpha: native.alpha },
@@ -1113,10 +1118,12 @@ function render(world, o) {
     np = world.pal.length,
     pal = [];
   for (let i = 0; i < np; i++) pal.push(hex(i));
-  const edge = world.outline && world.outline.edge ? world.outline.edge / (2 * R) : 0,
+  const outlineIndex = world.outline?.c ?? 0,
+    exactLine = remap && Number.isInteger(outlineIndex) && outlineIndex >= 0 && outlineIndex < np,
+    edge = world.outline && world.outline.edge ? world.outline.edge / (2 * R) : 0,
     line = hex(world.outline ? world.outline.c : 0),
     dith = (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither,
-    localOutput = localAt && PixelLook.outputPalettes(tone?.palette || world.pal, surface.palettes),
+    localOutput = localAt && PixelLook.outputPalettes(tone?.palette || remappedPalette || world.pal, surface.palettes),
     use = new Uint32Array(localOutput?.packed.length ?? (tone ? tone.palette.length : np)),
     ln = look.lines ? (look.lines === true ? {} : look.lines) : null,
     lines = !ink && !!ln,
@@ -1221,7 +1228,8 @@ function render(world, o) {
       }
       let bd = 1e9,
         bi = 0;
-      for (let i = 0; i < np; i++) {
+      if (exactLine && outlined) bi = outlineIndex;
+      else for (let i = 0; i < np; i++) {
         const e = pal[i],
           dr = r - e[0],
           dg = g - e[1],
@@ -1233,12 +1241,11 @@ function render(world, o) {
         }
       }
       use[bi]++;
-      const h = world.pal[bi],
-        gr = world.anim && world.anim.grade;
-      if (gr) {
-        out[q] = Math.round(gr[bi * 3] * 255);
-        out[q + 1] = Math.round(gr[bi * 3 + 1] * 255);
-        out[q + 2] = Math.round(gr[bi * 3 + 2] * 255);
+      const h = world.pal[bi];
+      if (grade) {
+        out[q] = Math.round(grade[bi * 3] * 255);
+        out[q + 1] = Math.round(grade[bi * 3 + 1] * 255);
+        out[q + 2] = Math.round(grade[bi * 3 + 2] * 255);
       } else {
         out[q] = (h >> 16) & 255;
         out[q + 1] = (h >> 8) & 255;
@@ -1380,7 +1387,7 @@ function render(world, o) {
   }
   return finishLook({
     w: W, h: H, px, rgb: out, drawn, use,
-    ...((localOutput || tone) && { palette: localOutput?.packed || tone.palette }),
+    ...((localOutput || tone || remappedPalette) && { palette: localOutput?.packed || tone?.palette || remappedPalette }),
     ...(detail && { detail }), ...(motionReference && { motionReference }),
     ...(volumeStats && { volumeStats }), ...(o.captureFog && atmosphere?.fog && { fog: atmosphere.fog }),
     ...(alpha && { alpha }), ...(orderFallback && { orderFallback })

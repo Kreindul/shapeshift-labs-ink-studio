@@ -18,6 +18,78 @@ const PixelLook = (() => {
   const fraction = value => Number.isFinite(value) && value >= 0 && value <= 1;
   const bayerRanks = Float32Array.from(bayer, rank => (rank + 0.5) / bayer.length);
   const bayerRank = (x, y) => bayerRanks[(x & 3) + ((y & 3) << 2)];
+  const isColor = n => Number.isSafeInteger(n) && n >= 0 && n <= 0xffffff;
+  const isSwatch = value => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+  const unpack = color => [color >> 16, (color >> 8) & 255, color & 255].map(n => n / 255);
+
+  function prepareRemap(definition, palette, roles = {}) {
+    if (definition === undefined || definition === false) return null;
+    if (!definition || Object.getPrototypeOf(definition) !== Object.prototype ||
+        Object.keys(definition).some(key => key !== 'rules' && key !== 'protect'))
+      throw new TypeError('Palette remap needs a settings object with rules and optional protect');
+    const colors = Array.isArray(palette) || ArrayBuffer.isView(palette) ? Array.from(palette) : [];
+    if (!colors.length || !colors.every(isColor))
+      throw new TypeError('Palette remap needs a palette of packed RGB colors');
+    const { rules, protect = [] } = definition;
+    if (!Array.isArray(rules) || rules.length > 1024 || !Array.isArray(protect) || protect.length > 1024)
+      throw new TypeError('Palette remap rules and protect must be lists of at most 1024 entries');
+    const index = value => {
+      if (!Number.isSafeInteger(value) || value < 0 || value >= colors.length)
+        throw new RangeError('Palette index out of range: ' + value);
+      return value;
+    };
+    function select(from) {
+      if (typeof from === 'number') return [index(from)];
+      if (typeof from !== 'string' || !from) throw new TypeError('Expected a palette index, #rrggbb swatch or role');
+      if (isSwatch(from)) {
+        const color = parseInt(from.slice(1), 16), indices = [];
+        colors.forEach((entry, i) => { if (entry === color) indices.push(i); });
+        if (!indices.length) throw new RangeError('Swatch is missing from the palette: ' + from);
+        return indices;
+      }
+      const at = from.lastIndexOf('.'), whole = Object.hasOwn(roles, from) || at < 0;
+      const name = whole ? from : from.slice(0, at), ramp = Object.hasOwn(roles, name) && roles[name];
+      if (!Array.isArray(ramp) || !ramp.length) throw new RangeError('Unknown or empty palette role: ' + name);
+      if (whole) return Array.from(ramp, index);
+      const stop = from.slice(at + 1);
+      const step = stop === 'shadow' ? 0 : stop === 'midtone' ? Math.floor((ramp.length - 1) / 2) :
+        stop === 'highlight' ? ramp.length - 1 : /^(0|[1-9]\d*)$/.test(stop) ? Number(stop) : -1;
+      if (step < 0 || step >= ramp.length) throw new RangeError('Unknown palette ramp stop: ' + from);
+      return [index(ramp[step])];
+    }
+    const overrides = new Map();
+    for (const rule of rules) {
+      if (!rule || Object.getPrototypeOf(rule) !== Object.prototype ||
+          Object.keys(rule).some(key => key !== 'from' && key !== 'to'))
+        throw new TypeError('Expected a palette remap rule with from and to');
+      const color = isSwatch(rule.to) ? parseInt(rule.to.slice(1), 16) : rule.to;
+      if (!isColor(color)) throw new TypeError('Palette remap output needs a #rrggbb or packed RGB color');
+      for (const i of select(rule.from)) overrides.set(i, color);
+    }
+    for (const from of protect) for (const i of select(from)) overrides.set(i, colors[i]);
+    const base = Float32Array.from(colors.flatMap(unpack));
+    const targets = Array.from(overrides, ([i, color]) => [i, unpack(color)]);
+    return Object.freeze({
+      grade(prior, amount = 1) {
+        if (!fraction(amount)) throw new RangeError('Palette remap strength must be in [0, 1]');
+        const output = base.slice();
+        if (prior) output.set(prior.subarray ? prior.subarray(0, output.length) : prior.slice(0, output.length));
+        for (const [i, rgb] of targets) {
+          for (let channel = 0; channel < 3; channel++) {
+            const key = i * 3 + channel;
+            output[key] = base[key] + (rgb[channel] - base[key]) * amount;
+          }
+        }
+        return output;
+      }
+    });
+  }
+
+  function gradePalette(grade) {
+    const byte = n => Math.round(Math.max(0, Math.min(1, n)) * 255);
+    return Array.from({ length: grade.length / 3 }, (_, i) =>
+      (byte(grade[i * 3]) << 16) | (byte(grade[i * 3 + 1]) << 8) | byte(grade[i * 3 + 2]));
+  }
 
   function toneSettings(definition) {
     if (definition === undefined || definition === false) return null;
@@ -222,6 +294,7 @@ vec3 inkToneResolve(vec3 color, ivec2 pixel) {
   float rank = texelFetch(u_inkToneRanks, pixel % textureSize(u_inkToneRanks, 0), 0).r;
   return share >= mix(0.5, rank, u_inkToneAmount) ? b.rgb : a.rgb;
 }`;
-  return { nearest, ink, resolve, glsl, presets, toneSettings, prepareTone, toneIndex, toneGlsl, bayerRank, outputPalettes };
+  return { nearest, ink, resolve, glsl, presets, toneSettings, prepareTone, toneIndex, toneGlsl, bayerRank, outputPalettes,
+    prepareRemap, gradePalette };
 })();
 if (typeof module !== 'undefined') module.exports = PixelLook;

@@ -48,6 +48,7 @@ tone mapping, and grading are inactive. Pass `reuseOrder: false` or
 | `raw` | Show the directly blended RGB instead of the palette resolve. |
 | `colored` | Use higher-resolution contours over native-size interiors. On by default for scenes without per-pixel materials. |
 | `outline`, `dither`, `tone` | Control outline and palette treatment. Use `tone: false` to disable an authored tone. |
+| `paletteRemap` | Override a world's [palette remap](pixel-look.md#palette-remaps), or pass `false` to disable it. |
 | `clean`, `lineClean`, `damp` | Control isolated-pixel cleanup, line cleanup, and per-pixel flicker damping. |
 | `edges`, `lightShape` | Toggle surface edge sprites and per-pixel line shading. |
 | `scale`, `stepAnimation` | Change the splat size or disable the shared per-pixel animation clock stepping. |

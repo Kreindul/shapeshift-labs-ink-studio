@@ -74,3 +74,47 @@ from the top-left. Set `u_inkToneCount` to the number of stops,
 `u_inkToneStops` to the normalized RGB colors with stop positions in alpha.
 Upload the threshold array as an `R32F` texture with nearest filtering and
 bind it to `u_inkToneRanks`.
+
+## Palette remaps
+
+Use `finish.look.paletteRemap` on a JSON diorama or `look.paletteRemap`
+in `B.finish()`. The renderer selects a color from the original palette
+with the usual lighting and dithering, then looks up its replacement.
+
+```json
+{
+  "rules": [
+    { "from": "stone.shadow", "to": "#16152e" },
+    { "from": "#474d57", "to": "#424789" },
+    { "from": 4, "to": "#6380ba" }
+  ],
+  "protect": [0, "signal", "beacon.highlight"]
+}
+```
+
+`from` and `protect` accept zero-based palette indices, exact `#rrggbb`
+swatches, full role names, and role stops such as `stone.shadow`,
+`stone.midtone`, `stone.highlight`, or `stone.1`. A full role addresses
+every entry in its ramp. For a ramp with an even number of stops,
+`midtone` picks the lower middle stop. `to` accepts a packed RGB integer
+or `#rrggbb` string. Rules always match the original palette. The last
+rule for an entry wins, and protection restores the original color even
+when an animation grade is active.
+
+Role names refer to entries in the existing material ramps. Two surfaces
+that share an entry receive the same color. JSON dioramas supply roles
+from their style and `roles` table. For a custom JS builder, pass
+`paletteRoles: { stone: [1, 2, 3] }` to `B.finish()` if needed.
+
+The CLI and the WebGL renderer use the remap during scene palette
+resolve. Stipple, projected layers with their own output palette, and
+raw rendering use their own color paths. Pass `paletteRemap: false` to
+a render call or `--palette-remap off` in the CLI to preview the base
+palette. `K.fx.grade(stage).setRemap(definition, amount)` drives a stage
+grade from JavaScript, with strength from zero to one.
+
+```sh
+node cli/ink-studio.js validate examples/palette-remap.json
+node cli/ink-studio.js render examples/palette-remap.json --ortho --palette-remap off --out before.png
+node cli/ink-studio.js render examples/palette-remap.json --ortho --out after.png
+```

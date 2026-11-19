@@ -282,7 +282,7 @@ uniform float u_edge;
 uniform float u_toneOn, u_toneCut, u_toneAmt; uniform int u_toneN; uniform highp sampler2D u_toneStops, u_toneTh;
 uniform vec3 u_pal[64], u_out[64], u_outl[64];   // (u_outl: what each colour is shown as where a carried light falls on it)
 uniform int u_n;
-uniform float u_grade; uniform float u_bars;
+uniform float u_grade; uniform float u_bars; uniform int u_remapLine;
 uniform float u_dither, u_luma, u_bypass, u_colored, u_refract, u_ao, u_aor;
 uniform float u_lines, u_lineGap, u_lineK, u_lineLit;
 out vec4 o;
@@ -692,7 +692,10 @@ ${water ? '      vec4 sl = texelFetch(u_sprLayer, p, 0); if (sl.a > 0.5) { g_spr
   if (u_lines > 0.0 && dc > -0.5 && !(g_pixed && u_ol > 0.5)) { float sx = min(dl + dr, dl2 + dr2) - 2.0 * dc, sy = min(du + db, du2 + db2) - 2.0 * dc;
     if (max(sx, sy) > u_lineGap) { bool litSide = sx >= sy ? dl > dr : du > db; c *= litSide ? u_lineLit : u_lineK; } }
   float dm = dc - max(2.0 * dc - min(dl + dr, dl2 + dr2), 2.0 * dc - min(du + db, du2 + db2));   // second difference, so a receding floor is not an edge
-  if (u_edge > 0.0 && dc > -0.5 && dc - dm > u_edge) c = u_line;
+  if (u_edge > 0.0 && dc > -0.5 && dc - dm > u_edge) {
+    if (u_remapLine > 0) return glassAir(u_out[u_remapLine - 1], p, dc, vec2(textureSize(u_depth, 0)));
+    c = u_line;
+  }
   else {
     float th = (BAYER[(p.x & 3) + ((p.y & 3) << 2)] + 0.5) / 16.0 - 0.5;
     c = clamp(c + th * u_dither, 0.0, 1.0);

@@ -334,6 +334,11 @@
           if (!Number.isInteger(i) || i < 0 || i >= pal.length)
             bad('roles.' + name, 'colour ' + i + ' is not in the palette (0 to ' + (pal.length - 1) + ')');
     }
+    try {
+      PixelLook.prepareRemap(look?.paletteRemap, pal, st.roles);
+    } catch (error) {
+      bad('finish.look.paletteRemap', error.message);
+    }
     const roleNames = Object.keys(st.roles),
       ids = new Set(),
       parts = new Set(),
@@ -902,7 +907,8 @@
       Object.assign(
         { cam, detail: 14, palName: typeof spec.style === 'string' ? spec.style : 'Data', dither: 0.25, radius: 9 },
         st0.finish,
-        { made, spec, ...(spec.light?.surfaceDirection !== undefined && { surfaceLight: spec.light.surfaceDirection }) }
+        { made, spec, paletteRoles: st0.roles,
+          ...(spec.light?.surfaceDirection !== undefined && { surfaceLight: spec.light.surfaceDirection }) }
       )
     );
     if (!moving.length && !effects.length && !spec.tap) return W;
