@@ -130,6 +130,22 @@ test('visibility links bypass only their own obstacle and report the chosen poin
   assert(blocked.route.length > pass.route.length);
 });
 
+test('a link can cross a composite obstacle while every other polygon remains solid', () => {
+  const rectangle = (x0, x1, z0, z1) => [[x0,z0],[x1,z0],[x1,z1],[x0,z1]];
+  const walls = [rectangle(-2,.1,-2,2),rectangle(-.1,2,-2,2)];
+  const origin = [-3,0,0], end = [3,.2,0], start = [-3,0], finish = [3,0];
+  const link = {start, end:finish, through:[0,1]};
+  const pass = routes.visibility(origin,end,walls,{links:[link]});
+  assert.deepEqual(pass.route.points,[origin,end]);
+  assert.deepEqual(pass.links,[{link:0,from:0,to:1}]);
+  const partly = routes.visibility(origin,end,walls,{links:[{...link,through:[0]}]});
+  assert.equal(partly.links,undefined);
+  const blocked = routes.visibility(origin,end,walls.concat([rectangle(-.2,.2,-.3,.3)]),{links:[link]});
+  assert.equal(blocked.links,undefined);
+  for(const through of [[],[1,1],[0,2],new Array(1)])
+    assert.throws(()=>routes.visibility(origin,end,walls,{links:[{...link,through}]}),/obstacle indices/);
+});
+
 test('swept clearance probes both sides and headroom along a sloping span', () => {
   const start = [0,.8,0], end = [3,1.4,0];
   const section = {halfWidth: .5, below: .2, above: .35, spacing: .1, minClearance: .02};

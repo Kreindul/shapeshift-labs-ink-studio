@@ -52,11 +52,14 @@ const RouteVisibility = (() => {
     }
     const linksByVertex = new Map();
     for (const [index, link] of links.entries()) {
+      const through = Array.isArray(link?.through) ? Array.from(link.through) : [link?.through];
       if (!point(link?.start, 2) || !point(link?.end, 2) || dist2(link.start, link.end) <= EPS ** 2 ||
-          !Number.isInteger(link.through) || link.through < 0 || link.through >= polygons.length)
-        throw new Error('Visibility links need two distinct XZ points and an obstacle index');
+          !through.length || through.length > polygons.length || new Set(through).size !== through.length ||
+          through.some(id => !Number.isInteger(id) || id < 0 || id >= polygons.length))
+        throw new Error('Visibility links need two distinct XZ points and valid obstacle indices');
       if (vertices.length + 2 > maxVertices) throw new Error('Visibility graph exceeds its vertex budget');
-      const a = vertices.push(link.start) - 1, b = vertices.push(link.end) - 1, bypass = polygons[link.through];
+      const a = vertices.push(link.start) - 1, b = vertices.push(link.end) - 1,
+        bypass = new Set(through.map(id => polygons[id]));
       linksByVertex.set(a, { next: b, index, bypass });
       linksByVertex.set(b, { next: a, index, bypass });
     }
@@ -102,7 +105,7 @@ const RouteVisibility = (() => {
         sq = dx * dx + dz * dz;
       if (sq <= EPS * EPS) return !polygons.some(polygon => inside(a, polygon));
       for (const polygon of polygons) {
-        if (polygon === bypass || !overlap(box, polygon.box)) continue;
+        if (bypass?.has(polygon) || !overlap(box, polygon.box)) continue;
         if (polygon.edges) {
           if (crossesConvex(a, b, polygon.edges)) return false;
           continue;

@@ -602,10 +602,12 @@ or an agent radius. Select the obstacles that intersect the relevant height
 range before passing their footprints to `visibility`.
 
 Use `visibility(start, end, obstacles, {links})` to admit a bridge,
-gate or other certified crossing through one polygon. Each link supplies
-`{start: [x,z], end: [x,z], through: obstacleIndex}`. The link contributes
-two graph vertices and one bidirectional edge that skips the specified
-polygon. The ends should sit outside that polygon. All other edges and
+gate or other certified crossing. Each link supplies
+`{start: [x,z], end: [x,z], through: obstacleIndex}`. A composite obstacle
+can use a nonempty array of distinct obstacle indices for `through`.
+The link contributes two graph vertices and one bidirectional edge that
+skips the specified polygons. The ends should sit outside those polygons.
+All other edges and
 obstacles keep their normal visibility rules. A successful result reports
 the links actually used as `{link, from, to}` with point indices into
 `route.points`. The caller checks clearance on the lifted route before
