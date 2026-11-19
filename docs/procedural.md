@@ -36,6 +36,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `logicalParts.compile(pieces, identify)` | Group clipped pieces of one stock part and partition visible and omitted pieces from retained keys |
 | `courseRelief(layout, {profile, rise, slope})` | Give fitted cells independent relief with stable local coordinates when clipped or wrapped |
 | `panelFrames(spec)` | Keyed rails, posts and braces that fit chart dimensions, with optional openings and fitted surrounds |
+| `panelRelief({outline, layers, base, depthScale, budget})` | Fit keyed relief layers, hardware and trim around the contours of a convex panel |
 | `fittedRibbon({inner, outer, pitch, gap, closed, phase, sections, measure, budget})` | Fit repeating bands along paired 2D or 3D rails. Each logical cell contains quadrilateral footprints split at source edges |
 | `fittedRailBand({inner, outer, pitch, gap, closed, phase, sections, measure, depth, direction, cellStyle, budget})` | Fit closed solid pieces along paired 3D rails. |
 | `clippedLattice({panels, runs, edges, edgeWidth, budget})` | Fit bar families and frames to convex chart patches, keeping gaps and member identities across patches. |
@@ -197,6 +198,17 @@ layout. Each cut can add a keyed header, sill and jambs. Set `rim: false` for
 clearance alone. A wrapped cut keeps the same member keys across both ends of
 the chart. The result exposes convex member footprints and a distance
 sampler. Callers set materials and realize the infill and apertures.
+
+`panelRelief({outline, layers, base, depthScale, budget})` fits convex
+ornaments, panel surrounds and other layered shapes to an existing planar or
+surface-local XY panel outline. Each layer supplies a stable `key`, a
+`material` role, a convex `polygon`, optional convex `holes`, and two
+ordered `levels`. The polygons are normalized to the outline's bounding
+rectangle with coordinates from 0 to 1. The outline accepts up to 128
+vertices. Each returned part carries its source `key` and `fragment`
+index, its clipped convex `outer` polygon, and the `lo` and `hi` depths
+computed as `base + level * depthScale`. Feed the footprints to a cell
+loft or a chart-local distance field. The existing panel supplies backing.
 
 `surfaceSection(chart, {center, units, thickness, periodicU, offset})` uses
 the chart's `sample(uv)` and `project(point)` contract. Supply the two local
