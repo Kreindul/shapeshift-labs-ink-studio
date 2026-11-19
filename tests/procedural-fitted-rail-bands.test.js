@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { fittedRailBand, pieces } = require('..').load().KIT.procedural;
+const { fittedRailBand, pieces, offsetRails } = require('..').load().KIT.procedural;
 
 const spec = {
   inner: [[0, 0, 0], [2, 0, 0]],
@@ -47,4 +47,36 @@ test('a band cell can override material and depth across all of its fragments', 
   assert.equal(featured.length,2);
   assert(featured.every(p=>p.cell==='feature/0'&&p.material==='polished'&&Math.abs(p.bounds.max[2]-.26)<1e-6));
   assert(parts.filter(p=>p.section!=='feature').every(p=>p.material==='rough'&&p.bounds.max[2]<.121));
+});
+
+test('profiled rail bands follow rising tapered corners with closed contact and physical picks',()=>{
+  const path=[[0,0,0],[2,.5,0],[2,1.1,2]],width=[.7,.46,.8];
+  const rails=offsetRails({path,halfWidth:width}),profile=[[0,-.05],[1,-.05],[1,.15],[.5,.51],[0,.15]];
+  const band=fittedRailBand({inner:rails.left,outer:rails.right,measure:path,pitch:10,profile,direction:()=>[0,1,0]});
+  const solids=band.pieces({key:'crest',owner:'wall'}),solid=pieces.union(solids);
+  assert.equal(solids.length,2);
+  assert(solids.every(part=>part.owner==='wall'&&part.cell==='0'&&part.mesh.positions.every(Number.isFinite)));
+  const corner=path[1];
+  for(const p of [[1.999,.78,0],corner.map((n,i)=>n+(i===1?.28:0)),[2,.78,.001]]){
+    const hit=solid.raycast([p[0],4,p[2]],[0,-1,0]);
+    assert(hit&&Math.abs(hit.p[1]-1.01)<.002);
+  }
+  const slope=solid.raycast([1,4,-.32],[0,-1,0]);
+  assert(slope&&slope.p[1]>.40&&slope.p[1]<.75&&Math.abs(slope.n[2])>.12);
+  assert.equal(solid.raycast([1,4,-.85],[0,-1,0]),null);
+});
+
+test('profile cells can vary independently and fitted joints remain open around a closed strip',()=>{
+  const path=[[0,0,0],[2,.2,0],[2,.4,2],[0,.3,2]],
+    rails=offsetRails({path,halfWidth:.32,closed:true}),
+    base={inner:rails.left,outer:rails.right,measure:path,closed:true,pitch:1,
+      gap:.1,direction:()=>[0,1,0],depth:[0,.16]},
+    profile=[[0,0],[1,0],[1,.1],[.45,.37],[0,.1]];
+  const band=fittedRailBand({...base,
+    cellStyle:cell=>cell.index===1?{profile,material:'feature'}:null});
+  const solids=band.pieces({material:'band'}),solid=pieces.union(solids);
+  assert(solids.some(part=>part.material==='feature'&&part.bounds.max[1]>.43));
+  assert.equal(solid.raycast([0,4,0],[0,-1,0]),null);
+  assert(solid.raycast([1.5,4,0],[0,-1,0]).p[1]>.43);
+  assert.throws(()=>fittedRailBand({...base,profile:[[0,0],[1,0],[.5,.1],[1,.6],[0,.6]]}),/convex/);
 });

@@ -40,7 +40,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `panelRelief({outline, layers, base, depthScale, budget})` | Fit keyed relief layers, hardware and trim around the contours of a convex panel |
 | `fittedRibbon({inner, outer, pitch, gap, closed, phase, sections, measure, budget})` | Fit repeating bands along paired 2D or 3D rails. Each logical cell contains quadrilateral footprints split at source edges |
 | `profileBand({profile, width, side, closed, pitch, gap, sections})` | Offset one side of a directed 2D profile and fit keyed cells along it. Width can vary by station. |
-| `fittedRailBand({inner, outer, pitch, gap, closed, phase, sections, measure, depth, direction, cellStyle, budget})` | Fit closed solid pieces along paired 3D rails. |
+| `fittedRailBand({inner, outer, pitch, gap, closed, phase, sections, measure, depth, profile, direction, cellStyle, budget})` | Fit closed solid pieces with a rectangular or authored cross section along paired 3D rails. |
 | `clippedLattice({panels, runs, edges, edgeWidth, budget})` | Fit bar families and frames to convex chart patches, keeping gaps and member identities across patches. |
 | `surfaceCells.clip(cells, {boundary, holes, budget, work})` | Intersect convex cell footprints with a convex chart boundary and subtract convex holes. Group fragments by logical cell key |
 | `surfaceCells.fieldMask(sample, {bounds, cell, maxCells})` | Convert a bounded signed chart field into convex cuts and a distance query against the same polygonal regions |
@@ -2431,13 +2431,23 @@ uniform fit.
 
 ### Fitted rail bands
 
-`KIT.procedural.fittedRailBand({inner, outer, pitch, gap, closed, phase, sections, measure, depth, direction, cellStyle, budget})`
+`KIT.procedural.fittedRailBand({inner, outer, pitch, gap, closed, phase, sections, measure, depth, profile, direction, cellStyle, budget})`
 fits repeated solids between two matching 3D rails. Layout uses the inner rail's
 length or the optional measuring spine, with a pitch and joint gap in the same units. `depth` is a pair of signed
 offsets along the normalized vector returned by `direction(point, fragment, cell)`.
 Optional `cellStyle(cell)` can provide a different `depth` pair and `material`
 role for the entire logical cell. A planar convex footprint produces one prism. Warped footprints are split into
 prisms with the same logical cell and fragment.
+
+Supply `profile` to loft a strictly convex cross section between the paired
+rails. Write the outline in boundary order as 3 to 12 `[fraction, depth]`
+points. Fraction runs from 0 on the inner rail to 1 on the outer rail, so
+the section follows changes in width. Depth is signed along the sampled
+direction, in world units. Each fragment encloses the convex hull of its
+two sections. Matching rails and a common direction give adjoining
+fragments the same end section through turns and at a closed seam.
+`cellStyle(cell)` can also select a profile and material for that cell
+or use a rectangular `depth` override.
 
 `band.layout` exposes the fitted ribbon. `band.pieces({owner, key, material})`
 returns closed convex pieces with bounds, a mesh, signed distance, ray
