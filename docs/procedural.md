@@ -67,6 +67,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
 | `geometry.recessedProfile({outline, recess, center, span, inset})` | Closed XY profile extruded along Z with a blind front recess, shared mesh edges and a solid backing |
 | `geometry.fitMonotoneOutline({outline, required})` | Fit a horizontal span at each height while preserving authored ledges and cutbacks where they have clearance |
+| `geometry.fitExteriorOutline({outline, required})` | Join two planar rings into one exterior while keeping exposed cutbacks, including profiles with multiple spans at a height |
 | `surfaceSection(chart, options)` | Convert between world coordinates and a section measured through the varying thickness of a surface chart |
 | `geometry.profileDistance(points)` | Compile a closed 2D ring into a reusable signed distance function `(x, y) => distance`. Concavity and either winding are supported |
 | `volumeCuts.compile(specs)` | Union keyed XZ profiles extruded along Y. Provides a signed field, host subtraction, bounded exposed-boundary sampling and ray hits |
@@ -2258,6 +2259,13 @@ height. The required ring must fit within the authored height range.
 The fitter extends the left and right traces only where required, adding
 exact intersections where one sloped side overtakes the other. It keeps
 horizontal ledges and returns a counterclockwise exterior ring.
+
+`geometry.fitExteriorOutline` takes simple authored and required XY rings.
+Each can have several spans at one height. It splits edges at intersections,
+keeps the exposed boundary of the union, and returns one closed exterior
+ring in counterclockwise order. Enclosed holes are filled. The rings may
+overlap or share edges. A disconnected union or a point contact is invalid.
+With no required ring, it validates and normalizes the authored ring.
 
 ### Retained environment profiles
 

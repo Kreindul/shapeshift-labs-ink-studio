@@ -29,6 +29,96 @@
     return area<0?vertices.reverse():vertices;
   }
 
+  function profileEdges(vertices) {
+    return vertices.map((a,i)=>{
+      const b=vertices[(i+1)%vertices.length],dx=b[0]-a[0],dy=b[1]-a[1];
+      return {a,b,delta:[dx,dy],length:Math.hypot(dx,dy),cuts:[0,1]};
+    });
+  }
+
+  function splitMeetingEdges(a,b) {
+    const delta=[b.a[0]-a.a[0],b.a[1]-a.a[1]],
+      direction=cross(a.delta,b.delta),ar=EPS/a.length,br=EPS/b.length;
+    const unit=t=>Math.max(0,Math.min(1,t));
+    if(Math.abs(direction)>EPS*Math.max(a.length,b.length)){
+      const t=cross(delta,b.delta)/direction,u=cross(delta,a.delta)/direction;
+      if(t>=-ar&&t<=1+ar&&u>=-br&&u<=1+br){a.cuts.push(unit(t));b.cuts.push(unit(u));}
+      return;
+    }
+    if(Math.abs(cross(delta,a.delta))>EPS*a.length)return;
+    function project(endpoints,edge){
+      const [dx,dy]=edge.delta;
+      for(const [x,y] of endpoints){
+        const t=((x-edge.a[0])*dx+(y-edge.a[1])*dy)/(edge.length**2);
+        if(t>0&&t<1)edge.cuts.push(t);
+      }
+    }
+    project([b.a,b.b],a);
+    project([a.a,a.b],b);
+  }
+
+  function fitExteriorOutline({outline,required=null}) {
+    const authored=simple(outline);
+    if(required===null)return P.data.freeze(authored);
+    const band=simple(required);
+    if(authored.length>128||band.length>128)throw RangeError('Fitted outlines need at most 128 points per input');
+    const a=profileEdges(authored),b=profileEdges(band),points=[],links=new Map();
+    for(const left of a)for(const right of b)splitMeetingEdges(left,right);
+
+    function station(p){
+      const index=points.findIndex(q=>Math.hypot(p[0]-q[0],p[1]-q[1])<=EPS);
+      if(index>=0)return index;
+      if(points.length>=1024)throw RangeError('Fitted outline exceeds its point budget');
+      return points.push(p)-1;
+    }
+    function exposed(edges,other){
+      const distance=P.geometry.profileDistance(other);
+      for(const edge of edges){
+        const at=t=>t===0?edge.a:t===1?edge.b:[
+          edge.a[0]+t*edge.delta[0],edge.a[1]+t*edge.delta[1]];
+        const cuts=edge.cuts.sort((p,q)=>p-q);
+        for(let i=1;i<cuts.length;i++){
+          const start=cuts[i-1],end=cuts[i];
+          if((end-start)*edge.length<=EPS||distance(...at((start+end)/2))< -EPS)continue;
+          const u=station(at(start)),v=station(at(end));
+          if(u===v)continue;
+          const key=Math.min(u,v)+'/'+Math.max(u,v),prior=links.get(key);
+          // Coincident opposing faces are internal. Keep one copy of a
+          // coincident face whose interiors are on the same side.
+          if(prior?.[0]===v)links.delete(key);
+          else links.set(key,[u,v]);
+        }
+      }
+    }
+    exposed(a,band);
+    exposed(b,authored);
+
+    const next=new Map(),incoming=new Set(),exteriors=[];
+    for(const [u,v] of links.values()){
+      if(next.has(u)||incoming.has(v))throw Error('Fitted exterior outlines cannot pinch or touch at a point');
+      next.set(u,v);incoming.add(v);
+    }
+    while(next.size){
+      const start=next.keys().next().value,ring=[];
+      let vertex=start;
+      do{
+        if(!next.has(vertex))throw Error('Fitted exterior outline could not be closed');
+        ring.push(points[vertex]);
+        const following=next.get(vertex);
+        next.delete(vertex);
+        vertex=following;
+      }while(vertex!==start);
+      const area=ring.reduce((n,p,i)=>n+cross(p,ring[(i+1)%ring.length]),0);
+      if(area>EPS)exteriors.push(ring);
+    }
+    if(exteriors.length!==1){
+      const error=Error('The required region and outline must form one connected exterior');
+      error.code='DISCONNECTED_PROFILE';
+      throw error;
+    }
+    return P.data.freeze(simple(exteriors[0]));
+  }
+
   function cappedRings(outer,inner,back,front,floor) {
     let frontCap,backCap,insideCap;
     const triangulate=P.geometry.triangulatePolygon;
@@ -204,4 +294,5 @@
   }
 
   P.geometry.recessedProfile = recessedProfile;
+  P.geometry.fitExteriorOutline = fitExteriorOutline;
 })(KIT);

@@ -8,6 +8,36 @@ const recess = [[-.2, -.8], [.2, -.8], [.2, -.25], [.65, -.25], [.65, .2], [.2, 
   [.2, .8], [-.2, .8], [-.2, .2], [-.65, .2], [-.65, -.25], [-.2, -.25]];
 const spec = { outline, recess: recess.slice().reverse(), span: [-.9, .1], inset: .36 };
 
+test('fitted exterior profiles keep separate spans while adding the required material',()=>{
+  const outline=[[-.5,0],[.5,0],[.5,.65],[.25,.65],[.25,.92],
+    [.44,.92],[.44,.76],[.5,.76],[.5,1],[-.5,1]];
+  const required=[[-.16,.57],[.37,.57],[.37,.81],[-.16,.81]];
+  const fitted=P.geometry.fitExteriorOutline({outline:outline.slice().reverse(),required});
+  const field=P.geometry.profileDistance(fitted);
+  assert(field(.31,.79)<0);
+  assert(field(.41,.79)>0);
+  assert(field(.47,.79)<0);
+  assert(field(.31,.85)>0);
+  const shell=P.geometry.recessedProfile({outline:fitted,
+    recess:[[-.12,.63],[.28,.63],[.28,.75],[-.12,.75]],
+    center:null,span:[-.6,0],inset:.2});
+  assert(shell.distance([.31,.85,-.3])>0);
+  assert.equal(KIT.mesh.info(P.geometry.toKitMesh(shell.mesh(),()=>[.5,.5,.5])).open,0);
+});
+
+test('fitted exteriors close enclosed holes, join along shared edges and reject disconnected regions',()=>{
+  const outline=[[-2,-2],[2,-2],[2,-1],[-1,-1],[-1,1],[2,1],[2,2],[-2,2]];
+  const required=[[1.5,-1.5],[2.5,-1.5],[2.5,1.5],[1.5,1.5]];
+  const enclosed=P.geometry.profileDistance(P.geometry.fitExteriorOutline({outline,required}));
+  assert(enclosed(0,0)<0);
+  const square=[[0,0],[1,0],[1,1],[0,1]],side=[[1,.25],[2,.25],[2,.75],[1,.75]];
+  const connected=P.geometry.profileDistance(P.geometry.fitExteriorOutline({outline:square,required:side}));
+  assert(connected(1,.5)<0);
+  assert(connected(1.5,.1)>0);
+  assert.throws(()=>P.geometry.fitExteriorOutline({outline:square,required:side.map(([x,y])=>[x+1,y])}),
+    {code:'DISCONNECTED_PROFILE'});
+});
+
 test('a profiled blind recess has a closed mesh and one field across the shell and backing', () => {
   const shape = P.geometry.recessedProfile(spec);
   assert(shape.distance([0, 0, 0]) > 0);
