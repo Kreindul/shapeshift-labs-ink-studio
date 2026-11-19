@@ -239,8 +239,13 @@
   };
   A.document = (initial, options) => {
     options = options || {};
+    const {prepareSnapshot}=options;
+    if(prepareSnapshot!==undefined&&typeof prepareSnapshot!=='function')
+      throw Error('Document snapshot preparation needs a function');
+    const loadSnapshot=prepareSnapshot===undefined?read:input=>
+      checkpoint(documentView(prepareSnapshot(documentView(input))));
     let state = initial
-      ? read(initial)
+      ? loadSnapshot(initial)
       : {
           format: FORMAT,
           version: VERSION,
@@ -628,7 +633,7 @@
       });
     doc.restore = snapshot =>
       mutate('Restore document', () => {
-        state = read(snapshot);
+        state = loadSnapshot(snapshot);
         invalidateStyles();
       });
     doc.autosave = (storage, key, settings) => {

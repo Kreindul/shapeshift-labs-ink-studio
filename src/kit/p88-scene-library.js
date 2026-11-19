@@ -7,10 +7,12 @@
   const name = value => typeof value === 'string' && value.trim().length > 0 && value.trim().length <= 100;
   const id = value => typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$/.test(value);
 
-  function create(storage, { key, backups = 8 } = {}) {
+  function create(storage, { key, backups = 8, prepareSnapshot } = {}) {
     if (!storage || typeof storage.getItem !== 'function' || typeof storage.setItem !== 'function' ||
         typeof key !== 'string' || !key.trim() || !Number.isSafeInteger(backups) || backups < 0)
       throw Error('A scene library needs storage, an index key and a valid backup count');
+    if(prepareSnapshot!==undefined&&typeof prepareSnapshot!=='function')
+      throw Error('Scene snapshot preparation needs a function');
 
     function read() {
       const raw = storage.getItem(key);
@@ -60,7 +62,7 @@
         snapshot = data.entries.at(-1)?.snapshot ?? initial;
       }
       if (snapshot === undefined) throw Error('The scene journal is missing: ' + slot.name);
-      const doc = A.document(snapshot).autosave({
+      const doc = A.document(snapshot,{prepareSnapshot}).autosave({
         getItem: () => seen,
         setItem(_, value) {
           seen = write(slot.journal, seen, value);

@@ -2277,7 +2277,7 @@ Sampling has no clock, rendering, document, or storage dependency.
 
 ### Named scene library
 
-`KIT.authoring.sceneLibrary.create(storage, {key, backups})` indexes named
+`KIT.authoring.sceneLibrary.create(storage, {key, backups, prepareSnapshot})` indexes named
 documents and assigns each its own autosave journal. `create(name, snapshot)`
 and `open(id)` return `{slot, doc}`, with autosave already bound. Use
 `state()` for the active ID and slot metadata. Rename or archive a slot
@@ -2292,6 +2292,13 @@ Otherwise the library checks for changes before writing. Failed or stale
 saves leave local edits available through the document so callers can export
 them. The index stores metadata and references to journals. Documents keep
 their authoring data and recovery revision format.
+
+Pass a synchronous `prepareSnapshot(snapshot)` to the scene library or to
+`KIT.authoring.document(initial, options)` to prepare imported and recovered
+data. It receives an immutable validated view and returns a valid snapshot.
+Opening a saved scene prepares the working document without adding an undo
+step or rewriting the journal. A later save persists the prepared records.
+Restoring a backup prepares that snapshot within the undoable restore.
 
 ### Asset packs and portable meshes
 
@@ -2727,6 +2734,13 @@ returned `keys` and `has(key)` describe current omissions. Call
 point of the part when erasing. A restore clears all sites currently
 mapped to that part. If several erased sites resolve to one coarse part,
 the original sites remain stored and can resolve to separate parts again.
+
+To capture positions for older key-only edits, call
+`P.logicalParts.captureAnchors(keys, anchors, siteFor)`. `siteFor(key)`
+returns a site in the loaded layout or null when the part is unavailable.
+Existing positions are preserved. Pass the returned anchors and original keys
+to the next layout. The function returns the original anchor array when
+there are no new sites.
 
 ### Courses on a variable strip
 

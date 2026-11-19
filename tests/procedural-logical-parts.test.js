@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const P = require('..').load().KIT.procedural;
-const { compile, edits } = P.logicalParts;
+const { compile, edits, captureAnchors } = P.logicalParts;
 
 test('a wrapped stock key selects every physical fragment and retains order', () => {
   const layout = require('..').load().KIT.stripCourses({
@@ -47,4 +47,19 @@ test('anchored exclusions follow a new layout and recover both sites after coars
   assert.deepEqual(edits([],anchors,split).keys,[]);
   assert.equal(coarse.setVisible('wide',false,[.5,.7]),null);
   assert.throws(()=>edits(old,[{key:'0',site:[.1,NaN]}],split),/finite chart point/);
+});
+
+test('capture upgrades only known sites and is idempotent for mixed saves',()=>{
+  const anchors=Object.freeze([{key:'kept',site:[.2,1]}]),keys=['kept','old','dormant','old'];
+  const tried=[],point=[.8,2];
+  const captured=captureAnchors(keys,anchors,key=>{
+    tried.push(key);
+    return key==='old'?point:null;
+  });
+  assert.deepEqual(tried,['old','dormant']);
+  assert.deepEqual(captured,[...anchors,{key:'old',site:[.8,2]}]);
+  point[0]=.9;
+  assert.equal(captured[1].site[0],.8);
+  assert.equal(captureAnchors(keys,captured,()=>null),captured);
+  assert.deepEqual(edits(keys,captured,()=>null).keys,['dormant']);
 });

@@ -38,11 +38,12 @@
         layout=P.fittedCourses({width,height:rows*vy,unit:[ux,vy],joint:mortar,stagger:.5,periodic:true,budget});
       }else scale*=1.4;
     }
-    const edits=P.logicalParts.edits(omit,anchors,([u,v])=>{
+    function stockKeyAt([u,v]){
       if(u<0||u>=1)return null;
       const offset=u*edges.length,i=Math.floor(offset),edge=edges[i];
       return layout.at(edge.start+(offset-i)*edge.length,v)?.id;
-    });
+    }
+    const edits=P.logicalParts.edits(omit,anchors,stockKeyAt);
     const omitted=new Set(edits.keys);
     if(!layout.joint&&!omitted.size)relief=0;
     const at0=skirt.top(0,0), slope=Math.hypot(skirt.top(1,0)-at0,skirt.top(0,1)-at0);
@@ -187,6 +188,6 @@
       const {u,v,edge}=chart(middle);
       return [(edge.index+(u-edge.start)/edge.length)/edges.length%1,v];
     }
-    return Object.freeze({layout,depth:relief,top,lookup,distance,sample,frontage,stockSite,edits});
+    return Object.freeze({layout,depth:relief,top,lookup,distance,sample,frontage,stockSite,stockKeyAt,edits});
   };
 })(KIT);

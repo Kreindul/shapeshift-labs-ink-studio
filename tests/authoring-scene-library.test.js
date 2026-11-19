@@ -69,3 +69,31 @@ test('stale saves and failed gallery writes preserve the latest readable documen
   storage.compareAndSet = compare;
   assert.equal(shelf.create('Second cabin', A.document().snapshot()).slot.name, 'Second cabin');
 });
+
+test('prepare saved and recovered snapshots before edits without rewriting the journal on open',()=>{
+  const storage=memory(),legacy=A.document().autosave(storage,'legacy');
+  legacy.create('tree',{id:'oak',parameters:{old:true}});
+  legacy.update('oak',{parameters:{height:3}});
+  const originalJournal=storage.getItem('legacy');
+  const prepareSnapshot=snapshot=>{
+    assert(Object.isFrozen(snapshot));
+    const tree=snapshot.entities.oak;
+    if(!tree?.parameters.old||tree.parameters.upgraded)return snapshot;
+    const upgraded=A.data.merge(tree,{parameters:{upgraded:true}});
+    return A.data.patchDocumentView(snapshot,{upserts:{oak:upgraded}});
+  };
+  const library=A.sceneLibrary.create(storage,{key:'gallery',prepareSnapshot});
+  library.adopt({id:'orig',name:'Original',journal:'legacy'});
+  const doc=library.open('orig').doc;
+  assert.equal(storage.getItem('legacy'),originalJournal);
+  assert.deepEqual(doc.history(),{undo:[],redo:[]});
+  assert.equal(doc.get('oak').parameters.upgraded,true);
+  doc.recover('save-1');
+  assert.deepEqual(doc.get('oak').parameters,{old:true,upgraded:true});
+  assert.deepEqual(doc.history().undo,['Restore document']);
+  assert(doc.undo());
+  assert.equal(doc.get('oak').parameters.height,3);
+  assert.equal(library.open('orig').doc.get('oak').parameters.upgraded,true);
+  assert.throws(()=>doc.restore({}),/version|document/i);
+  assert.equal(doc.get('oak').parameters.height,3);
+});

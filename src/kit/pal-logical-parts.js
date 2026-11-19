@@ -68,5 +68,28 @@
     return Object.freeze({ keys: Object.freeze([...excluded].sort()), has: key => excluded.has(key), setVisible });
   }
 
-  P.logicalParts = Object.freeze({ compile, edits });
+  function captureAnchors(keys, anchors, siteFor) {
+    if(!Array.isArray(keys)||!Array.isArray(anchors)||keys.length+anchors.length>65536||
+       !keys.every(validKey)||typeof siteFor!=='function')
+      throw Error('Capturing part anchors needs bounded keys and a site lookup');
+    const seen=new Set();
+    for(const record of anchors){
+      if(!record||!validKey(record.key)||!validSite(record.site))
+        throw Error('Part edit anchors need a retained key and a finite chart point');
+      seen.add(record.key);
+    }
+    let result=anchors;
+    for(const key of keys){
+      if(seen.has(key))continue;
+      seen.add(key);
+      const site=siteFor(key);
+      if(site==null)continue;
+      if(!validSite(site))throw Error('Part sites must be two finite coordinates');
+      if(result===anchors)result=anchors.slice();
+      result.push({key,site:site.slice()});
+    }
+    return result;
+  }
+
+  P.logicalParts = Object.freeze({ compile, edits, captureAnchors });
 })(KIT);
