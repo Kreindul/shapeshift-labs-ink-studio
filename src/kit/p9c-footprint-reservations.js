@@ -31,20 +31,72 @@
       return result;
     }
 
+    const verticalOverlap = (a, b) => a.high > b.low && b.high > a.low;
+    const axes = (a, b) => [...a.axes, ...b.axes];
+    const radius = (item, axis) => Math.abs(dot(item.axes[0], axis)) * item.half[0] +
+      Math.abs(dot(item.axes[1], axis)) * item.half[1];
+
     function intersects(a, b) {
-      if (a.high <= b.low || b.high <= a.low || a.min.some((v, i) => v >= b.max[i] || b.min[i] >= a.max[i]))
+      if (!verticalOverlap(a, b) || a.min.some((v, i) => v >= b.max[i] || b.min[i] >= a.max[i]))
         return false;
       const delta = a.center.map((v, i) => v - b.center[i]);
-      const radius = (item, axis) => Math.abs(dot(item.axes[0], axis)) * item.half[0] +
-        Math.abs(dot(item.axes[1], axis)) * item.half[1];
-      return [...a.axes, ...b.axes].every(axis => Math.abs(dot(delta, axis)) < radius(a, axis) + radius(b, axis));
+      return axes(a, b).every(axis => Math.abs(dot(delta, axis)) < radius(a, axis) + radius(b, axis));
+    }
+
+    function nearby(entries) {
+      if (entries === null) return occupied;
+      const found = new Set(large);
+      for (const key of entries) for (const other of cells.get(key) || []) found.add(other);
+      return found;
     }
 
     function fits(item, entries) {
-      if (entries === null) return !occupied.some(other => intersects(item, other));
-      const nearby = new Set(large);
-      for (const key of entries) for (const other of cells.get(key) || []) nearby.add(other);
-      return ![...nearby].some(other => intersects(item, other));
+      for (const other of nearby(entries)) if (intersects(item, other)) return false;
+      return true;
+    }
+
+    function forbidden(a, b, direction) {
+      if (!verticalOverlap(a, b)) return null;
+      const delta = a.center.map((value, i) => value - b.center[i]);
+      let low = -Infinity, high = Infinity;
+      for (const axis of axes(a, b)) {
+        const start = dot(delta, axis), rate = dot(direction, axis), limit = radius(a, axis) + radius(b, axis);
+        if (!rate) {
+          if (Math.abs(start) >= limit) return null;
+          continue;
+        }
+        const first = (-limit - start) / rate, last = (limit - start) / rate;
+        low = Math.max(low, Math.min(first, last));
+        high = Math.min(high, Math.max(first, last));
+        if (high <= low) return null;
+      }
+      return [low, high];
+    }
+
+    function freeIntervals(spec, tangent, range) {
+      const length = vector(tangent) ? Math.hypot(tangent[0], tangent[2]) : 0;
+      if (!Number.isFinite(length) || length < 1e-8 || !Array.isArray(range) || range.length !== 2 ||
+          !range.every(Number.isFinite) || range[1] < range[0])
+        throw new Error('Footprint intervals need a horizontal direction and finite ordered range');
+      const item = frame(spec), direction = [tangent[0] / length, tangent[2] / length], [from, to] = range;
+      const span = direction.map(component => [component * from, component * to]);
+      const swept = { min: item.min.map((v, i) => v + Math.min(...span[i])),
+        max: item.max.map((v, i) => v + Math.max(...span[i])) };
+      const blocked = [];
+      for (const other of nearby(keys(swept))) {
+        const interval = forbidden(item, other, direction);
+        if (interval && interval[0] < to && interval[1] > from) blocked.push(interval);
+      }
+      blocked.sort((a, b) => a[0] - b[0]);
+      const open = [];
+      let cursor = from;
+      for (const [lo, hi] of blocked) {
+        if (lo >= cursor) open.push([cursor, lo]);
+        cursor = Math.max(hi, cursor);
+        if (cursor > to) break;
+      }
+      if (cursor <= to) open.push([cursor, to]);
+      return open;
     }
 
     function add(item, entries) {
@@ -57,6 +109,7 @@
     }
 
     return Object.freeze({
+      freeIntervals,
       fits(spec) { const item = frame(spec); return fits(item, keys(item)); },
       reserve(spec) {
         const item = frame(spec), entries = keys(item);

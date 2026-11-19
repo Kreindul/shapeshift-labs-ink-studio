@@ -304,6 +304,15 @@ can fit on multiple decks. Insert claims in your preferred order to settle
 competing candidates deterministically. The `cellSize` changes lookup
 granularity and keeps the overlap test identical.
 
+`freeIntervals(spec, direction, [start, end])` on the reservation field
+returns the ranges of signed distances that keep the footprint clear when
+translated in the supplied XZ direction. The direction is normalized and
+the footprint retains its orientation and vertical range. The solver
+intersects the separating-axis limits of nearby oriented rectangles
+analytically. Touching endpoints are allowed, including a singleton
+interval between two reservations. Use a support or geometry test at the
+chosen location if the surface changes along the interval.
+
 `matchIntervals` compares two lists of disjoint `[low, high]` spans in the
 same units. An entry in its result points to the original index of the
 previous span paired with that next span. An unmatched entry is `-1`.

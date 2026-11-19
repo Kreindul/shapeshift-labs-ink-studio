@@ -26,3 +26,27 @@ test('reserve is atomic and authored volumes can overlap in the same field', () 
   assert(!field.reserve(at([250,0,0])));
   assert.throws(()=>field.occupy(at([0,0,0],[1,1,1],[0,1,0])),/horizontal/);
 });
+
+test('clearance intervals keep exact touching positions and ignore separate levels',()=>{
+  const field=createFootprintReservations({cellSize:.25});
+  field.occupy(at([0,0,0]));
+  field.occupy(at([2,0,0]));
+  field.occupy(at([4,1,0]));
+  assert.deepEqual(field.freeIntervals(at([0,0,0]),[2,0,0],[-3,5]),[[-3,-1],[1,1],[3,5]]);
+  assert.deepEqual(field.freeIntervals(at([0,0,0]),[1,0,0],[0,0]),[]);
+  assert.deepEqual(field.freeIntervals(at([0,0,0]),[1,0,0],[1,1]),[[1,1]]);
+  assert.throws(()=>field.freeIntervals(at([0,0,0]),[0,1,0],[-2,2]),/horizontal/);
+});
+
+test('clearance intervals match rotated physical overlap over continuous signed offsets',()=>{
+  const field=createFootprintReservations({cellSize:.24,clearance:.16});
+  field.occupy(at([0,0,0],[1.8,.5,.25],[1,0,1]));
+  field.occupy(at([2.1,.1,0],[.9,.25,.65],[1,0,-1]));
+  const sample=at([0,.1,.18],[.45,.4,.42],[0,0,1]),dir=[.8,0,.6];
+  const free=field.freeIntervals(sample,dir,[-3,3]);
+  assert(free.some(([a,b])=>b-a>.5));
+  for(let i=0;i<=600;i++){
+    const step=(i-300)/100,point=sample.point.map((x,j)=>x+dir[j]*step);
+    assert.equal(field.fits({...sample,point}),free.some(([lo,hi])=>lo<=step&&step<=hi));
+  }
+});
