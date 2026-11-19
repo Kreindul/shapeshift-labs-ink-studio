@@ -52,6 +52,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `alignedFeatureGroups(features, {axis, chartAxis, periods, separation})` | Group nearby aligned features on a measured chart and return ordered members and shared extents. |
 | `fitFootprintContact({center, tangent, size, height, blocked, maxSpread, samples, interval, includePoints})` | Seat an upright footprint on a sampled support and check space above it |
 | `createFootprintReservations({clearance, cellSize})` | Reserve space for oriented upright objects and test nearby candidates |
+| `fitAlongLane({range, start, pointAt, fit, maxDistance, spacing, precision})` | Find a nearby accepted station on a sampled 3D carrier line |
 | `matchIntervals(previous, next, {maxShift, accept})` | Match spans across an edit using overlap and optional center displacement |
 | `environmentFields.evaluate(settings, elapsed)`, `environmentFields.opticalDepth(from, to, medium)`, `environmentFields.scatter(from, to, light, medium)`, `environmentFields.deposition(sample)` | Cyclic sun and sky tint, height-dependent fog, local scattering, and slope-sensitive surface loads |
 | `populations.layout(boundsList, evaluate, options)` | Seeded world-space candidates ranked by density. Expanding the work region preserves existing candidate identities |
@@ -313,6 +314,16 @@ intersects the separating-axis limits of nearby oriented rectangles
 analytically. Touching endpoints are allowed, including a singleton
 interval between two reservations. Use a support or geometry test at the
 chosen location if the surface changes along the interval.
+
+`fitAlongLane` searches both sides of a starting parameter within the
+supplied range. `pointAt(parameter)` returns XYZ or `null` where the
+carrier ends. Candidate spacing and travel bounds use the measured
+polyline length. `fit(parameter)` returns a result or rejects with
+`false`, `null` or `undefined`. Its accepted result is returned with
+the selected parameter and distance. Use `segments` to control curve
+measurement, and `maxTests` to cap fit calls. Sample spacing controls
+which clear intervals can be discovered. The solver refines a detected
+transition to `precision` in measured distance.
 
 `matchIntervals` compares two lists of disjoint `[low, high]` spans in the
 same units. An entry in its result points to the original index of the
