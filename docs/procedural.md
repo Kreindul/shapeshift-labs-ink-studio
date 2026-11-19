@@ -565,15 +565,18 @@ layers. The mixer has no clock, playback engine, or scene dependency.
 
 `inputActions.compile({edit: {select: ['key:Enter', 'pad:South']}, menu:
 {confirm: ['key:Enter', 'pad:South']}})` binds inputs to named actions. The
-same physical control may be reused across contexts. Inside a context each
-control belongs to one action. Configure analog bindings with
+same physical control may be reused across contexts. Within one context,
+each control and exact modifier combination belongs to one action. A
+binding such as `{input: 'key:KeyX', modifiers: ['Shift', 'Alt']}` requires
+both modifiers, in either order. A binding with no modifiers matches the
+unmodified control. Configure analog bindings with
 `{input: 'pad:RightX', deadZone: .18, scale: -1}` to remove stick drift and
 reverse its direction.
 
-`resolve(context, input, value)` returns an action and its normalized value,
+`resolve(context, input, value, modifiers = [])` returns an action and its normalized value,
 or `null` for an unbound control. `sample(context, sources)` accepts one
-input-to-value object per source, keeping the strongest absolute value per
-action. The first source wins ties. Unpressed actions are zero.
+input-to-value object per source for unmodified polling, keeping the strongest
+absolute value per action. The first source wins ties. Unpressed actions are zero.
 `bindings(context, action)` provides the same binding information for
 tooltips or settings. The caller owns polling, key edges, focus, and
 persisted overrides. A caller can recompile a changed profile and keep the

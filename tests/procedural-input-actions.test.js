@@ -27,6 +27,28 @@ test('independent devices combine without dead-zone drift or doubling the same a
   assert.throws(()=>map.resolve('edit','pad:RightX',2),/Input values/);
 });
 
+test('modifier combinations are exact, order independent and scoped to their context',()=>{
+  const modifiers=['Shift','Alt'];
+  const binding={input:'key:KeyX',modifiers,scale:.5};
+  const map=inputActions.compile({
+    edit:{focus:[binding,'mouse:Right'],inspect:['key:KeyX']},
+    menu:{confirm:[binding]}
+  });
+  modifiers.pop();
+  assert.deepEqual(map.resolve('edit','key:KeyX',1,['Alt','Shift']),{action:'focus',value:.5});
+  assert.equal(map.resolve('menu','key:KeyX',1,['Shift','Alt']).action,'confirm');
+  assert.equal(map.resolve('edit','key:KeyX',1,['Shift']),null);
+  assert.equal(map.resolve('edit','key:KeyX',1,['Alt','Control','Shift']),null);
+  assert.equal(map.resolve('edit','key:KeyX').action,'inspect');
+  assert.equal(map.resolve('edit','mouse:Right').action,'focus');
+  assert.deepEqual(map.sample('edit',[{'key:KeyX':1}]),{focus:0,inspect:1});
+  assert(Object.isFrozen(map.bindings('edit','focus')[0].modifiers));
+  assert.throws(()=>inputActions.compile({edit:{
+    first:[{...binding,modifiers:['Alt','Shift']}], second:[{...binding,modifiers:['Shift','Alt']}]
+  }}),/already/);
+  assert.throws(()=>map.resolve('edit','key:KeyX',1,['Shift','Shift']),/Invalid input modifiers/);
+});
+
 test('radial pairs keep headings, reject drift, and cap travel on diagonals',()=>{
   const {radial}=inputActions;
   assert.deepEqual(radial(.09,-.14,.2),[0,0]);

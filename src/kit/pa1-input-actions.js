@@ -3,6 +3,11 @@
   const P=K.procedural||K.authoring;
   const name=value=>typeof value==='string'&&/^[a-z][a-z0-9_-]{0,47}$/i.test(value);
   const control=value=>typeof value==='string'&&/^[a-z][a-z0-9_-]{0,47}:[a-z0-9][a-z0-9_-]{0,47}$/i.test(value);
+  function chord(modifiers){
+    if(!Array.isArray(modifiers)||modifiers.length>8||!Array.from(modifiers).every(name)||
+       new Set(modifiers).size!==modifiers.length)throw Error('Invalid input modifiers');
+    return modifiers.slice().sort().join('+');
+  }
 
   function compile(contexts) {
     const entries=Object.entries(contexts||{}), maps=new Map();
@@ -13,12 +18,15 @@
       for (const [action,bindings] of list) {
         if (!name(action)||!Array.isArray(bindings)||bindings.length>16) throw Error('Invalid input action');
         const owned=Array.from(bindings,binding=>{
-          const { input, deadZone=0, scale=1 }=typeof binding==='string'?{input:binding}:binding||{};
+          const { input, deadZone=0, scale=1, modifiers=[] }=typeof binding==='string'?{input:binding}:binding||{};
           if (!control(input)||!Number.isFinite(deadZone)||deadZone<0||deadZone>=1||
               !Number.isFinite(scale)||Math.abs(scale)>1) throw Error('Invalid action binding');
-          if (byControl.has(input)) throw Error('A control already has an action in '+context+': '+input);
-          const value=Object.freeze({ input, deadZone, scale });
-          byControl.set(input,{action,binding:value});
+          const key=chord(modifiers),combinations=byControl.get(input)||new Map();
+          if(combinations.has(key))throw Error('A control already has an action in '+context+': '+input+(key?' + '+key:''));
+          const value=Object.freeze({ input, deadZone, scale,
+            ...(key&&{modifiers:Object.freeze(key.split('+'))}) });
+          combinations.set(key,{action,binding:value});
+          byControl.set(input,combinations);
           return value;
         });
         byAction.set(action,Object.freeze(owned));
@@ -34,14 +42,14 @@
       const magnitude=Math.abs(raw);
       return magnitude<=deadZone ? 0 : Math.sign(raw)*(magnitude-deadZone)/(1-deadZone)*scale;
     }
-    function resolve(context,input,raw=1) {
-      const match=get(context).byControl.get(input);
+    function resolve(context,input,raw=1,modifiers=[]) {
+      const match=get(context).byControl.get(input)?.get(chord(modifiers));
       return match?{action:match.action,value:level(raw,match.binding)}:null;
     }
     function sample(context,sources) {
       const {byControl,byAction}=get(context), values=new Map([...byAction.keys()].map(id=>[id,0]));
       for (const source of sources) for (const [input,raw] of Object.entries(source)) {
-        const match=byControl.get(input);
+        const match=byControl.get(input)?.get('');
         if (!match) continue;
         const value=level(raw,match.binding);
         if (Math.abs(value)>Math.abs(values.get(match.action))) values.set(match.action,value);
