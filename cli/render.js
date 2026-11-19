@@ -285,7 +285,7 @@ function render(world, o) {
       sp = d[q + 13],
       rg = d[q + 14],
       ex = d[q + 15];
-    if (sampleWithdrawal > 0 && !SampleCoverage.visible(kraw, sampleWithdrawal)) al = 0;
+    if (!SampleCoverage.visible(kraw, sampleWithdrawal)) al = 0;
     if (kind === 1) al *= 0.62 + 0.38 * Math.sin(t * sp + ph);
     else if (kind === 2) {
       const f = (t * sp) / rg + ph,

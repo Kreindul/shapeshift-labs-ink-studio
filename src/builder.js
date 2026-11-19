@@ -358,7 +358,7 @@ function makeBuilder(seed, hex, { renderMetadata = true } = {}) {
       const asSet = an.as && an.as !== true ? Math.max(0, Math.min(3, an.as | 0)) : 0;
       data[o + 11] = (an.k || 0) + (an.nd ? 16 : 0) + (an.em ? 32 : 0) + (an.bk ? 64 : 0) + (an.gl ? 256 : 0) + (an.wind ? 8192 : 0)
         + (an.as ? 2048 + (asSet & 1 ? 4096 : 0) + (asSet & 2 ? 16384 : 0) : 0)
-        + (an.coverage === undefined ? 0 : SampleCoverage.pack(an.coverage));
+        + (an.coverage === undefined ? 0 : SampleCoverage.pack(an.coverage, an.coverageEnter));
       if (an.bk) back.push(n);
       data[o + 12] = an.ph || 0;
       data[o + 13] = an.sp || 0;

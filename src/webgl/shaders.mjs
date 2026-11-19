@@ -1,6 +1,6 @@
 // Shared draw and resolve shaders extracted from Inkwell Rebirth's WebGL renderer.
 // Hosts provide the ASCII shader hooks and Ink Studio's shared PixelLook GLSL.
-export function splatShaderSources(ascii) {
+export function splatShaderSources(ascii, sampleCoverage) {
   const SPLAT_VS = `#version 300 es
 precision highp float; precision highp int;
 uniform highp sampler2D u_data;
@@ -14,6 +14,7 @@ uniform vec4 u_wc[4]; uniform vec4 u_wd[4];   // where a blow is about to land: 
 uniform vec4 u_hitf[4]; uniform vec3 u_fl[8];   // places just struck (a ball each), and bodies just hurt (a run of splats each): both go white for an instant
 uniform highp sampler2D u_eco; uniform highp sampler2D u_bones; uniform float u_ecoOn;   // what the ground remembers, a texel to each unit of it: burnt, burning, frozen, and how high the ground is there   // round shadows: x, z, ground height, radius
 uniform vec2 u_season;   // how far autumn, and how far winter, has come
+${sampleCoverage ? 'uniform float u_sampleWithdrawal;\n'+sampleCoverage.glsl : ''}
 uniform vec4 u_born;   // growth you can watch: when the diorama was shown, how fast its clock runs, how long a dab takes to grow, and the loop (0: once)
 uniform vec2 u_cut;       // how wide a view is cleared between you and the eye, and how low it reaches
 uniform float u_wl, u_slice; uniform vec2 u_lid; uniform vec4 u_pit; uniform vec4 u_portal; uniform vec2 u_pdoor; uniform vec3 u_eye;   // a doorway standing square to z (centre x, sill y, z, and which side of it this place is on), its half-width and height, and where the eye is
@@ -41,7 +42,8 @@ void main(){
   mat3 cov = mat3(t1.x, t1.y, t1.z,  t1.y, t2.x, t2.y,  t1.z, t2.y, t2.z);
   vec3 color = vec3(mod(t1.w, 256.0), mod(floor(t1.w / 256.0), 256.0), floor(t1.w / 65536.0)) / 255.0;
   vec3 color0 = color; mat3 FM = mat3(1.0); v_fk = -1.0; v_lit = 0.0; v_fm = vec4(0.0); v_ft = vec4(0.0);
-  int kraw = int(t2.w + 0.5), flags = kraw / 16, kind = kraw - flags * 16;
+  int kraw = int(t2.w), flags = kraw / 16, kind = kraw - flags * 16;
+  ${sampleCoverage ? 'if (!sampleCoverageVisible(kraw, u_sampleWithdrawal)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }' : ''}
   float ph = t3.x, sp = t3.y, rg = t3.z, ex = t3.w, sc = u_scale;
   bool snap = false, stat = a_index < u_dyn.x || a_index >= u_dyn.y, pv = (flags & 8) != 0, green = (flags & 2) == 0 && color.g - max(color.r, color.b) > 0.06, veg = green || (flags & 6) == 0 && color.b - color.g > 0.15 && color.r - color.g > 0.08, fire = false;   // what grows: green things, and the purple grass
   if (u_ecoOn > 0.5 && stat && !pv && abs(t0.x) < 80.0 && t0.z > -208.0 && t0.z < 80.0) {

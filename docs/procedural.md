@@ -2853,7 +2853,7 @@ have no shared area. Use the shared plan when a projected part must stop at a
 carrier edge. For a vertical fit, lift that ring onto the part and pass it to
 `supportSkirt` with the carrier's height field.
 
-### Withdrawing retained samples
+### Transitioning retained samples
 
 `KIT.procedural.sampleCoverage.cohort(x, y, z, spacing, seed)` assigns a stable
 integer rank to a point in a local grid. Pass that rank as `{coverage:rank}`
@@ -2863,6 +2863,14 @@ at full withdrawal. The packed rank preserves the existing motion flags. Hosts
 can use `sampleCoverage.visible(code, amount)` or inject `sampleCoverage.glsl`
 into a vertex shader. The offline renderer accepts the same amount as a render
 option or world property.
+
+Pass `{coverage:rank, coverageEnter:true}` to reveal a cohort at the same
+threshold where an ordinary cohort disappears. Entering samples start hidden.
+Both populations share a bake, retain their own motion flags and reverse when
+the amount decreases. The WebGL renderer accepts `frame.sampleWithdrawal` with
+the standard toolkit. A low-level pipeline can receive
+`{sampleCoverage: KIT.procedural.sampleCoverage}` and set
+`u_sampleWithdrawal` directly.
 
 Keep independent layers in a single sculpt template. Mark a structural part
 with `{whole:true}` in the solid's options to retain samples behind other parts

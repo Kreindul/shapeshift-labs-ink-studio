@@ -65,6 +65,7 @@ function sameValues(a, b) {
 
 function createBackend(gl, toolkit, specialize, reuseOrder) {
   const resources = createResources(gl);
+  const sampleCoverage = toolkit.KIT?.procedural?.sampleCoverage;
   let pipeline;
   try {
     const sources = pixelShaderSources(toolkit.PixelLook);
@@ -72,7 +73,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     const post = program(sources.POST_FS), clean = program(sources.CLEAN_FS);
     // Rebirth hosts can opt into geometry specialization through the lower
     // level pipeline. The canvas path specializes its own fullscreen resolve.
-    pipeline = createSplatPipeline(gl, { specialize: false });
+    pipeline = createSplatPipeline(gl, { specialize: false, sampleCoverage });
     const emptyVao = resources.allocate('VertexArray');
     const maxSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
     const { target, table, textureUnit } = createTargets(gl, resources);
@@ -309,6 +310,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       shader.set({
         u_data: 0, u_bones: 4, u_fine: 7, u_fineOn: +hasFine, u_fpal: pal, u_view: camera.view,
         u_proj: camera.projection, u_time: time, u_scale: scale, u_ortho: +camera.ortho,
+        u_sampleWithdrawal: sampleCoverage?.amount(frame.sampleWithdrawal ?? world.sampleWithdrawal ?? 0) ?? 0,
         u_born: [frame.bornAt ?? 0, growth.rate ?? 1, growth.fade ?? 0.5, growth.loop ?? 0],
         u_crisp: +!raw, u_dilate: raw ? 0.3 : 0.15, u_near: camera.clipNear,
         u_fog: rgb(world.pal[fog.c ?? 0] ?? 0),

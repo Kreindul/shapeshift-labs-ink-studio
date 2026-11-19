@@ -8,10 +8,10 @@ function plainVertex(source) {
     .replace('if (i >= u_azn) break;', 'break;');
 }
 
-export function createSplatPipeline(gl, { ascii, specialize = true } = {}) {
+export function createSplatPipeline(gl, { ascii, specialize = true, sampleCoverage } = {}) {
   const resources = createResources(gl);
   try {
-    const { vertex, fragment } = splatShaderSources(ascii);
+    const { vertex, fragment } = splatShaderSources(ascii, sampleCoverage);
     const full = resources.program(vertex, fragment);
     let plain, plainUnavailable = false;
     let disposed = false;

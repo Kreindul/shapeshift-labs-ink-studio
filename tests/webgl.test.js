@@ -37,6 +37,9 @@ test('the optional entry imports in Node without touching the software renderer'
   assert.equal(entry.default, createRenderer);
   assert.equal(require('../package.json').browser, './webgl.mjs');
   assert(splatShaderSources().vertex.startsWith('#version 300 es'));
+  const phased = splatShaderSources(undefined,core.load().KIT.procedural.sampleCoverage).vertex;
+  assert.match(phased,/int kraw = int\(t2.w\)/);
+  assert.match(phased,/if \(!sampleCoverageVisible\(kraw, u_sampleWithdrawal\)\)/);
   assert.throws(() => createRenderer({}, { toolkit: core.load() }), /canvas/);
   assert.throws(() => createRenderer({ getContext: () => null }, { toolkit: core.load() }), /requires WebGL 2/);
 });

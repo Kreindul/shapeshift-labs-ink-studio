@@ -26,6 +26,24 @@ test('withdrawal changes visible samples through the standard offline render pat
   assert.deepEqual([0,.5,1].map(count),[3,2,1]);
 });
 
+test('entering cohorts exchange visibility with departing cohorts at the same rank', () => {
+  const rank = 93, threshold = (rank + .5) / coverage.bins;
+  const entering = Float32Array.of(coverage.pack(rank, true) + 16384 + 8192 + 11)[0];
+  const departing = coverage.pack(rank);
+  assert.equal(entering & 32767, 16384 + 8192 + 11);
+  assert.equal(coverage.visible(entering, 0), false);
+  assert.equal(coverage.visible(entering, threshold - 1e-6), false);
+  assert.equal(coverage.visible(entering, threshold), true);
+  assert.equal(coverage.visible(departing, threshold), false);
+  assert.equal(coverage.visible(coverage.pack(127, true), 1), true);
+  const builder = makeBuilder(62, [0, 0xec954d]);
+  builder.dab(0, 1, 0, [0,0,1], [1,0,0], .34, .4, .025, builder.P[1], 3,
+    {coverage: rank, coverageEnter: true});
+  const world = builder.finish({cam:{target:[0,1,0],yaw:0,pitch:.2,dist:9},detail:12});
+  const count = sampleWithdrawal => render(world,{w:160,h:90,px:1,raw:true,samples:true,sampleWithdrawal}).drawn;
+  assert.deepEqual([0,.5,1].map(count),[0,0,1]);
+});
+
 test('whole template parts retain their buried samples while other solids still clip the instance', () => {
   const builder = makeBuilder(12,[0,0xc09778,0x48615b]), sculpt = makeSculpt(builder);
   const tpl = sculpt.template(local => {
