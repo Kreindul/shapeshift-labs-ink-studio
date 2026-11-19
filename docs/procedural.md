@@ -692,6 +692,14 @@ It caps the number of support planes and keeps the entire margin-expanded
 hull inside the result, so the planner can use fewer vertices while
 preserving clearance.
 
+`P.routeStations.remap(before, after, edits)` returns a function mapping an old
+normalized route station to a new one. Supply ordered `{key,length}` sections
+and optional `{from,to,fromRange,toRange}` interval mappings. Ranges default to
+`[0,1]`. Dividing one old range among new sections models a split, and
+dividing one new section among old spans models a join. Sections whose keys
+persist keep their local fraction. An empty or removed section with no
+target yields `null`, so an attachment host can choose its geometric fallback.
+
 `P.routes.spline(route, {radius, spacing, clearance, minClearance})`
 rounds corners using quadratic splines, shrinking the trim when needed.
 Unfit corners stay in the route. The result contains the fitted control points
