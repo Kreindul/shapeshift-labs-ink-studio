@@ -77,6 +77,8 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `masks.stroke(spec)`, `masks.compose(specs, options)` | Tapered and feathered swept discs, ordered addition and erasure, signed distance and visible source ownership |
 | `surfaceMasks.compile(strokes, {size, periodic})` | Ordered surface brush coverage in retained UVs with measured width and optional seam wrapping |
 | `surfaceMasks.dirtyBounds(before, after, options)` | Bounded UV rectangles for repainting changed stroke coverage, including across chart seams |
+| `surfaceMasks.compileLoop(strokes, {charts, height})` | Brush masks that cross an ordered loop of unequal surface charts while retaining each point's chart and UV |
+| `surfaceMasks.loopDirtyBounds(before, after, options)` | Changed UV rectangles keyed by affected chart in a joined loop |
 | `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
 | `geometry.profilePlaneSection({outline, span, frame, plane})` | Find the world-space edge intersections of a swept profile with a plane. Use the vertices for projected bounds, including concave outlines |
 | `geometry.profileCylinderSection({outline, span, frame, cylinder})` | Intersect a swept profile with a closed elliptical cylinder chart and return contact bands and per-station vertical intervals |
@@ -207,6 +209,17 @@ unit UV rectangles for the changed suffix of two retained stroke lists.
 The rectangles include brush width and feathering and split across periodic
 seams. An unchanged list returns an empty array. Test a sample's full
 footprint against these rectangles when updating its color or coverage.
+
+`surfaceMasks.compileLoop` joins charts of the same height into a closed
+run. List them in travel order as `{key, length}`, where `length` is the
+physical distance along U. Joined strokes use `{chart, uv: [u, v]}` for each
+point. For a stroke clipped to one chart, set `chart` on the stroke and
+use ordinary `[u, v]` points. The mask applies both forms in their supplied
+order. Call `weight(chart, u, v, initial)` to query a point. Recompiling
+with different chart lengths moves the stroke centers with their own
+charts. The brush keeps its physical width and uses the shortest path
+around the loop between successive points. `loopDirtyBounds` returns
+conservative `{chart, min, max}` rectangles in the affected charts.
 
 Route layout takes a positive `pitch`, optional physical `gap`, a normalized
 `from` / `to` range, and a `distribution` of `ceil`, `floor`, or `round`.

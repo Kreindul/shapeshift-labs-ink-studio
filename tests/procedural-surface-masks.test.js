@@ -67,3 +67,39 @@ test('dirty bounds enclose all changed samples on both sides of a periodic seam'
   }
   assert.deepEqual(P.surfaceMasks.dirtyBounds([start],[{...start}],options),[]);
 });
+
+test('loop brushes cross unequal chart edges, retain point anchors and compose local layers in order',()=>{
+  const charts=[{key:'a',length:4},{key:'b',length:1},{key:'c',length:3}],options={charts,height:2};
+  const point=(chart,u,v)=>({chart,uv:[u,v]});
+  const dab={points:[point('a',.98,.45)],width:.5,softness:.1};
+  const stroke={...dab,points:[point('a',.80,.35),point('b',.50,.55)]};
+  const restored={chart:'b',points:[[.08,.45]],width:.34,operation:'erase'};
+  const legacy={chart:'a',points:[[0,.79]],width:.8};
+  const tint=P.surfaceMasks.compileLoop([dab],options);
+  assert.equal(tint.weight('b',.05,.45),1);
+  assert(tint.weight('b',.13,.45)>0&&tint.weight('b',.13,.45)<1);
+  assert.equal(tint.weight('b',.31,.45),0);
+  const before=[legacy,stroke,restored];
+  const mask=P.surfaceMasks.compileLoop(before,options);
+  assert.equal(mask.weight('b',.08,.45),0);
+  assert.equal(mask.weight('a',.99,.45),1);
+  assert.equal(mask.weight('c',.999,.79),0,'older single-chart paint remains clipped');
+  assert.equal(P.surfaceMasks.compileLoop([restored,stroke],options).weight('b',.08,.45),1);
+  const after=[legacy,stroke,{...dab,points:[point('c',.97,.61),point('a',.04,.67)]},restored],
+    dirty=P.surfaceMasks.loopDirtyBounds(before,after,options),
+    next=P.surfaceMasks.compileLoop(after,options);
+  assert.equal(next.weight('a',0,.64),1);
+  assert.equal(next.weight('c',1,.64),1);
+  for(const {key:chart} of charts)for(let y=0;y<=40;y++)for(let x=0;x<=60;x++){
+    const u=x/60,v=y/40;
+    if(mask.weight(chart,u,v)===next.weight(chart,u,v))continue;
+    assert(dirty.some(box=>box.chart===chart&&u>=box.min[0]&&u<=box.max[0]&&v>=box.min[1]&&v<=box.max[1]));
+  }
+  assert.deepEqual(P.surfaceMasks.loopDirtyBounds(after,structuredClone(after),options),[]);
+  const resized=P.surfaceMasks.compileLoop([stroke],{height:6,charts:charts.map(span=>({...span,
+    length:span.key==='a'?11:span.length}))});
+  assert.equal(resized.weight('a',.80,.35),1);
+  assert.equal(resized.weight('b',.50,.55),1);
+  assert.equal(resized.weight('b',.50,.79),0);
+  assert.throws(()=>P.surfaceMasks.compileLoop([{...dab,points:[point('missing',.5,.45)]}],options),/chart/);
+});
