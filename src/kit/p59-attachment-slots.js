@@ -35,6 +35,34 @@
     return P.data.freeze(stations);
   }
 
+  function fitRow(spec, { occupied = [], gap = spec?.spacing, fits } = {}) {
+    const stations = row(spec || {});
+    if (!Array.isArray(occupied) || occupied.length > 1024 ||
+        !Array.from(occupied).every(interval => Array.isArray(interval) && interval.length === 2 &&
+          interval.every(Number.isFinite) && interval[0] <= interval[1]) ||
+        !Number.isFinite(gap) || gap < 0 || fits !== undefined && typeof fits !== 'function')
+      throw Error('Fitted attachment rows need a finite gap and bounded occupied intervals');
+    const reserved = occupied.slice();
+    const result = [];
+    for (const station of stations) {
+      const [low, high] = station.range;
+      const near = reserved.filter(([a, b]) => a <= high && b >= low);
+      const candidates = [station.distance, low, high];
+      for (const interval of near) {
+        for (const edge of interval) if (edge >= low && edge <= high) candidates.push(edge);
+      }
+      // A support predicate may admit a new point inside an otherwise open band.
+      if (fits) for (let i = 1; i < 8; i++) candidates.push(low + (high - low) * i / 8);
+      candidates.sort((a, b) => Math.abs(a - station.distance) - Math.abs(b - station.distance) || a - b);
+      const distance = [...new Set(candidates)].find(at =>
+        near.every(([a, b]) => at <= a || at >= b) && (!fits || fits(at, station)));
+      if (distance === undefined) continue;
+      result.push({ ...station, preferred: station.distance, distance });
+      if (gap) reserved.push([distance - gap, distance + gap]);
+    }
+    return P.data.freeze(result);
+  }
+
   function layout(slots, families, { seed = 0, fits = () => true, budget = 32768 } = {}) {
     if (!Array.isArray(slots) || slots.length > 1024 || !Array.isArray(families) || families.length > 128 ||
         !Number.isSafeInteger(seed) || typeof fits !== 'function' || !Number.isSafeInteger(budget) || budget < 1 || budget > 131072)
@@ -83,5 +111,5 @@
     return P.data.freeze(placements);
   }
 
-  P.attachments = Object.freeze({ layout, row });
+  P.attachments = Object.freeze({ layout, row, fitRow });
 })(KIT);

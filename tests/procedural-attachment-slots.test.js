@@ -39,6 +39,15 @@ test('source metadata remains mutable and can pass a serializable attachment rec
   assert(Object.isFrozen(result[0].slot.data.anchor));
 });
 
+test('fitted rows keep station identity around reserved distances and unsupported areas', () => {
+  const layout={range:[0,8],spacing:2,inset:.5}, opts={gap:1.4,occupied:[[3.7,4.7]]};
+  const result=P.attachments.fitRow(layout,{...opts,fits:(_,station)=>station.index!==1});
+  assert.deepEqual(result.map(({index,distance,preferred})=>[index,distance,preferred]),[[0,3.7,4],[-1,2,2]]);
+  const tight=P.attachments.fitRow(layout,{...opts,occupied:[[2.9,5.1]]});
+  assert.deepEqual(tight.map(station=>station.index),[-1,1]);
+  assert.throws(()=>P.attachments.fitRow(layout,{occupied:[[1,0]]}),/occupied intervals/);
+});
+
 test('attachment rows preserve center-relative indices as a span grows at either end', () => {
   const row = (range, options = {}) => P.attachments.row({ range, spacing: 2, inset: 1, ...options });
   const narrow = row([-4, 4]), wide = row([-6, 6]);

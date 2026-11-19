@@ -51,6 +51,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `proximity.connect(sockets, options)` | Deterministic matching of named sockets with reach, degree and compatibility limits |
 | `attachments.layout(slots, families, options)` | Stable weighted selection for framed, typed attachment slots, with fit and clearance callbacks |
 | `attachments.row({range, spacing, inset, maxPairs})` | Centered attachment stations at a fixed pitch, with persistent indices and bounded ranges for local adjustment |
+| `attachments.fitRow(rowSpec, {occupied, gap, fits})` | Fit centered attachment stations around occupied distance intervals and validate support |
 | `fitSurfaceBands({domain, panels, opening, edges, obstructions, clearance})` | Keep bands mounted to a chart feature's edges and shorten or omit them to fit nearby boundaries and obstructions |
 | `alignedFeatureGroups(features, {axis, chartAxis, periods, separation})` | Group nearby aligned features on a measured chart and return ordered members and shared extents. |
 | `fitFootprintContact({center, tangent, size, height, blocked, maxSpread, samples, interval, includePoints})` | Seat an upright footprint on a sampled support and check space above it |
@@ -327,6 +328,15 @@ intersects the separating-axis limits of nearby oriented rectangles
 analytically. Touching endpoints are allowed, including a singleton
 interval between two reservations. Use a support or geometry test at the
 chosen location if the surface changes along the interval.
+
+`attachments.fitRow(rowSpec, {occupied, gap, fits})` adjusts each existing
+center-relative station only within its range. `occupied` supplies open
+distance intervals. Touching their endpoints is allowed. Accepted stations
+reserve `gap` units on either side for subsequent stations. An optional
+`fits(distance, station)` tests physical support at the preferred point,
+obstacle edges and a finite set of points within the station band. Unfitted
+stations are omitted. Surviving stations report `preferred` and actual
+`distance` with their original index.
 
 `placeFootprintRequests(requests, {obstacles, clearance, cellSize})` shares
 the field across candidate sources. Each request supplies a numeric
