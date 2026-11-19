@@ -96,6 +96,64 @@
       holes:holes.map(h=>rectangle(...h.min,...h.max)),budget,work:650000
     }).cells.flatMap(({key,fragments})=>fragments.map(polygon=>({key,role:roles.get(key),polygon}))) : parts;
 
+    let exposed;
+    function openingEdges(){
+      if(exposed)return exposed;
+      const epsilon=1e-7,lines=[new Map(),new Map()];
+      function union(ranges){
+        const joined=[];
+        for(const [lo,hi] of ranges.sort((a,b)=>a[0]-b[0])){
+          const last=joined.at(-1);
+          if(last&&lo<=last[1]+epsilon)last[1]=Math.max(last[1],hi);
+          else joined.push([lo,hi]);
+        }
+        return joined;
+      }
+      function addLine(axis,at,sign,low,high){
+        const limit=axis?height:width,extent=axis?width:height;
+        low=Math.max(0,low);high=Math.min(extent,high);
+        if(at<=epsilon||at>=limit-epsilon||high-low<=epsilon)return;
+        const index=Math.round(at/epsilon),map=lines[axis];
+        let entries=map.get(index);
+        if(!entries)map.set(index,entries=[]);
+        let line=entries.find(item=>item.at===at&&item.sign===sign);
+        if(!line)entries.push(line={at,sign,cutouts:[],ranges:[]});
+        line.cutouts.push([low,high]);
+      }
+      for(const {min,max,full} of holes)for(const axis of [0,1]){
+        if(full&&axis===0)continue;
+        const across=1-axis;
+        addLine(axis,min[axis],1,min[across],max[across]);
+        addLine(axis,max[axis],-1,min[across],max[across]);
+      }
+      if(!lines.some(map=>map.size))return exposed=Object.freeze([]);
+      for(const map of lines)for(const entries of map.values())for(const line of entries)
+        line.cutouts=union(line.cutouts);
+      for(const {polygon} of visibleParts)for(let i=0;i<polygon.length;i++){
+        const a=polygon[i],b=polygon[(i+1)%polygon.length];
+        const axis=Math.abs(a[0]-b[0])<=epsilon?0:Math.abs(a[1]-b[1])<=epsilon?1:-1;
+        if(axis<0)continue;
+        const at=a[axis],index=Math.round(at/epsilon),across=1-axis,
+          low=Math.min(a[across],b[across]),high=Math.max(a[across],b[across]),
+          // The clipped fragments are counterclockwise. Match their outward
+          // edge direction to the face of the aperture.
+          sign=Math.sign(b[across]-a[across])*(axis?-1:1);
+        for(let slot=index-1;slot<=index+1;slot++)for(const line of lines[axis].get(slot)||[]){
+          if(sign!==line.sign||Math.abs(at-line.at)>epsilon||Math.abs(b[axis]-line.at)>epsilon)continue;
+          for(const [start,end] of line.cutouts){
+            const lo=Math.max(low,start),hi=Math.min(high,end);
+            if(hi-lo>epsilon)line.ranges.push([lo,hi]);
+          }
+        }
+      }
+      const edges=[];
+      for(const [axis,map] of lines.entries())for(const entries of map.values())for(const {at,sign,ranges} of entries){
+        const uv=t=>axis?[t,at]:[at,t],normal=axis?[0,sign]:[sign,0];
+        for(const [lo,hi] of union(ranges))edges.push({start:uv(lo),end:uv(hi),normal});
+      }
+      return exposed=P.data.freeze(edges);
+    }
+
     function braceDistance(part, u, v) {
       let distance = -Infinity;
       const points = part.polygon;
@@ -118,7 +176,8 @@
       const boundary = Math.max(periodic ? -Infinity : Math.max(-u, u - width), -v, v - height);
       return Math.max(boundary, d);
     }
-    return P.data.freeze({ layout, parts:visibleParts, distance, postCount: periodic ? cols : cols + 1, railCount: rows + 1 });
+    return P.data.freeze({ layout, parts:visibleParts, distance, openingEdges,
+      postCount: periodic ? cols : cols + 1, railCount: rows + 1 });
   }
 
   P.panelFrames = panelFrames;

@@ -2,6 +2,26 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const P=require('..').load().KIT.procedural;
 const standard={width:5,height:3,unit:[1,1],beam:.16,braces:'cross'};
 
+test('opening edges keep exposed spans across a periodic seam and merge overlapping material',()=>{
+  const frame=P.panelFrames({...standard,braces:'none',periodic:true,openings:[
+    {key:'seam',min:[4.55,.63],max:[5.6,2.17],rim:false},
+    {key:'overlap',min:[.4,.82],max:[1.45,1.18],rim:false}
+  ]});
+  const edges=frame.openingEdges(),close=(a,b)=>Math.abs(a-b)<1e-7;
+  assert(edges.length>0);
+  assert.equal(frame.openingEdges(),edges);
+  assert(!edges.some(edge=>edge.normal[0]&&[0,5].some(seam=>close(edge.start[0],seam))));
+  const first=edges.filter(edge=>edge.normal[0]===1&&close(edge.start[0],4.55));
+  assert.equal(first.length,2);
+  assert(first.some(({start,end})=>close(start[1],.92)&&close(end[1],1.08)));
+  const exposed=edges.filter(edge=>edge.normal[0]===-1&&close(edge.start[0],.6));
+  assert.equal(exposed.length,1);
+  assert(close(exposed[0].start[1],1.92)&&close(exposed[0].end[1],2.08));
+  assert(edges.some(edge=>edge.normal[0]===-1&&close(edge.start[0],1.45)&&
+    close(edge.start[1],.92)&&close(edge.end[1],1.08)));
+  assert.deepEqual(P.panelFrames(standard).openingEdges(),[]);
+});
+
 test('a retained opening clips crossing members and fits keyed headers, sills and jambs',()=>{
   const original=P.panelFrames(standard);
   const frame=P.panelFrames({...standard,openings:[{key:'bay',min:[1.65,.58],max:[2.65,1.59]}]});

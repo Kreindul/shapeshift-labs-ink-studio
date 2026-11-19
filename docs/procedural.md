@@ -227,7 +227,11 @@ next panel can omit the intervening jamb without filling the opening. A
 wrapped cut keeps the same member keys across both ends of
 the chart. A cut exactly one period wide uses continuous sill and header
 rings and omits both end jambs. The result exposes convex member footprints and a distance
-sampler. Callers set materials and realize the infill and apertures.
+sampler. Call `openingEdges()` for merged segments of exposed member
+boundaries along the cutouts. Each segment has chart-space `start`, `end`
+and a `normal` pointing into the opening. A periodic opening preserves its
+real edges across the seam. Callers can extrude these segments through the
+relief depth to render cut faces, then set their materials and infill.
 
 `geometry.profileCylinderSection` intersects a simple profile, including a
 concave outline, swept from `span[0]` to `span[1]` in its affine frame. The
