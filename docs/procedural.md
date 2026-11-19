@@ -2764,6 +2764,13 @@ to the backing, including fragments on either side of the perimeter seam.
 returns face outlines with outward normals, clipped between the terrain and
 carrier. The signed field and sample emitter both include the recesses.
 
+For a location-based edit, pass `plan.stockSite(id)` to
+`plan.edits.setVisible(id, false, site)`. Save the returned arrays and pass
+them as `omit` and `anchors` to the next support layout. The first site
+coordinate describes an edge index and fraction in a normalized outline
+interval. The second is distance down from the top course datum. Keep the
+same ordered outline edges to follow a particular side during resizing.
+
 ### Convex keepout subtraction
 
 `KIT.procedural.geometry.subtractConvexFaces(faces, planes, { capTag, budget })`
