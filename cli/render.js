@@ -73,6 +73,9 @@ function viewMatrix(yaw, pitch, dist, T) {
 // o: t (seconds), yaw, pitch, dist, target, w, h (the size of the stage in screen pixels), zoom (1 = the diorama's own distance), raw (skip the palette)
 function render(world, o) {
   o = o || {};
+  const lensScale = o.lensScale ?? 1;
+  if (!Number.isFinite(lensScale) || lensScale <= 0) throw new RangeError('Lens scale must be finite and positive');
+  const tangent = Math.tan(FOV / 2) / lensScale;
   const c = world.cam,
     t = o.t || 0,
     yaw = o.yaw === undefined ? c.yaw : o.yaw,
@@ -127,7 +130,7 @@ function render(world, o) {
   const tone = o.raw || o.samples || o.captureCoverage ? null : toneFor(world, o.tone ?? look.tone);
   const rel = c.dist / dist0,
     rho = world.detail * Math.pow(rel, rel > 1 ? 0.5 : 0.25),
-    px = o.px || look.pixelSize || clamp(Math.round(ch / (2 * Math.tan(FOV / 2) * rho * dist0)), 1, 18),
+    px = o.px || look.pixelSize || clamp(Math.round(ch / (2 * tangent * rho * dist0)), 1, 18),
     W = Math.ceil(cw / px),
     H = Math.ceil(ch / px);
   const historyFrames = effects?.smear && o.artHistory ? o.artHistory.previous(t, W, H, world) : [];
@@ -177,15 +180,15 @@ function render(world, o) {
   /* orthographic (o.ortho): no perspective, every ray parallel, the picture as big as the perspective one is at the target. The eye
      is set well back, so nothing comes behind it however far in the camera zooms; the zoom is the size of the view */
   const ortho = !!o.ortho,
-    oh = dist * Math.tan(FOV / 2),
+    oh = dist * tangent,
     eyeD = ortho ? dist + 2 * world.radius + 4 : dist,
     reflectionPlane = o.reflectionPlane,
-    focal = ortho ? H / 2 / oh : H / 2 / Math.tan(FOV / 2),
+    focal = ortho ? H / 2 / oh : H / 2 / tangent,
     cameraView = viewMatrix(yaw, pitch, eyeD, T),
     view = ortho && stable?.snap ? ArtStability.snapView(cameraView, focal / (o.artGridScale || 1), stable.anchor) : cameraView,
     V = reflectionPlane ? SceneOptics.reflectedView(view, reflectionPlane) : view,
     near = Math.max(0.4, 0.15 * dist),
-    tp = 1 / Math.tan(FOV / 2),
+    tp = 1 / tangent,
     asp = W / H,
     N = world.count,
     d = world.data,

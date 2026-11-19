@@ -4,6 +4,28 @@ These APIs are available through `KIT.procedural` in Node and the browser bundle
 
 For image review and export, pass the finished world to Node's CPU `render()`. For interactive review, pass the world and authoring toolkit to the [WebGL canvas renderer](browser-renderer.md).
 
+## Fixed-size image framing
+
+`KIT.captureFrame.fixed(viewWidth, viewHeight, options)` returns the centred
+crop, exact output size, art raster dimensions and a lens multiplier. `aspect`
+accepts `view`, `wide`, `square`, `portrait` and custom ratios from .25 through
+4. `edge` is the longest PNG side in pixels. `scale` controls whole art-pixel
+blocks from 1 to 8. A crop changes the lens around the same camera target.
+
+```js
+const studio = require('@shapeshift-labs/ink-studio');
+const { captureFrame } = studio.load().KIT;
+const frame = captureFrame.fixed(480, 360, { aspect: 'wide', edge: 1920, scale: 4 });
+const art = studio.render(world, { w: frame.renderWidth, h: frame.renderHeight,
+  px: 1, colored: true, lensScale: frame.lensScale });
+const rgb = captureFrame.pixels(art.rgb, frame, { channels: 3 });
+```
+
+`pixels` expands each art pixel by an integer factor and trims any fractional
+block at the output border. Use `flipY: true` for a bottom-up framebuffer
+readback. The software renderer's `lensScale` also works independently with
+either perspective or orthographic cameras.
+
 ## Graphs and reusable groups
 
 ```js
