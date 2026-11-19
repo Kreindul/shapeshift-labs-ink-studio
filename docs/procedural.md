@@ -104,6 +104,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `edgeClearance.clipFieldPath(points, fields, {padding, spacing, tolerance})` | Split a polyline around bounded signed fields, preserving its unblocked vertices and bends. |
 | `snapping.resolve(point, features, options)` | Project to a bounded point or segment and return the winning feature with its caller-supplied identity. |
 | `planSnapping.compile(outline)`, `planSnapping.align(moving, translation, targets, options)` | Align convex footprints along finite faces or corners, with an optional retained contact and release distance. |
+| `planSnapping.compileMotion(plan, velocity)`, `planSnapping.alignMotion(motion, value, targets, options)` | Align a convex plan whose vertex positions change linearly with one parameter. Applies to anchored scaling and other parameterized edits. |
 | `railGuard(options, meta)` | Build closed rail and upright post pieces with adjustable height, spacing and rail levels. |
 | `cantileverSupports.sites(options)`, `cantileverSupports.fitMount(options, distance)`, `cantileverSupports.bracket(site, options, meta)` | Fit bearing sites along an edge or to a nearby solid field and build support profiles. |
 | `traceSignedIntervals(sample, options)` | Find where a signed field is negative along a bounded curve parameter. Supply a slope bound to skip homogeneous regions. |
@@ -642,6 +643,15 @@ result includes the corrected translation, contact endpoints and a latch.
 Pass that latch back on the next frame to keep the same contact within the
 larger release distance. Skip the call and clear the latch when free
 placement is active. Targets and plans can be reused for each pointer event.
+
+Use `compileMotion(plan, (point, index) => [vx, vy])` when each vertex has a
+constant velocity per parameter unit. Its position at `t` is
+`point + velocity * t`. Keep the outline convex with its original winding
+through the edit range. `alignMotion` takes the requested parameter and
+returns the contact's resolved `value`, guide endpoints and latch. The
+`capture` and `release` distances use parameter units, and `min` and `max`
+can limit the solved range. It finds both moving points on fixed faces and
+fixed points on moving faces, including faces that rotate during the edit.
 
 `railGuard({path, up, height, thickness, postWidth, postSpacing, levels,
 maxPieces}, meta)` returns closed construction pieces with the owner, material
