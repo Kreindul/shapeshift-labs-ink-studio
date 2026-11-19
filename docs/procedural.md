@@ -124,6 +124,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `traceSignedIntervals(sample, options)` | Find where a signed field is negative along a bounded curve parameter. Supply a slope bound to skip homogeneous regions. |
 | `styles.catalog(definitions)`, `styles.compose(...layers)` | Caller-defined profiles, named inheritance, and deep composition. `styles.material(profile, role)` resolves aliases and normalized colors |
 | `chunks.create({preview, refine})` | Cache realized chunks by key and revision, retain unrelated payloads, send bounded replacement patches, and cancel obsolete work |
+| `chunks.createScheduler({budgetBytes, describe, load})` and `chunks.grid(options)` | Prioritize independent streaming requests and keep a bounded set of chunks from procedural grids |
 | `contacts.index(mesh, options)`, `contacts.intersections(a, b, options)`, `contacts.clipCurve(points, solids)` | Index named triangle groups, trace noncoplanar contacts, and trim contact or authored curves against closed indexed solids |
 | `contacts.index(mesh).raycast(origin, direction, max)` | Find the nearest triangle hit and report its point, normal, distance, owner and named surface. Reach is measured in world units. |
 | `contacts.traceSdf(chart, sd, options)`, `contacts.expose(curves, occluder, options)`, `contacts.field(curves)`, `contacts.runoff(curves, project, options)` | Trace SDF contacts, expose visible runs, derive distance masks and follow downhill paths |
@@ -2829,6 +2830,79 @@ The gallery's **Retained assemblies** example combines these APIs. Resizing
 the left mount changes generated attachments and replaces that mount's visual
 chunk. The right payload is reused. Undo and Redo operate on the retained
 document and trigger the same realization path.
+
+### Shared chunk scheduling
+
+`P.chunks.createScheduler({budgetBytes, concurrency, describe, load, sizeOf, release})`
+keeps chunks resident for any number of independent consumers. Each
+consumer opens an `interest(id, {priority})` and calls
+`interest.update(requests, {priority})` with its current keys. A request is
+a string key or `{key, priority}` with a relative priority offset.
+The strongest request sets a shared key's priority. Higher numbers win,
+and keys break ties. A missing or evicted key can be requested again.
+
+```js
+const grid = P.chunks.grid({dimensions: 2, size: cell * chunkCells});
+const scheduler = P.chunks.createScheduler({
+  budgetBytes: 16 * 1024 * 1024,
+  describe(key) {
+    const {place, index} = grid.address(key);
+    const {revision, frame} = worlds.get(place);
+    return {revision, bytes: 512 * 1024, input: {place, index, frame}};
+  },
+  load({input}, {signal}) {
+    signal.throwIfAborted();
+    return worldBuilders.get(input.place).build(input.frame, input.index);
+  }
+});
+
+const player = scheduler.interest('player-collision', {priority: 100});
+const viewer = scheduler.interest('camera', {priority: 30});
+const underfoot = grid.key('heath', grid.index([playerX, playerZ]));
+player.update([underfoot]);
+viewer.update(grid.cover(visibleXZ).map(index => grid.key('heath', index)));
+const [ground] = await player.ready();
+```
+
+Use `grid({dimensions: 3, size})` for XYZ chunks or two dimensions for
+planar grids such as XZ biome columns. `grid.cover({min, max}, {limit})`
+enumerates only the requested half-open window. Keys encode a place ID
+and signed safe-integer indices, with no authored world boundary or
+preallocated grid. Generate chunks from the place seed and address.
+Use local coordinate origins when a geometry provider or packed splats
+reach their numeric precision limits.
+
+`describe(key)` returns a revision, a conservative byte reservation, and
+caller-owned input, or null for an unavailable chunk. Revisions identify
+immutable build inputs. Call `scheduler.refresh()` to reread descriptions
+for current requests after an edit or to retry a failed build. Matching
+revisions keep their resident objects. `load` accepts synchronous generators
+or asynchronous loaders, including worker adapters. The default concurrency
+is two. Cancelled jobs keep their reservations until they settle. A
+superseded result is released instead of being published.
+
+Once loaded, a chunk costs its full reservation or the byte count returned by
+optional `sizeOf(value, descriptor)`. A measured chunk that exceeds its
+reservation fails admission. This budget covers scheduler-owned chunks
+and in-flight reservations. Use `release(value, descriptor)` to free
+resources owned by a dropped, failed, or late result.
+
+`interest.ready({keys, signal})` waits for the requested keys, or all keys
+in that interest by default. The optional signal cancels the wait, and
+`interest.close()` withdraws the requests. A closed interest, aborted
+wait, or removed key resolves to null. A failed, unavailable, or
+currently over-budget key rejects the wait. Synchronous interest changes
+are reconciled together on the next microtask. Inspect a key with
+`scheduler.status(key)` and look up its current payload with
+`scheduler.get(key)`. `scheduler.snapshot()` returns a stable resident
+view until publication changes, so hosts can rebuild packed splat inputs
+only on resident changes. Call `scheduler.dispose()` to close every interest.
+
+The [streamed places example](../examples/streamed-places.js) runs two
+procedural places without a UI. The player and camera have separate
+interests. A doorway starts with a small destination window. On crossing,
+the same interests gain priority and expand around the arrival, keeping
+overlapping chunks by reference as the outgoing place releases its interests.
 
 Contact curves follow the input mesh resolution. `contacts.index` can restrict
 the index to named surface groups and exposes bounds queries and segment

@@ -66,6 +66,12 @@ superseded. `session.cancelPreparation(linkId)` aborts an unused preview and
 releases its payload. Omit the ID to cancel the current preview. The session
 keeps previously visited places configured to continue ticking.
 
+For streamed destinations, hold a [chunk interest](procedural.md#shared-chunk-scheduling)
+on the prepared payload. Wait for its required landing keys during
+`prepare`. Expand that interest around the traveler in `onCross` and
+close it when the payload is disposed. Overlapping keys stay resident
+through promotion when they fit the new budget.
+
 Use `session.checkArrival(linkId)` to inspect preparation. It returns a
 record with `link` and one of three statuses.
 
