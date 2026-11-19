@@ -401,6 +401,24 @@ analytically. Touching endpoints are allowed, including a singleton
 interval between two reservations. Use a support or geometry test at the
 chosen location if the surface changes along the interval.
 
+`nearestTranslation(spec, {reach, margin, maxObstacles, maxTests, test})`
+searches in XZ across all headings while keeping the footprint orientation
+and vertical range fixed. It considers the nearest points on reservation
+boundaries, their corners, and the intersections of overlapping
+boundaries. `reach` limits the distance in world units. `margin` defaults
+to one millionth of a world unit and offsets the sampled faces outward to
+avoid floating-point contact errors.
+
+For each clear candidate, the optional `test(offset, distance)` can check
+terrain, constrain the search to one side of a surface, or return a
+caller-specific placement. Return `false` or `null` to reject. Candidates
+are tested in increasing distance order. The result has `status` and
+`tests`, plus `offset`, `distance` and `value` when the status is `ok`.
+Use `maxObstacles` and `maxTests` to limit the work. The search reports
+`budget` when either limit stops it and `unreachable` when the candidate
+set is exhausted. The callback verifies these candidates against the
+support geometry.
+
 `assetCatalog.create(entries)` accepts stable IDs, display labels, and
 optional `subtitle`, `categories` and `keywords`. Geometry and recipes are
 outside the index. `search({query, category, offset, limit})` returns a total
@@ -419,7 +437,8 @@ stations are omitted. Surviving stations report `preferred` and actual
 
 `placeFootprintRequests(requests, {obstacles, clearance, cellSize})` shares
 the field across candidate sources. Each request supplies a numeric
-`priority` (default zero) and a synchronous `fit({fits, freeIntervals})`
+`priority` (default zero) and a synchronous
+`fit({fits, freeIntervals, nearestTranslation})`
 callback. Return `{footprint, value}` for one proposal or `null` to skip
 the request. Higher priorities fit first and ties keep input order.
 Obstacles reserve their space before the first request. Each accepted

@@ -70,3 +70,40 @@ test('clearance intervals match rotated physical overlap over continuous signed 
     assert.equal(field.fits({...sample,point}),free.some(([lo,hi])=>lo<=step&&step<=hi));
   }
 });
+
+test('nearest footprint translation finds the corner of two blockers between fixed search directions',()=>{
+  const field=createFootprintReservations(),spot=at([0,0,0]);
+  field.occupy(at([-.68,0,0]));
+  field.occupy(at([0,0,-.44]));
+  field.occupy(at([.32,1,.56]));
+  const reach=.66;
+  for(let i=0;i<8;i++){
+    const angle=i*Math.PI/4;
+    assert.deepEqual(field.freeIntervals(spot,[Math.cos(angle),0,Math.sin(angle)],[0,reach]),[]);
+  }
+  const fit=field.nearestTranslation(spot,{reach,margin:.001,test:offset=>offset[2]>0?'supported':null});
+  assert.equal(fit.status,'ok');
+  assert.equal(fit.value,'supported');
+  assert(Math.abs(fit.offset[0]-.321)<1e-8&&Math.abs(fit.offset[2]-.561)<1e-8);
+  assert(field.fits({...spot,point:fit.offset}));
+  assert(!field.fits(spot),'query does not change reservations');
+  assert.equal(field.nearestTranslation(spot,{reach:.64}).status,'unreachable');
+  assert.equal(field.nearestTranslation(spot,{reach,maxObstacles:1}).status,'budget');
+  assert.equal(field.nearestTranslation(spot,{reach,maxTests:1}).status,'budget');
+});
+
+test('nearest translation checks a rotated face and uses the same ledger in priority requests',()=>{
+  const theta=.31,c=Math.cos(theta),s=Math.sin(theta),spot=at([0,0,0],[.2,.2,.2]),
+    obstacle=at([0,0,0],[1,1,.34],[c,0,s]);
+  const fit={fit({nearestTranslation}){
+    const found=nearestTranslation(spot,{reach:.4,margin:.001,test:(offset,distance)=>
+      offset[2]>0&&{distance}});
+    assert.equal(found.status,'ok');
+    assert(Math.abs(found.offset[0]/found.distance+s)<1e-8);
+    assert(Math.abs(found.offset[2]/found.distance-c)<1e-8);
+    return {footprint:{...spot,point:found.offset},value:found.value};
+  }};
+  const result=placeFootprintRequests([fit],{obstacles:[obstacle]});
+  assert.equal(result.length,1);
+  assert(Math.abs(result[0].value.distance-(.171+.1*(c+s)))<1e-8);
+});

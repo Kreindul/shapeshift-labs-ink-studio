@@ -3,6 +3,8 @@
   const P = K.procedural || K.authoring;
   const vector = v => Array.isArray(v) && v.length === 3 && Array.from(v).every(Number.isFinite);
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1];
+  const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
+  const EPS = 1e-9;
 
   function createFootprintReservations({ clearance = 0, cellSize = 2 } = {}) {
     if (!Number.isFinite(clearance) || clearance < 0 || !Number.isFinite(cellSize) || cellSize <= 0)
@@ -99,6 +101,94 @@
       return open;
     }
 
+    // A fixed-orientation translation collides inside the intersection of
+    // the separating-axis strips. Clip each supporting line to its face.
+    function translationEdges(item, other, reach, margin) {
+      const delta = other.center.map((v, i) => v - item.center[i]), normals = [];
+      for (const axis of axes(item, other))
+        if (!normals.some(n => Math.abs(cross(n, axis)) <= EPS)) normals.push(axis);
+      const planes = normals.flatMap(axis => {
+        const sum = radius(item, axis) + radius(other, axis) + margin, center = dot(delta, axis);
+        return [[axis, center + sum], [axis.map(v => -v), sum - center]];
+      });
+      const edges = [];
+      for (const [normal, offset] of planes) {
+        if (Math.abs(offset) > reach) continue;
+        const point = normal.map(v => v * offset), tangent = [-normal[1], normal[0]];
+        let low = -Infinity, high = Infinity;
+        for (const [axis, limit] of planes) {
+          const slope = dot(axis, tangent), available = limit - dot(axis, point);
+          if (Math.abs(slope) <= EPS) {
+            if (available < -EPS) { low = Infinity; break; }
+          } else if (slope > 0) high = Math.min(high, available / slope);
+          else low = Math.max(low, available / slope);
+        }
+        const nearest = Math.min(high, Math.max(low, 0));
+        if (high >= low && Math.hypot(offset, nearest) <= reach + EPS)
+          edges.push({ point, normal, tangent, offset, low, high, nearest });
+      }
+      return edges;
+    }
+
+    function nearestTranslation(spec, {
+      reach, margin = 1e-6, maxObstacles = 32, maxTests = 64, test = () => true
+    } = {}) {
+      if (![reach, margin].every(v => Number.isFinite(v) && v >= 0) || typeof test !== 'function' ||
+          !Number.isSafeInteger(maxObstacles) || maxObstacles < 1 || maxObstacles > 96 ||
+          !Number.isSafeInteger(maxTests) || maxTests < 1 || maxTests > 2048)
+        throw Error('Footprint translation needs a finite reach, margin and bounded search options');
+      const item = frame(spec), origin = item.center;
+      let tests = 0;
+      function probe(x, z, distance) {
+        tests++;
+        const moved = { ...item, center: [origin[0] + x, origin[1] + z],
+          min: [item.min[0] + x, item.min[1] + z], max: [item.max[0] + x, item.max[1] + z] };
+        if (!fits(moved, keys(moved))) return null;
+        const offset = [x, 0, z], value = test(offset.slice(), distance);
+        return value === false || value == null ? null : { status: 'ok', offset, distance, value, tests };
+      }
+      const initial = probe(0, 0, 0);
+      if (initial) return initial;
+      if (!reach) return { status: 'unreachable', tests };
+      const swept = { min: item.min.map(v => v - reach - margin), max: item.max.map(v => v + reach + margin) };
+      const groups = [];
+      for (const other of nearby(keys(swept))) {
+        if (!verticalOverlap(item, other) ||
+            swept.min.some((v, i) => v > other.max[i] || other.min[i] > swept.max[i])) continue;
+        if (groups.length >= maxObstacles) return { status: 'budget', tests };
+        groups.push(translationEdges(item, other, reach, margin));
+      }
+      const points = [];
+      function add(x, z) {
+        const distance = Math.hypot(x, z);
+        if (distance > EPS && distance <= reach + EPS) points.push({ x, z, distance });
+      }
+      for (const [i, group] of groups.entries()) for (const edge of group) {
+        for (const t of [edge.nearest, edge.low, edge.high])
+          add(edge.point[0] + t * edge.tangent[0], edge.point[1] + t * edge.tangent[1]);
+        for (let j = i + 1; j < groups.length; j++) for (const other of groups[j]) {
+          const slope = dot(other.normal, edge.tangent);
+          if (Math.abs(slope) <= EPS) continue;
+          const t = (other.offset - dot(other.normal, edge.point)) / slope;
+          if (t < edge.low - EPS || t > edge.high + EPS) continue;
+          const x = edge.point[0] + t * edge.tangent[0], z = edge.point[1] + t * edge.tangent[1];
+          const u = x * other.tangent[0] + z * other.tangent[1];
+          if (u >= other.low - EPS && u <= other.high + EPS) add(x, z);
+        }
+      }
+      points.sort((a, b) => a.distance - b.distance || a.x - b.x || a.z - b.z);
+      const seen = new Set();
+      for (const { x, z, distance } of points) {
+        const key = Math.round(x / EPS) + '/' + Math.round(z / EPS);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (tests >= maxTests) return { status: 'budget', tests };
+        const result = probe(x, z, distance);
+        if (result) return result;
+      }
+      return { status: 'unreachable', tests };
+    }
+
     function add(item, entries) {
       occupied.push(item);
       if (entries === null) large.push(item);
@@ -109,7 +199,7 @@
     }
 
     return Object.freeze({
-      freeIntervals,
+      freeIntervals, nearestTranslation,
       fits(spec) { const item = frame(spec); return fits(item, keys(item)); },
       reserve(spec) {
         const item = frame(spec), entries = keys(item);
@@ -132,7 +222,9 @@
     }).sort((a, b) => b.priority - a.priority);
     const ledger = createFootprintReservations({ clearance, cellSize });
     for (const item of obstacles) ledger.occupy(item);
-    const tests = Object.freeze({ fits: ledger.fits, freeIntervals: ledger.freeIntervals });
+    const tests = Object.freeze({
+      fits: ledger.fits, freeIntervals: ledger.freeIntervals, nearestTranslation: ledger.nearestTranslation
+    });
     const placements = [];
     for (const { request } of order) {
       const result = request.fit(tests);
