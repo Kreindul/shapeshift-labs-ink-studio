@@ -183,6 +183,9 @@ actor properties carry forward. A null result leaves the source active. Keep you
 actor on the source side while a load or clearance check is unresolved.
 A host can also use `portals.doorway({from, to, halfWidth, halfHeight, shape})`
 directly for `hit`, `point`, `direction`, or `camera` operations.
+The optional [character and camera rig](headless-worlds.md#character-traversal-and-follow-cameras)
+can submit its swept motion segments to the session and carry the mapped
+camera frame into the next place.
 
 ### Render the view
 

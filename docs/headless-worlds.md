@@ -291,3 +291,79 @@ place is active, or drive it on a background update schedule.
 The [interactable locks example](../examples/interactable-locks.js)
 ties a breakable wall and timed gate to one traversal graph. Its debris
 uses splat samples from the wall that the committed revision removed.
+
+## Character traversal and follow cameras
+
+`KIT.world.characters.create({tuning, selectMode, modes, allowSupport})`
+is an optional Y-up capsule solver. It uses the same support, signed
+clearance, and medium queries as the rest of the world. A host can supply
+`{supports(x, z, low, high), clearance(point, radius), mediumAt(point)}`
+or use `characters.fromBiome(frame)` with a prepared biome frame. The
+biome adapter allows a small configurable `supportPadding` search when
+a conservative field requires extra clearance above a support.
+
+Create a JSON actor with `controller.state({position, velocity, …})`.
+Position is the center of the capsule. The controller preserves additional
+JSON fields such as inventory. Call
+`controller.step(actor, {move, vertical, jump, climb}, dt, world)` with
+seconds and a world-space XZ move input. Swimming uses the vertical input,
+with jump also available as an ascend button. Jumping from the ground
+uses a button press edge. Set `climb: false` to disable the automatic
+climb from the waterline onto a reachable, clear ledge.
+
+The reported movement includes the next `actor`, swept `segments`,
+`events`, and the body and eye media. The defaults switch between
+`ground`, `air`, and `swim`, with independent swim-entry, swim-exit,
+and eye probe heights. The swim solver adds the sampled XYZ current.
+Tune the body dimensions, acceleration and speed, jumping and gravity,
+water response, step height, ledge reach, and substep size. The controller
+exposes its resolved `tuning` for inspection.
+
+`selectMode(context)` can choose a custom mode. Return the natural mode
+for the default behavior. Each custom mode receives the same actor, input,
+medium, eyes, support, and timestep context. Return a `velocity` and an
+optional JSON `actor` patch. The controller still applies its collision
+sweep and owns position, velocity, mode, and jump-button state.
+`allowSupport(actor, support, world)` can reject a support by tag or
+apply a host-specific rule.
+
+```js
+const controller = KIT.world.characters.create({
+  tuning: {walkSpeed: 3, climbHeight: 0.6},
+  selectMode: ({input, natural}) => input.glide && natural === 'air' ? 'glide' : natural,
+  modes: {
+    glide({actor}) { return {velocity: [actor.velocity[0], -0.8, actor.velocity[2]]}; }
+  }
+});
+```
+
+`KIT.world.cameras.follow({tuning, stable})` creates a separate,
+renderer-independent rig. Call `rig.start(actor)` and
+`rig.step(state, actor, dt, {yaw, pitch, focus, clearance})`. Orbit inputs
+are relative angles in radians. The rig steadies the focus inside a
+vertical jump window and follows sustained rises, drops and swimming
+at configurable rates. A custom `stable(actor)` can include other
+movement modes. Supply a signed clearance query to shorten the camera
+arm at an obstacle and ease it back out after the obstruction.
+
+```js
+const movement = controller.step(actor, input, dt, currentPlace.queries);
+const travel = await controller.cross(session, 'garden-door', movement, {camera: camera.pose});
+actor = travel?.actor ?? movement.actor;
+camera = travel?.arrival
+  ? rig.handoff(camera, travel.arrival)
+  : rig.step(camera, actor, dt, {clearance: currentPlace.queries.clearance});
+renderer.render(session.current().asset.world, {camera: {pose: camera.pose}});
+```
+
+`cross` checks the actual motion segments against a walk or drop link.
+It returns null if the actor misses the opening, or reports `crossed`
+or `blocked`. A blocked result keeps the actor on the source side.
+For a successful crossing, use the destination's queries on the next
+step. `rig.handoff` adopts the arrival camera pose and preserves the
+mapped orbit frame. Use the same method with a fade arrival to reposition
+the rig at the named anchor.
+
+The [headless canal example](../examples/canal-traversal.js) follows a
+traveler from a dry bank into the water, out over a ledge, and through a
+rotated doorway.
