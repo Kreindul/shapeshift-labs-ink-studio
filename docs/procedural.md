@@ -2005,6 +2005,13 @@ and throw when the plan is invalid.
 Callers choose the target set and which fields to expose. Shared finishes
 can use the separate document style catalog and `styleRef`.
 
+`KIT.procedural.appearanceMemory({storage?, key?, normalize?})` holds immutable
+JSON settings under caller-chosen names. Call `set(id, profile)`, `get(id)`,
+`snapshot()`, or `clear(id?)`. The optional normalizer validates settings
+on write and reload. An adapter with `getItem` and `setItem` enables persistence.
+A failed adapter write leaves the previous in-memory state available. A caller
+can use names for tool families, material roles, or another placement scope.
+
 Material roles can refer to another role with a string or with an object
 such as `{alias: 'timber', color: '#428d9f'}`. Object properties override
 the referenced material. If the shared material changes later, fields
