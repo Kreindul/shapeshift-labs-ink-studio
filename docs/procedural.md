@@ -2248,3 +2248,18 @@ with `{whole:true}` in the solid's options to retain samples behind other parts
 of its own instance. This still clips against neighboring solids. Set
 `omitFromProxy:true` on a material whose geometry draws in the template but
 should stay out of the placed instance's static field and shadows.
+
+### Contact volumes for surface cells
+
+`KIT.procedural.surfaceCells.prisms(layout, { sample, levels, step, budget, planar })`
+returns convex contact pieces with a logical cell key, bounds, and unit-normal
+planes. It uses the same tessellation as `surfaceCells.loft`. Sample the two
+levels on the same local XZ footprint with increasing Y, then transform the
+resulting volumes into the surrounding assembly. The footprint can contain
+clipped gaps or holes already represented by the layout's fragments.
+
+The optional `planar` flag or `(key, polygon) => boolean` predicate keeps
+a known affine fragment in one prism. Otherwise `step` controls tessellation.
+`budget` limits the number of pieces. Plane records mark the upper, lower
+and fragment perimeter as `exterior`. Triangulation seams stay unmarked
+so callers can add contact clearance without widening the seams.

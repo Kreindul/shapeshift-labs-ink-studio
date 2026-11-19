@@ -76,3 +76,22 @@ test('lofted cells follow a curved carrier with closed sides and a distinct mate
   assert.throws(() => P.surfaceCells.loft(layout, { sample, step: .01, budget: 15 }), /triangle budget/);
   assert.throws(() => P.surfaceCells.loft(layout, { sample: ([u, v]) => [u, 0, v] }), /volume/);
 });
+
+test('height prisms preserve a clipped hole and distinguish tessellation seams from outer edges', () => {
+  const layout = P.surfaceCells.clip([{key:'cover',polygon:rectangle(0,0,2,2)}],{
+    holes:[rectangle(.8,.8,.4,.4)]
+  });
+  const sample = ([x,z],level) => [x,level+.2*x+.1*z,z];
+  const inside = (point,pieces) => pieces.some(({planes}) => planes.every(({normal,offset}) =>
+    normal.reduce((sum,component,i)=>sum+component*point[i],0)<=offset+1e-7));
+  for(const options of [{step:.27},{planar:true}]){
+    const pieces=P.surfaceCells.prisms(layout,{sample,...options});
+    assert(pieces.every(piece=>piece.key==='cover'));
+    assert(inside([.5,.65,.5],pieces));
+    assert(!inside([1,.70,1],pieces));
+    assert(!inside([.5,1.4,.5],pieces));
+    assert(pieces.every(piece=>piece.planes.some(plane=>plane.kind==='upper'&&plane.exterior)));
+    if(!options.planar)assert(pieces.some(piece=>piece.planes.some(plane=>plane.kind==='side'&&!plane.exterior)));
+  }
+  assert.throws(()=>P.surfaceCells.prisms(layout,{sample,step:.15,budget:1}),/piece budget/);
+});
