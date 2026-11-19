@@ -7,6 +7,7 @@ const { pathToFileURL } = require('node:url');
 const { execFileSync } = require('node:child_process');
 const core = require('..');
 const coastline = require('../examples/biome-world');
+const floodValley = require('../examples/biome-flood');
 const { biomes, waterBodies, motion } = core.load().KIT.procedural;
 
 test('a water frame shares shoreline, depth and currents with biome queries and particles', () => {
@@ -81,7 +82,7 @@ test('water changes bound modified columns and carry strict interior air pockets
   assert.throws(() => waterBodies.scene([body(false)], { airPockets: [{ id: 'pool', bounds }] }), /distinct IDs/);
 });
 
-function browserProbe(createRenderer, compileSprites, coastline) {
+async function browserProbe(createRenderer, compileSprites, coastline, floodValley) {
   const canvas = document.querySelector('canvas');
   const { waterBodies, verticalSpans } = KIT.procedural;
   const renderer = createRenderer(canvas, { toolkit: { KIT, PixelLook } });
@@ -218,6 +219,21 @@ function browserProbe(createRenderer, compileSprites, coastline) {
   const tunnelCamera = { target: [8.6, -2.5, 0.54], dist: 2.1, yaw: -Math.PI / 2 };
   const tunnel = draw(assembled, { camera: tunnelCamera })(), dryTunnel = draw(assembled, { camera: tunnelCamera, water: false })();
   if (dryTunnel[0] - tunnel[0] < 15) throw new Error('compiled tunnel should absorb through water');
+
+  const valley = floodValley(KIT), beforeCut = await valley.build();
+  const afterCut = await valley.build(valley.brush(), { previous: beforeCut });
+  const waterline = { target: [4.35, -3.25, 1.19], dist: 2.15, pitch: 0, yaw: -Math.PI / 2, fov: 1.03 };
+  const beforeFlood = draw(beforeCut.world, { camera: waterline });
+  const afterFlood = draw(afterCut.world, { camera: waterline });
+  const clearHall = draw(afterCut.world, { camera: waterline, water: false });
+  close(afterFlood(middle, middle + 12), clearHall(middle, middle + 12), 'upper hall stays clear');
+  const y = middle - 13;
+  if (afterFlood(middle, y)[0] > Math.min(clearHall(middle, y)[0], beforeFlood(middle, y)[0]) - 15)
+    throw new Error('connected flooding must attenuate the lower half of the hall at the new waterline');
+  const lakeCamera = { target: [-0.25, 1.85, 0.1], dist: 8.2, pitch: 0.68, yaw: 0.28, fov: 0.94 };
+  const lakeBefore = draw(beforeCut.world, { camera: lakeCamera });
+  const lakeAfter = draw(afterCut.world, { camera: lakeCamera });
+  for (let x = 25; x <= 39; x += 3) close(lakeAfter(x), lakeBefore(x), 'independent surface lake');
   renderer.dispose();
 }
 
@@ -235,12 +251,12 @@ import { createRenderer, pixelShaderSources } from ${JSON.stringify(browserEntry
 import { createResources } from ${JSON.stringify(resources)};
 const result = document.querySelector('#result');
 try {
-  (${browserProbe.toString()})(createRenderer, (gl, pixel) => {
+  await (${browserProbe.toString()})(createRenderer, (gl, pixel) => {
     const shaders = pixelShaderSources(pixel, { water: true });
     const resources = createResources(gl);
     resources.program(shaders.SPR_VS, shaders.SPR_FS);
     resources.dispose();
-  }, ${coastline.toString()});
+  }, ${coastline.toString()}, ${floodValley.toString()});
   result.textContent = 'PASS';
 } catch (error) { result.textContent = error.stack; }
 </script>`);
@@ -248,7 +264,7 @@ try {
       '--headless', '--no-first-run', '--disable-background-networking', '--allow-file-access-from-files',
       '--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--user-data-dir=' + path.join(temp, 'profile'),
       '--dump-dom', pathToFileURL(path.join(temp, 'water.html')).href
-    ], { timeout: 60000, encoding: 'utf8', maxBuffer: 4e6, stdio: ['ignore', 'pipe', 'ignore'] });
+    ], { timeout: 90000, encoding: 'utf8', maxBuffer: 4e6, stdio: ['ignore', 'pipe', 'ignore'] });
     assert.equal(html.match(/<pre id="result">([^<]*)<\/pre>/)?.[1], 'PASS');
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });

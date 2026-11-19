@@ -9,55 +9,69 @@
   const graphs = new WeakMap();
 
   function create({ tiles, radius = 0.18, height = 0.8, stepUp = 0.3, maxDrop = 1.5,
-    maxClimb = 1.5, canClimb, swimStep, clearance, origin, maxNodes = 50000, maxChecks = 4000000 } = {}) {
-    if (!Array.isArray(tiles) || !tiles.length || tiles.length > 4096 ||
-        !Array.from(tiles).every(tile => P.verticalSpans.isGrid(tile) &&
-          [...tile.bounds.min, ...tile.bounds.max].every(v => Math.abs(v) <= 1e6)) ||
-        ![radius, height, stepUp, maxDrop, maxClimb].every(v => finite(v) && v >= 0 && v <= 1e4) ||
+    maxClimb = 1.5, canClimb, swimStep, clearance, origin, maxNodes = 50000, maxChecks = 4000000,
+    previous, dirtyBounds } = {}) {
+    const old = graphs.get(previous);
+    const vector = value => Array.isArray(value) && value.length === 3 && Array.from(value).every(finite);
+    if (![radius, height, stepUp, maxDrop, maxClimb].every(v => finite(v) && v >= 0 && v <= 1e4) ||
         radius < 1e-5 || height < 2 * radius || (clearance !== undefined && typeof clearance !== 'function') ||
         (canClimb !== undefined && typeof canClimb !== 'function') ||
-        (origin !== undefined && (!Array.isArray(origin) || origin.length !== 2 ||
-          !Array.from(origin).every(v => finite(v) && Math.abs(v) <= 1e6))) ||
         !integer(maxNodes) || maxNodes < 1 || maxNodes > 250000 ||
-        !integer(maxChecks) || maxChecks < 1 || maxChecks > 30000000)
+        !integer(maxChecks) || maxChecks < 1 || maxChecks > 30000000 ||
+        (previous !== undefined && !old) || (dirtyBounds !== undefined && (!Array.isArray(dirtyBounds) ||
+          !Array.from(dirtyBounds).every(box => vector(box?.min) && vector(box?.max) && box.min.every((v, i) => v <= box.max[i])))))
       throw new TypeError('Traversal needs span tiles, capsule dimensions and bounded graph options');
-    const [dx, dz] = tiles[0].cell;
+    const { dx, dz, phase, entries } = P.verticalSpans.layout(tiles, origin);
+    entries.sort((a, b) => a.x0 - b.x0 || a.z0 - b.z0);
     const spacing = swimStep ?? Math.min(dx, dz, height);
     if (!finite(spacing) || spacing < 1e-5) throw new RangeError('Swim spacing must be positive and representable');
-    // An explicit anchor keeps column IDs stable across floating-point tile revisions.
-    const phase = origin ?? [0, 2].map((axis, i) => {
-      const v = Math.min(...tiles.map(tile => tile.bounds.min[axis])), size = i === 0 ? dx : dz;
-      const offset = v - Math.floor(v / size) * size;
-      return Math.min(offset, size - offset) < size * 1e-6 ? 0 : offset;
-    });
-    const stride = Math.min(radius / 2, dx / 4, dz / 4), margin = stride / 2;
+    const stride = Math.min(radius / 2, dx / 4, dz / 4), margin = stride / 2, halo = radius + margin;
     const half = height / 2 - radius, stand = height / 2 + margin;
     const swimReach = Math.max(spacing * 1.55, height * 1.5, stepUp);
     const reach = Math.max(swimReach, stepUp, maxDrop, maxClimb);
-    const columns = new Map(), nodes = new Map(), edges = new Map(), adjacent = new Map();
-    let checks = 0;
+    const columns = new Map(), nodes = new Map(), edges = new Map(), adjacent = new Map(), tileStates = new Map();
+    const controls = [dx, dz, ...phase, spacing, radius, height, stepUp, maxDrop, maxClimb, canClimb];
+    const cache = old && controls.every((v, i) => v === old.controls[i]) &&
+      (clearance === old.clearance || dirtyBounds) && Boolean(clearance) === Boolean(old.clearance) ? old : null;
+    const dirty = dirtyBounds ?? [];
+    const replacements = new Set(), changedGrids = [];
+    const currentGrids = new Map(entries.map(({ key, grid }) => [key, grid]));
+    if (cache && !clearance) {
+      for (const [key, state] of cache.tileStates) {
+        if (currentGrids.get(key) !== state.grid) changedGrids.push(state.grid.bounds);
+      }
+      for (const { key, grid } of entries) {
+        if (cache.tileStates.get(key)?.grid !== grid) changedGrids.push(grid.bounds);
+      }
+    }
+    function touches(bounds, changed, padding) {
+      return changed.some(box => bounds.min.every((v, i) =>
+        v - padding <= box.max[i] && bounds.max[i] + padding >= box.min[i]));
+    }
+    let checks = 0, nodeCount = 0;
     const check = () => {
       if (++checks > maxChecks) throw new RangeError('Traversal graph exceeds its work budget');
     };
-    const aligned = (a, b, scale) => Math.abs(a - b) <= scale * 1e-5;
-    for (const tile of tiles) {
-      const [nx, nz] = tile.resolution, [x0, z0] = phase.map((v, i) => {
-        const size = i === 0 ? dx : dz, min = tile.bounds.min[i * 2];
-        const n = Math.round((min - v) / size);
-        if (!integer(n) || !aligned(v + n * size, min, size) ||
-            !aligned(min + tile.resolution[i] * size, tile.bounds.max[i * 2], size))
-          throw new RangeError('Traversal tiles must share an aligned XZ lattice');
-        return n;
-      });
-      if (!aligned(tile.cell[0], dx, dx) || !aligned(tile.cell[1], dz, dz))
-        throw new RangeError('Traversal tiles must share the same cell size');
-      for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
-        check();
-        const i = x0 + x, j = z0 + z, key = name(i, j);
-        if (columns.has(key)) throw new RangeError('Traversal tiles cannot cover the same column');
-        columns.set(key, { key, i, j, x: phase[0] + (i + 0.5) * dx, z: phase[1] + (j + 0.5) * dz,
-          tile: name(x0, z0), rows: tile.column(x, z), nodes: [] });
+    for (const { grid, key, nx, nz, x0, z0 } of entries) {
+      if (tileStates.has(key)) throw new RangeError('Traversal tiles cannot cover the same column');
+      const cached = cache?.tileStates.get(key);
+      const keep = cached?.grid === grid && !touches(grid.bounds, dirty, halo) &&
+        !touches(grid.bounds, changedGrids, halo);
+      const local = keep ? cached.columns : [];
+      if (!keep) {
+        replacements.add(key);
+        for (let x = 0; x < nx; x++) for (let z = 0; z < nz; z++) {
+          check();
+          const i = x0 + x, j = z0 + z;
+          local.push({ key: name(i, j), i, j, x: phase[0] + (i + 0.5) * dx, z: phase[1] + (j + 0.5) * dz,
+            tile: key, rows: grid.column(x, z), nodes: [] });
+        }
       }
+      for (const column of local) {
+        if (columns.has(column.key)) throw new RangeError('Traversal tiles cannot cover the same column');
+        columns.set(column.key, column);
+      }
+      tileStates.set(key, { grid, columns: local, links: null });
     }
 
     const columnAt = (x, z) => columns.get(name(Math.floor((x - phase[0]) / dx), Math.floor((z - phase[1]) / dz)));
@@ -126,12 +140,10 @@
         if (!row || row.kind === 'solid' || (kind && row.kind !== kind) ||
             [level - 1, level, level + 1].some(k => Math.abs((levels.get(k) ?? Infinity) - y) < gap) ||
             !pose(point, check)) return false;
-        if (nodes.size >= maxNodes) throw new RangeError('Traversal graph exceeds its node budget');
+        if (++nodeCount > maxNodes) throw new RangeError('Traversal graph exceeds its node budget');
         const id = column.key + '/' + chamber + '/' + slot;
         const node = freeze({ id, point, column: [column.i, column.j], tile: column.tile, supported,
           medium: row.kind, mediumId: row.id, span: [row.min, row.max] });
-        nodes.set(id, node);
-        adjacent.set(id, []);
         column.nodes.push(node);
         levels.set(level, y);
         return true;
@@ -155,21 +167,29 @@
         }
       }
     }
-    const ordered = [...columns.values()].sort((a, b) => a.i - b.i || a.j - b.j);
-    for (const column of ordered) {
-      const { rows } = column;
-      for (let start = 0, room = 0; start < rows.length;) {
-        check();
-        if (rows[start].kind === 'solid') {
-          start++;
-          continue;
+    for (const column of columns.values()) {
+      if (replacements.has(column.tile)) {
+        const { rows } = column;
+        for (let start = 0, room = 0; start < rows.length;) {
+          check();
+          if (rows[start].kind === 'solid') {
+            start++;
+            continue;
+          }
+          let stop = start + 1;
+          while (stop < rows.length && rows[stop].kind !== 'solid') stop++;
+          addRoom(column, start, stop, room++);
+          start = stop;
         }
-        let stop = start + 1;
-        while (stop < rows.length && rows[stop].kind !== 'solid') stop++;
-        addRoom(column, start, stop, room++);
-        start = stop;
+        column.nodes.sort((a, b) => a.point[1] - b.point[1] || order(a.id, b.id));
+      } else {
+        nodeCount += column.nodes.length;
+        if (nodeCount > maxNodes) throw new RangeError('Traversal graph exceeds its node budget');
       }
-      column.nodes.sort((a, b) => a.point[1] - b.point[1] || order(a.id, b.id));
+      for (const node of column.nodes) {
+        nodes.set(node.id, node);
+        adjacent.set(node.id, []);
+      }
     }
 
     function connect(from, to) {
@@ -200,26 +220,45 @@
       scanned ??= probePath(points, check);
       if (!scanned || (mode === 'swim' && !scanned.wet) || (mode !== 'swim' && scanned.wet) || scanned.length === 0) return;
       const id = from.id + '>' + to.id;
-      const edge = freeze({ id, from: from.id, to: to.id, mode, length: scanned.length, points,
+      return freeze({ id, from: from.id, to: to.id, mode, length: scanned.length, points,
         crossTile: from.tile !== to.tile });
-      adjacent.get(from.id).push(edge);
-      edges.set(id, edge);
     }
-    for (const a of ordered) {
-      for (let i = 1; i < a.nodes.length; i++) {
-        connect(a.nodes[i - 1], a.nodes[i]);
-        connect(a.nodes[i], a.nodes[i - 1]);
-      }
-      for (const b of [columns.get(name(a.i + 1, a.j)), columns.get(name(a.i, a.j + 1))]) {
-        if (!b) continue;
-        let begin = 0;
-        for (const from of a.nodes) {
-          while (begin < b.nodes.length && b.nodes[begin].point[1] < from.point[1] - reach) begin++;
-          for (let i = begin; i < b.nodes.length && b.nodes[i].point[1] <= from.point[1] + reach; i++) {
-            connect(from, b.nodes[i]);
-            connect(b.nodes[i], from);
+    const neighborKeys = column => [name(column.i + 1, column.j), name(column.i, column.j + 1)];
+    const relinked = [];
+    for (const [key, state] of tileStates) {
+      const cached = cache?.tileStates.get(key);
+      const borderChanged = cached && state.columns.some(column => neighborKeys(column).some(neighbor =>
+        columns.get(neighbor) !== cache.columns.get(neighbor)));
+      if (!cached || replacements.has(key) || borderChanged || touches(state.grid.bounds, dirty, halo + Math.max(dx, dz))) {
+        relinked.push(key);
+        const links = [];
+        const link = (a, b) => {
+          const edge = connect(a, b);
+          if (edge) links.push(edge);
+        };
+        for (const a of state.columns) {
+          for (let i = 1; i < a.nodes.length; i++) {
+            link(a.nodes[i - 1], a.nodes[i]);
+            link(a.nodes[i], a.nodes[i - 1]);
+          }
+          for (const neighbor of neighborKeys(a)) {
+            const b = columns.get(neighbor);
+            if (!b) continue;
+            let begin = 0;
+            for (const from of a.nodes) {
+              while (begin < b.nodes.length && b.nodes[begin].point[1] < from.point[1] - reach) begin++;
+              for (let i = begin; i < b.nodes.length && b.nodes[i].point[1] <= from.point[1] + reach; i++) {
+                link(from, b.nodes[i]);
+                link(b.nodes[i], from);
+              }
+            }
           }
         }
+        state.links = links;
+      } else state.links = cached.links;
+      for (const edge of state.links) {
+        adjacent.get(edge.from).push(edge);
+        edges.set(edge.id, edge);
       }
     }
 
@@ -303,8 +342,9 @@
       }));
     }
 
-    const result = freeze({ nodes: [...nodes.values()], edges: [...edges.values()], route, changesFrom, work: { checks } });
-    graphs.set(result, { nodes, edges });
+    const result = freeze({ nodes: [...nodes.values()], edges: [...edges.values()], route, changesFrom,
+      work: { checks, rebuilt: [...replacements], relinked } });
+    graphs.set(result, { nodes, edges, columns, tileStates, controls, clearance });
     return result;
   }
 

@@ -6,7 +6,8 @@
   const scalar = v => finite(v) && finite(Math.fround(v));
   const name = v => typeof v === 'string' && v.length > 0;
   const empty = Object.freeze([]);
-  const grids = new WeakSet();
+  const grids = new WeakMap();
+  const tileBakes = new WeakMap();
   const zero = Object.freeze([0, 0, 0]);
   const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
   const kindOK = kind => kind === 'air' || kind === 'solid' || kind === 'water';
@@ -97,8 +98,10 @@
       return rowAt(lo);
     }
     const result = Object.freeze({ bounds: shape, resolution: freeze([nx, nz]), cell: freeze([dx, dz]), center, locate, column, at,
+      hasWater: palette.some(row => row.kind === 'water'),
+      hasNamedAir: palette.some(row => row.kind === 'air' && row.id !== null),
       count: ids.length, pack: () => ({ offsets: offsets.slice(), heights: heights.slice(), labels: ids.slice(), palette: palette.slice() }) });
-    grids.add(result);
+    grids.set(result, { offsets, heights, ids, palette });
     return result;
   }
 
@@ -168,5 +171,83 @@
     } });
   }
 
-  P.verticalSpans = Object.freeze({ create, bake, isGrid: value => grids.has(value) });
+  const same = (a, b) => a.every((v, i) => v === b[i]);
+  const intersects = (a, b) => a.min.every((v, i) => v <= b.max[i] && a.max[i] >= b.min[i]);
+  const boundsOK = box => vector(box?.min, 3) && vector(box?.max, 3) && box.min.every((v, i) => v <= box.max[i]);
+  function sameGrid(a, b) {
+    const first = grids.get(a), second = grids.get(b);
+    return same(a.resolution, b.resolution) && same(a.bounds.min, b.bounds.min) && same(a.bounds.max, b.bounds.max) &&
+      first.ids.length === second.ids.length && first.palette.length === second.palette.length &&
+      same(first.offsets, second.offsets) && same(first.heights, second.heights) && same(first.ids, second.ids) &&
+      first.palette.every((row, i) => {
+        const other = second.palette[i];
+        return row.kind === other.kind && row.id === other.id && row.material === other.material && same(row.current, other.current);
+      });
+  }
+
+  function bakeTiles({ tiles, previous, dirtyBounds, solid, volumes, step, refine, maxSamples, maxSpans } = {}) {
+    const old = tileBakes.get(previous);
+    if (!Array.isArray(tiles) || tiles.length > 4096 || typeof solid !== 'function' ||
+        previous !== undefined && !old || dirtyBounds !== undefined &&
+        (!Array.isArray(dirtyBounds) || !Array.from(dirtyBounds).every(boundsOK)))
+      throw new TypeError('A tiled span bake needs tile descriptions, a solid field and optional dirty bounds');
+    const controls = [step, refine, maxSamples, maxSpans, volumes];
+    const incremental = old && dirtyBounds && same(controls, old.controls);
+    const byId = new Map(), rebuilt = [], changed = [];
+    let samples = 0;
+    for (const tile of tiles) {
+      if (!name(tile?.id) || byId.has(tile.id)) throw new TypeError('Span tiles need unique IDs');
+      const shape = domain(tile.bounds, tile.resolution ?? [1, 1]), cached = incremental ? old.byId.get(tile.id) : null;
+      if (cached && same(cached.resolution, [shape.nx, shape.nz]) &&
+          same(cached.bounds.min, shape.min) && same(cached.bounds.max, shape.max) &&
+          !dirtyBounds.some(box => intersects(cached.bounds, box))) {
+        byId.set(tile.id, cached);
+        continue;
+      }
+      const grid = bake({ bounds: tile.bounds, resolution: tile.resolution, volumes, step, refine, maxSamples, maxSpans,
+        solid(x, y, z) {
+          samples++;
+          return solid(x, y, z);
+        }
+      });
+      const retained = cached && sameGrid(cached, grid);
+      byId.set(tile.id, retained ? cached : grid);
+      rebuilt.push(tile.id);
+      if (!retained) changed.push(tile.id);
+    }
+    const result = freeze({ ids: [...byId.keys()], tiles: Object.freeze([...byId.values()]),
+      work: { samples, rebuilt, changed, removed: old ? [...old.byId.keys()].filter(id => !byId.has(id)) : [] } });
+    tileBakes.set(result, { byId, controls });
+    return result;
+  }
+
+  function layout(tiles, origin) {
+    if (!Array.isArray(tiles) || !tiles.length || tiles.length > 4096 ||
+        !Array.from(tiles).every(tile => grids.has(tile) &&
+          [...tile.bounds.min, ...tile.bounds.max].every(v => Math.abs(v) <= 1e6)) ||
+        origin !== undefined && !vector(origin, 2, v => finite(v) && Math.abs(v) <= 1e6))
+      throw new TypeError('Expected span tiles with finite, bounded coordinates and an optional XZ origin');
+    const [dx, dz] = tiles[0].cell;
+    const phase = origin ? origin.slice() : [0, 2].map((axis, i) => {
+      const v = Math.min(...tiles.map(tile => tile.bounds.min[axis])), size = i === 0 ? dx : dz;
+      const offset = v - Math.floor(v / size) * size;
+      return Math.min(offset, size - offset) < size * 1e-6 ? 0 : offset;
+    });
+    const aligned = (a, b, scale) => Math.abs(a - b) <= scale * 1e-5;
+    const entries = tiles.map(grid => {
+      const [nx, nz] = grid.resolution, [x0, z0] = phase.map((v, i) => {
+        const size = i === 0 ? dx : dz, min = grid.bounds.min[i * 2], n = Math.round((min - v) / size);
+        if (!Number.isSafeInteger(n) || !aligned(v + n * size, min, size) ||
+            !aligned(min + grid.resolution[i] * size, grid.bounds.max[i * 2], size))
+          throw new RangeError('Span tiles must share an aligned XZ lattice');
+        return n;
+      });
+      if (!aligned(grid.cell[0], dx, dx) || !aligned(grid.cell[1], dz, dz))
+        throw new RangeError('Span tiles must share the same cell size');
+      return { grid, nx, nz, x0, z0, key: x0 + '/' + z0 };
+    });
+    return { dx, dz, phase, entries };
+  }
+
+  P.verticalSpans = Object.freeze({ create, bake, bakeTiles, layout, isGrid: value => grids.has(value) });
 })(KIT);

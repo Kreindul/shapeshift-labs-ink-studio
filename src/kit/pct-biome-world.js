@@ -48,7 +48,7 @@
   function create({
     height, caves = [], cell = 0.25, chunkCells = 16, verticalCells = [-24, 24], terrainSlope = 1,
     layers = [], project, emit, palette = [0x13232b, 0x435a58, 0x78927a, 0xbdba92, 0xede0b9], materialRamps = {},
-    dependencyHalo = 0, maxSplats = 50000
+    dependencyHalo = 0, maxSplats = 50000, surfaceScatter = 0
   } = {}) {
     if (typeof height !== 'function' || !positive(cell) || cell < 1e-6 || !integer(chunkCells) || chunkCells < 1 ||
         !coordinates(verticalCells, 2, integer) || verticalCells[0] >= verticalCells[1] ||
@@ -58,7 +58,8 @@
         (emit !== undefined && typeof emit !== 'function') || (project !== undefined && typeof project !== 'function') ||
         !Array.isArray(palette) || !palette.length || palette.length > 64 ||
         !Array.from(palette).every(v => integer(v) && v >= 0 && v <= 0xffffff) ||
-        !finite(dependencyHalo) || dependencyHalo < 0 || !integer(maxSplats) || maxSplats < 1)
+        !finite(dependencyHalo) || dependencyHalo < 0 || !integer(maxSplats) || maxSplats < 1 ||
+        !finite(surfaceScatter) || surfaceScatter < 0 || surfaceScatter > 0.35)
       throw new Error('Invalid headless biome world options');
     if (!materialRamps || typeof materialRamps !== 'object' || Array.isArray(materialRamps))
       throw new Error('Brick materials need a map of RGB ramps');
@@ -110,6 +111,22 @@
         return bricks?.stats.sculpted ? (x, y, z) => bricks.distance(x, y, z, base) : base;
       }
       const evaluate = field(heightAt);
+      // Span and graph builds repeatedly sample several heights at the same XZ.
+      function sampledDistance() {
+        const columns = new Map();
+        let size = 0;
+        return field((x, z) => {
+          let column = columns.get(x);
+          if (column?.has(z)) return column.get(z);
+          const y = heightAt(x, z);
+          if (size < 65536) {
+            if (!column) columns.set(x, column = new Map());
+            column.set(z, y);
+            size++;
+          }
+          return y;
+        });
+      }
       function distance(x, y, z) {
         if (![x, y, z].every(finite)) throw new Error('World collision queries need finite XYZ coordinates');
         return evaluate(x, y, z);
@@ -178,8 +195,9 @@
         return freeze({ ok: true, clearance, count, media });
       }
       const frame = Object.freeze({ water, view, time, bricks, ...geometry, traceRoute,
-        bakeSpans: options => P.verticalSpans.bake({ ...options, solid: distance }),
-        traversalGraph: options => P.traversalGraph.create({ ...options, clearance: distance }),
+        bakeSpans: options => P.verticalSpans.bake({ ...options, solid: sampledDistance() }),
+        bakeSpanTiles: options => P.verticalSpans.bakeTiles({ ...options, solid: sampledDistance() }),
+        traversalGraph: options => P.traversalGraph.create({ ...options, clearance: sampledDistance() }),
         traversal: body => P.traversal.create({ ...body, supports, clearance: point => distance(...point) }) });
       frames.set(frame, { field, normalOf });
       return frame;
@@ -215,8 +233,23 @@
       }), ids = [];
       const owned = p => P.spatial.contains(bounds, p) && p[0] < bounds.max[0] && p[2] < bounds.max[2];
       for (let i = 0; i < surface.points.length; i++) {
-        const point = surface.points[i], normal = surface.normals[i];
+        let point = surface.points[i];
+        const normal = surface.normals[i];
         const coord = surface.active[i].key.split('/').map((v, axis) => Number(v) + grid.min[axis]);
+        const id = 'surface/' + coord.join('/');
+        if (surfaceScatter > 0) {
+          const dice = K.grow.dice(hash(id, view.seed));
+          const tangent = V.norm(V.cross(normal, Math.abs(normal[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0]));
+          const bitangent = V.cross(normal, tangent), amount = cell * surfaceScatter;
+          const candidate = V.mad(V.mad(point, tangent, (dice() * 2 - 1) * amount), bitangent, (dice() * 2 - 1) * amount);
+          const slope = (distance(...V.mad(candidate, normal, epsilon)) -
+            distance(...V.mad(candidate, normal, -epsilon))) / (2 * epsilon);
+          const offset = slope > 0.02 ? distance(...candidate) / slope : Infinity;
+          if (Math.abs(offset) <= amount) {
+            const projected = V.mad(candidate, normal, -offset);
+            if (Math.abs(distance(...projected)) <= epsilon * 1.5) point = projected;
+          }
+        }
         const surfaceY = heightAt(point[0], point[2]);
         const shade = Math.max(0, V.dot(normal, sun));
         const painted = bricks && ramps.size ? ramps.get(bricks.attributes(...V.mad(point, normal, -cell * 0.22)).material) : null;
@@ -224,8 +257,8 @@
           const { ramp } = view.materialAt(...point, { surfaceY, time, probe: V.mad(point, normal, cell * 0.22) });
           return ramp[Math.round(shade * (ramp.length - 1))].map(v => Math.round(v * 255));
         })();
-        builder.disc(...point, normal, cell * 0.52, cell * 0.11, color, 1);
-        ids.push('surface/' + coord.join('/'));
+        builder.disc(...point, normal, cell * (0.52 + surfaceScatter * 0.24), cell * 0.11, color, 1);
+        ids.push(id);
       }
       const placements = [];
       const ground = (x, z) => {

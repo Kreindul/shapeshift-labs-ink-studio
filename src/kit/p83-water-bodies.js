@@ -2,7 +2,7 @@
 (function (K) {
   const P = K.procedural;
   const maxAxis = 64, maxBodies = 8;
-  const states = new WeakMap(), sceneStates = new WeakMap();
+  const states = new WeakMap(), sceneStates = new WeakMap(), tileScenes = new WeakMap();
   const number = value => Number.isFinite(value) && Number.isFinite(Math.fround(value));
   const pair = value => Array.isArray(value) && value.length === 2 && number(value[0]) && number(value[1]);
   const unit = value => number(value) && value >= 0 && value <= 1;
@@ -350,5 +350,25 @@
     return result;
   }
 
-  P.waterBodies = Object.freeze({ create, fromShallowWater, fromSpans, scene });
+  function sceneFromSpans(tiles, { previous, optics: look } = {}) {
+    const old = tileScenes.get(previous);
+    if (!Array.isArray(tiles) || tiles.length > 4096 || new Set(tiles).size !== tiles.length ||
+        !Array.from(tiles).every(P.verticalSpans.isGrid) ||
+        (previous !== undefined && !old))
+      throw new TypeError('Expected span grids and an optional previous span water scene');
+    const style = optics(look), key = JSON.stringify(style), cached = old?.key === key ? old.bodies : new Map();
+    const wet = tiles.filter(grid => grid.hasWater || grid.hasNamedAir);
+    if (wet.length > maxBodies) throw new RangeError('A span water scene supports up to eight wet or tagged-air tiles');
+    const bodies = new Map();
+    for (const grid of wet) {
+      const id = 'span/' + grid.bounds.min.join('/');
+      bodies.set(grid, cached.get(grid) ?? fromSpans(grid, { id, optics: style }));
+    }
+    if (old?.key === key && bodies.size === cached.size && wet.every(grid => cached.has(grid))) return previous;
+    const result = scene([...bodies.values()]);
+    tileScenes.set(result, { key, bodies });
+    return result;
+  }
+
+  P.waterBodies = Object.freeze({ create, fromShallowWater, fromSpans, scene, sceneFromSpans });
 })(KIT);

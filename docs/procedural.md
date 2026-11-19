@@ -1385,6 +1385,10 @@ const eyesMedium = environment.mediumAt(...eyePosition);
   Depth is measured to the top of each contiguous water run. The renderer
   highlights a waterline only where air meets the top of the run. All
   intervals in one body share its optical settings.
+- `W.sceneFromSpans(tiles, {previous, optics})` publishes a collection of
+  span tiles. Up to eight tiles with water or named air can enter one scene.
+  A previous scene from this helper retains bodies for unchanged grids. If
+  the set of rendered grids and their optics match, it returns the same scene.
 - `W.scene(bodies, {airPockets: [{id, bounds}, ...]})` accepts up to eight
   axis-aligned XYZ air pockets. Their strict interiors override water
   membership and subtract dry intervals from the WebGL light path. Overlapping
@@ -1417,6 +1421,15 @@ vector or an XYZ function sampled inside each interval. The baker refines sign
 changes between vertical samples. Choose a `step` small enough to sample the
 thinnest feature that must survive, and choose XZ resolution to fit the
 smallest relevant horizontal detail.
+
+`P.verticalSpans.bakeTiles({tiles, solid, previous, dirtyBounds, ...controls})`
+accepts tile descriptions with stable `id`, XYZ `bounds` and XZ
+`resolution`. Supply conservative XYZ `dirtyBounds` covering all changed
+solid or volume samples to retain unchanged grids from `previous`. An empty
+array declares that the fields are unchanged. Sampling controls and explicit
+`volumes` must also match for reuse. Omitting `dirtyBounds` requests a full
+bake. The result's `ids` and `tiles` follow input order, and `work` reports
+solid samples, rebaked tile IDs, grids that actually changed, and removals.
 
 ### Retained biome recipes
 
@@ -1508,7 +1521,7 @@ view.inspect(7, -9, 3, { species: 'glow-moss' });  // cave pool at the same XZ
 ### Headless biome world realization
 
 `P.biomeWorld.create({height, caves, cell, chunkCells, verticalCells,
-terrainSlope, layers, project, emit, palette, materialRamps, dependencyHalo, maxSplats})`
+terrainSlope, layers, project, emit, palette, materialRamps, dependencyHalo, maxSplats, surfaceScatter})`
 realizes a retained biome recipe view against caller-supplied terrain.
 The [headless coast example](../examples/biome-world.js) walks from a ridge
 through a marsh, dives through a flooded passage, and surfaces in an
@@ -1542,6 +1555,10 @@ const trip = frame.traceRoute(coast.itinerary(frame));
   Use the frame's continuous field for precise traversal. Chunk splats
   use stable IDs keyed by world cell or placement. Chunks also expose
   placements, clipped route segments, and bake work counts.
+  Optional `surfaceScatter` takes a fraction of a cell in [0, 0.35].
+  It spreads splat centers in the tangent plane, projects them onto the
+  continuous solid field, and compensates for coverage with wider splats.
+  The world seed and lattice coordinates determine the offsets.
 - Each population layer supplies `{id, height?, habitatOffset?, options?}`.
   Its optional height sampler receives `(x,z,frame)` and selects a support
   or returns `null`. The default uses the remaining surface of the carrier
@@ -1554,8 +1571,9 @@ const trip = frame.traceRoute(coast.itinerary(frame));
   The frame takes its recipe media and air pockets from that snapshot.
   Optional `bricks` supply sparse edits to the solid field and material
   overrides with an entry in `materialRamps`. Each override is an array of
-  packed RGB colors. `frame.bakeSpans(options)` samples the same solid field,
-  and `frame.traversalGraph(options)` uses it for clearance checks.
+  packed RGB colors. `frame.bakeSpans(options)` and
+  `frame.bakeSpanTiles(options)` sample the same solid field.
+  `frame.traversalGraph(options)` uses it for clearance checks.
   `update` accepts the full desired index set and publishes a patch of
   replaced chunks and removed keys. It compares retained recipe edits,
   old and new route spans, water changes, and changed bricks, then checks the dependency
@@ -1604,13 +1622,21 @@ brick data and remain readable.
 
 Pass aligned, nonoverlapping XZ span tiles to
 `P.traversalGraph.create({tiles, radius, height, stepUp, maxDrop, maxClimb,
-canClimb, swimStep, clearance, origin, maxNodes, maxChecks})`. The graph
+canClimb, swimStep, clearance, origin, maxNodes, maxChecks, previous, dirtyBounds})`. The graph
 samples capsule-sized standing and swimming positions and checks paths across
 neighboring columns and tile seams. A supplied `clearance(x,y,z)` SDF checks
 the capsule axis with its radius. Without it the graph uses the occupied
 spans and an enclosing box. `canClimb(from,to)` authorizes climbs upward when
 the height change exceeds a step. Drops are directed. Use a common XZ
 `origin` for stable column IDs in streamed regions.
+
+Pass the previous graph to retain nodes and links for unchanged tiles.
+Changed span grids and added or removed neighbors refresh the affected
+boundary links. If the clearance field is a new revision, supply
+`dirtyBounds` covering all of its changes. The graph expands these bounds
+by the capsule radius and link reach in XZ. A new clearance function without
+dirty bounds rebuilds the graph. `graph.work` counts clearance and graph
+checks and lists rebuilt node tiles and relinked tiles.
 
 `graph.route(start,end,{allow, maxSnap, weights})` accepts node IDs or XYZ
 agent centers and returns the ordered nodes, movement edges, waypoint
@@ -1626,6 +1652,43 @@ const ridge = graph.nodes.find(node => node.supported && node.medium === 'air');
 const chamber = graph.nodes.find(node => node.mediumId === 'chamber-air');
 const route = graph.route(ridge.id, chamber.id);
 ```
+
+### Connected flooding
+
+`P.spanFlood.create({tiles, sources, previous, origin, opening, maxChecks})`
+fills aligned **dry** solid/air span grids from explicit sources. Each source
+supplies an `id`, an XYZ `point` below its `level`, and optional XYZ
+`current`. Water passes between adjacent columns where their free intervals
+overlap below that level by at least `opening` (default 0.02 world units).
+An unreachable or above-head sill blocks the fill. If reservoirs connect,
+the higher head wins, with source ID breaking ties. This is a fixed-head
+occupancy solver. Flow rates, pressure and time evolution belong to the host.
+
+The result retains unchanged geometry topology and keeps unchanged filled
+grids by identity. Source reachability is evaluated through the connected
+wet intervals each revision. `work` reports topology rebuilds, wet relabels,
+and visited intervals. Use the resulting tiles for both the traversal graph
+and `waterBodies.sceneFromSpans` so gameplay and WebGL publish the same water.
+
+The [headless flood valley](../examples/biome-flood.js) has a surface lake
+above a separate underground reservoir. One sparse brush opens a passage at a
+chunk boundary. The lower route floods, and a dry route over the sill remains
+walkable between the same endpoints.
+
+```js
+const { KIT } = require('.').load();
+const valley = require('./examples/biome-flood')(KIT);
+const before = await valley.build();
+const after = await valley.build(valley.brush(), { previous: before });
+const flooded = after.graph.changesFrom(before.graph).filter(change => change.reason === 'flooded');
+```
+
+Run `node scripts/benchmark-biome-flood.js` from the checkout. It reports
+CPU time and work counts for rebuilding the same post-cut world with local
+updates and from scratch. It alternates order after a warmup pair, checks the
+two outcomes for equality, and reports median and p95 times. Setup, brush
+authoring, and WebGL drawing are outside the timed rebuilds.
+`--runs=N` changes the sample count and `--json` emits raw timing samples.
 
 ### Stable spacing and finite Poisson sampling
 
