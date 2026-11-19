@@ -2670,6 +2670,12 @@ must leave positive backing thickness. Use `distance([x, y, z])` for
 inside/outside queries, `mesh(metadata)` for a closed surface, and
 `sample(spacing, emit)` for points on the same surface.
 
+Use `mesh(metadata, surfaces)` to override metadata by face. The keys are
+`front`, `back`, `outer-wall`, `reveal`, and `recess-back`. The reveal forms
+the sides of the recess between the front and its backing. For an analytic
+renderer, `surfaceAt([x, y, z])` identifies the nearest face with the same keys.
+The caps take precedence at shared edges.
+
 Pass `center: null` to triangulate the caps of arbitrary simple nested
 rings. The front cap has the recess ring as a hole. The recess and rear
 caps share their boundary vertices with the side faces. This mode

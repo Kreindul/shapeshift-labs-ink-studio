@@ -122,26 +122,26 @@
   function cappedRings(outer,inner,back,front,floor) {
     let frontCap,backCap,insideCap;
     const triangulate=P.geometry.triangulatePolygon;
-    function cap(triangle,mesh,z,reverse=false) {
+    function cap(triangle,mesh,z,surface,reverse=false) {
       for(const indices of mesh.triangles){
         const [a,b,c]=indices.map(i=>[...mesh.points[i],z]);
-        triangle(a,reverse?c:b,reverse?b:c);
+        triangle(a,reverse?c:b,reverse?b:c,surface);
       }
     }
     return function faces(triangle,quad) {
       frontCap||=triangulate([outer,inner]);
       backCap||=triangulate([outer]);
       insideCap||=triangulate([inner]);
-      cap(triangle,frontCap,front);
-      cap(triangle,backCap,back,true);
-      cap(triangle,insideCap,floor);
+      cap(triangle,frontCap,front,'front');
+      cap(triangle,backCap,back,'back',true);
+      cap(triangle,insideCap,floor,'recess-back');
       for(const [i,a] of outer.entries()){
         const b=outer[(i+1)%outer.length];
-        quad([...a,front],[...a,back],[...b,back],[...b,front]);
+        quad([...a,front],[...a,back],[...b,back],[...b,front],'outer-wall');
       }
       for(const [i,a] of inner.entries()){
         const b=inner[(i+1)%inner.length];
-        quad([...a,front],[...b,front],[...b,floor],[...a,floor]);
+        quad([...a,front],[...b,front],[...b,floor],[...a,floor],'reveal');
       }
     };
   }
@@ -256,23 +256,38 @@
       return Math.max(exterior(u, v), back - z, z - front, Math.min(-cavity(u, v), z - floor));
     }
 
+    function surfaceAt([x, y, z]) {
+      const side=exterior(x-pivot[0],y-pivot[1]),hole=cavity(x-pivot[0],y-pivot[1]),
+        outside=Math.max(0,side),frontGap=z-front,backGap=back-z,recessGap=floor-z;
+      // Compare distances to the bounded faces. At shared edges, caps
+      // win ties so a side finish never extends onto a planar face.
+      return [
+        ['front',frontGap**2+Math.max(outside,-hole)**2],
+        ['back',backGap**2+outside**2],
+        ['recess-back',recessGap**2+Math.max(0,hole)**2],
+        ['outer-wall',side**2+Math.max(0,frontGap,backGap)**2],
+        ['reveal',hole**2+Math.max(0,frontGap,recessGap)**2]
+      ].reduce((best,face)=>face[1]<best[1]?face:best)[0];
+    }
+
     function radialFaces(triangle, quad) {
       for (const [i, [a, b]] of bands.entries()) {
         const [c, d] = bands[(i + 1) % bands.length];
         const oa = [...a, front], oc = [...c, front], ib = [...b, front], id = [...d, front];
         const ba = [...a, back], bc = [...c, back], fb = [...b, floor], fd = [...d, floor];
-        quad(oa, oc, id, ib);
-        quad(oa, ba, bc, oc);
-        quad(ib, id, fd, fb);
-        triangle([...pivot, back], bc, ba);
-        triangle([...pivot, floor], fb, fd);
+        quad(oa, oc, id, ib, 'front');
+        quad(oa, ba, bc, oc, 'outer-wall');
+        quad(ib, id, fd, fb, 'reveal');
+        triangle([...pivot, back], bc, ba, 'back');
+        triangle([...pivot, floor], fb, fd, 'recess-back');
       }
     }
     const faces=general?cappedRings(outer,inner,back,front,floor):radialFaces;
-    function mesh(meta) {
+    function mesh(meta, surfaces) {
       const builder = P.geometry.builder();
-      faces((a, b, c) => builder.triangle(a, b, c, meta),
-        (a, b, c, d) => builder.quad(a, b, c, d, meta));
+      const overrides=surfaces&&Object.fromEntries(Object.entries(surfaces).map(([key,value])=>[key,{...meta,...value}]));
+      faces((a,b,c,key)=>builder.triangle(a,b,c,overrides?.[key]??meta),
+        (a,b,c,d,key)=>builder.quad(a,b,c,d,overrides?.[key]??meta));
       return builder.finish();
     }
     function sample(spacing, emit) {
@@ -290,7 +305,7 @@
       }
       faces(triangle, (a, b, c, d) => { triangle(a, b, c); triangle(a, c, d); });
     }
-    return Object.freeze({ bounds: P.data.freeze(bounds), distance, mesh, sample });
+    return Object.freeze({ bounds: P.data.freeze(bounds), distance, surfaceAt, mesh, sample });
   }
 
   P.geometry.recessedProfile = recessedProfile;

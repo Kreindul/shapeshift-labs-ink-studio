@@ -62,6 +62,33 @@ test('recess profiles reject crossed boundaries, an invalid center and insuffici
     assert.throws(() => P.geometry.recessedProfile({...spec,...patch}), /profile|Recess/i);
 });
 
+test('a blind recess exposes five independently finishable surfaces without splitting its solid', () => {
+  const outline=[[-2,-2],[2,-2],[2,2],[-2,2]],recess=[[-1,-1],[1,-1],[1,1],[-1,1]];
+  for(const center of [[0,0],null]){
+    const shape=P.geometry.recessedProfile({outline,recess,span:[-1,0],inset:.6,center});
+    const meta={owner:'solid',material:'stone',surface:'shell'};
+    const finish=Object.fromEntries(['front','back','recess-back','outer-wall','reveal']
+      .map(surface=>[surface,{surface,material:surface}]));
+    const mesh=shape.mesh(meta,finish),plain=shape.mesh(meta);
+    assert.deepEqual(mesh.positions,plain.positions);
+    assert.deepEqual(mesh.normals,plain.normals);
+    assert.equal(KIT.mesh.info(P.geometry.toKitMesh(mesh,()=>[.3,.5,.7])).open,0);
+    assert.deepEqual(new Set(mesh.groups.map(g=>g.surface)),new Set(Object.keys(finish)));
+    for(const group of mesh.groups){
+      assert.equal(group.owner,'solid');
+      assert.equal(group.material,group.surface);
+      for(let i=group.start;i<group.start+group.count;i+=3){
+        const point=[0,1,2].map(axis=>
+          (mesh.positions[i*3+axis]+mesh.positions[(i+1)*3+axis]+mesh.positions[(i+2)*3+axis])/3);
+        assert.equal(shape.surfaceAt(point),group.surface);
+        assert(Math.abs(shape.distance(point))<1e-7);
+      }
+    }
+    assert.equal(shape.surfaceAt([1,.3,0]),'front');
+    assert.equal(shape.surfaceAt([1,.3,-.6]),'recess-back');
+  }
+});
+
 test('a general recess produces a closed cap inside an outline with no radial center', () => {
   const outline=[[-2,-2],[2,-2],[2,-1],[-.4,-1],[-.4,1],[2,1],[2,2],[-2,2]],
     recess=[[-1.5,-.5],[-.9,-.5],[-.9,.5],[-1.5,.5]],span=[-.95,0],inset=.4;
