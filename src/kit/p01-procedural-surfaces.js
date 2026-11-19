@@ -60,11 +60,15 @@
     const normal = V.norm(V.cross(d.u, d.v)),
       tangent = V.norm(d.u),
       bitangent = V.norm(d.v);
-    function sample(at) {
+    function planePoint(at) {
       if (!Array.isArray(at) || at.length !== 2 || !at.every(Number.isFinite))
         throw new Error('Surface coordinates must be two finite numbers');
+      return V.add(d.origin, V.add(V.mul(d.u, at[0]), V.mul(d.v, at[1])));
+    }
+    const samplePointNormal = at => ({ p: planePoint(at), n: normal.slice() });
+    function sample(at) {
       return {
-        p: V.add(d.origin, V.add(V.mul(d.u, at[0]), V.mul(d.v, at[1]))),
+        p: planePoint(at),
         n: normal.slice(),
         tangent: tangent.slice(),
         bitangent: bitangent.slice(),
@@ -137,6 +141,8 @@
       data: freeze(d),
       bounds: freeze(b),
       sample,
+      samplePointNormal,
+      planePoint,
       project,
       closest,
       raycast
@@ -304,6 +310,8 @@
     const inverse = M.inv(pose.R), normalMatrix = M.tr(inverse);
     const worldNormal = n => V.norm(M.app(normalMatrix, n));
     const unpoint = p => M.app(inverse, V.sub(p, pose.t));
+    const planePoint = surface.planePoint && (at => point(pose, surface.planePoint(at)));
+    const planeNormal = planePoint && worldNormal(surface.sample([0, 0]).n);
     function sample(at) {
       const s = surface.sample(at);
       return {
@@ -315,6 +323,7 @@
       };
     }
     function samplePointNormal(at) {
+      if (planePoint) return { p: planePoint(at), n: planeNormal.slice() };
       const s = surface.samplePointNormal ? surface.samplePointNormal(at) : surface.sample(at);
       return { p: point(pose, s.p), n: worldNormal(s.n) };
     }
@@ -405,6 +414,7 @@
       bounds: freeze(transformBounds(pose, surface.bounds)),
       sample,
       samplePointNormal,
+      ...(planePoint ? { planePoint } : {}),
       project,
       closest,
       raycast

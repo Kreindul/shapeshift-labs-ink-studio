@@ -19,6 +19,23 @@ test('affine carriers preserve attachment coordinates, normals and ray distance'
   assert.equal(carrier.periodicU, true);
 });
 
+test('planar position and normal samples agree through chained affine charts', () => {
+  const plane = P.surface.plane({ id: 'facet', origin: [1, 0, 2], u: [2, 0, 1], v: [1, 4, 0] });
+  const transformed = P.surface.transform(plane, P.transforms.local({
+    position: [2, 1, -1], rotation: [.1, .3, .4], scale: [-2, 1, .5]
+  }));
+  const chained = P.surface.transform(transformed, P.transforms.local({ rotation: .27, scale: [1, 3, .8] }));
+  for (const chart of [plane, transformed, chained]) {
+    for (const at of [[0, 0], [.4, .6], [-.25, 1.2]]) {
+      const { p, n } = chart.sample(at), fast = chart.samplePointNormal(at);
+      assert.deepEqual(fast, { p, n });
+      assert.deepEqual(chart.planePoint(at), p);
+      fast.n[0] = 99;
+      assert.deepEqual(chart.samplePointNormal(at).n, n);
+    }
+  }
+});
+
 test('convex clipping creates a material-tagged cap and feeds the existing mesh tooling', () => {
   const box = P.pieces.box([0, 0, 0], [1, 1, 1], [1, 0, 0, 0, 1, 0, 0, 0, 1], { owner: 'block', material: 'body' });
   const cut = P.geometry.clipConvex(box.mesh, [{ normal: [1, 0, 0], offset: 0.21 }], { material: 'cut' });

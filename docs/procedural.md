@@ -2181,9 +2181,11 @@ the horizontal mask determines the exact result.
 Pass the cheaper field first. If its value is already at or below the floor,
 the second field cannot change the result.
 
-Cylindrical charts and affine-transformed charts expose
+Planar, cylindrical and affine-transformed charts expose
 `samplePointNormal(uv)` for callers that need only the position and normal
-from `sample(uv)`. Transformed charts reuse the matrix for normal sampling.
+from `sample(uv)`. Transformed planes reuse their constant world normal,
+including when multiple transforms are applied. A planar chart also
+provides `planePoint(uv)` when a caller only needs the position.
 Context adapters can supply the same optional method on their own charts.
 
 Pass a world-space `lowerBound(x, y, z, limit)` callback to a sculpt
