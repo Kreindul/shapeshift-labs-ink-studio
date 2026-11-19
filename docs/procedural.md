@@ -934,7 +934,8 @@ swept detail whose bounds fit the region and the safe inset.
 `P.routeStations.remap(before, after, edits)` returns a function mapping an old
 normalized route station to a new one. Supply ordered `{key,length}` sections
 and optional `{from,to,fromRange,toRange}` interval mappings. Ranges default to
-`[0,1]`. Dividing one old range among new sections models a split, and
+`[0,1]`. Use a descending `toRange` to map onto a reversed section.
+Dividing one old range among new sections models a split, and
 dividing one new section among old spans models a join. Sections whose keys
 persist keep their local fraction. An empty or removed section with no
 target yields `null`, so an attachment host can choose its geometric fallback.

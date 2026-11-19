@@ -3,6 +3,7 @@
   const P = K.procedural || K.authoring;
   const unit = v => Number.isFinite(v) && v >= 0 && v <= 1;
   const interval = v => Array.isArray(v) && v.length === 2 && v.every(unit) && v[0] < v[1];
+  const destination = v => Array.isArray(v) && v.length === 2 && v.every(unit) && v[0] !== v[1];
   const lerp = (a,b,t) => a + (b-a)*t;
 
   function index(sections) {
@@ -37,7 +38,7 @@
   function remap(before, after, edits = []) {
     const old = index(before), next = index(after), ranges = new Map();
     for (const {from,to,fromRange=[0,1],toRange=[0,1]} of edits) {
-      if (!old.byKey.has(from) || !next.byKey.has(to) || !interval(fromRange) || !interval(toRange))
+      if (!old.byKey.has(from) || !next.byKey.has(to) || !interval(fromRange) || !destination(toRange))
         throw Error('Invalid route station mapping');
       const pieces = ranges.get(from) || [];
       pieces.push({to,fromRange:fromRange.slice(),toRange:toRange.slice()});

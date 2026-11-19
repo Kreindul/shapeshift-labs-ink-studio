@@ -37,3 +37,18 @@ test('two source sections can map to one join and removed sections give callers 
     {from:'left',to:'join',fromRange:[.4,1]}
   ]),/overlap/);
 });
+
+test('destination intervals can run in reverse without changing source order',()=>{
+  const before=[part('south',3),part('north',2)];
+  const after=[part('northward',4),part('southward',9)];
+  const map=routeStations.remap(before,after,[
+    {from:'south',to:'southward',toRange:[1,0]},
+    {from:'north',to:'northward',toRange:[1,0]}
+  ]);
+  near(map(0),1);
+  near(map(.3),8.5/13);
+  near(map(.6),4/13);
+  near(map(.8),2/13);
+  near(map(1),0);
+  assert.throws(()=>routeStations.remap(before,after,[{from:'south',to:'southward',toRange:[.5,.5]}]),/mapping/);
+});
