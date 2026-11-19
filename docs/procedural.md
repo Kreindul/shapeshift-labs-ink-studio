@@ -866,6 +866,23 @@ can be a segment or point. A missing fit returns `null`. The plane
 constraints cover the whole swept section along the leg. Apply additional
 solid and terrain checks for the rest of the scene.
 
+`P.routes.sectionHeightBands(path, options)` samples a planar guide made from
+XZ points. Supply a section with `halfWidth`, `below` and `above`, or supply
+`sectionBands`. The callback `clearHeights(x, z, low, high)` receives one
+part's vertical offsets at a point in the footprint. Return the permitted
+interval for the route's center height, or `null` when the point adds no
+constraint. For an open vertical interval `[floor, ceiling]`, return
+`[floor - low, ceiling - high]`. Either end can be unbounded.
+The function intersects these intervals with `minHeight` and `maxHeight`,
+using the same angular footprint as `sweepPath` at bends.
+
+Set `spacing` and bound the work with `maxStations` and `maxSamples`.
+An `ok` result includes the sampled `stations` and the number of probes.
+Every station has an XZ `point` and is ready for `fitHeightBands`, with the
+original guide points marked `keep`. Contradictions return `blocked` and
+an exhausted limit returns `budget`. Verify the finished 3D route with
+the clearance field used for the final sweep.
+
 `P.routes.fitHeightBands(samples, {maxGrade, maxPoints})` fits a grade-limited
 height profile through ordered stations. Each record supplies `at`, `min`,
 `max`, and optional `preferred` height and `keep` flag. A fixed-height

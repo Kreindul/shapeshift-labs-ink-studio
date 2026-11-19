@@ -267,6 +267,34 @@ test('banded joins reserve rail height on the outside corner only when that side
   assert(hit.point[0]>.1&&hit.point[2]<-.1&&hit.point[1]>.58);
 });
 
+test('section height bands climb a curved guide under a ceiling that only clears one rail side',()=>{
+  const path=[[-1,0],[0,0],[0,1]],deck={lateral:[-.4,.4],vertical:[-.12,.04]},
+    inside={lateral:[.3,.4],vertical:[0,.64]},outside={lateral:[-.4,-.3],vertical:[0,.64]},
+    ground=(x,z)=>.2+Math.max(0,.24-Math.hypot(x,z)*.42),
+    ceiling=(x,z)=>Math.hypot(x-.24,z+.24)<.15?.76:1.28,
+    options={minHeight:.2,maxHeight:.65,spacing:.045,
+      clearHeights:(x,z,low,high)=>[ground(x,z)-low,ceiling(x,z)-high]};
+  const fit=routes.sectionHeightBands(path,{...options,sectionBands:[deck,inside]});
+  assert.equal(fit.status,'ok');
+  assert.deepEqual(fit.stations.filter(s=>s.keep).map(s=>s.point),path);
+  assert(fit.stations.find(s=>s.at===1).min>.54);
+  const profile=routes.fitHeightBands(fit.stations,{maxGrade:.65,maxPoints:12});
+  assert(profile);
+  const points=profile.indices.map((index,i)=>{
+    const [x,z]=fit.stations[index].point;
+    return [x,profile.elevations[i],z];
+  });
+  assert.equal(routes.sweepPath(points,{spacing:.045,maxSamples:24000,sectionBands:[deck,inside],
+    clearance:([x,y,z])=>Math.min(y-ground(x,z)+.015,ceiling(x,z)-y)}).status,'ok');
+  assert.equal(routes.sectionHeightBands(path,{...options,sectionBands:[deck,inside,outside]}).status,'blocked');
+  assert.equal(routes.sectionHeightBands(path.slice().reverse(),{...options,sectionBands:[deck,outside]}).status,'ok');
+  assert.equal(routes.sectionHeightBands(path.slice().reverse(),{...options,sectionBands:[deck,inside]}).status,'blocked');
+  assert.deepEqual(routes.sectionHeightBands(path,{...options,sectionBands:[deck,inside],maxSamples:10}),
+    {status:'budget',samples:10});
+  assert.deepEqual(routes.sectionHeightBands(path,{...options,sectionBands:[deck,inside],maxStations:10}),
+    {status:'budget',samples:0});
+});
+
 test('certified crossings can restrict graph traversal direction in plan and elevation',()=>{
   const ring=[[-.8,-4],[.8,-4],[.8,4],[-.8,4]],a=[-2,.45,0],b=[2,.45,0],
     link={start:[-1,0],end:[1,0],through:0,direction:'forward'};

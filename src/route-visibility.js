@@ -911,35 +911,109 @@ const RouteVisibility = (() => {
     return { status: 'ok', samples };
   }
 
-  function sweepBandJoin(point,angle,turn,bands,{spacing,minClearance,clearance,maxSamples}){
-    let samples=0;
+  function* joinFootprint(x,z,angle,turn,bands,spacing,rounded){
+    if(rounded){
+      const {lateral:[,radius],vertical:[low,high]}=bands[0],rings=Math.ceil(radius/spacing);
+      if(!rings)return;
+      for(let ring=0;ring<=rings;ring++){
+        const r=radius*ring/rings,steps=ring?Math.ceil(2*Math.PI*r/spacing):1;
+        for(let i=0;i<steps;i++){
+          const a=2*Math.PI*i/steps;
+          yield [x+r*Math.cos(a),z+r*Math.sin(a),low,high];
+        }
+      }
+      return;
+    }
     for(const {lateral:[left,right],vertical:[low,high]} of bands){
-      const layers=Math.ceil((high-low)/spacing);
       for(const sign of [-1,1]){
         const near=Math.max(0,sign===1?left:-right),far=sign===1?right:-left;
         if(far<=0)continue;
         const angles=Math.max(1,Math.ceil(Math.abs(turn)*far/spacing));
         for(let i=0;i<=angles;i++){
           const a=turn*i/angles,theta=angle+a+(sign<0?Math.PI:0);
-          // Cover the circular sweep and the straight bevel chord. Miter
-          // portions on the inside overlap the existing leg cross sections.
+          // Cover the circular sweep and the straight bevel chord.
           const ratio=Math.cos(turn/2)/Math.max(EPS,Math.cos(a-turn/2)),
-            inner=near*Math.max(0,Math.min(1,ratio)),radial=Math.ceil((far-inner)/spacing);
-          if((layers+1)*(radial+1)>maxSamples-samples)return {status:'budget',samples};
+            inner=near*clamp(ratio),radial=Math.ceil((far-inner)/spacing);
           for(let j=0;j<=radial;j++){
-            const r=radial?inner+(far-inner)*j/radial:inner,
-              x=point[0]+r*Math.cos(theta),z=point[2]+r*Math.sin(theta);
-            for(let k=0;k<=layers;k++){
-              const q=[x,point[1]+(layers?low+(high-low)*k/layers:low),z],d=clearance(q);
-              samples++;
-              if(typeof d!=='number'||Number.isNaN(d))throw Error('A clearance field must return a signed distance');
-              if(d<minClearance)return {status:'blocked',samples,point:q,clearance:d};
-            }
+            const r=radial?inner+(far-inner)*j/radial:inner;
+            yield [x+r*Math.cos(theta),z+r*Math.sin(theta),low,high];
           }
         }
       }
     }
-    return {status:'ok',samples};
+  }
+
+  function turnBetween(dx,dz,ex,ez){
+    const cross=dx*ez-dz*ex,dot=dx*ex+dz*ez;
+    return Math.abs(cross)<=EPS*Math.hypot(dx,dz)*Math.hypot(ex,ez)&&dot>0?0:Math.atan2(cross,dot);
+  }
+
+  // Intersect the permitted center heights for each occupied part at every
+  // station. Endpoints and bends are retained when fitting a grade afterwards.
+  function sectionHeightBands(path,{
+    spacing=.12,minHeight,maxHeight,clearHeights,maxStations=256,maxSamples=10000,...section
+  }={}){
+    if(!Array.isArray(path)||path.length<2||path.length>4097||!Array.from(path).every(q=>point(q,2))||
+      !point([minHeight,maxHeight],2)||minHeight>maxHeight||!Number.isFinite(spacing)||spacing<=EPS||
+      typeof clearHeights!=='function'||!limit(maxStations,2,4096)||!limit(maxSamples,1,1000000))
+      throw Error('Section height bands need a finite planar guide, height range, spacing and clearance callback');
+    const bands=clearanceBands(section),rounded=section.sectionBands===undefined,spans=[];
+    let count=1,distance=0,samples=0;
+    for(let i=1;i<path.length;i++){
+      const [x,z]=path[i-1],dx=path[i][0]-x,dz=path[i][1]-z,run=Math.hypot(dx,dz);
+      if(run<=EPS)throw Error('Section height bands need nonzero horizontal spans');
+      const rows=Math.ceil(run/spacing);
+      spans.push({dx,dz,run,rows});
+      count+=rows;
+    }
+    if(count>maxStations)return {status:'budget',samples};
+    const stations=[];
+    function* crossSection(x,z,{dx,dz,run}){
+      for(const {lateral:[left,right],vertical:[low,high]} of bands){
+        const columns=Math.ceil((right-left)/spacing);
+        for(let i=0;i<=columns;i++){
+          const u=columns?left+(right-left)*i/columns:left;
+          yield [x-dz/run*u,z+dx/run*u,low,high];
+        }
+      }
+    }
+    function* footprint(x,z,span,next){
+      yield* crossSection(x,z,span);
+      if(!next)return;
+      const turn=turnBetween(span.dx,span.dz,next.dx,next.dz);
+      if(!turn)return;
+      yield* crossSection(x,z,next);
+      yield* joinFootprint(x,z,Math.atan2(span.dx,-span.dz),turn,bands,spacing,rounded);
+    }
+    function station(x,z,at,keep,span,next){
+      let min=minHeight,max=maxHeight;
+      for(const [a,b,low,high] of footprint(x,z,span,next)){
+        if(samples===maxSamples)return 'budget';
+        const range=clearHeights(a,b,low,high);
+        samples++;
+        if(range===null)continue;
+        if(!Array.isArray(range)||range.length!==2||
+          typeof range[0]!=='number'||typeof range[1]!=='number'||Number.isNaN(range[0])||Number.isNaN(range[1]))
+          throw Error('Section clearance must return a center height interval or null');
+        min=Math.max(min,range[0]);
+        max=Math.min(max,range[1]);
+        if(min>max)return 'blocked';
+      }
+      stations.push({point:[x,z],at,min,max,keep});
+      return 'ok';
+    }
+    let status=station(...path[0],0,true,spans[0]);
+    if(status!=='ok')return {status,samples};
+    for(const [i,span] of spans.entries()){
+      const [x,z]=path[i],{dx,dz,run,rows}=span;
+      for(let j=1;j<=rows;j++){
+        const t=j/rows,keep=j===rows,point=keep?path[i+1]:[x+dx*t,z+dz*t];
+        status=station(...point,distance+run*t,keep,span,keep?spans[i+1]:null);
+        if(status!=='ok')return {status,samples};
+      }
+      distance+=run;
+    }
+    return {status:'ok',samples,stations};
   }
 
   function sweepPath(points, options = {}) {
@@ -950,45 +1024,32 @@ const RouteVisibility = (() => {
     for (let i=1;i<points.length;i++)
       if (Math.hypot(points[i][0]-points[i-1][0],points[i][2]-points[i-1][2]) <= EPS)
         throw new Error('Swept routes need a nonzero horizontal run');
-    const {halfWidth,below,above,sectionBands,spacing=.12,minClearance=0,clearance,maxSamples=10000}=options;
-    const bands=sectionBands===undefined?null:clearanceBands(options);
+    const {halfWidth,sectionBands,spacing=.12,minClearance=0,clearance,maxSamples=10000}=options;
+    const bands=clearanceBands(options),rounded=sectionBands===undefined;
     let samples=0;
-    for (let i=1;i<points.length;i++) {
-      if (i>1&&samples===maxSamples) return {status:'budget',samples};
+    for(let i=1;i<points.length;i++){
+      if(i>1&&samples===maxSamples)return {status:'budget',samples};
       const span=sweep(points[i-1],points[i],{...options,maxSamples:maxSamples-samples});
       samples+=span.samples;
-      if (span.status!=='ok') return {...span,samples};
-      if (i===points.length-1||!halfWidth&&!bands) continue;
+      if(span.status!=='ok')return {...span,samples};
+      if(i===points.length-1||rounded&&!halfWidth)continue;
       const [a,b,c]=[points[i-1],points[i],points[i+1]],dx=b[0]-a[0],dz=b[2]-a[2],
-        ex=c[0]-b[0],ez=c[2]-b[2];
-      if (Math.abs(dx*ez-dz*ex)<=EPS*Math.hypot(dx,dz)*Math.hypot(ex,ez)&&dx*ex+dz*ez>0) continue;
-      if(bands){
-        const angle=Math.atan2(dx,-dz),turn=Math.atan2(dx*ez-dz*ex,dx*ex+dz*ez);
-        const join=sweepBandJoin(b,angle,turn,bands,{spacing,minClearance,clearance,maxSamples:maxSamples-samples});
-        samples+=join.samples;
-        if(join.status!=='ok')return {...join,samples};
-        continue;
-      }
-      // A rounded join includes the sector between the two leg cross-sections.
-      // Probe the full disk, including its boundary, at each join.
-      const rings=Math.ceil(halfWidth/spacing),layers=Math.ceil((below+above)/spacing);
-      for (let ring=0;ring<=rings;ring++) {
-        const radius=halfWidth*ring/rings,steps=ring?Math.ceil(2*Math.PI*radius/spacing):1;
-        if(steps*(layers+1)>maxSamples-samples) return {status:'budget',samples};
-        for(let j=0;j<steps;j++){
-          const angle=2*Math.PI*j/steps,x=b[0]+radius*Math.cos(angle),z=b[2]+radius*Math.sin(angle);
-          for(let k=0;k<=layers;k++){
-            const q=[x,b[1]+(layers?-below+(below+above)*k/layers:0),z],d=clearance(q);
-            samples++;
-            if(typeof d!=='number'||Number.isNaN(d)) throw new Error('A clearance field must return a signed distance');
-            if(d<minClearance) return {status:'blocked',samples,point:q,clearance:d};
-          }
+        ex=c[0]-b[0],ez=c[2]-b[2],turn=turnBetween(dx,dz,ex,ez);
+      if(!turn)continue;
+      for(const [x,z,low,high] of joinFootprint(b[0],b[2],Math.atan2(dx,-dz),turn,bands,spacing,rounded)){
+        const layers=Math.ceil((high-low)/spacing);
+        if(layers+1>maxSamples-samples)return {status:'budget',samples};
+        for(let k=0;k<=layers;k++){
+          const q=[x,b[1]+(layers?low+(high-low)*k/layers:low),z],d=clearance(q);
+          samples++;
+          if(typeof d!=='number'||Number.isNaN(d))throw Error('A clearance field must return a signed distance');
+          if(d<minClearance)return {status:'blocked',samples,point:q,clearance:d};
         }
       }
     }
     return {status:'ok',samples};
   }
 
-  return Object.freeze({ find, convexFootprint, sweep, sweepPath, elevationProfile, guideElevation, guideVisibility, prismVisibility, profileSection, elevationFrame });
+  return Object.freeze({ find, convexFootprint, sweep, sweepPath, elevationProfile, guideElevation, guideVisibility, prismVisibility, profileSection, sectionHeightBands, elevationFrame });
 })();
 if (typeof module !== 'undefined') module.exports = RouteVisibility;
