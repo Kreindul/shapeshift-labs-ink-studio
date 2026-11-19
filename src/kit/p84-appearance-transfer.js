@@ -8,8 +8,8 @@
   const equal=(a,b)=>Object.is(a,b)||JSON.stringify(a)===JSON.stringify(b);
   const format='ink-studio/appearance-sample/1';
 
-  function create({describe,compatible=(sample,target)=>sample.family===target.family} = {}){
-    if(typeof describe!=='function'||typeof compatible!=='function')
+  function create({describe,compatible=(sample,target)=>sample.family===target.family,validate} = {}){
+    if(typeof describe!=='function'||typeof compatible!=='function'||validate!==undefined&&typeof validate!=='function')
       throw Error('Appearance transfer needs a binding and compatibility policy');
 
     function binding(entity,source,sample){
@@ -55,10 +55,11 @@
         const target=binding(e,s,sample);
         if(!target||!compatible(sample,target,e,s)){skipped.push({id,reason:'incompatible'});continue;}
         const paths=new Map();
-        for(const [key,{path,value,encode}] of target.entries){
+        for(const [key,slot] of target.entries){
           if(!Object.hasOwn(sample.values,key))continue;
+          const {path,value,encode}=slot;
           const supplied=sample.values[key],next=encode?clone(encode(clone(supplied))):supplied,
-            encoded=JSON.stringify(path),same=equal(value,supplied);
+            encoded=JSON.stringify(path),same=Object.hasOwn(slot,'stored')?equal(slot.stored,next):equal(value,supplied);
           if(paths.has(encoded)){
             if(!equal(paths.get(encoded).next,next))throw Error('Appearance slots conflict on '+id);
             paths.get(encoded).same&&=same;
@@ -79,7 +80,9 @@
         if(Object.keys(patch).length)edits.push({id,patch});
         else skipped.push({id,reason:'unchanged'});
       }
-      return freeze({edits,skipped});
+      const result=freeze({edits,skipped});
+      if(edits.length)validate?.(s,result.edits,sample);
+      return result;
     }
     function apply(doc,ids,sample,{label='Transfer appearance'} = {}){
       const result=plan(doc,ids,sample);

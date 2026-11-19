@@ -83,3 +83,28 @@ test('slot encoders write receiver-specific values without changing the sampled 
   assert.throws(()=>broken.apply(doc,['receiver','another'],sample),/Invalid receiver/);
   assert.equal(doc.serialize(),before);
 });
+
+test('encoded no-ops and caller validation use the complete plan before any target is written',()=>{
+  const {doc}=fixture(),before=doc.serialize();
+  let inspected=0;
+  const api=A.appearanceTransfer.create({
+    describe(e){
+      return {family:'panel',slots:{role:{value:e.parameters.role,stored:e.parameters.role,
+        path:['parameters','role'],encode:role=>role==='wood'?'paint':role}}};
+    },
+    validate(source,edits){
+      inspected++;
+      assert.equal(source.entities.another.parameters.role,'wood');
+      assert.deepEqual(edits.map(e=>e.id),['another']);
+      throw Error('The receiver cannot realize the complete style');
+    }
+  });
+  const sample=api.capture(doc,'source');
+  assert.equal(api.apply(doc,['receiver'],sample).edits.length,0);
+  doc.begin('Existing edit');
+  assert.throws(()=>api.apply(doc,['receiver','another'],sample),/cannot realize/);
+  assert.equal(inspected,1);
+  assert.equal(doc.serialize(),before);
+  assert(doc.pending());
+  doc.cancel();
+});

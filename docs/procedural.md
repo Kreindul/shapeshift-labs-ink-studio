@@ -1985,19 +1985,23 @@ from source IDs. `groups.remove(doc, ids)` batches normal retained deletion.
 membership and currently active IDs, so a deleted member can reappear after
 undo. `groups.forget(doc, id)` removes just the saved selection.
 
-`KIT.authoring.appearanceTransfer.create({describe, compatible?})` binds
+`KIT.authoring.appearanceTransfer.create({describe, compatible?, validate?})` binds
 portable finish samples to an application's own fields. The descriptor
 receives `(entity, source, incoming?)` and returns `{family, label?, slots}`.
 Each named slot has an effective `value` and an array `path` into the target
 entity's appearance or parameters. A slot can supply `encode(value)` to
 write a receiver-specific JSON value while keeping the sample in its
 semantic form. For example, a sampled frame color can map to a material
-reference with local overrides. The default compatibility policy matches
-descriptor families.
+reference with local overrides. A slot with `stored` compares that target
+value against the encoded write when deciding whether the edit changes
+anything. The default compatibility policy matches descriptor families.
 
 `capture(source, id)` returns a JSON-safe sample. `plan(source, ids, sample)`
 resolves target patches and reports skipped IDs for callers that need a live
 preview. `apply(doc, ids, sample)` applies the patches in one transaction.
+`validate(source, edits, sample)` receives the complete plan before it can
+be returned or applied. Use it to check target-specific constraints together
+and throw when the plan is invalid.
 Callers choose the target set and which fields to expose. Shared finishes
 can use the separate document style catalog and `styleRef`.
 
