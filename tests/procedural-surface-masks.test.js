@@ -48,3 +48,22 @@ test('surface masks reject invalid or unbounded charts, strokes and queries', ()
   assert.throws(() => P.surfaceMasks.compile([{ ...stroke, points: Array(8193).fill([.5, .5]) }], options), /budget/);
   assert.throws(() => P.surfaceMasks.compile([stroke], options).weight(Infinity, 0));
 });
+
+test('dirty bounds enclose all changed samples on both sides of a periodic seam',()=>{
+  const options={size:[10,4],periodic:true};
+  const start={points:[[.48,.15]],width:1}, seam={points:[[.96,.5],[.04,.55]],width:.55,softness:.12};
+  const restore={points:[[.01,.54]],operation:'erase',width:.3};
+  for(const [a,b] of [[[start],[start,seam]],[[start,seam],[start,seam,restore]],[[start,seam,restore],[start]]]){
+    const bounds=P.surfaceMasks.dirtyBounds(a,b,options);
+    assert(bounds.length>0);
+    assert(bounds.every(box=>box.min[0]>=0&&box.max[0]<=1&&box.min[1]>=0&&box.max[1]<=1));
+    const from=P.surfaceMasks.compile(a,options),to=P.surfaceMasks.compile(b,options);
+    for(let y=0;y<=40;y++)for(let x=0;x<=100;x++){
+      const u=x/100,v=y/40;
+      if(from.weight(u,v)===to.weight(u,v))continue;
+      assert(bounds.some(box=>u>=box.min[0]&&u<=box.max[0]&&v>=box.min[1]&&v<=box.max[1]));
+    }
+    assert(bounds.every(box=>box.max[0]<.25||box.min[0]>.75),'unrelated central samples stay clean');
+  }
+  assert.deepEqual(P.surfaceMasks.dirtyBounds([start],[{...start}],options),[]);
+});

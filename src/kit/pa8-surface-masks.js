@@ -3,7 +3,7 @@
   const P = K.procedural || K.authoring;
   const unit = value => Number.isFinite(value) && value >= 0 && value <= 1;
 
-  function compile(strokes, { size, periodic = false } = {}) {
+  function prepare(strokes, { size, periodic = false } = {}) {
     if (!Array.isArray(size) || size.length !== 2 ||
         !size.every(length => Number.isFinite(length) && length > 0 && length <= 5e5) ||
         typeof periodic !== 'boolean')
@@ -49,6 +49,11 @@
       };
     });
 
+    return {width,height,periodic,wrap,masks};
+  }
+
+  function compile(strokes, options) {
+    const {width,height,periodic,wrap,masks}=prepare(strokes,options);
     function weight(u, v, initial = 0) {
       if (!Number.isFinite(u) || !Number.isFinite(v) || !unit(initial))
         throw Error('Surface mask queries need finite chart coordinates and unit initial coverage');
@@ -73,5 +78,23 @@
     }
     return Object.freeze({ weight });
   }
-  P.surfaceMasks = Object.freeze({ compile });
+
+  function dirtyBounds(before, after, options) {
+    if (!Array.isArray(before)||!Array.isArray(after)||before.length>256||after.length>256)
+      throw Error('Surface masks need at most 256 strokes');
+    let prefix=0;
+    while(prefix<before.length&&prefix<after.length&&
+      (before[prefix]===after[prefix]||JSON.stringify(before[prefix])===JSON.stringify(after[prefix])))prefix++;
+    const old=prepare(before.slice(prefix),options),next=prepare(after.slice(prefix),options),
+      {width,height,periodic}=next, result=[];
+    for(const {runs} of [...old.masks,...next.masks])for(const {bounds:{min,max}} of runs){
+      for(const shift of periodic?[-1,0,1]:[0]){
+        const left=Math.max(0,min[0]/width+shift),right=Math.min(1,max[0]/width+shift);
+        if(left>right)continue;
+        result.push({min:[left,Math.max(0,min[2]/height)],max:[right,Math.min(1,max[2]/height)]});
+      }
+    }
+    return result;
+  }
+  P.surfaceMasks = Object.freeze({ compile,dirtyBounds });
 })(KIT);
