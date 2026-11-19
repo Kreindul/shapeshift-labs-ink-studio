@@ -316,3 +316,41 @@ test('prism links preserve bent passage geometry while other obstacles still req
     floor:(x,z)=>x>=7.2&&x<=7.8&&z>.35&&z<.9?1.6:0,spacing:.12}).status,'unreachable');
   assert.throws(()=>routes.prismVisibility(...pins,solids,{...limits,links:[{...link,through:[2]}]}),/prism indices/);
 });
+
+test('guide profiles preserve planar corners within continuous flights and report projected crossings',()=>{
+  const guide=[[0,0],[2,0],[2,2],[4,2],[4,4]];
+  const prism={ring:[[1.6,1.25],[2.4,1.25],[2.4,1.75],[1.6,1.75]],min:-1,max:1.3};
+  const options={minHeight:.2,maxHeight:2,maxGrade:.7,maxLength:9};
+  const result=routes.guideElevation(guide,.4,.4,[prism],options);
+  assert.equal(result.status,'ok');
+  assert.deepEqual(result.points.map(([x,,z])=>[x,z]).filter(point=>
+    guide.some(p=>point.every((v,i)=>p[i]===v))),guide);
+  assert.deepEqual(result.points[0],[0,.4,0]);
+  assert.deepEqual(result.points.at(-1),[4,.4,4]);
+  assert.equal(result.flights.length,3);
+  assert(result.flights[0].last>1,'the first flight continues across a planar corner');
+  assert.equal(result.points[result.flights[0].last][1],1.3);
+  assert.equal(result.points[result.flights[1].last][1],1.3);
+  assert.equal(result.crossings.length,1);
+  assert.equal(result.crossings[0].prism,0);
+  assert(Math.abs(result.crossings[0].from-3.25)<1e-7);
+  assert(Math.abs(result.crossings[0].to-3.75)<1e-7);
+  assert(result.points.slice(1).every((q,i)=>
+    Math.abs(q[1]-result.points[i][1])<=.7*(result.stations[i+1]-result.stations[i])+1e-8));
+  assert.equal(routes.guideElevation(guide,.4,.4,[prism],{...options,maxLength:8}).status,'unreachable');
+  assert.equal(routes.guideElevation(guide,.4,.4,[prism],{...options,maxTests:7}).status,'budget');
+  assert.equal(routes.guideElevation(guide.slice().reverse(),.4,.4,[prism],options).status,'ok');
+  assert.throws(()=>routes.guideElevation([[0,0],[0,0]],.4,.4,[]),/nonzero spans/);
+});
+
+test('a guide preserves separate entries into one obstacle and reports an obstructed pin',()=>{
+  const guide=[[0,0],[4,0],[4,2],[0,2]];
+  const prism={ring:[[1,-1],[2,-1],[2,3],[1,3]],min:1.2,max:3};
+  const options={minHeight:.3,maxHeight:2,maxGrade:.9};
+  const result=routes.guideElevation(guide,1.6,1.6,[prism],options);
+  assert.equal(result.status,'ok');
+  assert.equal(result.crossings.length,2);
+  assert(result.crossings[1].from>result.crossings[0].to);
+  assert(result.points.some(([,y])=>y===1.2));
+  assert.equal(routes.guideElevation([[1.5,0],[4,0]],1.6,1.6,[prism],options).status,'blocked-pin');
+});

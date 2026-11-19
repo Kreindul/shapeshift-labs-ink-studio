@@ -11,6 +11,40 @@ const RouteVisibility = (() => {
     bounds = (a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])],
     overlap = (a, b) => a[0] <= b[2] + EPS && b[0] <= a[2] + EPS && a[1] <= b[3] + EPS && b[1] <= a[3] + EPS;
 
+  // Clip one planar span against a convex ring's open interior.
+  function convexInterval(a,b,edges,check){
+    let low=0,high=1;
+    const [ax,az]=a,[bx,bz]=b;
+    for(const [x,z,nx,nz] of edges){
+      check();
+      const first=nx*(ax-x)+nz*(az-z)-EPS,last=nx*(bx-x)+nz*(bz-z)-EPS;
+      if(first<=0&&last<=0)return null;
+      if(first<=0)low=Math.max(low,first/(first-last));
+      else if(last<=0)high=Math.min(high,first/(first-last));
+      if(high-low<=EPS)return null;
+    }
+    return [low,high];
+  }
+
+  function convexRing(ring,check){
+    const signed=ring.reduce((sum,p,i)=>sum+area2(ring[0],p,ring[(i+1)%ring.length]),0);
+    if(Math.abs(signed)<=EPS)throw new Error('Prism footprints need positive area');
+    const sign=Math.sign(signed),box=[Infinity,Infinity,-Infinity,-Infinity];
+    const edges=ring.map(([x,z],i)=>{
+      const [u,v]=ring[(i+1)%ring.length],dx=u-x,dz=v-z,len=Math.hypot(dx,dz);
+      if(len<=EPS)throw new Error('Prism footprints need distinct successive points');
+      const nx=-dz*sign/len,nz=dx*sign/len;
+      for(const p of ring){
+        check();
+        if(nx*(p[0]-x)+nz*(p[1]-z)<-EPS)throw new Error('Prism footprints must be convex');
+      }
+      box[0]=Math.min(box[0],x);box[1]=Math.min(box[1],z);
+      box[2]=Math.max(box[2],x);box[3]=Math.max(box[3],z);
+      return [x,z,nx,nz];
+    });
+    return {box,edges};
+  }
+
   function find(start, end, obstacles, {
     maxVertices = 600, maxTests = 2500000, links = [], waypoints = [], domain
   } = {}, acceptsEdge) {
@@ -125,20 +159,6 @@ const RouteVisibility = (() => {
       }
       return odd;
     }
-    function crossesConvex(a, b, edges) {
-      let low = 0, high = 1;
-      const ax = a[0], az = a[1], bx = b[0], bz = b[1];
-      for (const [x, z, nx, nz] of edges) {
-        check();
-        const first = nx * (ax - x) + nz * (az - z) - EPS,
-          last = nx * (bx - x) + nz * (bz - z) - EPS;
-        if (first <= 0 && last <= 0) return false;
-        if (first <= 0) low = Math.max(low, first / (first - last));
-        else if (last <= 0) high = Math.min(high, first / (first - last));
-        if (high - low <= EPS) return false;
-      }
-      return true;
-    }
     function clear(a, b, bypass) {
       work.pairs++;
       if(acceptsEdge&&!acceptsEdge(a,b))return false;
@@ -149,7 +169,7 @@ const RouteVisibility = (() => {
       for (const polygon of polygons) {
         if (bypass?.has(polygon) || !overlap(box, polygon.box)) continue;
         if (polygon.edges) {
-          if (crossesConvex(a, b, polygon.edges)) return false;
+          if (convexInterval(a, b, polygon.edges, check)) return false;
           continue;
         }
         const parameters = [0, 1], { loop } = polygon;
@@ -283,6 +303,110 @@ const RouteVisibility = (() => {
     return Object.freeze(points?{...result,points:frozenPoints(points.map(plan))}:result);
   }
 
+  // Unroll an XZ guide into horizontal station space. Prism intersections
+  // become elevation bands while the original bends stay in the output.
+  function guideElevation(guide,start,end,prisms,{
+    maxGrade=1,minHeight=-1e6,maxHeight=1e6,maxLength=1e7,maxVertices=360,maxTests=350000
+  }={}){
+    if(!Array.isArray(guide)||guide.length<2||guide.length>1024||!Array.from(guide).every(p=>point(p,2))||
+      !Array.isArray(prisms)||prisms.length>500||!point([start,end,minHeight,maxHeight],4)||minHeight>=maxHeight||
+      start<minHeight||start>maxHeight||end<minHeight||end>maxHeight||
+      ![maxGrade,maxLength].every(v=>Number.isFinite(v)&&v>EPS)||
+      !limit(maxVertices,2,3000)||!limit(maxTests,1,30000000))
+      throw new Error('Guide elevations need finite XZ vertices, pins, clearance prisms and work limits');
+    const stations=[0],segments=[];
+    for(let i=1;i<guide.length;i++){
+      const a=guide[i-1],b=guide[i],run=Math.sqrt(dist2(a,b)),from=stations.at(-1);
+      if(run<=EPS||from+run>1e6)throw new Error('Guide elevations need nonzero spans within the station range');
+      segments.push({a,b,run,from,box:bounds(a,b)});
+      stations.push(from+run);
+    }
+    const run=stations.at(-1),crossings=[],barriers=[],exhausted=Symbol('guide elevation budget');
+    let projectionTests=0;
+    const check=()=>{if(++projectionTests>maxTests)throw exhausted;};
+    const result=(status,work={pairs:0,tests:0},data={})=>Object.freeze({status,...data,
+      work:Object.freeze({pairs:work.pairs,tests:Math.min(maxTests,projectionTests+work.tests)})});
+    try{
+      for(const [prism,item] of prisms.entries()){
+        const {ring,min,max}=item||{};
+        if(!Array.isArray(ring)||ring.length<3||ring.length>4096||!Array.from(ring).every(p=>point(p,2))||
+          !point([min,max],2)||max-min<=EPS)
+          throw new Error('Guide elevations need convex footprints and positive height intervals');
+        const {box,edges}=convexRing(ring,check);
+        for(const [pin,y] of [[guide[0],start],[guide.at(-1),end]]){
+          if(y>min+EPS&&y<max-EPS&&overlap(bounds(pin,pin),box)&&convexInterval(pin,pin,edges,check))
+            return result('blocked-pin');
+        }
+        let previous;
+        for(const segment of segments){
+          check();
+          if(!overlap(segment.box,box))continue;
+          const hit=convexInterval(segment.a,segment.b,edges,check);
+          if(!hit)continue;
+          const from=segment.from+hit[0]*segment.run,to=segment.from+hit[1]*segment.run;
+          if(to-from<=EPS)continue;
+          if(previous&&from-previous.to<=EPS)previous.to=to;
+          else{
+            previous={prism,from,to};
+            crossings.push(previous);
+          }
+        }
+      }
+      // Merge adjacent bands of equal height before the visibility search.
+      // Split walls can produce many equivalent overlapping footprint spans.
+      const intervals=new Map();
+      for(const {prism,from,to} of crossings){
+        const {min,max}=prisms[prism];
+        if(min>=maxHeight||max<=minHeight)continue;
+        const key=min+'/'+max;
+        if(!intervals.has(key))intervals.set(key,[]);
+        intervals.get(key).push({from,to,min,max});
+      }
+      for(const bands of intervals.values()){
+        let previous;
+        for(const band of bands.sort((a,b)=>a.from-b.from||a.to-b.to)){
+          if(previous&&band.from-previous.to<=EPS)previous.to=Math.max(previous.to,band.to);
+          else{barriers.push(band);previous=band;}
+        }
+      }
+      if(projectionTests>=maxTests||barriers.length>500)return result('budget');
+      const profile=elevationProfile(run,start,end,barriers,{
+        maxGrade,minHeight,maxHeight,maxVertices,maxTests:maxTests-projectionTests
+      });
+      if(profile.status!=='ok')return result(profile.status,profile.work);
+      const points=[[guide[0][0],start,guide[0][1]]],samples=[0],distances=[0],flights=[];
+      let guideIndex=1;
+      function append(station,y){
+        const leg=segments[guideIndex-1],t=clamp((station-leg.from)/leg.run);
+        const [x,z]=t<=EPS?leg.a:t>=1-EPS?leg.b:interpolate(leg.a,leg.b,t),last=points.at(-1);
+        points.push([x,y,z]);
+        samples.push(station);
+        distances.push(distances.at(-1)+Math.hypot(x-last[0],y-last[1],z-last[2]));
+      }
+      for(let i=1;i<profile.points.length;i++){
+        const [from,low]=profile.points[i-1],[to,high]=profile.points[i];
+        if(to-from<=EPS)continue;
+        const first=points.length-1;
+        while(guideIndex<stations.length-1&&stations[guideIndex]<to-EPS){
+          const s=stations[guideIndex];
+          append(s,low+(high-low)*(s-from)/(to-from));
+          guideIndex++;
+        }
+        append(to,high);
+        if(guideIndex<stations.length-1&&Math.abs(stations[guideIndex]-to)<=EPS)guideIndex++;
+        flights.push({first,last:points.length-1});
+      }
+      const length=distances.at(-1);
+      if(length>maxLength+EPS)return result('unreachable',profile.work);
+      return result('ok',profile.work,{length,points:frozenPoints(points),stations:Object.freeze(samples),
+        distances:Object.freeze(distances),flights:Object.freeze(flights.map(Object.freeze)),
+        crossings:Object.freeze(crossings.map(Object.freeze))});
+    }catch(error){
+      if(error===exhausted)return result('budget');
+      throw error;
+    }
+  }
+
   // Search a finite visibility graph in X/Y/Z. Tangency is allowed on the
   // clearance envelopes. Callers can widen a footprint and extend its
   // elevation interval to account for the shape that will travel the route.
@@ -390,22 +514,8 @@ const RouteVisibility = (() => {
           throw new Error('Prism routes need convex footprints and positive height intervals');
         if(min>=maxHeight||max<=minHeight)continue;
         if(ring.length>maxVertices)throw exhausted;
-        const signed=ring.reduce((sum,p,i)=>sum+area2(ring[0],p,ring[(i+1)%ring.length]),0);
-        const sign=Math.sign(signed),box=[Infinity,Infinity,-Infinity,-Infinity],edges=[];
-        if(Math.abs(signed)<=EPS)throw new Error('Prism footprints need positive area');
-        for(let i=0;i<ring.length;i++){
-          const [x,z]=ring[i],next=ring[(i+1)%ring.length],dx=next[0]-x,dz=next[1]-z,len=Math.hypot(dx,dz);
-          if(len<=EPS)throw new Error('Prism footprints need distinct successive points');
-          const nx=-dz*sign/len,nz=dx*sign/len;
-          for(const p of ring){
-            check();
-            if(nx*(p[0]-x)+nz*(p[1]-z)<-EPS)throw new Error('Prism footprints must be convex');
-          }
-          edges.push([x,z,nx,nz]);
-          box[0]=Math.min(box[0],x);box[1]=Math.min(box[1],z);
-          box[2]=Math.max(box[2],x);box[3]=Math.max(box[3],z);
-          sites.set(x+'/'+z,ring[i]);
-        }
+        const {box,edges}=convexRing(ring,check);
+        for(const p of ring)sites.set(p.join('/'),p);
         const solid={index,min,max,box,edges};
         solids.push(solid);
         for(const y of [min,max])if(y>=minHeight&&y<=maxHeight)heights.add(y);
@@ -599,6 +709,6 @@ const RouteVisibility = (() => {
     return {status:'ok',samples};
   }
 
-  return Object.freeze({ find, convexFootprint, sweep, sweepPath, elevationProfile, prismVisibility });
+  return Object.freeze({ find, convexFootprint, sweep, sweepPath, elevationProfile, guideElevation, prismVisibility });
 })();
 if (typeof module !== 'undefined') module.exports = RouteVisibility;

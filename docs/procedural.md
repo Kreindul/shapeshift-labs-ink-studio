@@ -654,6 +654,18 @@ results return `points: [[station, elevation], ...]` with exact endpoint
 heights. Forward-only edges keep route stations ordered. Search limits
 `maxVertices` and `maxTests` apply as in visibility routing.
 
+`P.routes.guideElevation(guide, startY, endY, prisms, options)` fits the
+elevation profile of a fixed piecewise-linear XZ guide. It clips each span
+against convex prism footprints and runs the grade solver in accumulated
+horizontal station space. Use `minHeight`, `maxHeight`, `maxGrade` and
+`maxLength` for route limits. The output retains each original bend.
+`flights: [{first, last}]` gives inclusive point indices for continuous grades
+or level intervals. These let a stair builder keep one tread sequence across
+several bends. `stations` contains horizontal run, `distances` contains 3D
+arc length, and `crossings: [{prism, from, to}]` identifies the projected
+obstacle intervals by input prism index and horizontal station. The
+profile reports blocked pins, unreachable routes and budget limits.
+
 `P.routes.prismVisibility(start, end, prisms, options)` plans in three
 dimensions through a finite visibility graph. Each prism supplies a convex
 XZ `ring` and vertical bounds `min` and `max`. Expand these bounds to reserve
