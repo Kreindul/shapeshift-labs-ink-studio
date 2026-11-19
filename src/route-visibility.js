@@ -11,13 +11,22 @@ const RouteVisibility = (() => {
     bounds = (a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])],
     overlap = (a, b) => a[0] <= b[2] + EPS && b[0] <= a[2] + EPS && a[1] <= b[3] + EPS && b[1] <= a[3] + EPS;
 
-  function find(start, end, obstacles, { maxVertices = 600, maxTests = 2500000, links = [] } = {}) {
+  function find(start, end, obstacles, {
+    maxVertices = 600, maxTests = 2500000, links = [], waypoints = [], domain
+  } = {}) {
     if (
       !point(start, 3) || !point(end, 3) || Math.hypot(...start.map((v, i) => end[i] - v)) <= EPS ||
       !Array.isArray(obstacles) || obstacles.length > 500 || !Array.isArray(links) || links.length > 64 ||
-      !limit(maxVertices, 2, 3000) || !limit(maxTests, 1, 30000000)
+      !limit(maxVertices, 2, 3000) || !limit(maxTests, 1, 30000000) ||
+      !Array.isArray(waypoints)
     ) throw new Error('Visibility paths need distinct finite pins, polygons, and work limits');
-    const first = plan(start), last = plan(end), vertices = [first, last],
+    const clearance=domain?.clearance, spacing=domain?.spacing??.12, minClearance=domain?.minClearance??0;
+    if(domain!==undefined&&(typeof clearance!=='function'||!Number.isFinite(spacing)||spacing<=EPS||
+      !Number.isFinite(minClearance)||minClearance<0))
+      throw new Error('A visibility domain needs an XZ clearance field and valid sampling controls');
+    if(waypoints.length+2>maxVertices)throw new Error('Visibility graph exceeds its vertex budget');
+    if(!Array.from(waypoints).every(p=>point(p,2)))throw new Error('Visibility waypoints need finite XZ points');
+    const first = plan(start), last = plan(end), vertices = [first, last,...waypoints],
       polygons = [], work = { pairs: 0, tests: 0 },
       exhausted = Symbol('visibility budget');
     for (const polygon of obstacles) {
@@ -78,6 +87,26 @@ const RouteVisibility = (() => {
     function check() {
       if (++work.tests > maxTests) throw exhausted;
     }
+    const endpointAccess=domain&&new Map();
+    function permits(x,z) {
+      check();
+      const value=clearance(x,z);
+      if(typeof value!=='number'||Number.isNaN(value))throw new Error('A clearance field must return a signed distance');
+      return value>=minClearance;
+    }
+    function permitsPoint(p){
+      if(!endpointAccess.has(p))endpointAccess.set(p,permits(p[0],p[1]));
+      return endpointAccess.get(p);
+    }
+    function inDomain(a,b,length){
+      if(!permitsPoint(a)||!permitsPoint(b))return false;
+      const steps=Math.ceil(length/spacing),dx=b[0]-a[0],dz=b[1]-a[1];
+      for(let i=1;i<steps;i++){
+        const t=i/steps;
+        if(!permits(a[0]+t*dx,a[1]+t*dz))return false;
+      }
+      return true;
+    }
     function inside(p, { loop, box, edges }) {
       if (!overlap(bounds(p, p), box)) return false;
       if (edges) {
@@ -115,7 +144,7 @@ const RouteVisibility = (() => {
       const box = bounds(a, b),
         dx = b[0] - a[0], dz = b[1] - a[1],
         sq = dx * dx + dz * dz;
-      if (sq <= EPS * EPS) return !polygons.some(polygon => inside(a, polygon));
+      if (sq <= EPS * EPS) return !polygons.some(polygon => inside(a, polygon))&&(!domain||inDomain(a,b,0));
       for (const polygon of polygons) {
         if (bypass?.has(polygon) || !overlap(box, polygon.box)) continue;
         if (polygon.edges) {
@@ -141,11 +170,12 @@ const RouteVisibility = (() => {
           if (inside(interpolate(a, b, (parameters[i] + parameters[i - 1]) / 2), polygon)) return false;
         }
       }
-      return true;
+      return !domain||inDomain(a,b,Math.sqrt(sq));
     }
     const result = (status, data = {}) => Object.freeze({ status, ...data, work: Object.freeze({ ...work }) });
     try {
-      if ([first, last].some(p => polygons.some(polygon => inside(p, polygon)))) return result('blocked-pin');
+      if ([first, last].some(p => (domain&&!permitsPoint(p))||polygons.some(polygon => inside(p, polygon))))
+        return result('blocked-pin');
       if (clear(first, last)) return result('ok', { points: frozenPoints([start, end]) });
       const size = vertices.length,
         costs = new Float64Array(size).fill(Infinity), estimates = new Float64Array(size).fill(Infinity),

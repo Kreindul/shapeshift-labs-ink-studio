@@ -193,3 +193,25 @@ test('path section clearance probes the exposed corner join under a shared sampl
   assert.equal(budget.status,'budget');
   assert(budget.samples<open.samples);
 });
+
+test('visibility waypoints connect through a composed clearance domain and respect erasure',()=>{
+  const start=[-2,.3,0],end=[0,.7,2],waypoints=[[0,0],[-1.6,1.6]];
+  const clearance=(x,z)=>.52-Math.min(
+    Math.hypot(x-Math.max(-2,Math.min(x,0)),z),
+    Math.hypot(x,z-Math.max(0,Math.min(z,2)))
+  );
+  const domain={clearance,minClearance:.2,spacing:.055},options={domain,waypoints};
+  const route=routes.visibility(start,end,[],options);
+  assert.equal(route.status,'ok');
+  assert.deepEqual(route.route.points,[start,[0,.5,0],end]);
+  const erase=(x,z)=>Math.min(clearance(x,z),Math.hypot(x,z)-.24);
+  assert.equal(routes.visibility(start,end,[],{...options,domain:{...domain,clearance:erase}}).status,'unreachable');
+  const wall=[[-.75,-.75],[.75,-.75],[.75,.75],[-.75,.75]];
+  const links=[{start:[-2,0],end:[0,2],via:[[0,0]],through:0}];
+  assert.deepEqual(routes.visibility(start,end,[wall],{links,domain}).links,[{link:0,from:0,to:2}]);
+  assert.equal(routes.visibility(start,end,[wall],{links,domain:{...domain,clearance:erase}}).status,'unreachable');
+  assert.equal(routes.visibility(start,end,[],{...options,maxTests:2}).status,'budget');
+  assert.equal(routes.visibility([-3,0,0],end,[],options).status,'blocked-pin');
+  assert.throws(()=>routes.visibility(start,end,[],{...options,maxVertices:3}),/vertex budget/);
+  assert.throws(()=>routes.visibility(start,end,[],{domain:{clearance:()=>NaN}}),/signed distance/);
+});

@@ -622,6 +622,15 @@ vertex budget and appear in the returned route as part of the link's
 `{link, from, to}` point range. The caller checks the lifted section because
 the chosen route determines the final elevations.
 
+Use `waypoints: [[x, z], ...]` to supply ordinary graph vertices from a
+sketch, medial path or sampled field. With `domain: {clearance, spacing,
+minClearance}`, the planner probes every candidate leg against a signed XZ
+clearance field, including legs inside passage links. Values at least
+`minClearance` (default zero) permit passage. Probes count against
+`maxTests`, and waypoints count against `maxVertices`. This supports
+clearance fields composed from paint, erasure, and other masks. Probe
+spacing governs the smallest feature the search can detect.
+
 `P.routes.sweep(start, end, {halfWidth, below, above, spacing, minClearance,
 clearance, maxSamples})` checks a sloped rectangular section with a horizontal
 side axis and vertical height. Its callback returns a signed distance
