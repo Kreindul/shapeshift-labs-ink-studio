@@ -692,6 +692,19 @@ It caps the number of support planes and keeps the entire margin-expanded
 hull inside the result, so the planner can use fewer vertices while
 preserving clearance.
 
+`P.foldedRibbon.compile(faces, {origin, offset})` builds a continuous chart
+around an oriented planar loop. Each face supplies a keyed edge `a` and
+`b`, an `up` direction, and its outward `normal`. `origin` selects the
+zero station along the closed perimeter. `offset` moves the frontage
+along its mitered normal, and `inset` gives a bound for inward extrusion.
+
+`ribbon.region(min, max)` returns the occupied bands over a station interval.
+Use `map([station, height, depth])`, `project(worldPoint)`, and `bounds(box)`
+for shared surface coordinates. `mesh(localMesh)` clips triangles at the
+band boundaries and maps their positions, normals, UVs and material groups.
+Affine mirrored contours retain outward winding. The chart can carry any
+swept detail whose bounds fit the region and the safe inset.
+
 `P.routeStations.remap(before, after, edits)` returns a function mapping an old
 normalized route station to a new one. Supply ordered `{key,length}` sections
 and optional `{from,to,fromRange,toRange}` interval mappings. Ranges default to
