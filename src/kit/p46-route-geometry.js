@@ -95,5 +95,6 @@
     }
   }
 
-  Object.assign(P.routes, { visibility, spline, convexFootprint: RouteVisibility.convexFootprint, sweep: RouteVisibility.sweep });
+  const {convexFootprint,sweep,sweepPath}=RouteVisibility;
+  Object.assign(P.routes, {visibility,spline,convexFootprint,sweep,sweepPath});
 })(KIT);

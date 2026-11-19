@@ -157,3 +157,39 @@ test('swept clearance probes both sides and headroom along a sloping span', () =
   assert.equal(routes.sweep(start, end, {...section,above:.9,clearance:tunnel}).status,'blocked');
   assert.equal(routes.sweep(start, end, {...section,maxSamples:2,clearance:tunnel}).status,'budget');
 });
+
+test('bent visibility links keep private waypoints and use their length for the grade', () => {
+  const wall=[[-2,-4],[2,-4],[2,4],[-2,4]],start=[-3,.5,0],end=[3,1.1,0];
+  const link={start:[-3,0],end:[3,0],via:[[-1,.6],[1,.6]],through:0};
+  const result=routes.visibility(start,end,[wall],{links:[link]});
+  const points=result.route.points;
+  assert.deepEqual(result.links,[{link:0,from:0,to:3}]);
+  assert.deepEqual(points.map(([x,,z])=>[x,z]),[link.start,...link.via,link.end]);
+  assert.deepEqual(points[0],start);
+  assert.deepEqual(points.at(-1),end);
+  const first=Math.hypot(2,.6),run=first*2+2;
+  assert(Math.abs(points[1][1]-(.5+.6*first/run))<1e-9);
+  const reversed=routes.visibility(end,start,[wall],{links:[link]});
+  assert.deepEqual(reversed.route.points.map(([x,,z])=>[x,z]),[link.end,...link.via.slice().reverse(),link.start]);
+  const obstacle=[[-.2,.45],[.2,.45],[.2,.75],[-.2,.75]];
+  assert.equal(routes.visibility(start,end,[wall,obstacle],{links:[link]}).links,undefined);
+  const long={...link,via:[[-1,3.9],[1,-3.9]]};
+  assert.equal(routes.visibility(start,end,[wall],{links:[long]}).links,undefined);
+  assert.throws(()=>routes.visibility(start,end,[wall],{links:[link],maxVertices:9}),/vertex budget/);
+  assert.throws(()=>routes.visibility(start,end,[wall],{links:[{...link,via:[link.start]}]}),/nonzero spans/);
+});
+
+test('path section clearance probes the exposed corner join under a shared sample limit', () => {
+  const points=[[-1,.3,0],[0,.3,0],[0,.3,1]],clearance=([x,,z])=>Math.hypot(x-.25,z+.25)-.08;
+  const options={halfWidth:.4,below:.12,above:.45,spacing:.06,clearance};
+  assert.equal(routes.sweep(points[0],points[1],options).status,'ok');
+  assert.equal(routes.sweep(points[1],points[2],options).status,'ok');
+  const blocked=routes.sweepPath(points,options);
+  assert.equal(blocked.status,'blocked');
+  assert(blocked.point[0]>0&&blocked.point[2]<0);
+  const open=routes.sweepPath(points,{...options,clearance:()=>Infinity});
+  assert.equal(open.status,'ok');
+  const budget=routes.sweepPath(points,{...options,clearance:()=>Infinity,maxSamples:open.samples-1});
+  assert.equal(budget.status,'budget');
+  assert(budget.samples<open.samples);
+});

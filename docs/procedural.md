@@ -613,13 +613,14 @@ Use `visibility(start, end, obstacles, {links})` to admit a bridge,
 gate or other certified crossing. Each link supplies
 `{start: [x,z], end: [x,z], through: obstacleIndex}`. A composite obstacle
 can use a nonempty array of distinct obstacle indices for `through`.
-The link contributes two graph vertices and one bidirectional edge that
+The link contributes two graph vertices and one bidirectional connection that
 skips the specified polygons. The ends should sit outside those polygons.
-All other edges and
-obstacles keep their normal visibility rules. A successful result reports
-the links actually used as `{link, from, to}` with point indices into
-`route.points`. The caller checks clearance on the lifted route before
-accepting each link because the final elevations depend on the route chosen.
+Optional `via: [[x, z], ...]` passes through up to sixteen private waypoints.
+Each leg checks the other obstacles. The complete length contributes to the
+shortest-path cost and to the interpolated grade. Waypoints count toward the
+vertex budget and appear in the returned route as part of the link's
+`{link, from, to}` point range. The caller checks the lifted section because
+the chosen route determines the final elevations.
 
 `P.routes.sweep(start, end, {halfWidth, below, above, spacing, minClearance,
 clearance, maxSamples})` checks a sloped rectangular section with a horizontal
@@ -628,6 +629,10 @@ with positive values in open space. The result reports `ok`, `blocked`
 or `budget`, a sample count and the first failing point when blocked.
 Sampling resolution governs the smallest obstruction it can detect.
 Use tighter spacing or explicit obstruction checks for thin objects.
+
+`P.routes.sweepPath(points, options)` takes the same section controls and
+sample budget. It checks each leg and the full rounded joins at changes of
+heading. Clearance checks can use the point range returned for a bent link.
 
 `P.routes.spline(route, {radius, spacing, clearance, minClearance})`
 rounds corners using quadratic splines, shrinking the trim when needed.
