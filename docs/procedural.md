@@ -57,6 +57,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `fitFootprintContact({center, tangent, size, height, blocked, maxSpread, samples, interval, includePoints})` | Seat an upright footprint on a sampled support and check space above it |
 | `createFootprintReservations({clearance, cellSize})` | Reserve space for oriented upright objects and test nearby candidates |
 | `placeFootprintRequests(requests, {obstacles, clearance, cellSize})` | Resolve priority-ordered fitters with one oriented clearance field |
+| `assetCatalog.create(entries)` | Search lightweight asset metadata by name, keywords and collection without loading geometry |
 | `fitAlongLane({range, start, pointAt, fit, maxDistance, spacing, precision})` | Find a nearby accepted station on a sampled 3D carrier line |
 | `matchIntervals(previous, next, {maxShift, accept})` | Match spans across an edit using overlap and optional center displacement |
 | `environmentFields.evaluate(settings, elapsed)`, `environmentFields.opticalDepth(from, to, medium)`, `environmentFields.scatter(from, to, light, medium)`, `environmentFields.deposition(sample)` | Cyclic sun and sky tint, height-dependent fog, local scattering, and slope-sensitive surface loads |
@@ -328,6 +329,13 @@ intersects the separating-axis limits of nearby oriented rectangles
 analytically. Touching endpoints are allowed, including a singleton
 interval between two reservations. Use a support or geometry test at the
 chosen location if the surface changes along the interval.
+
+`assetCatalog.create(entries)` accepts stable IDs, display labels, and
+optional `subtitle`, `categories` and `keywords`. Geometry and recipes are
+outside the index. `search({query, category, offset, limit})` returns a total
+and a page of metadata. Search ignores case and accents, matches across
+words and ranks display labels ahead of metadata matches. Filter with
+`catalog.categories` and retrieve one entry with `catalog.get(id)`.
 
 `attachments.fitRow(rowSpec, {occupied, gap, fits})` adjusts each existing
 center-relative station only within its range. `occupied` supplies open
