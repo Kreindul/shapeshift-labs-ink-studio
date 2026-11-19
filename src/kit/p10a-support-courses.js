@@ -2,18 +2,17 @@
 (function(K) {
   const P=K.procedural||K.authoring, clamp=K.clamp;
   P.supportCourses=(skirt, options={})=>{
-    const {unit=[.46,.22],joint=.035,depth=.035,budget=4096,omit=[]}=options;
+    const {unit=[.46,.22],joint=.035,depth=.035,budget=4096,omit=[],anchors=[]}=options;
     if(!skirt?.outline||!Array.isArray(unit)||unit.length!==2||
        !unit.every(v=>Number.isFinite(v)&&v>=.025)||!Number.isFinite(joint)||joint<0||
        !Number.isFinite(depth)||depth<0||depth>.25||!Number.isSafeInteger(budget)||budget<4||budget>65536||
        !Array.isArray(omit)||omit.length>65536||!omit.every(key=>typeof key==='string'&&/^\d{1,5}\/\d{1,5}$/.test(key)))
       throw Error('Support courses need a skirt and bounded course dimensions');
-    const omitted=new Set(omit);
     const poly=skirt.outline;
     let width=0;
     const edges=poly.map((a,i)=>{
       const b=poly[(i+1)%poly.length],dx=b[0]-a[0],dz=b[2]-a[2],length=Math.hypot(dx,dz);
-      const edge={a,length,start:width,tx:dx/length,tz:dz/length,nx:dz/length,nz:-dx/length};
+      const edge={a,index:i,length,start:width,tx:dx/length,tz:dz/length,nx:dz/length,nz:-dx/length};
       width+=length;
       return edge;
     });
@@ -39,6 +38,12 @@
         layout=P.fittedCourses({width,height:rows*vy,unit:[ux,vy],joint:mortar,stagger:.5,periodic:true,budget});
       }else scale*=1.4;
     }
+    const edits=P.logicalParts.edits(omit,anchors,([u,v])=>{
+      if(u<0||u>=1)return null;
+      const offset=u*edges.length,i=Math.floor(offset),edge=edges[i];
+      return layout.at(edge.start+(offset-i)*edge.length,v)?.id;
+    });
+    const omitted=new Set(edits.keys);
     if(!layout.joint&&!omitted.size)relief=0;
     const at0=skirt.top(0,0), slope=Math.hypot(skirt.top(1,0)-at0,skirt.top(0,1)-at0);
     const topScale=1/Math.hypot(1,slope), bottomScale=1/Math.hypot(1,slope,skirt.ground.slopeBound);
@@ -169,6 +174,19 @@
       lastKey=key;
       return lastFrontage=P.data.freeze(bands);
     }
-    return Object.freeze({layout,depth:relief,top,lookup,distance,sample,frontage});
+    function stockSite(key){
+      const bands=frontage(key);
+      if(!bands.length)return null;
+      // Use the midpoint of the longest exposed frontage so the anchor starts
+      // on the visible part of a clipped course.
+      const span=({points})=>K.V.dist(points[0],points[points.length/2-1]);
+      const {points}=bands.reduce((best,band)=>span(band)>span(best)?band:best);
+      const n=points.length/2,i=Math.floor((n-1)/2),j=Math.ceil((n-1)/2);
+      const middle=K.V.mul([points[i],points[j],points[2*n-1-i],points[2*n-1-j]]
+        .reduce((sum,point)=>K.V.add(sum,point),[0,0,0]),.25);
+      const {u,v,edge}=chart(middle);
+      return [(edge.index+(u-edge.start)/edge.length)/edges.length%1,v];
+    }
+    return Object.freeze({layout,depth:relief,top,lookup,distance,sample,frontage,stockSite,edits});
   };
 })(KIT);

@@ -49,7 +49,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `panelFrames({width, height, unit, beam, braceWidth, braces, periodic, budget})` | Fit posts, rails and optional diagonal braces to rectangular bays. Get stable keyed footprints and a signed chart query |
 | `planarCells.layout(bounds, mask, options)`, `planarCells.prism(cell, options)` | Stable planar cells clipped to a mask, including disconnected fragments and holes. Prisms provide distance, ray, sampling and closed mesh operations |
 | `supportSkirt({outline, ground, embed, overlap, maxDrop})` | Fill vertically below a convex planar carrier and above the supplied height field, up to the configured drop |
-| `supportCourses(skirt, {unit, joint, depth, budget, omit})` | Fit staggered, recessed courses around a closed gravity support and remove facing cells by logical ID |
+| `supportCourses(skirt, {unit, joint, depth, budget, omit, anchors})` | Fit recessed courses around a closed gravity support and retain facing omissions by key or surface position |
 | `basins.surface(carrier, mask, options)`, `terraces.surface(carrier, configuration)` | Masked level cuts and configurable height bands. Carrier provides bounds, height, normal and domain predicates |
 | `spans.catenary(a, b, options)` | Gravity-aware sagging curve with arc-length sampling, finite frames and closest-point queries |
 | `proximity.connect(sockets, options)` | Deterministic matching of named sockets with reach, degree and compatibility limits |
@@ -2715,6 +2715,18 @@ keys and their fragments. `index.get(key)` returns all fragments of a single
 part. `index.partition(hiddenKeys)` returns `{ visible, omitted }` in input
 order. Retain the hidden keys alongside the generator input. Unknown keys
 can stay dormant until a future realization contains the part again.
+
+Use `P.logicalParts.edits(keys, anchors, locate)` when a rebuilt layout can
+assign a different key to the same place. `anchors` contains `{key, site}`
+records with a finite two-component chart coordinate. The caller resolves
+`locate(site, key)` to a current part key or returns null while the site is
+out of range. Keys without anchors still identify parts directly. The
+returned `keys` and `has(key)` describe current omissions. Call
+`setVisible(key, visible, site)` to get a new pair of serialized `keys` and
+`anchors` arrays, or null when the edit changes nothing. Supply the chart
+point of the part when erasing. A restore clears all sites currently
+mapped to that part. If several erased sites resolve to one coarse part,
+the original sites remain stored and can resolve to separate parts again.
 
 ### Courses on a variable strip
 

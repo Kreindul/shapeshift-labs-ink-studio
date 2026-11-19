@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const P = require('..').load().KIT.procedural;
-const { compile } = P.logicalParts;
+const { compile, edits } = P.logicalParts;
 
 test('a wrapped stock key selects every physical fragment and retains order', () => {
   const layout = require('..').load().KIT.stripCourses({
@@ -30,4 +30,21 @@ test('unkeyed backing remains visible and invalid keys fail early', () => {
   assert.deepEqual(assembly.get('unknown'), []);
   assert.throws(() => compile([tile], () => ''), /keys/);
   assert.throws(() => assembly.partition([null]), /keys/);
+});
+
+test('anchored exclusions follow a new layout and recover both sites after coarsening', () => {
+  const split=([u])=>u<.5?'left':'right';
+  const anchors=[{key:'0',site:[.26,.7]},{key:'1',site:[.72,.7]}];
+  const old=['0','1','legacy'];
+  const coarse=edits(old,anchors,()=> 'wide');
+  assert.deepEqual(coarse.keys,['legacy','wide']);
+  const edited=coarse.setVisible('third',false,[.83,.85]);
+  const refined=edits(edited.keys,edited.anchors,split);
+  assert.deepEqual(refined.keys,['left','legacy','right']);
+  const restored=refined.setVisible('right',true);
+  assert.deepEqual(restored,{keys:['0','legacy'],anchors:[anchors[0]]});
+  assert.deepEqual(edits(old,anchors,()=>null).keys,['legacy']);
+  assert.deepEqual(edits([],anchors,split).keys,[]);
+  assert.equal(coarse.setVisible('wide',false,[.5,.7]),null);
+  assert.throws(()=>edits(old,[{key:'0',site:[.1,NaN]}],split),/finite chart point/);
 });
