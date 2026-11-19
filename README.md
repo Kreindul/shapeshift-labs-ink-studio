@@ -25,6 +25,7 @@ The package includes geometry, materials, lighting, animation, character control
 - [Projected and procedural effects](#projected-and-procedural-effects)
 - [Reflections, ripples and atmosphere](#reflections-ripples-and-atmosphere)
 - [Embedding and custom scene collections](#embedding-and-custom-scene-collections)
+- [Optional WebGL renderer](#optional-webgl-renderer)
 - [Module reference](#module-reference)
 - [Validation and development](#validation-and-development)
 
@@ -722,7 +723,7 @@ const studio = require('@shapeshift-labs/ink-studio');
 fs.writeFileSync('ink-studio.browser.js', studio.bundle());
 ```
 
-The bundle defines `makeBuilder`, `makeSculpt`, `KIT`, `PixelLook` and the other names in `studio.EXPORTS` in script scope. It includes no DOM interface or complete interactive WebGL viewport. A host supplies rendering, calls `world.anim.update(dt, time)`, handles input, and uses changed-row and bone data as appropriate. The included software renderer is used by the CLI.
+The bundle defines `makeBuilder`, `makeSculpt`, `KIT`, `PixelLook` and the other names in `studio.EXPORTS` in script scope. A browser host can render that scene data with the optional WebGL module below. The host controls input and advances animation. The CLI and the package's Node `render()` entry use the software renderer.
 
 To append the demos to a browser script, write `const SCENES = [];` after the toolkit bundle and append `studio.demos()`. Keep source files in the order returned by `files()` when embedding individually.
 
@@ -740,6 +741,36 @@ module.exports = {
 ```
 
 Then `ink-studio scenes`, `render`, `snap` and other commands operate on that collection. The load callback returns the toolkit exports alongside `SCENES`.
+
+## Optional WebGL renderer
+
+Import `@shapeshift-labs/ink-studio/webgl.mjs` in a browser build, or serve `webgl.mjs` and its relative `src/webgl/` modules directly. This entry is separate from the plain-script toolkit bundle and creates GPU resources when you call `createRenderer`. Pass the same toolkit and world you use to build scenes.
+
+The following module can run after `ink-studio.browser.js` loads as a classic script. Adjust the WebGL module URL to the package location your server exposes.
+
+```html
+<canvas id="view" width="320" height="200" style="image-rendering: pixelated"></canvas>
+<script src="./ink-studio.browser.js"></script>
+<script type="module">
+  import { createRenderer } from './ink-studio/webgl.mjs';
+
+  const builder = makeBuilder(7);
+  const sculpt = KIT.sculpt(makeSculpt(builder));
+  sculpt.ball([0, 1, 0], 1, { r: [1, 2, 3, 4] }, { res: 0.15 });
+  sculpt.bake();
+  const world = builder.finish({ cam: { target: [0, 1, 0], dist: 7, yaw: 0.4, pitch: 0.2 } });
+  const renderer = createRenderer(document.querySelector('#view'), { toolkit: { KIT, PixelLook } });
+  renderer.render(world);
+</script>
+```
+
+`renderer.render(world, frame)` draws into a canvas or `OffscreenCanvas`. The drawing buffer is the art resolution. Set `frame.width` and `frame.height` to resize it, or enlarge the canvas with CSS. A frame can override the scene camera with `camera: { target, dist, yaw, pitch, fov, ortho }`; angles are in radians. Advance `world.anim` in the host, then pass the current `frame.time` in seconds. Set `frame.bornAt` to the starting time for growth effects.
+
+The renderer supports palette and tone resolution, colored contours, per-pixel material patterns, edge sprites, fine ink tiles, and the shared cleanup and flicker damping passes. Frame options include `raw`, `colored`, `outline`, `tone`, `clean`, `damp`, and `edges`. Game-specific effects and view-dependent layers outside these passes use the host integration or the CLI renderer.
+
+The renderer uploads the world on first use. On later draws, pass `changedRows` as an array of changed 512-splat texture row indices, or pass `[]` when the data is unchanged. Omitting it uploads the current splat data again. Replace the corresponding world buffer or material table when editing fine tiles, ramps, or patterns. A host with its own verified depth sort can pass an `Int32Array` of splat IDs as `order`. Call `renderer.dispose()` when you remove the canvas. WebGL 2 availability is checked at creation.
+
+Hosts that own the framebuffers and effects can use `createSplatPipeline(gl, { ascii: KIT.ascii?.glsl })` from the same module. Use `programFor({ lamps, fine, textZones })` to select the program and `setOrder(ids)` followed by `draw()` to issue the instanced quads. The host binds the selected program, its uniforms, textures, and blend state. To use an existing geometry buffer, pass `draw(count, vao)` with Rebirth's corner and integer splat-ID attributes at locations 0 and 1. Omit the feature object to select the full shader. Explicitly passing all three flags as `false` selects the specialized shader when available. Dispose the pipeline when finished.
 
 ## Module reference
 
