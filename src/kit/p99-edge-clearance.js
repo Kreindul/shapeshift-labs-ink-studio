@@ -54,6 +54,20 @@
     return {kept,removed};
   }
 
+  function footprint(outline,{padding=0}={}){
+    if(!Number.isFinite(padding)||padding<0)throw Error('Clearance footprint padding must be nonnegative');
+    const {cells}=P.surfaceCells.clip([{key:'clearance',polygon:outline}],{budget:1});
+    const ring=cells[0]?.fragments[0];
+    if(!ring)throw Error('Edge clearance needs a convex footprint');
+    const origin=[ring[0][0],0,ring[0][1]];
+    const slabs=ring.map(([x,z],i)=>{
+      const [u,v]=ring[(i+1)%ring.length],normal=V.norm([v-z,0,x-u]);
+      const high=normal[0]*(x-origin[0])+normal[2]*(z-origin[2])+padding;
+      return [normal,-Infinity,high];
+    });
+    return P.data.freeze({origin,slabs});
+  }
+
   function clipFieldPath(points, fields, {padding=0, spacing=.035, tolerance=.001}={}) {
     if(!Array.isArray(points)||points.length<2||points.length>4097||!points.every(point)||
        !Array.isArray(fields)||fields.length>4096||!Number.isFinite(padding)||padding<0||
@@ -103,5 +117,5 @@
     return cut?P.data.freeze(runs):null;
   }
 
-  P.edgeClearance=Object.freeze({strip,ranges,clipFieldPath});
+  P.edgeClearance=Object.freeze({strip,footprint,ranges,clipFieldPath});
 })(KIT);

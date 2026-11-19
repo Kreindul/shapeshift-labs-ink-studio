@@ -688,8 +688,11 @@ renderer. The mixer does not impose a brush shape, a material, or a layout.
 constant-width corridor along the XZ projection of two 3D points. The height
 band follows their linear grade. `extension` adds distance at both ends and
 defaults to zero. `above` and `below` default to .20 world units.
-`edgeClearance.ranges(a, b, strips)` clips a 3D edge against the union of those
-corridors and returns ordered normalized `{kept, removed}` intervals. Sample
+`edgeClearance.footprint(outline, {padding})` defines a clearance region
+at all heights from a convex XZ polygon. Padding moves the sides outward
+and defaults to zero.
+`edgeClearance.ranges(a, b, strips)` clips a 3D edge against the union of
+sloped strips and convex footprints, and returns ordered normalized `{kept, removed}` intervals. Sample
 these intervals on the original edge to build separate guard, trim or fence
 pieces. For piecewise-linear edges, apply the query to each segment.
 
@@ -968,6 +971,11 @@ arrays of paired 3D points. It returns `{R, t}` for a yaw and translation
 that fit every pair within the given world-space tolerance. A vertical guide
 can translate with identity rotation. The result is `null` when spacing
 or rise changes, so a caller can refit treads or parts that need to stay level.
+
+`P.routes.stripFootprint(start, end, halfWidth, extension = 0)` returns the
+four corners of a constant-width strip in a planar chart. The extension adds
+the same length at each end. A collapsed span returns an empty array. Use
+the outline as a fitted surface, a convex keepout or the input for a join.
 
 `P.routes.stripJoin(previous, corner, next, halfWidth, options)` joins
 two equal-width strips at three planar points. It returns `null` for
@@ -1791,8 +1799,11 @@ input order with resolved `grounded` and `state` values. Each part and
 contact is visited a bounded number of times. Callers choose how to find
 contacts and how to present either state.
 
-`contacts.verticalPrism(footprint, bottom, top)` constructs a closed
+`contacts.verticalPrism(footprint, bottom, top, {origin, gradient})` constructs a closed
 volume from a convex polygon in the XZ plane and two ordered Y heights.
+Caps are level by default. An optional XZ `origin` gives the datum for
+both heights and `gradient: [dx, dz]` applies the same slope to both caps
+while keeping the sides upright.
 It owns its frozen `footprint` and world `bounds`. Use `containsPlan(x, z)`
 to restrict external samples to the footprint.
 `contacts.volumeContact(a, b, tolerance = 0)` accepts these prisms and

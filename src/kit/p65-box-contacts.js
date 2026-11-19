@@ -51,19 +51,27 @@
     return true;
   }
 
-  function verticalPrism(outline, bottom, top) {
+  function verticalPrism(outline, bottom, top, {origin=[0,0],gradient=[0,0]}={}) {
     if (!Number.isFinite(bottom) || !Number.isFinite(top) || bottom >= top)
       throw Error('A vertical prism needs ordered finite heights');
+    const plan = p => Array.isArray(p) && p.length===2 && Array.from(p).every(Number.isFinite);
+    if (!plan(origin) || !plan(gradient)) throw Error('A prism datum and gradient need finite coordinates');
     const {cells} = P.surfaceCells.clip([{key:'base',polygon:outline}],{budget:1});
     const footprint = cells[0]?.fragments[0];
     if (!footprint) throw Error('A vertical prism needs a nonempty convex footprint');
+    const [dx,dz] = gradient, sloped = dx!==0 || dz!==0;
+    const rises = sloped ? footprint.map(([x,z])=>dx*(x-origin[0])+dz*(z-origin[1])) : null;
+    const low = bottom+(rises?Math.min(...rises):0), high = top+(rises?Math.max(...rises):0);
+    if (![low,high,Math.hypot(dx,dz)].every(Number.isFinite) ||
+        rises?.some(y => y+top<=y+bottom))
+      throw Error('Prism bands need finite, ordered bounds');
     const edges = footprint.map(([x,z],i) => {
       const [nextX,nextZ] = footprint[(i+1)%footprint.length];
       return V.norm([nextX-x,0,nextZ-z]);
     });
     const sides = edges.map(([x,,z]) => [z,0,-x]);
     const xs = footprint.map(([x]) => x), zs = footprint.map(([,z]) => z);
-    const bounds = {min:[Math.min(...xs),bottom,Math.min(...zs)],max:[Math.max(...xs),top,Math.max(...zs)]};
+    const bounds = {min:[Math.min(...xs),low,Math.min(...zs)],max:[Math.max(...xs),high,Math.max(...zs)]};
     function containsPlan(x,z) {
       return sides.every(([nx,,nz],i) => {
         const [vx,vz] = footprint[i];
@@ -71,7 +79,9 @@
       });
     }
     const prism = P.data.freeze({footprint,bounds,containsPlan});
-    prisms.set(prism,{axes:[vertical,...sides],edges:[vertical,...edges]});
+    const up = sloped ? V.norm([-dx,1,-dz]) : vertical,
+      capEdges = sloped ? edges.map(([x,,z])=>V.norm([x,dx*x+dz*z,z])) : edges;
+    prisms.set(prism,{axes:[up,...sides],edges:[vertical,...capEdges],bottom,top,rises});
     return prism;
   }
 
@@ -82,12 +92,12 @@
       return [middle-radius,middle+radius];
     }
     let low = Infinity, high = -Infinity;
-    for (const [x,z] of volume.footprint) {
-      const t = axis[0]*(x-origin[0])+axis[2]*(z-origin[2]);
+    for (const [i,[x,z]] of volume.footprint.entries()) {
+      const t = axis[0]*(x-origin[0])+axis[2]*(z-origin[2])+axis[1]*(prism.rises?.[i]??0);
       low = Math.min(low,t);
       high = Math.max(high,t);
     }
-    const y0 = axis[1]*(volume.bounds.min[1]-origin[1]), y1 = axis[1]*(volume.bounds.max[1]-origin[1]);
+    const y0 = axis[1]*(prism.bottom-origin[1]), y1 = axis[1]*(prism.top-origin[1]);
     return [low+Math.min(y0,y1),high+Math.max(y0,y1)];
   }
 
@@ -103,8 +113,8 @@
       return lo-pad>otherHi||otherLo-pad>hi;
     }
     if ((pa?.axes||a.axes).some(separated) || (pb?.axes||b.axes).some(separated)) return false;
-    // Two upright prisms already supply all the necessary axes.
-    if (pa && pb) return true;
+    // Two level prisms already supply all the necessary axes.
+    if (pa && pb && !pa.rises && !pb.rises) return true;
     for (const edgeA of pa?.edges||a.axes) for (const edgeB of pb?.edges||b.axes) {
       const axis = V.cross(edgeA,edgeB), length = V.len(axis);
       if (length>epsilon && separated(V.mul(axis,1/length))) return false;

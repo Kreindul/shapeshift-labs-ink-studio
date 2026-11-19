@@ -1,5 +1,5 @@
 const test=require('node:test'),assert=require('node:assert/strict');
-const {edgeClearance:{strip,ranges,clipFieldPath}}=require('..').load().KIT.procedural;
+const {edgeClearance:{strip,footprint,ranges,clipFieldPath}}=require('..').load().KIT.procedural;
 
 test('ordered retained spans handle overlapping angled access, reversed edges and complete removal',()=>{
   const a=[-4,2,0],b=[4,2,0];
@@ -20,6 +20,17 @@ test('vertical bands protect underpasses, and end extensions and tangent contact
   assert.deepEqual(ranges([-2,1,0],[-1,1,0],[thin]),untouched);
   assert.deepEqual(ranges([-2,1,.09],[2,1,.09],[thin]),{kept:[[0,.25],[.75,1]],removed:[[.25,.75]]});
   assert.throws(()=>strip([0,0,0],[0,1,0],{halfWidth:1}),/horizontal span/);
+});
+
+test('convex footprints trim edges at any height and compose with sloped bands',()=>{
+  const mask=footprint([[0,-1],[2,-1],[0,1]].reverse()),
+    a=[-2,3,0],b=[2,5,0],local=strip([-.5,3.75,-1],[-.5,3.75,1],{halfWidth:.25});
+  assert.deepEqual(ranges(a,b,[mask]),{kept:[[0,.5],[.75,1]],removed:[[.5,.75]]});
+  assert.deepEqual(ranges(b,a,[mask]),{kept:[[0,.25],[.5,1]],removed:[[.25,.5]]});
+  assert.deepEqual(ranges(a,b,[mask,local]).removed,[[.3125,.4375],[.5,.75]]);
+  const padded=footprint([[0,-1],[1,-1],[1,1],[0,1]],{padding:.25});
+  assert.deepEqual(ranges(a,b,[padded]).removed,[[.4375,.8125]]);
+  assert.throws(()=>footprint([[0,-1],[1,-1],[1,1]],{padding:-1}),/padding/);
 });
 
 test('bounded signed fields split a bent path and preserve unblocked vertices',()=>{

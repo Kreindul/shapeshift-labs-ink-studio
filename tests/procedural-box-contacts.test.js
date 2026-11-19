@@ -58,6 +58,24 @@ test('prism contact agrees with an equivalent box against tilted volumes',()=>{
   }
 });
 
+test('upright prism walls can enclose a sloped band without claiming the entire bounding height',()=>{
+  const ring=[[10,20],[12,20],[12,22],[10,22]],
+    ramp=verticalPrism(ring,.8,1,{origin:[10,20],gradient:[.5,0]});
+  assert.deepEqual(ramp.bounds,{min:[10,.8,20],max:[12,2,22]});
+  const overlap=orientedBox([10.25,1.85,20.5],[.1,.15,.1]);
+  assert(K.procedural.spatial.overlap(ramp.bounds,overlap.bounds));
+  assert(!volumeContact(ramp,overlap));
+  assert(!volumeContact(overlap,ramp));
+  const facing=verticalPrism([[11.5,20.5],[11.8,20.5],[11.8,21],[11.5,21]],1.7,1.8);
+  assert(volumeSetsContact(volumeSet([ramp]),volumeSet([facing])));
+  const high=verticalPrism(facing.footprint,1.92,1.95);
+  assert(!volumeContact(high,ramp));
+  assert(volumeContact(high,ramp,.022));
+  const counter=verticalPrism(ring,1.6,1.7,{origin:[10,20],gradient:[-.2,0]});
+  assert(volumeContact(ramp,counter));
+  assert.throws(()=>verticalPrism(ring,0,1,{gradient:[Infinity,0]}),/finite/);
+});
+
 test('box contacts include a face join and reject separated diagonal volumes with overlapping bounds', () => {
   const yaw = Math.PI/4, c = Math.cos(yaw), s = Math.sin(yaw);
   const frame = [c,0,-s,0,1,0,s,0,c];

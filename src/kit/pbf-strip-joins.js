@@ -6,6 +6,21 @@
   const sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1];
 
+  function stripFootprint(start, end, halfWidth, extension = 0) {
+    if (![start,end].every(vector) || !Number.isFinite(halfWidth) || halfWidth <= 0 ||
+        !Number.isFinite(extension) || extension < 0)
+      throw new Error('Strip footprints need finite endpoints, positive width and nonnegative extension');
+    const delta = sub(end,start), length = Math.hypot(...delta);
+    if (!Number.isFinite(length+extension)) throw new Error('Strip distances must be finite');
+    if (length <= EPS) return [];
+    const [x,z] = start, [dx,dz] = delta.map(value => value/length);
+    const at = (along,side) => [x+along*dx-side*dz,z+along*dz+side*dx];
+    const ring = [at(-extension,-halfWidth),at(length+extension,-halfWidth),
+      at(length+extension,halfWidth),at(-extension,halfWidth)];
+    if (!ring.every(vector)) throw new Error('Strip points must be finite');
+    return ring;
+  }
+
   function stripJoin(before, at, after, halfWidth, { maxArcAngle = Math.PI / 8 } = {}) {
     if (![before, at, after].every(vector) || !Number.isFinite(halfWidth) || halfWidth <= 0 ||
         !Number.isFinite(maxArcAngle) || maxArcAngle < Math.PI / 64 || maxArcAngle > Math.PI)
@@ -55,5 +70,5 @@
     return { exterior, clip };
   }
 
-  P.routes.stripJoin = stripJoin;
+  Object.assign(P.routes,{stripJoin,stripFootprint});
 })(KIT);

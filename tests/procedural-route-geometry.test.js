@@ -3,6 +3,15 @@ const assert = require('node:assert/strict');
 const { routes } = require('..').load().KIT.procedural;
 const box = [[-1,-1],[1,-1],[1,1],[-1,1]];
 
+test('strip footprints share the same shape when their stations are reversed',()=>{
+  const next=routes.stripFootprint([1,2],[4,2],.5,.25);
+  assert.deepEqual(next,[[.75,1.5],[4.25,1.5],[4.25,2.5],[.75,2.5]]);
+  const previous=routes.stripFootprint([4,2],[1,2],.5,.25);
+  assert.deepEqual(previous,next.slice(2).concat(next.slice(0,2)));
+  assert.deepEqual(routes.stripFootprint([1,2],[1,2],.5),[]);
+  assert.throws(()=>routes.stripFootprint([1,2],[4,2],.5,-.1),/extension/);
+});
+
 test('strip joins close only the outside of a turn and partition the overlapping strips',()=>{
   const close=(a,b)=>assert(Math.abs(a-b)<1e-8,`${a} vs ${b}`);
   const center=[2,3],previous=[0,3],next=[2,5];
