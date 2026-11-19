@@ -144,6 +144,11 @@ const door = createTransition('doorframe-wipe');
 composer.draw(door.sample(0.35), { width: 320, height: 180 });
 ```
 
+To use a live doorway view as a transition source, include the
+[portal descriptor](portals.md#render-the-view) in the corresponding
+`renderer.render` call. The target captures the composed view with its
+world-space aperture and foreground occlusion.
+
 `composer.draw(frame, { target, width, height, uniforms })` renders to a
 composer target, a compatible host framebuffer descriptor, or the canvas.
 Target draws default to the target dimensions and keep the canvas dimensions.

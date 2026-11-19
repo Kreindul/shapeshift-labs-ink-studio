@@ -108,6 +108,7 @@ python3 -m http.server 8080
 | --- | --- | --- |
 | Packed splats, animation poses, palette and tone | Supported | Supported |
 | Fine ink tiles, per-pixel patterns and edge sprites | Supported | Supported |
+| Oriented live portal views with fragment clipping and foreground occlusion | Supported | Travel and camera mapping |
 | Contours, cleanup, and camera-dependent glass beams | Supported | Supported |
 | Selective ink, diagnostic buffers, stable art resolves, and frame-history effects | Host integration | Supported |
 | View-dependent surface finishes, projected layers, reflection captures, and atmosphere volumes | Host integration | Supported |

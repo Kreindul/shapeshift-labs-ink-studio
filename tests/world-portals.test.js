@@ -432,7 +432,7 @@ test('abandoning a preview releases its payload but leaves borrowed place assets
   assert.deepEqual(disposed, ['preview', 'source']);
 });
 
-function browserProbe(createRenderer) {
+function browserProbe(createRenderer, createTransitionComposer, defineTransition) {
   const canvas = document.querySelector('canvas');
   const renderer = createRenderer(canvas, { toolkit: { KIT, PixelLook } });
   const gl = canvas.getContext('webgl2'), size = 65;
@@ -447,13 +447,16 @@ function browserProbe(createRenderer) {
   d.disc(10, 0, 4, [-1, 0, 0], 6, 0.02, d.P[1], 1);
   d.disc(7, 0, 4, [-1, 0, 0], 6, 0.02, d.P[2], 1);
   const destination = d.finish();
-  const render = (overrides = {}, shape) => {
-    renderer.render(source, { width: size, height: size, raw: true, portal: { source, destination, opening: door(shape) },
-      ...overrides });
+  const read = () => {
     const bytes = new Uint8Array(size * size * 4);
     gl.readPixels(0, 0, size, size, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
     if (gl.getError() !== gl.NO_ERROR) throw new Error('WebGL error during portal render');
     return (x, y) => bytes.slice((y * size + x) * 4, (y * size + x) * 4 + 3);
+  };
+  const render = (overrides = {}, shape) => {
+    renderer.render(source, { width: size, height: size, raw: true, portal: { source, destination, opening: door(shape) },
+      ...overrides });
+    return read();
   };
   function dominant(image, x, y, channel, label) {
     const rgb = image(x, y);
@@ -470,6 +473,77 @@ function browserProbe(createRenderer) {
   dominant(circle, 32, 32, 2, 'ellipse center');
   dominant(circle, 13, 13, 0, 'ellipse corner');
 
+  const { V } = KIT, fov = 38 * Math.PI / 180;
+  const cam = { target: [0, 0, 0], dist: 4, fov };
+  const red = makeBuilder(1, [0xff2020]).finish({ cam }), blue = makeBuilder(1, [0x2040ff]).finish();
+  function pair(source, destination, opening, frame = {}) {
+    renderer.render(source, { width: size, height: size, raw: true, ...frame, portal: { source, destination, opening } });
+    return read();
+  }
+  function apertureAt(from, to, halfWidth = 0.9, halfHeight = 0.9) {
+    return KIT.world.portals.doorway({ from, to, halfWidth, halfHeight });
+  }
+  const opposite = { origin: [0, 0, 0], normal: [0, 0, -1] };
+  const aligned = apertureAt(from, opposite);
+  const slanted = (background, z) => {
+    const builder = makeBuilder(1, [background, 0x20ff20]);
+    builder.disc(0, 0, z, [Math.SQRT1_2, 0, -Math.SQRT1_2], 1.7, 0.015, builder.P[1], 1);
+    return builder.finish({ cam });
+  };
+  for (const z of [-0.12, 0.12]) {
+    const exit = pair(red, slanted(0x2040ff, z), aligned);
+    dominant(exit, 22, 32, 1, 'destination fragment behind the plane survives');
+    dominant(exit, 42, 32, 2, 'destination fragment in front of the plane is cut');
+    const foreground = pair(slanted(0xff2020, z), blue, aligned);
+    dominant(foreground, 22, 32, 2, 'source fragment behind the portal leaves the opening visible');
+    dominant(foreground, 42, 32, 1, 'source fragment in front of the portal occludes it');
+  }
+
+  const rolled = apertureAt({ origin: [0, 0, 0], normal: [0.4, -0.25, 1], up: [-1, 0.35, 0.2] },
+    { origin: [12, 8, -9], normal: [0.2, 1, -0.4], up: [0.3, 0.4, 1] }, 0.95, 0.38);
+  const oblique = pair(red, blue, rolled);
+  const at = (axis, distance) => {
+    const p = V.mad(rolled.from.origin, axis, distance);
+    const half = (cam.dist - p[2]) * Math.tan(fov / 2);
+    return p.slice(0, 2).map(value => Math.floor((value / half + 1) * size / 2));
+  };
+  dominant(oblique, ...at(rolled.from.right, 0.76), 2, 'inside the rolled opening along its wide axis');
+  dominant(oblique, ...at(rolled.from.up, 0.59), 0, 'outside the rolled opening along its short axis');
+  const hatch = apertureAt({ origin: [0, 0, 0], normal: [0, 1, 0], up: [0, 0, -1] }, rolled.to);
+  const down = { eye: [0, 4, 0], right: [1, 0, 0], up: [0, 0, -1], back: [0, 1, 0] };
+  dominant(pair(red, blue, hatch, { camera: { pose: down } }), 32, 32, 2, 'horizontal opening seen from above');
+  const offset = apertureAt({ origin: [1, 0, 0], normal: [0.8, 0, 0.6] }, rolled.to);
+  const orthographic = pair(red, blue, offset, { camera: { ortho: true, dist: 5,
+    pose: { eye: [0, 0, 0], right: [1, 0, 0], up: [0, 1, 0], back: [0, 0, 1] } } });
+  dominant(orthographic, 58, 32, 2, 'orthographic ray on the front side with its center eye behind the plane');
+  dominant(orthographic, 32, 32, 0, 'orthographic ray starting behind the plane');
+
+  const decorated = (z, background) => {
+    const builder = makeBuilder(11, [background, 0x505050, 0xff40e8]);
+    const sculpt = KIT.sculpt(makeSculpt(builder));
+    const fringe = KIT.sprite.art('xxxxx\nxxxxx\nxxxxx\nxxxxx', { key: { x: { pal: 2 } } });
+    const material = KIT.pixel.edge(KIT.pixel.plain({ r: [1] }), { up: [fringe], side: [fringe], every: 2, share: 1 });
+    sculpt.pixel = true;
+    sculpt.box([0, -0.14, z], [0.42, 0.12, 0.08], material, { res: 0.06 });
+    sculpt.bake();
+    return builder.finish({ cam, detail: 4, look: { pixel: true } });
+  };
+  function spriteCount(image) {
+    let count = 0;
+    for (let y = 15; y <= 49; y++) for (let x = 15; x <= 49; x++) {
+      const [r, g, b] = image(x, y);
+      if (r > 220 && g < 100 && b > 190) count++;
+    }
+    return count;
+  }
+  const frontSprites = decorated(0.4, 0xff2020), backSprites = decorated(-0.4, 0x2040ff);
+  if (!spriteCount(pair(frontSprites, blue, aligned, { raw: false })) ||
+      spriteCount(pair(frontSprites, blue, aligned, { raw: false, edges: false })))
+    throw new Error('source edge sprites should occlude the opening only where their drawn pixels are in front');
+  if (!spriteCount(pair(red, backSprites, aligned, { raw: false })) ||
+      spriteCount(pair(red, frontSprites, aligned, { raw: false })))
+    throw new Error('destination edge sprites should be clipped at the arrival plane');
+
   const { waterBodies } = KIT.procedural;
   const pool = (min, max) => waterBodies.scene([waterBodies.create({ id: 'pool',
     bounds: { min: [min, 0], max: [max, 8] }, sample: () => ({ bed: -2, surface: 2 }),
@@ -484,10 +558,20 @@ function browserProbe(createRenderer) {
     throw new Error('fade opacity was not applied to the visible frame');
   const pose = door().camera(renderer.cameraPose(source, { width: size, height: size }));
   if (pose.eye[0] !== 4 || pose.back[0] !== -1) throw new Error('camera handoff lost the relative pose');
+
+  const composer = createTransitionComposer(canvas);
+  const before = composer.createTarget(size, size), after = composer.createTarget(size, size);
+  renderer.render(red, { raw: true, target: before, portal: { destination: blue, opening: rolled } });
+  renderer.render(red, { raw: true, target: after });
+  composer.setSource('from', before);
+  composer.setSource('to', after);
+  composer.draw(defineTransition({ stages: [{}] }).sample(0), { width: size, height: size });
+  dominant(read(), 32, 32, 2, 'portal view remains in the GPU transition source');
+  composer.dispose();
   renderer.dispose();
 }
 
-test('WebGL presents oriented apertures with foreground occlusion and scene fades', {
+test('WebGL presents oriented apertures with per-fragment clipping, occlusion and transitions', {
   skip: !process.env.INK_TEST_CHROME
 }, () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ink-portals-'));
@@ -497,9 +581,9 @@ test('WebGL presents oriented apertures with foreground occlusion and scene fade
     fs.writeFileSync(path.join(temp, 'bundle.js'), core.bundle());
     fs.writeFileSync(page, `<!doctype html><canvas></canvas><pre id="result">PENDING</pre>
 <script src="bundle.js"></script><script type="module">
-import { createRenderer } from ${JSON.stringify(browserEntry)};
+import { createRenderer, createTransitionComposer, defineTransition } from ${JSON.stringify(browserEntry)};
 const result = document.querySelector('#result');
-try { (${browserProbe.toString()})(createRenderer); result.textContent = 'PASS'; }
+try { (${browserProbe.toString()})(createRenderer, createTransitionComposer, defineTransition); result.textContent = 'PASS'; }
 catch (error) { result.textContent = error.stack; }
 </script>`);
     const html = execFileSync(process.env.INK_TEST_CHROME, [

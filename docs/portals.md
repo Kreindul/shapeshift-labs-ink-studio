@@ -178,13 +178,29 @@ actor on the source side while a load or clearance check is unresolved.
 A host can also use `portals.doorway({from, to, halfWidth, halfHeight, shape})`
 directly for `hit`, `point`, `direction`, or `camera` operations.
 
-WebGL supports one visible destination view per render and rectangular or
-elliptical apertures. The renderer evaluates the opening per pixel and
-uses foreground splat coverage to occlude it. The destination is rendered
-with its mapped camera, own palette and environment. Its splats and water
-before the arrival plane are clipped. Set `destinationFrame` on the
-preview descriptor for destination-specific render options such as `time`.
-The portal frame geometry is authored as part of the source place.
+### Render the view
+
+Pass `session.view()` to `renderer.render(world, { portal })`. To render
+a portal without a session, supply `{ opening, destination }`. Build
+`opening` with `portals.doorway()`, and use the source and destination
+anchors' normals and up axes to set their orientation. WebGL supports one
+live view per render, rectangular and elliptical openings, and perspective
+and orthographic cameras. It supports tilted or horizontal openings along
+with upright doors. Author the frame geometry as part of the source scene.
+
+The renderer evaluates the aperture on each camera ray. Foreground splat
+coverage and opaque edge sprite pixels on the near side of the source
+plane occlude the opening. Thin, tilted splats can straddle the plane.
+Their fragments are tested using depth estimated from the projected
+Gaussian, so a splat can cover part of the opening while leaving the
+rest visible. Occlusion uses a coverage threshold for soft splats.
+
+The destination renders with the mapped camera and its own palette and
+environment. Splat fragments and edge sprite pixels on the camera side of
+the arrival plane are clipped. Destination water optics begin at the
+arrival plane. Set `destinationFrame` on the view for destination render
+options such as `time`. The same portal view works on the canvas and when
+rendering to a GPU target for the [transition compositor](transitions.md#render-ink-studio-worlds-directly-into-a-transition).
 
 ## Drop through a hatch
 

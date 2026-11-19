@@ -39,6 +39,7 @@ export function makeCamera(world, frame, width, height) {
     tangent: ortho ? viewHeight : tanFov,
     footprint: dist * 2 * tanFov / height,
     clipNear: Math.max(0.4, 0.15 * dist),
+    clipFar: far,
     depthRange: [depthCenter - radius, depthCenter + radius]
   };
   return camera.pose ? withCameraPose(result, camera.pose) : result;

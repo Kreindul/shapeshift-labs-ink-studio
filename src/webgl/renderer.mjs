@@ -33,6 +33,15 @@ function inverseView(view, eye) {
   ]);
 }
 
+function anchorPlane({ origin, normal: [x, y, z] }) {
+  return [x, y, z, -(x * origin[0] + y * origin[1] + z * origin[2])];
+}
+
+function planeInView([x, y, z, d], { view, eye }) {
+  return [view[0] * x + view[4] * y + view[8] * z, view[1] * x + view[5] * y + view[9] * z,
+    view[2] * x + view[6] * y + view[10] * z, x * eye[0] + y * eye[1] + z * eye[2] + d];
+}
+
 function materialData(pixel, world) {
   const data = pixel.gpu(world);
   const lens = Float32Array.from(data.lens);
@@ -82,7 +91,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     const dryGeometry = target(2), dryContours = target(2), owner = target(), key = target(1, { integer: true });
     const wetVariants = new Map();
     let wetGeometry, wetContours, waterTexture, packedWater;
-    let portalSource, portalDestination, portalDepth, portalProgram;
+    let portalSource, portalDestination, portalMask, portalSpriteLayer, portalProgram;
     let lastWater, lastWaterTime, waterWidth = 0, waterHeight = 0;
     const cleaned = target(), finished = target(), history = [target(), target()];
     const data = table(2048, 0, maxSize), bones = table(768, 4, maxSize);
@@ -234,7 +243,6 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       if (options.u_idx) {
         gl.disable(gl.BLEND);
         gl.clearBufferfv(gl.COLOR, 0, zero);
-        if (options.u_idx > 1) gl.clearBufferfv(gl.COLOR, 1, zero);
       } else {
         if (water) {
           wet.background ??= program(waterBackgroundShader(wet.airPockets, wet.layered, wet.atlas));
@@ -257,15 +265,17 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       pipeline.draw();
     }
 
-    function drawSprites(camera, world, width, height, time, pixelOutline, water, pal, wet, plane) {
-      spriteLayer.resize(width, height);
+    function drawSprites(camera, world, width, height, time, pixelOutline, water, pal, wet, clip, foreground) {
+      const buffer = foreground ? portalSpriteLayer : spriteLayer;
+      buffer.resize(width, height);
       data.bind();
       textureUnit(13, null);
       textureUnit(12, spriteTable);
       anchors.bind();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, spriteLayer.framebuffer);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, buffer.framebuffer);
       gl.viewport(0, 0, width, height);
       gl.clearBufferfv(gl.COLOR, 0, zero);
+      if (foreground) gl.clearBufferfv(gl.COLOR, 1, zero);
       gl.clearBufferfv(gl.DEPTH, 0, [1]);
       gl.disable(gl.BLEND);
       gl.enable(gl.DEPTH_TEST);
@@ -274,7 +284,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       gl.useProgram(sprites.p);
       sprites.set({
         u_anc: 14, u_sprTex: 12, u_dat: 0, u_depth: 2, u_idxTex: 9, u_pixTex: 10,
-        u_view: camera.view, u_proj: camera.projection, u_vp: [width, height], u_arrivalPlane: plane,
+        u_view: camera.view, u_proj: camera.projection, u_vp: [width, height],
+        u_splatPlane: clip, u_spriteCover: foreground ?? zero,
         u_rng: camera.depthRange, u_time: time, u_keep: toolkit.KIT.pixel.anchorKeep(world, camera.footprint),
         u_ortho: +camera.ortho, u_rmpN4: materials.gpu.lens, u_pview: camera.view, u_peye: camera.eye,
         u_tanF: camera.tangent, u_asp: camera.aspect, u_portho: +camera.ortho,
@@ -284,7 +295,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       gl.bindVertexArray(emptyVao);
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, anchorCount);
       gl.disable(gl.DEPTH_TEST);
-      textureUnit(13, spriteLayer.textures[0]);
+      textureUnit(13, buffer.textures[0]);
+      return buffer.textures[1];
     }
 
     function render(world, frame, width, height, output, cameraOverride, plane = zero, cover) {
@@ -317,6 +329,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       contours.resize(colored ? width : 1, colored ? height : 1);
       owner.resize(patterned ? width : 1, patterned ? height : 1);
       key.resize(patterned ? width : 1, patterned ? height : 1);
+      if (cover && patterned && frame.edges !== false) portalSpriteLayer ??= target(2, { depth: true });
       if (cleaning) cleaned.resize(width, height);
       if (damping) {
         finished.resize(width, height);
@@ -324,6 +337,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       }
 
       const camera = cameraOverride ?? makeCamera(world, frame, width, height);
+      const clip = plane === zero ? zero : planeInView(plane, camera);
       const t = frame.time ?? 0;
       const water = waterUniforms(waterScene, camera, t, plane);
       const wet = water && wetVariant(water);
@@ -357,12 +371,15 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       gl.colorMask(true, true, true, true);
       gl.depthMask(true);
       gl.blendEquation(gl.FUNC_ADD);
-      const shader = pipeline.programFor(wet ? { water: true, airPockets: wet.airPockets, layered: wet.layered, atlas: wet.atlas } : undefined);
+      const shader = pipeline.programFor({
+        water: !!wet, airPockets: wet?.airPockets, layered: wet?.layered, atlas: wet?.atlas, portal: plane !== zero || !!cover
+      });
       gl.useProgram(shader.p);
       const growth = world.grow ?? {};
       shader.set({
         u_data: 0, u_bones: 4, u_fine: 7, u_fineOn: +hasFine, u_fpal: pal, u_view: camera.view,
-        u_proj: camera.projection, u_time: time, u_scale: scale, u_ortho: +camera.ortho, u_arrivalPlane: plane,
+        u_proj: camera.projection, u_time: time, u_scale: scale, u_ortho: +camera.ortho,
+        u_arrivalPlane: plane, u_splatPlane: clip,
         u_sampleWithdrawal: sampleCoverage?.amount(frame.sampleWithdrawal ?? world.sampleWithdrawal ?? 0) ?? 0,
         u_born: [frame.bornAt ?? 0, growth.rate ?? 1, growth.fade ?? 0.5, growth.loop ?? 0],
         u_crisp: +!raw, u_dilate: raw ? 0.3 : 0.15, u_near: camera.clipNear,
@@ -376,7 +393,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       if (patterned)
         drawGeometry(shader, owner, width, height, { u_idx: 1, u_snap: 1, u_hard: 0, tangent });
       if (cover)
-        drawGeometry(shader, cover, width, height, { u_idx: 2, u_snap: +(!raw && !colored), u_hard: 0, tangent });
+        drawGeometry(shader, cover.buffer, width, height,
+          { u_idx: 2, u_snap: +(!raw && !colored), u_hard: 0, u_splatPlane: cover.plane, tangent });
       gl.disable(gl.BLEND);
       textureUnit(1, geometry.textures[0]);
       textureUnit(2, geometry.textures[1]);
@@ -402,7 +420,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       }
       textureUnit(15, key.textures[0]);
       const sprites = patterned && anchorCount > 0 && frame.edges !== false;
-      if (sprites) drawSprites(camera, world, width, height, time, pixelOutline, water, pal, wet, plane);
+      const spriteCover = sprites && drawSprites(camera, world, width, height, time, pixelOutline, water, pal, wet, clip, cover?.plane);
       const lines = outline && look.lines;
       const definition = raw || frame.tone === false ? null : (frame.tone ?? look.tone);
       const grade = world.anim?.grade;
@@ -473,14 +491,15 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       lastOutput = output;
       lastWater = waterScene;
       lastWaterTime = frame.time;
+      return spriteCover;
     }
 
     function present(world, frame, width, height, output) {
       const { portal, fade = 0 } = frame;
       if (!portal && !fade) return render(world, frame, width, height, output);
       const camera = makeCamera(world, frame, width, height), opening = portal?.opening;
-      const dotFrom = (a, b, axis) => a.reduce((sum, value, i) => sum + (value - b[i]) * axis[i], 0);
-      const visible = opening && dotFrom(camera.eye, opening.from.origin, opening.from.normal) > 1e-6;
+      const front = opening && planeInView(anchorPlane(opening.from), camera);
+      const visible = front && (camera.ortho ? front[2] > 1e-7 : front[3] > 1e-6);
       if (!visible && !fade) return render(world, frame, width, height, output, camera);
       if (width > maxSize || height > maxSize || width > viewportLimit[0] || height > viewportLimit[1])
         throw new RangeError('Ink Studio frame exceeds the WebGL viewport or texture size limit');
@@ -492,27 +511,28 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       portalSource.resize(width, height);
       if (visible) {
         portalDestination ??= target();
-        portalDepth ??= target(2);
+        portalMask ??= target();
         portalDestination.resize(width, height);
-        portalDepth.resize(width, height);
+        portalMask.resize(width, height);
         const nextCamera = withCameraPose(camera, opening.camera(cameraPose(camera)));
-        const { origin, normal } = opening.to;
-        const clip = [...normal, -dotFrom(origin, [0, 0, 0], normal)];
         const { raw, outline, dither, scale, clean, lineClean, colored, tone, edges, water, time, stepAnimation } = frame;
         render(portal.destination, { raw, outline, dither, scale, clean, lineClean, colored, tone, edges, water, time,
-          stepAnimation, ...portal.destinationFrame, damp: false }, width, height, portalDestination.framebuffer, nextCamera, clip);
+          stepAnimation, ...portal.destinationFrame, damp: false }, width, height, portalDestination.framebuffer,
+          nextCamera, anchorPlane(opening.to));
       }
-      render(world, visible ? { ...frame, damp: false } : frame, width, height, portalSource.framebuffer,
-        camera, zero, visible ? portalDepth : undefined);
+      const spriteCover = render(world, visible ? { ...frame, damp: false } : frame, width, height,
+        portalSource.framebuffer, camera, zero, visible ? { buffer: portalMask, plane: front } : undefined);
       portalProgram ??= program(portalComposite);
       textureUnit(0, portalSource.textures[0]);
       textureUnit(1, visible ? portalDestination.textures[0] : portalSource.textures[0]);
-      textureUnit(2, visible ? portalDepth.textures[1] : portalSource.textures[0]);
-      fullscreen(portalProgram, output, width, height, { u_source: 0, u_destination: 1, u_coverDepth: 2,
+      textureUnit(2, visible ? portalMask.textures[0] : portalSource.textures[0]);
+      textureUnit(3, spriteCover || portalSource.textures[0]);
+      fullscreen(portalProgram, output, width, height, { u_source: 0, u_destination: 1,
+        u_cover: 2, u_spriteCover: 3, u_hasSpriteCover: +!!spriteCover,
         u_opening: visible ? (opening.shape === 'ellipse' ? 2 : 1) : 0, u_size: [width, height], u_fade: fade,
         ...(visible ? { u_origin: opening.from.origin, u_right: opening.from.right, u_up: opening.from.up,
           u_normal: opening.from.normal, u_half: [opening.halfWidth, opening.halfHeight],
-          u_eye: camera.eye, u_portalView: camera.view, u_portalProj: camera.projection,
+          u_eye: camera.eye, u_portalView: camera.view, u_far: camera.clipFar,
           u_settings: [camera.tangent * camera.aspect, camera.tangent, +camera.ortho] } : {}) });
       gl.activeTexture(gl.TEXTURE0);
     }

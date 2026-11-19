@@ -13,7 +13,7 @@ export function createSplatPipeline(gl, { ascii, specialize = true, sampleCovera
   try {
     const { vertex, fragment } = splatShaderSources(ascii, sampleCoverage);
     const full = resources.program(vertex, fragment);
-    const water = new Map();
+    const variants = new Map();
     let plain, plainUnavailable = false;
     let disposed = false;
     let orderCapacity = 0, orderCount = 0;
@@ -41,14 +41,15 @@ export function createSplatPipeline(gl, { ascii, specialize = true, sampleCovera
       // explicitly be false before the shader can omit their work.
       programFor(features) {
         check();
-        if (features?.water) {
+        if (features?.water || features?.portal) {
+          const water = Boolean(features.water), portal = Boolean(features.portal);
           const airPockets = Boolean(features.airPockets), layered = Boolean(features.layered), atlas = Boolean(features.atlas);
-          const key = +airPockets + 2 * layered + 4 * atlas;
-          if (!water.has(key)) {
-            const wet = splatShaderSources(ascii, sampleCoverage, { water: true, airPockets, layered, atlas });
-            water.set(key, resources.program(wet.vertex, wet.fragment));
+          const key = +airPockets + 2 * layered + 4 * atlas + 8 * water + 16 * portal;
+          if (!variants.has(key)) {
+            const shader = splatShaderSources(ascii, sampleCoverage, { water, airPockets, layered, atlas, portal });
+            variants.set(key, resources.program(shader.vertex, shader.fragment));
           }
-          return water.get(key);
+          return variants.get(key);
         }
         if (!specialize || plainUnavailable || features?.lamps !== false ||
             features.fine !== false || features.textZones !== false) return full;

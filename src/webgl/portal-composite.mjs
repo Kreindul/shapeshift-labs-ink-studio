@@ -1,14 +1,14 @@
-// Each side retains its own palette and lighting. Compare the aperture plane
-// with the source scene's packed coverage depth at every output pixel.
+// Each side retains its own palette and lighting. Front-side fragments
+// mark the source coverage before compositing the world-space aperture.
 export const portalComposite = `#version 300 es
 precision highp float;
-uniform sampler2D u_source, u_destination, u_coverDepth;
+uniform sampler2D u_source, u_destination, u_cover, u_spriteCover;
 uniform vec3 u_origin, u_right, u_up, u_normal, u_eye;
-uniform mat4 u_portalView, u_portalProj;
+uniform mat4 u_portalView;
 uniform vec3 u_settings;
 uniform vec2 u_half, u_size;
-uniform int u_opening;
-uniform float u_fade;
+uniform int u_opening, u_hasSpriteCover;
+uniform float u_fade, u_far;
 out vec4 o;
 bool throughOpening() {
   vec2 p = (gl_FragCoord.xy / u_size * 2.0 - 1.0) * u_settings.xy;
@@ -19,20 +19,14 @@ bool throughOpening() {
   float towards = dot(ray, u_normal);
   if (towards >= -1e-7) return false;
   float t = dot(u_origin - eye, u_normal) / towards;
-  if (t <= 0.0 || t >= 400.0) return false;
+  if (t <= 0.0 || t >= u_far) return false;
   vec3 at = eye + ray * t;
   vec3 relative = at - u_origin;
   vec2 local = vec2(dot(relative, u_right), dot(relative, u_up)) / u_half;
   if (u_opening == 2 ? dot(local, local) > 1.0 : any(greaterThan(abs(local), vec2(1.0)))) return false;
-  vec4 coverage = texelFetch(u_coverDepth, ivec2(gl_FragCoord.xy), 0);
-  if (coverage.a > 0.5) {
-    vec3 bytes = floor(coverage.rgb * 255.0 + 0.5);
-    float solid = dot(bytes, vec3(1.0, 256.0, 65536.0)) / 16777215.0;
-    vec4 clip = u_portalProj * (u_portalView * vec4(at, 1.0));
-    float plane = clip.z / clip.w * 0.5 + 0.5;
-    if (solid <= plane + 1e-6) return false;
-  }
-  return true;
+  ivec2 pixel = ivec2(gl_FragCoord.xy);
+  return texelFetch(u_cover, pixel, 0).r < 0.5 &&
+    (u_hasSpriteCover == 0 || texelFetch(u_spriteCover, pixel, 0).r < 0.5);
 }
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);

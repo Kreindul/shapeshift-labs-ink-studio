@@ -2,7 +2,16 @@
 // Hosts provide the ASCII shader hooks and Ink Studio's shared PixelLook GLSL.
 import { waterGLSL } from './water-optics.mjs';
 
-export function splatShaderSources(ascii, sampleCoverage, { water = false, airPockets = false, layered = false, atlas = false } = {}) {
+// Reconstruct the sample on its pixel ray from a camera-space axial distance.
+const axialPosition = `
+vec3 axialPosition(vec2 pixel, float axial, vec2 size) {
+  vec2 screen = (pixel * 2.0 / size - 1.0) / vec2(u_proj[0][0], u_proj[1][1]);
+  return vec3(screen * (u_ortho > 0.5 ? 1.0 : axial), -axial);
+}`;
+
+export function splatShaderSources(ascii, sampleCoverage, {
+  water = false, airPockets = false, layered = false, atlas = false, portal = false
+} = {}) {
   const SPLAT_VS = `#version 300 es
 precision highp float; precision highp int;
 uniform highp sampler2D u_data;
@@ -25,9 +34,10 @@ uniform vec4 u_arrivalPlane;
 uniform vec4 u_fogp;   // haze start, haze max, depth range near, depth range far
 layout(location=0) in vec2 a_corner;
 layout(location=1) in int a_index;
-out vec2 v_d; out vec3 v_conic; out vec4 v_color; out float v_depth; flat out float v_ownerDepth;
+out vec2 v_d; out vec3 v_conic; out vec4 v_color; out float v_depth;
+${portal ? 'flat out vec3 v_portalDepth;' : 'flat out float v_ownerDepth;'}
 out float v_gl; out float v_as; out float v_ast; uniform vec4 u_az[4]; uniform int u_azn; uniform float u_asoft, u_azst;
-${water ? 'flat out float v_waterAxial;' : ''}
+${water && !portal ? 'flat out float v_waterAxial;' : ''}
 ${ascii ? ascii.vsDecl : ''}// Inked detail (an option, off unless asked for): a dab may carry a 4 by 4 picture of the surface under it. Its two half-axes are
 // carried to the screen here and turned inside out, so each pixel can find where on the surface it is looking.
 uniform highp sampler2D u_fine; uniform float u_fineOn;
@@ -96,7 +106,7 @@ void main(){
     if ((pos.z - u_portal.z) * sg < -0.12 && (u_eye.z - u_portal.z) * sg > 0.05) { vec3 hp = u_eye + (pos - u_eye) * ((u_eye.z - u_portal.z) / (u_eye.z - pos.z)); thr = abs(hp.x - u_portal.x) < u_pdoor.x && hp.y > u_portal.y && hp.y < u_portal.y + u_pdoor.y; }
     if (pv ? !thr : (thr && stat)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; } }
   else if (pv) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
-  if (dot(u_arrivalPlane, vec4(pos, 1.0)) < 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  ${portal ? '' : 'if (dot(u_arrivalPlane, vec4(pos, 1.0)) < 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }'}
   // under a roof, the storey over your head is not drawn at all: the cut comes down from above to just over head height, block by block
   if (u_lid.y > 0.0 && !pv) { float hl = fract(sin(dot(floor(pos.xyz / 0.5), vec3(12.9898, 78.233, 37.719))) * 43758.5453); if (pos.y > u_lid.x + (stat ? 0.0 : 0.9) + (1.0 - u_lid.y) * (7.0 + 3.0 * hl)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; } }
   // what moves (an enemy, a barrel, a saw, a rail's lights) is held to the same lit circle as the ground it stands on: nothing shows out in the black where there is no floor
@@ -141,9 +151,9 @@ void main(){
 
   vec4 cam = u_view * vec4(pos, 1.0);
   if (cam.z > -u_near) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
-${water ? '  v_waterAxial = -cam.z;' : ''}
+${water && !portal ? '  v_waterAxial = -cam.z;' : ''}
   vec4 clip = u_proj * cam;
-  v_ownerDepth = u_idx > 1.5 ? clip.z / clip.w * 0.5 + 0.5 : 0.0;
+  ${portal ? '' : 'v_ownerDepth = u_idx > 1.5 ? clip.z / clip.w * 0.5 + 0.5 : 0.0;'}
   float dn = clamp((-cam.z - u_fogp.z) / (u_fogp.w - u_fogp.z), 0.0, 1.0);
   if (u_lampN > 0 && (flags & 22) == 0 && alpha >= 1.0) {
     float tr = cov[0][0] + cov[1][1] + cov[2][2], pp = tr / 2.4253, add = 0.0;   // (a dab is a disc, thin the way it faces: from its shape, how squarely it faces a light)
@@ -169,6 +179,12 @@ ${water ? '  v_waterAxial = -cam.z;' : ''}
   float det = A * C - B * B;
   if (det <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   v_conic = vec3(C, -B, A) / det;
+  ${portal ? `
+  // Condition axial depth on the pixel offset using the same projected covariance as the footprint.
+  vec3 back = vec3(u_view[0].z, u_view[1].z, u_view[2].z);
+  vec2 depthCov = -(T * (cov * back)).xy;
+  v_portalDepth = vec3(-cam.z, mat2(v_conic.x, v_conic.y, v_conic.y, v_conic.z) * depthCov);
+  ` : ''}
   vec2 ext = min(3.0 * sqrt(vec2(A, C)), vec2(2048.0));
   vec2 ndc = clip.xy / clip.w;
   if (snap) { vec2 px = floor((ndc * 0.5 + 0.5) * u_viewport) + 0.5; ndc = px / u_viewport * 2.0 - 1.0; }
@@ -190,7 +206,9 @@ ${ascii ? ascii.vsMain : ''}  gl_Position = vec4(ndc + a_corner * extN, 0.0, 1.0
 }`;
   const SPLAT_FS = `#version 300 es
 precision highp float;
-in vec2 v_d; in vec3 v_conic; in vec4 v_color; in float v_depth; flat in float v_ownerDepth;
+in vec2 v_d; in vec3 v_conic; in vec4 v_color; in float v_depth;
+${portal ? 'flat in vec3 v_portalDepth; uniform mat4 u_proj; uniform float u_ortho; uniform vec4 u_splatPlane;' :
+  'flat in float v_ownerDepth;'}
 in float v_gl; in float v_as; in float v_ast;
 ${ascii ? ascii.fsDecl : 'uniform float u_gly;\n'}uniform float u_crisp, u_hard;
 flat in vec4 v_fm; flat in vec4 v_ft; flat in float v_fk; flat in float v_lit; flat in float v_ix; uniform vec3 u_fpal[64]; uniform vec3 u_fog;
@@ -198,11 +216,25 @@ uniform float u_idx;
 layout(location=0) out vec4 o;
 layout(location=1) out vec4 od;
 layout(location=2) out vec4 oa;
-${water ? waterGLSL(airPockets, layered, atlas) + 'flat in float v_waterAxial; uniform vec2 u_viewport;' : ''}
+${water || portal ? 'uniform vec2 u_viewport;' : ''}
+${portal ? axialPosition : ''}
+${water ? waterGLSL(airPockets, layered, atlas) + (portal ? '' : 'flat in float v_waterAxial;') : ''}
 void main(){
 ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + v_conic.z * v_d.y * v_d.y) - v_conic.y * v_d.x * v_d.y;
   if (power > 0.0 || power < -4.5) discard;
   float g = v_color.a * exp(power);
+  ${portal ? `
+  float axial = v_portalDepth.x + dot(v_portalDepth.yz, v_d);
+  bool clipped = any(notEqual(u_splatPlane.xyz, vec3(0.0)));
+  if (clipped) {
+    if (axial <= 0.0 || dot(u_splatPlane, vec4(axialPosition(gl_FragCoord.xy, axial, u_viewport), 1.0)) < 0.0) discard;
+  }
+  if (u_idx > 1.5) {
+    if (v_color.a < 0.5 || g < 0.38) discard;
+    o = vec4(1.0); od = vec4(0.0); oa = vec4(0.0);
+    return;
+  }
+  ` : `
   if (u_idx > 1.5) {
     if (v_color.a < 0.5 || g < 0.38) discard;
     float k = v_ix + 1.0, z = round(clamp(v_ownerDepth, 0.0, 1.0) * 16777215.0);
@@ -211,6 +243,7 @@ ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + 
     oa = vec4(0);
     return;
   }
+  `}
   if (u_idx > 0.5) {   // the index pass (colour per pixel): which solid dab is in front here, its number in three bytes
     if (v_color.a < 1.0 || g < 0.5 || v_depth < 0.0) discard;
     float k = v_ix + 1.0;
@@ -225,7 +258,8 @@ ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + 
     float f = ij.y == 0 ? v_ft.x : ij.y == 1 ? v_ft.y : ij.y == 2 ? v_ft.z : v_ft.w;
     int ci = int(mod(floor(f / (ij.x == 0 ? 1.0 : ij.x == 1 ? 64.0 : ij.x == 2 ? 4096.0 : 262144.0)), 64.0));
     rgb = mix(u_fpal[min(ci, 63)], u_fog, v_fk); }
-${water ? '  vec3 mark; rgb = waterPaint(rgb, gl_FragCoord.xy, u_viewport, v_waterAxial, mark);' : ''}
+${water ? `  vec3 mark; rgb = waterPaint(rgb, gl_FragCoord.xy, u_viewport,
+    ${portal ? 'clipped ? axial : v_portalDepth.x' : 'v_waterAxial'}, mark);` : ''}
   o = vec4(rgb * a, a);
   float a2 = v_color.a >= 1.0 && v_depth >= 0.0 ? a : 0.0;   // only solid splats write depth
   od = vec4(v_depth * a2, v_gl * a * 0.5, v_lit * a2, a2);   // (green: how much glass lies over this pixel, in front of the last solid thing; a solid splat wipes it)
@@ -763,8 +797,7 @@ void main() { o = vec4(texelFetch(u_src, ivec2(gl_FragCoord.xy), 0).rgb, 1.0); }
   const SPR_VS = `#version 300 es
 precision highp float; precision highp int;
 uniform highp sampler2D u_anc, u_dat, u_sprTex; uniform mat4 u_view, u_proj; uniform vec2 u_vp, u_rng; uniform float u_time, u_keep, u_ortho; uniform vec4 u_rmpN4[16];
-uniform vec4 u_arrivalPlane;
-flat out ivec2 v_a; flat out ivec4 v_i; flat out float v_dA; flat out vec3 v_P, v_N;
+flat out ivec2 v_a; flat out ivec4 v_i; flat out float v_dA, v_axial; flat out vec3 v_P, v_N;
 vec4 sprT(int x, int y) { return texelFetch(u_sprTex, ivec2(x, y), 0); }
 int rlen(int r) { return int(u_rmpN4[r >> 2][r & 3] + 0.5) & 15; }
 void main() {
@@ -776,7 +809,7 @@ void main() {
   int j = int(t0.w + 0.5); vec4 m2 = texelFetch(u_dat, ivec2(((j & 511) << 2) + 2, j >> 9), 0), m3 = texelFetch(u_dat, ivec2(((j & 511) << 2) + 3, j >> 9), 0);
   vec3 pos = t0.xyz;
   if (int(m2.w + 0.5) % 16 == 11) { pos.x += m3.z * sin(u_time * m3.y + pos.y * 1.3 + pos.z * 0.9 + m3.x); pos.y += m3.z * 0.6 * sin(u_time * m3.y * 1.3 + pos.x * 1.1 + m3.x); }
-  vec4 cam = u_view * vec4(pos, 1.0); if (cam.z > -0.05 || dot(u_arrivalPlane, vec4(pos, 1.0)) < 0.0) return;
+  vec4 cam = u_view * vec4(pos, 1.0); if (cam.z > -0.05) return;
   vec4 clip = u_proj * cam; ivec2 a = ivec2(floor((clip.xy / clip.w * 0.5 + 0.5) * u_vp));
   vec3 N = t1.xyz, vn = mat3(u_view) * N, c = cam.xyz;
   float facing = u_ortho > 0.5 ? -vn.z : dot(vn, c) / length(c); if (abs(facing) > 0.95) return;
@@ -787,12 +820,15 @@ void main() {
   float dA = clamp((-cam.z - u_rng.x) / (u_rng.y - u_rng.x), 0.0, 1.0);
   vec2 corner = vec2(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1)) * 2.0 - 1.0;
   gl_Position = vec4((vec2(a) + 0.5 + corner * 8.0) / u_vp * 2.0 - 1.0, dA * 2.0 - 1.0, 1.0);
-  v_a = a; v_i = ivec4(s, cat, r, band); v_dA = dA; v_P = pos; v_N = N; }`;
+  v_a = a; v_i = ivec4(s, cat, r, band); v_dA = dA; v_axial = -cam.z; v_P = pos; v_N = N; }`;
   const SPR_FS = `#version 300 es
 precision highp float; precision highp int;
 uniform highp sampler2D u_sprTex, u_depth, u_idxTex, u_pixTex, u_dat; uniform mat4 u_pview; uniform vec3 u_peye; uniform float u_tanF, u_asp, u_portho, u_eGap, u_tol;
-flat in ivec2 v_a; flat in ivec4 v_i; flat in float v_dA; flat in vec3 v_P, v_N;
-out vec4 o;
+uniform mat4 u_proj; uniform vec2 u_vp; uniform float u_ortho; uniform vec4 u_splatPlane, u_spriteCover;
+flat in ivec2 v_a; flat in ivec4 v_i; flat in float v_dA, v_axial; flat in vec3 v_P, v_N;
+layout(location=0) out vec4 o;
+layout(location=1) out vec4 cover;
+${axialPosition}
 ${water ? waterGLSL(airPockets, layered, atlas) + `
 uniform vec3 u_waterSpritePalette[64];
 uniform vec4 u_rmp4[128], u_rmpN4[16];
@@ -820,6 +856,12 @@ void main() {
   vec4 I = sprT(0, 32 + s); int w = int(I.x + 0.5), h = int(I.y + 0.5), sk = int(I.w + 0.5), rr = d.x * od.x + d.y * od.y - 1 + sk, cc = d.x * td.x + d.y * td.y + int(I.z + 0.5);
   if (rr < 0 || rr >= h || cc < 0 || cc >= w) discard;
   int k = rr * w + cc; vec4 t = sprT(1 + (k >> 2), 32 + s); int v = int(t[k & 3] + 0.5); if (v == 0) discard;
+  cover = vec4(0.0);
+  if (any(notEqual(u_splatPlane.xyz, vec3(0.0))) || any(notEqual(u_spriteCover.xyz, vec3(0.0)))) {
+    vec4 at = vec4(axialPosition(gl_FragCoord.xy, v_axial, u_vp), 1.0);
+    if (dot(u_splatPlane, at) < 0.0) discard;
+    if (any(notEqual(u_spriteCover.xyz, vec3(0.0))) && dot(u_spriteCover, at) >= 0.0) cover = vec4(1.0);
+  }
   float dp = texelFetch(u_depth, p, 0).r;
   if (dp < 0.995) {
     if (dp < v_dA - 0.008) discard;   // (something nearer stands here)
