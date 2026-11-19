@@ -61,5 +61,26 @@
     return [x/length*strength,y/length*strength];
   }
 
-  P.inputActions=Object.freeze({compile,radial});
+  function permutation(controls,overrides={}) {
+    if (!Array.isArray(controls)||controls.length<1||controls.length>128||
+        !Array.from(controls).every(control)||new Set(controls).size!==controls.length)
+      throw Error('Expected 1..128 distinct controls');
+    if (!overrides||typeof overrides!=='object'||Array.isArray(overrides))
+      throw Error('Invalid control overrides');
+    const selected=new Set(controls);
+    if (Object.entries(overrides).some(([key,target])=>!selected.has(key)||!selected.has(target)))
+      throw Error('Unknown control in overrides');
+    const mapping=new Map(controls.map(key=>[key,Object.hasOwn(overrides,key)?overrides[key]:key]));
+    const owners=new Map([...mapping].map(([key,target])=>[target,key]));
+    if (owners.size!==mapping.size) throw Error('Each physical control needs a unique assignment');
+    const remap=input=>mapping.get(input)??input;
+    const saved=Object.freeze(Object.fromEntries([...mapping].filter(([key,target])=>key!==target)));
+    function swap(logical,physical) {
+      if (!mapping.has(logical)||!owners.has(physical)) throw Error('Unknown control');
+      return permutation([...mapping.keys()],{...saved,[logical]:physical,[owners.get(physical)]:remap(logical)});
+    }
+    return Object.freeze({remap,swap,overrides:saved});
+  }
+
+  P.inputActions=Object.freeze({compile,radial,permutation});
 })(KIT);

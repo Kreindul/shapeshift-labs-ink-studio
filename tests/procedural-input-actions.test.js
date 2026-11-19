@@ -39,3 +39,29 @@ test('radial pairs keep headings, reject drift, and cap travel on diagonals',()=
   assert.throws(()=>radial(NaN,0),/Radial input/);
   assert.throws(()=>radial(0,1,1),/Radial input/);
 });
+
+test('control permutations swap owners and persist only changed assignments',()=>{
+  const slots=['pad:South','pad:East','pad:LeftTrigger'];
+  const defaults=inputActions.permutation(slots);
+  const first=defaults.swap('pad:LeftTrigger','pad:South');
+  const second=first.swap('pad:East','pad:South');
+  assert.deepEqual(defaults.overrides,{});
+  assert.deepEqual(first.overrides,{'pad:LeftTrigger':'pad:South','pad:South':'pad:LeftTrigger'});
+  assert.deepEqual(second.overrides,{'pad:LeftTrigger':'pad:East','pad:South':'pad:LeftTrigger','pad:East':'pad:South'});
+  assert.deepEqual(first.swap('pad:LeftTrigger','pad:LeftTrigger').overrides,{});
+  const restored=inputActions.permutation(slots,JSON.parse(JSON.stringify(second.overrides)));
+  assert.equal(restored.remap('key:Enter'),'key:Enter');
+  assert.equal(restored.remap('pad:RightX'),'pad:RightX');
+  const map=inputActions.compile({
+    edit:{pick:[restored.remap('pad:South')],grab:[restored.remap('pad:LeftTrigger')]},
+    menu:{confirm:[restored.remap('pad:South'),'key:Enter'],back:[restored.remap('pad:East')]}
+  });
+  assert.equal(map.resolve('edit','pad:East').action,'grab');
+  assert.equal(map.resolve('menu','pad:LeftTrigger').action,'confirm');
+  assert.equal(map.resolve('menu','key:Enter').action,'confirm');
+  assert.throws(()=>inputActions.permutation(slots,{'pad:South':'pad:East'}),/unique assignment/);
+  assert.throws(()=>inputActions.permutation(slots,{'pad:South':'wheel:Up'}),/Unknown control/);
+  assert.throws(()=>inputActions.permutation(['pad:South','pad:South']),/distinct controls/);
+  assert.throws(()=>inputActions.permutation(Array(1)),/distinct controls/);
+  assert.throws(()=>restored.swap('pad:North','pad:South'),/Unknown control/);
+});

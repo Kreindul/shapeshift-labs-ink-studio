@@ -83,6 +83,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `ambientMotion.create(members, {place, move, destination?, step?})` | Seeded roaming, local avoidance, temporary attraction and habitat revalidation |
 | `layerMix.create(layers, {budget})` | Combine continuous controls into bounded per-layer gains with optional fades |
 | `inputActions.compile(contexts)` | Map physical keys and analog controls to semantic actions in named contexts |
+| `inputActions.permutation(controls, overrides)` | Swap physical assignments without leaving actions unbound |
 | `emitters.compile(spec)` | Deterministic looping samples with configurable emission direction and local drift. Set `windborne: true` and pass `{wind: [x, z]}` when sampling to advect by particle age. |
 | `routes.polyline(points, options)`, `routes.aroundConvex(outline, start, end, options)` | Arc-length routes with frames and closest queries. Convex XZ routes project endpoints onto an offset perimeter and interpolate world Y |
 | `geometry.inclinedPerimeter(outline, pose, {offset, below, above})` | Offset a convex affine extrusion for a world-upright swept section. Project and lift between the height-independent outline and world space |
@@ -549,6 +550,15 @@ action. The first source wins ties. Unpressed actions are zero.
 tooltips or settings. The caller owns polling, key edges, focus, and
 persisted overrides. A caller can recompile a changed profile and keep the
 previous one if the update contains conflicting bindings.
+
+`inputActions.permutation(controls, overrides = {})` maps each configured
+logical control name to a distinct physical control from the same list.
+`remap(input)` looks up the physical assignment and passes through controls
+outside the list. `swap(logical, physical)` returns a new permutation and
+gives the former owner that logical control's old physical assignment.
+Persist the returned `overrides` object to restore just the assignments that
+differ from the defaults. A caller can apply the same permutation across its
+contexts before compiling the action map.
 
 `inputActions.radial(x, y, deadZone = 0)` remaps a pair of signed analog
 axes together. The pair is zero inside the circular dead zone and reaches
