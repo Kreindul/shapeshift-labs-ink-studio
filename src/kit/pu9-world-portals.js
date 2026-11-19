@@ -9,6 +9,13 @@
     if (!xyz(value)) throw new TypeError('Expected finite XYZ coordinates');
     return value.slice();
   };
+  function synchronous(value, label) {
+    if (typeof value?.then === 'function') {
+      Promise.resolve(value).catch(() => {});
+      throw new TypeError(label + ' must be synchronous');
+    }
+    return value;
+  }
 
   function anchor({ origin, normal = [0, 0, 1], up = [0, 1, 0] } = {}) {
     const n = V.norm(point(normal), [0, 0, 0]), right = V.norm(V.cross(point(up), n), [0, 0, 0]);
@@ -62,9 +69,10 @@
 
   function create({ places, links = [], saved = {} } = {}) {
     const catalog = unique(places, 'Places'), graph = unique(links, 'Links');
-    const exits = new Map(), away = new Map();
+    const exits = new Map(), away = new Map(), observers = new Set();
     let memory = savedStates(saved), clocks = new Map();
-    let active = null, pending = null, restoring = null, stepping = false, walking = false, fading = null, disposed = false;
+    let active = null, pending = null, restoring = null, stepping = false, handoff = false;
+    let walking = false, fading = null, disposed = false;
     function savedStates(value) {
       if (!W.data.record(value)) throw new TypeError('Saved place state needs a JSON record keyed by place ID');
       return new Map(Object.entries(freeze(clone(value))));
@@ -88,12 +96,15 @@
       if (!['walk', 'fade', 'drop'].includes(mode) || !positive(radius) || !positive(height) || !positive(duration) ||
           row.open !== undefined && typeof row.open !== 'function')
         throw new TypeError('Invalid travel mode, gate or trigger controls');
+      if (row.transfer !== undefined && typeof row.transfer !== 'function')
+        throw new TypeError('Link transfer must be a callback');
       const opening = mode === 'walk' ? doorway({ ...row.aperture, from: from.at, to: to.at }) : null;
       const sweep = mode === 'drop' ? doorway({ halfWidth: radius, halfHeight: radius, shape: 'ellipse',
         ...row.aperture, from: from.at, to: to.at }) : opening;
       const requires = row.requires === undefined ? undefined : freeze(clone(row.requires));
       W.query.condition(requires, {});
-      const link = Object.freeze({ id, from, to, mode, opening, sweep, radius, height, duration, open: row.open, requires });
+      const link = Object.freeze({ id, from, to, mode, opening, sweep, radius, height, duration,
+        open: row.open, requires, transfer: row.transfer });
       graph.set(id, link);
       if (!exits.has(from.place)) exits.set(from.place, []);
       exits.get(from.place).push(link);
@@ -108,7 +119,7 @@
     }
     function guard() {
       if (disposed) throw new Error('The place session has been disposed');
-      if (restoring || stepping) throw new Error('Place state is already being updated');
+      if (restoring || stepping || handoff) throw new Error('Place state is already being updated');
     }
     function permits(link, actor) {
       if (link.requires !== undefined && !W.query.condition(link.requires, {
@@ -149,10 +160,10 @@
       job.done = Promise.resolve().then(async () => {
         if (controller.signal.aborted) return null;
         const previous = from?.id === place.id ? from.asset : away.get(place.id);
+        job.borrowed = previous;
         const context = { id: place.id, anchor: at, state: memory.get(place.id), previous: previous ?? null,
           time: timeOf(place.id), signal: controller.signal, reason, link };
         if (previous && place.tickPolicy === 'continue') {
-          job.resident = previous;
           if (previous.prepareArrival) {
             context.state = stateOf(place.id, previous);
             await previous.prepareArrival(context);
@@ -162,7 +173,7 @@
         return place.prepare(context);
       }).then(asset => {
         if (pending !== job) {
-          if (asset !== job.resident) release(asset);
+          if (asset !== job.borrowed) release(asset);
           return null;
         }
         try { job.asset = validateAsset(asset); }
@@ -175,33 +186,105 @@
       });
       return job;
     }
-    function activate(job, actor, camera, crossing) {
-      if (pending !== job || job.from !== active || !job.asset) return null;
+    function encounter(link, { actor, previous, radius } = {}) {
+      if (!actor) return { status: 'outside' };
+      if (!permits(link, actor)) return { status: 'locked' };
+      if (link.sweep) {
+        const crossing = previous == null ? null : link.sweep.hit(previous, actor.position, { radius });
+        return crossing ? { crossing } : { status: 'outside' };
+      }
+      const delta = V.sub(point(actor.position), link.from.at.origin);
+      return Math.hypot(delta[0], delta[2]) <= link.radius && Math.abs(delta[1]) <= link.height
+        ? { crossing: null } : { status: 'outside' };
+    }
+    function shiftCamera(camera, delta) {
+      return freeze({ ...camera, eye: V.add(point(camera.eye), delta),
+        ...(camera.target == null ? {} : { target: V.add(point(camera.target), delta) }) });
+    }
+    function evaluateArrival(job, actor, camera, crossing) {
       const link = job.link;
-      if (link && !permits(link, actor)) return null;
-      const opening = link?.opening, drop = link?.mode === 'drop', at = link?.to.at;
-      const arrival = actor && freeze({ ...clone(actor),
+      const opening = link.opening, drop = link.mode === 'drop', at = link.to.at;
+      let arrival = freeze({ ...actor,
         position: opening ? opening.point(actor.position) : at.origin.slice(),
         ...(actor.velocity ? { velocity: opening ? opening.direction(actor.velocity) : drop ? point(actor.velocity) : [0, 0, 0] } : {}),
         ...(actor.forward && opening ? { forward: opening.direction(actor.forward) } : {}),
         ...(actor.up && opening ? { up: opening.direction(actor.up) } : {})
       });
       let mappedCamera = opening?.camera(camera) ?? null;
-      if (drop && camera) {
-        const delta = V.sub(arrival.position, actor.position);
-        mappedCamera = freeze({ ...clone(camera), eye: V.add(point(camera.eye), delta),
-          ...(camera.target ? { target: V.add(point(camera.target), delta) } : {}) });
+      if (drop && camera) mappedCamera = shiftCamera(camera, V.sub(arrival.position, actor.position));
+      if (link.transfer) {
+        const next = synchronous(link.transfer(Object.freeze({
+          actor, arrival, link, crossing, source: job.from, destination: job.asset
+        })), 'Link transfer');
+        if (!W.data.record(next) || !xyz(next.position)) throw new TypeError('Link transfer must return an actor with a finite position');
+        if (mappedCamera) mappedCamera = shiftCamera(mappedCamera, V.sub(next.position, arrival.position));
+        arrival = freeze(clone(next));
       }
-      if (arrival && job.asset.canArrive && !job.asset.canArrive(arrival, link)) return null;
-      const previous = active, state = previous?.asset.checkpoint?.();
-      if (state !== undefined) memory.set(previous.id, freeze(clone(state)));
-      away.delete(job.place.id);
-      if (previous && previous.id !== job.place.id && catalog.get(previous.id).tickPolicy === 'continue')
-        away.set(previous.id, previous.asset);
-      active = Object.freeze({ id: job.place.id, asset: job.asset });
-      pending = null;
-      release(previous?.asset);
-      return Object.freeze({ place: active, link, actor: arrival, camera: mappedCamera, crossing });
+      const clear = !job.asset.canArrive || synchronous(job.asset.canArrive(arrival, link), 'Arrival clearance');
+      return { status: clear ? 'ready' : 'blocked', link, actor: arrival, camera: mappedCamera, crossing };
+    }
+    function checkArrival(id, options) {
+      guard();
+      const link = linked(id), job = pending?.link === link ? pending : null;
+      handoff = true;
+      try {
+        const contact = options === undefined ? null : encounter(link, options);
+        const status = contact?.status ?? (job?.asset ? 'prepared' : job ? 'loading' : 'unprepared');
+        if (!contact || status !== 'prepared') return Object.freeze({ status, link });
+        return Object.freeze(evaluateArrival(job, freeze(clone(options.actor)),
+          options.camera == null ? null : clone(options.camera), contact.crossing));
+      } finally {
+        handoff = false;
+      }
+    }
+    function activate(job, actor, camera, crossing) {
+      if (pending !== job || job.from !== active || !job.asset) return null;
+      handoff = true;
+      try {
+        const link = job.link;
+        let arrival = { link, actor: null, camera: null, crossing: null };
+        if (link) {
+          if (!permits(link, actor)) return null;
+          const { status, ...candidate } = evaluateArrival(job, actor, camera, crossing);
+          if (status !== 'ready') return null;
+          arrival = candidate;
+        }
+        const source = active, state = source?.asset.checkpoint?.();
+        if (state !== undefined) memory.set(source.id, freeze(clone(state)));
+        away.delete(job.place.id);
+        if (source && source.id !== job.place.id && catalog.get(source.id).tickPolicy === 'continue')
+          away.set(source.id, source.asset);
+        active = Object.freeze({ id: job.place.id, asset: job.asset });
+        pending = null;
+        if (!link) {
+          release(source?.asset);
+          return Object.freeze({ ...arrival, place: active });
+        }
+        const sourceDisposition = source.asset === active.asset ? 'reused' : away.has(source.id) ? 'retained' : 'released';
+        const event = Object.freeze({ ...arrival, place: active, source, sourceDisposition });
+        const errors = [];
+        for (const observer of [...observers]) {
+          try { synchronous(observer(event), 'Crossing listeners'); }
+          catch (error) { errors.push(error); }
+        }
+        try { release(source.asset); }
+        catch (error) { errors.push(error); }
+        return errors.length ? Object.freeze({ ...event, errors: Object.freeze(errors) }) : event;
+      } finally {
+        handoff = false;
+      }
+    }
+    function onCross(listener) {
+      guard();
+      if (typeof listener !== 'function') throw new TypeError('A crossing listener must be a callback');
+      observers.add(listener);
+      return () => observers.delete(listener);
+    }
+    function cancelPreparation(id = pending?.link?.id) {
+      guard();
+      if (!pending?.link || pending.link.id !== id || walking || fading) return false;
+      cancel();
+      return true;
     }
 
     async function enter(id, at) {
@@ -251,10 +334,10 @@
       guard();
       if (walking || fading) return null;
       const link = linked(id);
-      if (!actor || !link.sweep || !permits(link, actor)) return null;
-      const crossing = link.sweep.hit(previous, actor.position, { radius });
+      if (!link.sweep) return null;
+      const { crossing } = encounter(link, { actor, previous, radius });
       if (!crossing) return null;
-      const traveler = clone(actor), view = camera == null ? null : clone(camera);
+      const traveler = freeze(clone(actor)), view = camera == null ? null : clone(camera);
       const loaded = prepare(id), job = pending;
       walking = true;
       try {
@@ -268,9 +351,7 @@
       guard();
       if (walking || fading) throw new Error('Travel is already in progress');
       const link = linked(id);
-      if (link.mode !== 'fade' || !permits(link, actor)) return null;
-      const delta = V.sub(point(actor?.position), link.from.at.origin);
-      if (Math.hypot(delta[0], delta[2]) > link.radius || Math.abs(delta[1]) > link.height) return null;
+      if (link.mode !== 'fade' || encounter(link, { actor }).status) return null;
       const loaded = prepare(id), job = pending, half = link.duration / 2;
       const traveler = freeze(clone(actor));
       let elapsed = 0, opacity = 0, phase = 'out', ready = false, error, arrival;
@@ -296,7 +377,10 @@
               error = reason;
             }
             if (!arrival) error ??= new Error('Arrival is unavailable');
-            if (pending === job) cancel();
+            if (pending === job) {
+              try { cancel(); }
+              catch (reason) { error ??= reason; }
+            }
             elapsed = 0;
             phase = 'in';
           }
@@ -331,11 +415,7 @@
       try {
         for (const id of ids) {
           const time = timeOf(id) + dt;
-          const result = residents.get(id).step?.({ id, dt, time, active: id === active.id });
-          if (typeof result?.then === 'function') {
-            Promise.resolve(result).catch(() => {});
-            throw new TypeError('Place step callbacks must be synchronous');
-          }
+          synchronous(residents.get(id).step?.({ id, dt, time, active: id === active.id }), 'Place step callbacks');
           clocks.set(id, time);
         }
       } finally {
@@ -396,11 +476,12 @@
       }
     }
     return Object.freeze({ current: () => active, place, linksFrom: id => exits.get(id) ?? noLinks,
-      enter, approach, prepare, view, cross, fade, step, checkpoint, restore,
+      enter, approach, prepare, checkArrival, cancelPreparation, view, cross, fade, onCross, step, checkpoint, restore,
       dispose() {
         if (disposed) return;
-        if (stepping) throw new Error('Place state is already being updated');
+        if (stepping || handoff) throw new Error('Place state is already being updated');
         disposed = true;
+        observers.clear();
         restoring?.abort();
         const residents = new Set(away.values());
         if (active) residents.add(active.asset);

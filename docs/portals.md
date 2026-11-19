@@ -57,6 +57,73 @@ places. A failed load leaves the session empty. The format also accepts
 older `{place, saved}` checkpoints. Save the actor and camera separately
 if the experience needs their exact poses on reload.
 
+## Use the travel lifecycle
+
+Call `session.prepare(linkId)` to preload the destination, or let
+`session.approach(position, { actor })` preload a nearby doorway. Preparation
+resolves to the payload, rejects on load failure, and resolves to null if
+superseded. `session.cancelPreparation(linkId)` aborts an unused preview and
+releases its payload. Omit the ID to cancel the current preview. The session
+keeps previously visited places configured to continue ticking.
+
+Use `session.checkArrival(linkId)` to inspect preparation. It returns a
+record with `link` and one of three statuses.
+
+| Status | Meaning |
+| --- | --- |
+| `unprepared` | This link has no pending destination. |
+| `loading` | The destination is still preparing. |
+| `prepared` | The destination payload is available. |
+
+Pass `{ previous, actor, camera, radius }` as the second argument to also
+check a proposed walk or drop. For a fade, pass `{ actor }`. The check can
+report `locked` if the link's gate fails or `outside` if the proposed move
+misses the trigger. With a prepared destination, it returns `ready` or
+`blocked`, plus the proposed destination `actor`, `camera`, and swept
+`crossing` where applicable. This check leaves the active place unchanged.
+The session checks the gate and clearance again at handoff.
+
+A link's optional `transfer({ actor, arrival, link, crossing, source,
+destination })` decides what travels. `actor` is the original traveler,
+`arrival` is the default mapped traveler, `source` is the current place
+handle, and `destination` is the prepared payload. Return the complete JSON
+actor with a finite `position`. The session moves the mapped camera with any
+position adjustment, then passes the resulting actor to the payload's
+`canArrive` callback. Keep both callbacks synchronous and free of side
+effects so a host can check an arrival repeatedly.
+
+```js
+const gardenDoor = {
+  id: 'garden-door',
+  from: { place: 'court', anchor: 'arch' },
+  to: { place: 'garden', anchor: 'arch' },
+  aperture: { halfWidth: 1, halfHeight: 1.45 },
+  transfer({ arrival }) {
+    const { localProjectiles, ...traveler } = arrival;
+    return traveler;
+  }
+};
+```
+
+Use `session.onCross(listener)` to bind sound, animations, or quests to
+successful walks, drops, and fades. It returns a function that unsubscribes
+the listener. The event includes the `source` place, new `place`, `link`,
+arrival `actor` and `camera`, and `crossing` when applicable. The
+destination is active when listeners run and the outgoing payload remains
+available through the callbacks. `sourceDisposition` tells callers whether
+that payload is being `released`, `retained` for background ticking, or
+`reused` as the active payload. Listeners run synchronously and once per
+crossing. A thrown listener or disposal error is reported in the successful
+arrival's `errors` array.
+
+```js
+const unsubscribe = session.onCross(({ link, place, actor }) => {
+  audio.play('door', actor.position);
+  animation.play(actor.id, 'arrive');
+  quests.visit(place.id, link.id);
+});
+```
+
 ## Walk through a door
 
 ```js
@@ -80,9 +147,7 @@ const preview = session.view('garden-door', actor);
 ```
 
 Use `approach` as the actor moves to keep the nearest eligible front-facing
-door prepared. The returned `ready` promise rejects on a failed load and
-resolves to null when superseded. `prepare(linkId)` allows explicit
-prefetching. A link is directed. Add a second link with its own anchors
+door prepared. A link is directed. Add a second link with its own anchors
 and conditions for a return route. A `requires` condition uses the
 [world query condition format](headless-worlds.md) and can address `/actor`,
 `/state` (the source place's checkpoint), and `/time` (the source
@@ -107,8 +172,8 @@ if (crossed) {
 `actor.position` against the bounded aperture. The radius reserves
 clearance around the center. The arrival preserves the distance traveled
 past the plane, rotates supplied `velocity`, `forward` and `up`, and maps
-the supplied camera pose through the same frame. Additional JSON actor
-properties carry forward. A null result leaves the source active. Keep your
+the supplied camera pose through the same frame. By default, additional JSON
+actor properties carry forward. A null result leaves the source active. Keep your
 actor on the source side while a load or clearance check is unresolved.
 A host can also use `portals.doorway({from, to, halfWidth, halfHeight, shape})`
 directly for `hit`, `point`, `direction`, or `camera` operations.
@@ -161,9 +226,9 @@ The playback reports `out`, `hold`, `in`, `done`, or `failed`.
 It holds at full black until the destination is ready, places the actor at
 the arrival anchor, and reveals the new place. On preparation failure or
 a blocked arrival, it reveals the original place and returns the error.
-`arrival` is available after handoff; use the changed place or the arrival
-object's identity to run one-time host logic. The host can feed opacity
-into its own compositor, audio, or transition presentation.
+`arrival` is available after handoff. Bind one-time effects with
+`session.onCross`. The host can feed opacity into its own compositor,
+audio, or transition presentation.
 
 See [the headless courtyard and lantern garden](../examples/place-portals.js)
 for two-way doors, a separate fade link, and a garden that keeps time
