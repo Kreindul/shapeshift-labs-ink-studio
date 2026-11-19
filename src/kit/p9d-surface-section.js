@@ -33,7 +33,19 @@
         z<0?z*referenceDepth/depthAt(uv):z];
     }
 
-    return Object.freeze({referenceDepth,map,project});
+    function aperture(profileDistance,{front=0,back=0}={}){
+      if(typeof profileDistance!=='function'||![front,back].every(value=>Number.isFinite(value)&&value>=0))
+        throw Error('An aperture needs a signed profile and finite nonnegative depth extensions');
+      function distanceLocal([x,y,z]){
+        return Math.max(profileDistance(x,y),-referenceDepth-back-z,z-front);
+      }
+      return Object.freeze({
+        distanceLocal,
+        distance:point=>distanceLocal(project(point)),
+        mouths([x,y]=[0,0]){return {entry:map([x,y,0]),exit:map([x,y,-referenceDepth])};}
+      });
+    }
+    return Object.freeze({referenceDepth,map,project,aperture});
   }
 
   P.surfaceSection=section;

@@ -196,6 +196,14 @@ depth keeps its world scale for trim projections. Chart projection must
 locate the corresponding surface point along the normal throughout the band.
 Turn on `periodicU` to keep local coordinates continuous across a closed seam.
 
+Use `section.aperture(profileDistance, {front, back})` to intersect a signed
+profile in local XY with the section's thickness band. The optional
+nonnegative extensions `front` and `back` use the section's local depth units.
+`distance(worldPoint)` and `distanceLocal([x,y,z])` are negative inside the
+cut. `mouths([x,y])` returns the unextended `entry` and `exit` at a profile
+coordinate, using the actual thickness there. Apply the host's spatial
+bounds when the chart projects points outside its own domain.
+
 Convex face clipping accepts face records with `points` in outward cyclic
 order and an optional `tag`. Supply half spaces with `normal` and `offset`
 and optionally attach a `tag` to any plane. The output has the same face record
