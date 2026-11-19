@@ -90,5 +90,32 @@
     return Object.freeze({remap,swap,overrides:saved});
   }
 
-  P.inputActions=Object.freeze({compile,radial,permutation});
+  function axisMapping(controls,{overrides={},inverted=[]}={}){
+    const mapping=permutation(controls,overrides),slots=controls.slice();
+    if(!Array.isArray(inverted)||!Array.from(inverted).every(axis=>slots.includes(axis))||
+       new Set(inverted).size!==inverted.length)throw Error('Expected distinct inverted axes from the control list');
+    const reversed=new Set(inverted),directions=Object.freeze(slots.filter(axis=>reversed.has(axis)));
+    const assignments=slots.map(axis=>[axis,mapping.remap(axis),reversed.has(axis)?-1:1]);
+    function project(source){
+      const sample={...source};
+      for(const [axis,input,sign] of assignments){
+        const value=source[input]??0;
+        if(!Number.isFinite(value)||Math.abs(value)>1)throw Error('Axis values must be in [-1, 1]');
+        sample[axis]=value===0?0:sign*value;
+      }
+      return sample;
+    }
+    function swap(axis,input){
+      return axisMapping(slots,{overrides:mapping.swap(axis,input).overrides,inverted:directions});
+    }
+    function invert(axis,enabled=true){
+      if(!slots.includes(axis)||typeof enabled!=='boolean')throw Error('Unknown axis or invalid inversion');
+      const next=directions.filter(input=>input!==axis);
+      if(enabled)next.push(axis);
+      return axisMapping(slots,{overrides:mapping.overrides,inverted:next});
+    }
+    return Object.freeze({project,swap,invert,remap:mapping.remap,overrides:mapping.overrides,inverted:directions});
+  }
+
+  P.inputActions=Object.freeze({compile,radial,permutation,axisMapping});
 })(KIT);

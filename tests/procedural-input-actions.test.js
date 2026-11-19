@@ -87,3 +87,24 @@ test('control permutations swap owners and persist only changed assignments',()=
   assert.throws(()=>inputActions.permutation(Array(1)),/distinct controls/);
   assert.throws(()=>restored.swap('pad:North','pad:South'),/Unknown control/);
 });
+
+test('axis mapping projects each device simultaneously and preserves logical inversion across swaps',()=>{
+  const slots=['pad:LeftX','pad:LeftY','pad:RightX','pad:RightY'];
+  const original=inputActions.axisMapping(slots);
+  const remapped=original.invert('pad:RightY').swap('pad:RightY','pad:LeftX');
+  const raw={'pad:LeftX':.4,'pad:RightY':-.8,'pad:South':1};
+  assert.deepEqual(remapped.project(raw),{
+    'pad:LeftX':-.8,'pad:LeftY':0,'pad:RightX':0,'pad:RightY':-.4,'pad:South':1
+  });
+  assert.deepEqual(raw,{'pad:LeftX':.4,'pad:RightY':-.8,'pad:South':1});
+  assert.equal(original.project(raw)['pad:RightY'],-.8);
+  const {overrides,inverted}=remapped;
+  const restored=inputActions.axisMapping(slots,JSON.parse(JSON.stringify({overrides,inverted})));
+  slots.reverse();
+  assert.deepEqual(restored.project(raw),remapped.project(raw));
+  assert.equal(restored.invert('pad:RightY',false).project(raw)['pad:RightY'],.4);
+  assert.deepEqual(restored.project({}),{'pad:LeftX':0,'pad:LeftY':0,'pad:RightX':0,'pad:RightY':0});
+  assert.throws(()=>restored.project({'pad:LeftX':1.1}),/Axis values/);
+  assert.throws(()=>restored.invert('pad:South'),/Unknown axis/);
+  assert.throws(()=>inputActions.axisMapping(slots,{inverted:['pad:RightY','pad:RightY']}),/distinct inverted axes/);
+});
