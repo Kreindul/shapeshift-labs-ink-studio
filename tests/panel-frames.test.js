@@ -25,3 +25,25 @@ test('seam openings clip the two chart ends with one set of logical keys',()=>{
   const unframed=P.panelFrames({...standard,periodic:true,openings:[{...opening,rim:false}]});
   assert(unframed.parts.every(p=>!p.key.startsWith('opening/')));
 });
+
+test('two charts meeting at a cut keep continuous rails with no artificial middle jamb',()=>{
+  const common={...standard,braces:'none'};
+  const a=P.panelFrames({...common,openings:[
+    {key:'join',min:[3.8,.64],max:[5,1.72],rimEdges:['header','sill','start']}
+  ]});
+  const b=P.panelFrames({...common,openings:[
+    {key:'join',min:[0,.64],max:[1.2,1.72],rimEdges:['header','sill','end']}
+  ]});
+  for(const [frame,u] of [[a,4.96],[b,.04]]){
+    assert(frame.distance(u,1)>.02);
+    assert(frame.distance(u,1.79)<0);
+    assert(frame.distance(u,.56)<0);
+  }
+  assert(a.parts.some(p=>p.key==='opening/join/start'));
+  assert(b.parts.some(p=>p.key==='opening/join/end'));
+  assert(a.parts.every(p=>p.key!=='opening/join/end'));
+  assert(b.parts.every(p=>p.key!=='opening/join/start'));
+  assert.throws(()=>P.panelFrames({...common,openings:[
+    {key:'bad',min:[1,1],max:[2,2],rimEdges:['middle']}
+  ]}),/rim edges/);
+});

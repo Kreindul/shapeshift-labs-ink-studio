@@ -3,6 +3,7 @@
 (function (K) {
   const P = K.procedural || K.authoring;
   const choices = new Set(['none', 'ascending', 'descending', 'alternating', 'cross']);
+  const rimNames=['sill','header','start','end'];
   const rectangle = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
   const pair = v => Array.isArray(v) && v.length === 2 && Array.from(v).every(Number.isFinite);
   const boxDistance = ([x0,y0], [x1,y1], u, v) => Math.max(x0-u, u-x1, y0-v, v-y1);
@@ -60,10 +61,13 @@
       bracesByBay.set(cell.id, members);
     }
     const holes = [], rims = [], openingIds = new Set();
-    for (const {key, min, max, rim = true} of openings) {
+    for (const {key, min, max, rim = true, rimEdges = rimNames} of openings) {
       if (typeof key !== 'string' || !key || openingIds.has(key) || !pair(min) || !pair(max) ||
           min[0] >= max[0] || min[1] >= max[1] || periodic && max[0]-min[0] >= width || typeof rim !== 'boolean')
         throw new Error('Panel openings need unique keys and ordered bounds within one chart period');
+      if(!Array.isArray(rimEdges)||rimEdges.length>4||new Set(rimEdges).size!==rimEdges.length||
+         !Array.from(rimEdges).every(edge=>rimNames.includes(edge)))
+        throw new Error('Panel rim edges must be unique sill, header, start or end roles');
       openingIds.add(key);
       const wrap = periodic ? ((min[0] % width) + width) % width : min[0];
       for (const shift of periodic ? [-width,0,width] : [0]) {
@@ -78,6 +82,7 @@
           ['start','post',[x0-beam,y0],[x0,y1]],
           ['end','post',[x1,y0],[x1+beam,y1]]
         ]){
+          if(!rimEdges.includes(name))continue;
           const low=[Math.max(a[0],0),Math.max(a[1],0)],high=[Math.min(b[0],width),Math.min(b[1],height)];
           if(low[0]>=high[0]||low[1]>=high[1])continue;
           add(prefix+name,role,rectangle(...low,...high));

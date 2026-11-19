@@ -71,6 +71,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `surfaceMasks.compile(strokes, {size, periodic})` | Ordered surface brush coverage in retained UVs with measured width and optional seam wrapping |
 | `surfaceMasks.dirtyBounds(before, after, options)` | Bounded UV rectangles for repainting changed stroke coverage, including across chart seams |
 | `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
+| `geometry.profilePlaneSection({outline, span, frame, plane})` | Find the world-space edge intersections of a swept profile with a plane. Use the vertices for projected bounds, including concave outlines |
 | `geometry.recessedProfile({outline, recess, center, span, inset})` | Closed XY profile extruded along Z with a blind front recess, shared mesh edges and a solid backing |
 | `geometry.fitMonotoneOutline({outline, required})` | Fit a horizontal span at each height while preserving authored ledges and cutbacks where they have clearance |
 | `geometry.fitExteriorOutline({outline, required})` | Join two planar rings into one exterior while keeping exposed cutbacks, including profiles with multiple spans at a height |
@@ -203,9 +204,12 @@ input coordinate system so callers can extrude, clip or sample them.
 
 `panelFrames({width, height, unit, beam, braceWidth, braces, periodic, openings})`
 fits a panel of rails and posts and optional per-bay diagonal bracing. Use
-`openings: [{key, min, max, rim}]` to cut rectangular clear areas through the
+`openings: [{key, min, max, rim, rimEdges}]` to cut rectangular clear areas through the
 layout. Each cut can add a keyed header, sill and jambs. Set `rim: false` for
-clearance alone. A wrapped cut keeps the same member keys across both ends of
+clearance alone. `rimEdges` optionally lists the enabled members from
+`sill`, `header`, `start` and `end`. A panel sharing an opening with the
+next panel can omit the intervening jamb without filling the opening. A
+wrapped cut keeps the same member keys across both ends of
 the chart. The result exposes convex member footprints and a distance
 sampler. Callers set materials and realize the infill and apertures.
 

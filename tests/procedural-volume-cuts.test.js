@@ -40,3 +40,17 @@ test('touching cut volumes do not expose the shared interior face', () => {
   volume.sample(.5, p => assert.notEqual(p[0], 0));
   assert.equal(volume.raycast([-1, 1, 0], [1, 0, 0], 5).distance, 3);
 });
+
+test('plane sections trace a swept concave profile through its frame',()=>{
+  const outline=[[-2,-1],[2,-1],[2,1],[.5,1],[.5,0],[-.5,0],[-.5,1],[-2,1]];
+  const frame=P.transforms.local({position:[1,2,3],rotation:Math.PI/4,scale:[1.3,1,.7]});
+  const section=(point,normal)=>P.geometry.profilePlaneSection({outline,span:[-1,0],frame,plane:{point,normal}});
+  const front=section(frame.t,[1,0,1]);
+  assert.equal(front.length,outline.length);
+  const middle=section(P.transforms.point(frame,[0,0,-.5]),[1.04,0,1]);
+  assert(middle.length>4);
+  assert(middle.every(p=>Math.abs(1.04*(p[0]-middle[0][0])+p[2]-middle[0][2])<1e-8));
+  assert(middle.some(p=>Math.abs(p[1]-2)<1e-8));
+  assert.deepEqual(section([1,2,50],[0,0,1]),[]);
+  assert.throws(()=>section(frame.t,[0,0,0]),/normal/);
+});
