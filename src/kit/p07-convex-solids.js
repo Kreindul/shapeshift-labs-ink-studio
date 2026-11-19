@@ -208,7 +208,8 @@
   function union(pieces) {
     if (!Array.isArray(pieces) || !pieces.length) throw new Error('A construction union needs pieces');
     const bounds = A.spatial.boxOf(pieces.flatMap(p => [p.bounds.min, p.bounds.max]));
-    if (new Set(pieces.map(p => p.key)).size !== pieces.length)
+    const order = new Map(pieces.map((part,i) => [part.key,i]));
+    if (order.size !== pieces.length)
       throw new Error('Construction unions need unique piece keys');
     const cell = Math.max(0.25, Math.min(2, V.dist(bounds.min, bounds.max) / 12)),
       grid = new Map(),
@@ -243,6 +244,68 @@
             (p.contains ? p.contains(point, tolerance) : p.distance(point) < -tolerance)) return true;
       return false;
     }
+    function nearby(min, max) {
+      const lo=min.map(v=>Math.floor((v-EPS)/cell)),hi=max.map(v=>Math.floor((v+EPS)/cell)),
+        cells=(hi[0]-lo[0]+1)*(hi[1]-lo[1]+1)*(hi[2]-lo[2]+1);
+      if(cells>=pieces.length)return pieces;
+      const candidates=new Set(large);
+      for(let x=lo[0];x<=hi[0];x++)for(let y=lo[1];y<=hi[1];y++)for(let z=lo[2];z<=hi[2];z++){
+        const bucket=grid.get(key(x,y,z));
+        if(bucket)for(const part of bucket)candidates.add(part);
+      }
+      return candidates;
+    }
+    function raycast(origin,direction,max=10000){
+      if(!vector(origin)||!vector(direction)||V.len(direction)<EPS||!Number.isFinite(max)||max<=0)
+        throw new Error('Construction rays need finite vectors and positive reach');
+      const dir=V.norm(direction),end=V.mad(origin,dir,max),hits=[];
+      const region=A.spatial.boxOf([origin,end]);
+      for(const part of nearby(region.min,region.max)){
+        if(A.spatial.rayBox(part.bounds,origin,dir,max)!==null)hits.push(...part.intersections(origin,dir,max));
+      }
+      hits.sort((a,b)=>a.distance-b.distance||order.get(a.part)-order.get(b.part));
+      return hits.find(hit=>!hidden(hit.part,hit.p,EPS*10))||null;
+    }
+    // Project a bounded strip of convex material onto the segment's 0..1
+    // domain. Clipping in two coordinates detects gaps between sample points.
+    function projectedIntervals(a,b,direction,{outward,inward}={}){
+      if(!vector(a)||!vector(b)||!vector(direction)||V.len(direction)<EPS||
+         ![outward,inward].every(value=>Number.isFinite(value)&&value>=0))
+        throw new Error('Projected intervals need finite endpoints, a direction and nonnegative reaches');
+      const n=V.norm(direction),along=V.sub(b,a),low=V.mul(n,-inward),high=V.mul(n,outward),
+        corners=[V.add(a,low),V.add(a,high),V.add(b,low),V.add(b,high)],
+        region=A.spatial.boxOf(corners),intervals=[];
+      for(const part of nearby(region.min,region.max)){
+        if(!A.spatial.overlap(part.bounds,region))continue;
+        let polygon=[[0,-inward],[1,-inward],[1,outward],[0,outward]];
+        for(const {normal,offset} of part.planes){
+          const u=V.dot(normal,along),v=V.dot(normal,n),c=V.dot(normal,a)-offset;
+          const next=[];
+          for(let i=0;i<polygon.length;i++){
+            const from=polygon[i],to=polygon[(i+1)%polygon.length],
+              x=from[0]*u+from[1]*v+c,y=to[0]*u+to[1]*v+c;
+            if(x<=EPS)next.push(from);
+            if((x<=EPS)!==(y<=EPS)){
+              const f=(x-EPS)/(x-y);
+              next.push([from[0]+(to[0]-from[0])*f,from[1]+(to[1]-from[1])*f]);
+            }
+          }
+          polygon=next;
+          if(!polygon.length)break;
+        }
+        if(!polygon.length)continue;
+        const domain=polygon.map(p=>p[0]);
+        intervals.push([Math.min(...domain),Math.max(...domain)]);
+      }
+      intervals.sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+      const merged=[];
+      for(const [start,end] of intervals){
+        const last=merged.at(-1);
+        if(last&&start<=last[1]+EPS)last[1]=Math.max(last[1],end);
+        else merged.push([start,end]);
+      }
+      return merged;
+    }
     return {
       bounds,
       hidden,
@@ -259,17 +322,8 @@
         }
         return d;
       },
-      raycast(origin, direction, max = 10000) {
-        if (!vector(origin) || !vector(direction) || V.len(direction) < EPS || !Number.isFinite(max) || max <= 0)
-          throw new Error('Construction rays need finite vectors and positive reach');
-        const dir = V.norm(direction),
-          hits = [];
-        for (const part of pieces)
-          if (A.spatial.rayBox(part.bounds, origin, dir, max) !== null)
-            hits.push(...part.intersections(origin, dir, max));
-        hits.sort((a, b) => a.distance - b.distance);
-        return hits.find(hit => !hidden(hit.part, hit.p, EPS * 10)) || null;
-      },
+      raycast,
+      projectedIntervals,
       mesh() {
         const out = A.geometry.builder();
         for (const p of pieces) out.append(p.mesh);

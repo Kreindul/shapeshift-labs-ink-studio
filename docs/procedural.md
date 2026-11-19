@@ -33,6 +33,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.implicitSurface(field, bounds, options)` | Marching tetrahedra for negative-inside fields, with column preparation and bounded edge refinement |
 | `geometry.implicitTriangles(field, bounds, options, emit)` | Stream outward triangles from the same bounded field sampler |
 | `pieces.convex`, `pieces.box`, `pieces.beam`, `pieces.tube`, `pieces.union` | Reusable solid pieces and query unions. Union meshes contain constituent shells |
+| `pieces.union(parts).projectedIntervals(a, b, direction, {outward, inward})` | Merged intervals of material within a bounded strip projected onto a segment, with gaps preserved |
 | `pieces.uprightSpan(a, b, {width, height, up, extension}, meta)` | Closed pitched band with upright ends and constant width and height |
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
 | `logicalParts.compile(pieces, identify)` | Group clipped pieces of one stock part and partition visible and omitted pieces from retained keys |
@@ -1371,6 +1372,14 @@ seam. Output contains `nodes`, `edges` with ordered `frames`, and terminal
 `ends`. `tips` bounds the active paths per root, and `budget` caps total
 nodes. Callers provide the surface, branching parameters, and rendering
 or manufacturing rules for the resulting edges.
+
+For growth over assembled solids, cast a short ray along the chart normal
+to seat each frame on the exposed solid. A convex union's
+`projectedIntervals(a, b, direction, {outward, inward})` reports material
+support along the whole segment. Both reaches are nonnegative world
+distances. The returned intervals use segment coordinates from 0 to 1.
+A link callback can apply its own allowable gap when deciding whether to
+continue across a joint.
 
 `P.surfaceGrowth.transport(heading, fromNormal, toNormal)` carries a tangent
 through the shortest turn between two unit normals. A projection callback can
