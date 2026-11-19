@@ -868,6 +868,16 @@ that fit every pair within the given world-space tolerance. A vertical guide
 can translate with identity rotation. The result is `null` when spacing
 or rise changes, so a caller can refit treads or parts that need to stay level.
 
+`P.routes.stripJoin(previous, corner, next, halfWidth, options)` joins
+two equal-width strips at three planar points. It returns `null` for
+collinear or collapsed legs. Its `exterior` polygon fills the outside gap
+between the two cross sections. `maxArcAngle` sets the greatest angle
+between successive points on the arc and defaults to π/8. Use π for a
+straight bevel. `join.clip(polygon, 'incoming' | 'outgoing')` partitions
+a convex footprint by the turn bisector. A caller can clip sloped or
+stepped parts independently, then extrude the corner at the required
+height so neighboring parts keep their own profiles.
+
 `P.routes.guideVisibility(guide, obstacles, options)` repairs blocked
 intervals of a piecewise-linear XZ guide. Supply convex clearance footprints
 and optional `reserved` footprints for regions the route must stay outside,

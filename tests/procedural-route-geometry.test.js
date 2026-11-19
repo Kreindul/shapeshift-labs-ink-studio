@@ -3,6 +3,37 @@ const assert = require('node:assert/strict');
 const { routes } = require('..').load().KIT.procedural;
 const box = [[-1,-1],[1,-1],[1,1],[-1,1]];
 
+test('strip joins close only the outside of a turn and partition the overlapping strips',()=>{
+  const close=(a,b)=>assert(Math.abs(a-b)<1e-8,`${a} vs ${b}`);
+  const center=[2,3],previous=[0,3],next=[2,5];
+  const join=routes.stripJoin(previous,center,next,1),reverse=routes.stripJoin(next,center,previous,1);
+  assert.equal(join.exterior.length,6);
+  assert.deepEqual(join.exterior[0],center);
+  close(join.exterior[1][0],2);
+  close(join.exterior[1][1],2);
+  close(join.exterior.at(-1)[0],3);
+  close(join.exterior.at(-1)[1],3);
+  for(const [x,y] of join.exterior.slice(1)){
+    assert(x>=2-1e-8&&y<=3+1e-8);
+    close(Math.hypot(x-2,y-3),1);
+  }
+  const before=[[0,2],[2,2],[2,4],[0,4]],after=[[1,3],[3,3],[3,5],[1,5]];
+  const incoming=join.clip(before,'incoming'),outgoing=join.clip(after,'outgoing');
+  assert(incoming.every(([x,y])=>x+y<=5+1e-8));
+  assert(outgoing.every(([x,y])=>x+y>=5-1e-8));
+  assert.deepEqual(reverse.clip(before,'outgoing'),incoming);
+  assert.deepEqual(reverse.clip(after,'incoming'),outgoing);
+  assert.deepEqual(join.clip(after.map(([x,y])=>[x+4,y]),'incoming'),[]);
+  const bevel=routes.stripJoin(previous,center,next,1,{maxArcAngle:Math.PI});
+  assert.equal(bevel.exterior.length,3);
+  center[0]=20;
+  assert.deepEqual(join.clip(before,'incoming'),incoming);
+  assert.equal(routes.stripJoin([0,0],[1,0],[2,0],1),null);
+  assert.equal(routes.stripJoin([0,0],[1,0],[0,0],1),null);
+  assert.equal(routes.stripJoin([1,0],[1,0],[1,2],1),null);
+  assert.throws(()=>routes.stripJoin(previous,center,next,0),/positive width/);
+});
+
 test('upright route motion preserves level surfaces and rejects stretching or shearing',()=>{
   const guide=[[0,0,0],[0,1,0],[2,1,0],[2,2,2]],
     moved=guide.map(([x,y,z])=>[z+3,y-.4,1-x]);
