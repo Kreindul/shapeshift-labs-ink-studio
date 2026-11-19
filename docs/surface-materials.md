@@ -99,6 +99,56 @@ or a JavaScript shader. Existing finish layers can read the same fields
 through a field mask. See the [projected effects guide](projected-effects.md)
 for field authoring, local palettes, and emitters.
 
+## Color curves on surfaces
+
+Add a `colorCurve` layer to a material's finish to map a numeric input
+to color. This layer reads water depth from a world query.
+
+```json
+{
+  "type": "colorCurve",
+  "source": { "field": "river/water", "path": ["depth"], "fallback": 0 },
+  "ramp": {
+    "interpolation": "smooth",
+    "stops": [[0, "#292a43"], [0.6, "#31949f"], [1.8, "#b8e8d9"]]
+  },
+  "outputPalette": ["#292a43", "#315366", "#31949f", "#7abebb", "#b8e8d9"]
+}
+```
+
+The default source is `"luminance"` of the current surface color.
+`"height"` reads world Y and `"depth"` reads distance along the view axis
+in world units. Use `{ "field": "climate/temperature" }` for a numeric
+scene query. Optional `args` are forwarded to `probe`, and a `path` array
+selects a number from a record or array. The layer skips a missing or
+nonnumeric reading unless a numeric `fallback` is supplied.
+
+A source with `field` and `channel` reads a [projected field](projected-effects.md#fields)
+using its usual `space` and `projection`. JavaScript can also provide
+`source(sample, color)` to compute a scalar directly. A custom host
+using camera depth supplies `sample.depth` to `SurfaceLook.shade`.
+
+Surface colors can reference palette indices, hex swatches, or normalized
+RGB. Use `channels` to run independent red, green, and blue curves on the
+current color or the ramp output. The layer also accepts the usual
+`strength` and `mask`, plus the `mix`, `add`, and `multiply` blends.
+An optional `outputPalette` gives the result its own swatches at palette
+resolve. Use raw rendering to see the color before quantization.
+
+The Node renderer runs these surface layers. Browser hosts can use
+`SurfaceLook` for custom integration. The standard WebGL renderer runs
+[scene color curves](pixel-look.md#color-ramps-and-channel-curves).
+
+The [thermal station](../examples/color-curves.js) renders the same
+temperature query with smooth and stepped ramps and applies RGB channel
+curves to the equipment.
+
+```sh
+node cli/ink-studio.js probe examples/color-curves.js --field spring/temperature --at 1,0,0
+node cli/ink-studio.js render examples/color-curves.js --ortho --color-curves off --out before.png
+node cli/ink-studio.js render examples/color-curves.js --ortho --out after.png
+```
+
 ## Animate the finish light
 
 Set `light.surfaceDirection` in a JSON scene, or pass `surfaceLight` to

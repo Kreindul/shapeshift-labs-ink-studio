@@ -47,6 +47,12 @@ ink-studio sim replay lower.run.json
 ink-studio sim render lower.run.json --out lowered.png
 ```
 
+In a simulation render, put [surface color curves](surface-materials.md#color-curves-on-surfaces)
+in `visual.terrainSurface` or `entities.<id>.visual.surface`. Field sources
+sample the rendered checkpoint or tick. Set `visual.look.colorCurves` for a
+scene-wide palette treatment, and pass `--color-curves off` to preview the
+scene with those layers disabled.
+
 `sim resume` and `sim fork` both start a new process from a checkpoint. Keep
 their output paths distinct to retain both branches. A run file contains its
 starting checkpoint, added commands, and ending checkpoint. Replay verifies the

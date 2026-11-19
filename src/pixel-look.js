@@ -1,6 +1,7 @@
 /* Fixed-grid, palette-aware resolve using coverage and cluster voting.
    No per-frame palette fitting, camera movement or black ink. */
 const PixelLook = (() => {
+  const curves = typeof ColorCurves === 'undefined' ? require('./color-curves.js') : ColorCurves;
   const weights = [0.30, 0.55, 0.15];
   const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
   const stipple = Object.freeze({
@@ -89,6 +90,18 @@ const PixelLook = (() => {
     const byte = n => Math.round(Math.max(0, Math.min(1, n)) * 255);
     return Array.from({ length: grade.length / 3 }, (_, i) =>
       (byte(grade[i * 3]) << 16) | (byte(grade[i * 3 + 1]) << 8) | byte(grade[i * 3 + 2]));
+  }
+
+  function colorGrade(palette, roles, prior, remap, definition) {
+    const transfer = curves.prepare(definition), plan = prepareRemap(remap, palette, roles);
+    if (!transfer) return plan ? plan.grade(prior) : null;
+    const grade = new Float32Array(palette.length * 3), result = [0, 0, 0];
+    for (let i = 0; i < palette.length; i++) {
+      const offset = i * 3;
+      const base = prior?.length >= offset + 3 ? prior.slice(offset, offset + 3) : unpack(palette[i]);
+      grade.set(transfer(base, result), offset);
+    }
+    return plan ? plan.grade(grade) : grade;
   }
 
   function toneSettings(definition) {
@@ -295,6 +308,6 @@ vec3 inkToneResolve(vec3 color, ivec2 pixel) {
   return share >= mix(0.5, rank, u_inkToneAmount) ? b.rgb : a.rgb;
 }`;
   return { nearest, ink, resolve, glsl, presets, toneSettings, prepareTone, toneIndex, toneGlsl, bayerRank, outputPalettes,
-    prepareRemap, gradePalette };
+    prepareRemap, gradePalette, colorGrade };
 })();
 if (typeof module !== 'undefined') module.exports = PixelLook;

@@ -307,6 +307,11 @@
     } catch (error) {
       bad('finish.look.tone', error.message);
     }
+    try {
+      ColorCurves.prepare(look?.colorCurves);
+    } catch (error) {
+      bad('finish.look.colorCurves', error.message);
+    }
     if (spec.light?.surfaceDirection !== undefined)
       try {
         SurfaceLook.prepareLightTrack(spec.light.surfaceDirection);

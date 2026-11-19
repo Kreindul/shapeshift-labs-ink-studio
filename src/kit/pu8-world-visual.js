@@ -12,6 +12,7 @@
     const {min,max}=region, span=Math.max(max[0]-min[0],max[2]-min[2],1), resolution=config.resolution??Math.max(.08,span/100);
     W.data.check(Number.isFinite(resolution)&&resolution>=.02&&resolution<=10&&span/resolution<=256,'Render grid exceeds its sample budget');
     const B=makeBuilder(view.world.seed,config.palette??palette), S=K.sculpt(makeSculpt(B));
+    if(config.look?.pixel)S.pixel=true;
     const mid=min.map((n,i)=>(n+max[i])/2);
     const fields=config.fields??{}, terrain=fields.bed, water=fields.water, wear=fields.wear;
     const earth={r:[7,8,9,10,11],rf(x,y,z,ny) {
@@ -19,6 +20,8 @@
       const result=wear&&query.probe(wear,[x,y,z]);
       return result?.status==='ok'&&result.value>.18?[19,20,21,22,23]:null;
     }};
+    let hasSurface=Boolean(config.terrainSurface);
+    if(hasSurface)earth.surface=config.terrainSurface;
     const height=(x,z)=>{
       const result=terrain&&query.probe(terrain,[x,0,z]);
       return result?.status==='ok'?result.value:config.ground??0;
@@ -44,7 +47,9 @@
       if (!entity.visual?.half) continue;
       const pose=query.target({entity:id}), point=pose?.point;
       if (!point) continue;
-      S.box(point,entity.visual.half,{r:entity.visual.ramp??[19,20,21,22,23]}, {res:resolution*.72,tag:id});
+      const {half,ramp,surface}=entity.visual;
+      hasSurface ||= Boolean(surface);
+      S.box(point,half,{r:ramp??[19,20,21,22,23],surface}, {res:resolution*.72,tag:id});
     }
     for (const field of fields.agents??[]) {
       const reading=query.probe(field);
@@ -73,7 +78,8 @@
       }
     }
     return B.finish({cam:config.camera??{target:[mid[0],.05,mid[2]],dist:span*1.48,yaw:.62,pitch:.8},
-      radius:span,detail:30,dither:.22});
+      radius:span,detail:30,dither:.22,look:config.look,paletteRoles:config.paletteRoles,
+      ...((hasSurface||config.surfaceEffects)&&{surfaceEffects:{...config.surfaceEffects,query}})});
   }
   W.visual = visual;
 })(KIT);

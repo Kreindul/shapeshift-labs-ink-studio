@@ -22,11 +22,11 @@ function surfaceShading(world, options, camera) {
     }
     return rigFrames.get(part);
   }
-  const { eye, parallel, footprint, time, reflection } = camera;
+  const { eye, forward, parallel, footprint, time, reflection } = camera;
   const { STRIDE } = SurfaceLook;
   const liveLight = world.surfaceLight === undefined ? undefined : SurfaceLook.prepareLightTrack(world.surfaceLight)(time);
   const materials = world.surfaces.map(({ settings, light }) =>
-    SurfaceLook.prepare(settings, world.pal, liveLight ?? light, world.surfaceEffects));
+    SurfaceLook.prepare(settings, world.pal, liveLight ?? light, world.surfaceEffects, { colorCurves: options.colorCurves !== false }));
   const ids = new Map();
   const palettes = [];
   for (const material of materials) {
@@ -100,6 +100,7 @@ function surfaceShading(world, options, camera) {
     sample.worldPosition[0] = x;
     sample.worldPosition[1] = y;
     sample.worldPosition[2] = z;
+    if (prepared.depth) sample.depth = (eye[0] - x) * forward[0] + (eye[1] - y) * forward[1] + (eye[2] - z) * forward[2];
     normal[0] = surfaceData[offset + 1];
     normal[1] = surfaceData[offset + 2];
     normal[2] = surfaceData[offset + 3];

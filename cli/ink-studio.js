@@ -226,6 +226,7 @@ const view = extra =>
       ink: opt.ink === 'off' ? false : opt.ink,
       tone: opt.tone === 'off' ? false : opt.tone,
       paletteRemap: opt['palette-remap'] === 'off' ? false : undefined,
+      colorCurves: opt['color-curves'] === 'off' ? false : undefined,
       raw: !!opt.raw,
       colored: !!opt.colored,
       splatOrder: opt['splat-order'],
@@ -326,7 +327,7 @@ const CMD = {
         '',
         'any command that plays a diorama takes --poke 2:x,y,z (tap it at 2 seconds, toward that point; several with ;)',
         'view options: --surface off (no finish layers) --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --px1 (native art pixels) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (remove lone pixels) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n',
-        'art options: --palette-remap off --ink off --effects off --stable off --snap --dither-space screen|world|object --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
+        'art options: --palette-remap off --color-curves off --ink off --effects off --stable off --snap --dither-space screen|world|object --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
       ].join('\n')
     );
   },

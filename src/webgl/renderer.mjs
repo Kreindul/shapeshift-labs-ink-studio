@@ -101,7 +101,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     const sort = createDepthSorter();
     let simple, simpleUnavailable = false, keyProgram, damp, copy, spriteProgram, spriteLayer, spriteTable, anchors;
     let lastWorld, lastData, lastCount, lastOutput, fineValues, materials, anchorCount = 0;
-    let packed = empty, historyIndex = 0, historyValid = false, previousVP, previousRemap;
+    let packed = empty, historyIndex = 0, historyValid = false, previousVP, previousColorGrade;
     let toneKey, tone, sorted;
 
     function orderFor(world, frame, camera, time, isNew) {
@@ -425,9 +425,12 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const lines = outline && look.lines;
       const definition = raw || frame.tone === false ? null : (frame.tone ?? look.tone);
       const remapDefinition = frame.paletteRemap ?? look.paletteRemap;
-      const remap = !raw && !definition && remapDefinition !== undefined && remapDefinition !== false &&
-        toolkit.PixelLook.prepareRemap(remapDefinition, world.pal, world.paletteRoles);
-      const grade = remap ? remap.grade(world.anim?.grade) : world.anim?.grade;
+      const curveDefinition = frame.colorCurves ?? look.colorCurves;
+      const hasColorGrade = (remapDefinition !== undefined && remapDefinition !== false) ||
+        (curveDefinition !== undefined && curveDefinition !== false);
+      const colorGrade = !raw && !definition && hasColorGrade &&
+        toolkit.PixelLook.colorGrade(world.pal, world.paletteRoles, world.anim?.grade, remapDefinition, curveDefinition);
+      const grade = colorGrade || world.anim?.grade;
       const lineIndex = world.outline?.c ?? 0;
       const glass = raw ? null : world.glass;
       const glassUniforms = {};
@@ -453,7 +456,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         u_sprLayer: 13, u_markA: +cleaning, u_pal: pal, u_n: palCount, u_luma: 0,
         u_bypass: +raw, u_colored: +colored, u_dither: dither * 0.3 * (world.dither ?? 1),
         u_line: rgb(world.pal[lineIndex] ?? 0),
-        u_remapLine: remap && Number.isInteger(lineIndex) && lineIndex >= 0 && lineIndex < palCount ? lineIndex + 1 : 0,
+        u_remapLine: colorGrade && Number.isInteger(lineIndex) && lineIndex >= 0 && lineIndex < palCount ? lineIndex + 1 : 0,
         u_edge: outline ? (world.outline?.edge ?? 0) / (2 * camera.radius) : 0,
         u_lines: +!!lines, u_lineGap: lines ? (lines.gap ?? 0.3) / (2 * camera.radius) : 1,
         u_lineK: lines ? (lines.k ?? 0.55) : 1, u_lineLit: lines ? (lines.lit ?? 1.15) : 1,
@@ -473,16 +476,16 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       if (damping) {
         damp ??= program(sources.DAMP_FS);
         copy ??= program(sources.COPY_FS);
-        const activeRemap = remap ? grade : empty;
-        if (!sameValues(previousRemap, activeRemap)) historyValid = false;
-        previousRemap = activeRemap;
+        const activeColorGrade = colorGrade || empty;
+        if (!sameValues(previousColorGrade, activeColorGrade)) historyValid = false;
+        previousColorGrade = activeColorGrade;
         const next = 1 - historyIndex, vp = viewProjection(camera.projection, camera.view);
         const still = previousVP && vp.every((v, i) => Math.abs(v - previousVP[i]) < 1e-6);
         textureUnit(8, finished.textures[0]);
         textureUnit(11, history[historyIndex].textures[0]);
         textureUnit(6, geometry.textures[1]);
         fullscreen(damp, history[next].framebuffer, width, height, {
-          u_cur: 8, u_hist: 11, u_dep: 6, u_pal: remap ? grade : pal, u_n: palCount,
+          u_cur: 8, u_hist: 11, u_dep: 6, u_pal: colorGrade || pal, u_n: palCount,
           u_have: +(historyValid && !!still), u_iview: inverseView(camera.view, camera.eye),
           u_pvp: previousVP ?? vp, u_cam: [tangent, camera.aspect, +camera.ortho, 0],
           u_rng: camera.depthRange

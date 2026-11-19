@@ -283,7 +283,7 @@ const SurfaceLook = (() => {
     }
   }
 
-  function prepare(settings, palette = [], lightDirection = [-0.55, 0.72, 0.43], context = {}) {
+  function prepare(settings, palette = [], lightDirection = [-0.55, 0.72, 0.43], context = {}, { colorCurves = true } = {}) {
     if (!isRecord(settings)) throw new TypeError('Surface settings must be an object');
     numeric(settings, ['scale', 'seed', 'steps'], 'surface');
     if (settings.layers !== undefined && !isRecord(settings.layers))
@@ -329,9 +329,9 @@ const SurfaceLook = (() => {
       }
     }
     const layers = Object.entries(settings.layers || {})
-      .filter(([, layer]) => layer && layer.strength !== 0)
+      .filter(([, layer]) => layer && layer.strength !== 0 && (colorCurves || layer.type !== 'colorCurve'))
       .map(([id, layer]) => {
-        if (layer.type !== 'projected' && !Object.hasOwn(models, layer.type))
+        if (layer.type !== 'projected' && layer.type !== 'colorCurve' && !Object.hasOwn(models, layer.type))
           throw new RangeError('Unknown surface layer: ' + layer.type);
         numeric(
           layer,
@@ -380,10 +380,11 @@ const SurfaceLook = (() => {
             throw new RangeError('Unknown surface mask: ' + layer.mask.type);
           numeric(layer.mask, ['scale', 'low', 'high', 'seed', 'phase', 'width', 'feather'], id + '.mask');
         }
-        if (layer.type === 'projected') {
+        if (layer.type === 'projected' || layer.type === 'colorCurve') {
           const blend = layer.blend ?? 'mix';
-          if (!['mix', 'add', 'multiply'].includes(blend)) throw new RangeError('Unknown projected blend: ' + blend);
-          const effect = effects.layer(layer, context, value => color(value, palette));
+          if (!['mix', 'add', 'multiply'].includes(blend)) throw new RangeError('Unknown surface color blend: ' + blend);
+          const prepareEffect = layer.type === 'projected' ? effects.layer : effects.colorCurve;
+          const effect = prepareEffect(layer, context, value => color(value, palette));
           return { ...layer, id, blend, strength: clamp(layer.strength ?? 1), effect, fieldMask };
         }
         if (layer.colors !== undefined && !Array.isArray(layer.colors))
@@ -418,6 +419,7 @@ const SurfaceLook = (() => {
     return {
       settings, normal, layers, sun: unit(vector(lightDirection, AXES.y)),
       projected: layers.some(layer => layer.effect || layer.fieldMask),
+      depth: layers.some(layer => layer.effect?.depth),
       reveals: layers.some(layer => layer.effect?.reveals)
     };
   }
@@ -487,6 +489,7 @@ const SurfaceLook = (() => {
       if (layer.effect) {
         const result = layer.effect.sample(sample, output);
         const amount = clamp(result[3] * strength);
+        if (!amount && layer.type === 'colorCurve') continue;
         output[3] *= mix(1, clamp(result[4]), strength);
         output[4] = Math.max(output[4], clamp(result[5] * strength));
         if (amount >= 0.5) output[5] = layer.effect.palette;

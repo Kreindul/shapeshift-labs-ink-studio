@@ -139,14 +139,16 @@
     });
   }
 
-  function context({ fields = {}, shaders = {} } = {}) {
+  function context({ fields = {}, shaders = {}, query } = {}) {
     if (!record(fields) || !record(shaders) || Object.keys(fields).length > 24 ||
-        !Object.values(shaders).every(shader => typeof shader === 'function'))
+        !Object.values(shaders).every(shader => typeof shader === 'function') ||
+        (query !== undefined && typeof query?.probe !== 'function'))
       throw new TypeError('Surface effects need named fields and shader functions');
     return {
       fields: Object.fromEntries(Object.entries(fields).map(([name, value]) =>
         [name, typeof value?.frame === 'function' ? value : field(value)])),
-      shaders
+      shaders,
+      ...(query && { query })
     };
   }
 

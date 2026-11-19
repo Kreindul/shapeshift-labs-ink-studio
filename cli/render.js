@@ -128,9 +128,10 @@ function render(world, o) {
   if (look.pixelSize !== undefined && (!Number.isSafeInteger(look.pixelSize) || look.pixelSize < 1))
     throw new RangeError('look.pixelSize must be a positive integer');
   const tone = o.raw || o.samples || o.captureCoverage ? null : toneFor(world, o.tone ?? look.tone);
-  const remap = styled && !tone && PixelLook.prepareRemap(o.paletteRemap ?? look.paletteRemap, world.pal, world.paletteRoles);
-  const grade = remap ? remap.grade(world.anim?.grade) : world.anim?.grade;
-  const remappedPalette = remap ? PixelLook.gradePalette(grade) : undefined;
+  const colorGrade = styled && !tone && PixelLook.colorGrade(world.pal, world.paletteRoles, an.grade,
+    o.paletteRemap ?? look.paletteRemap, o.colorCurves ?? look.colorCurves);
+  const grade = colorGrade || an.grade;
+  const evaluatedPalette = colorGrade ? PixelLook.gradePalette(grade) : undefined;
   const rel = c.dist / dist0,
     rho = world.detail * Math.pow(rel, rel > 1 ? 0.5 : 0.25),
     px = o.px || look.pixelSize || clamp(Math.round(ch / (2 * tangent * rho * dist0)), 1, 18),
@@ -164,7 +165,7 @@ function render(world, o) {
     const palette = basePalette.map(h => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255]);
     const local = native.localAt && {
       at: native.localAt, palettes: native.localPalettes,
-      output: PixelLook.outputPalettes(remappedPalette || basePalette, native.localPalettes)
+      output: PixelLook.outputPalettes(evaluatedPalette || basePalette, native.localPalettes)
     };
     const amount = (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither;
     const img = specializedResolve ? ArtStability.resolve(native, samples, stable, palette, PixelLook, amount,
@@ -174,7 +175,7 @@ function render(world, o) {
         ditherAt: anchoring ? (x, y) => ArtStability.ditherCoordinates(stable, native.passes, (H - 1 - y) * W + x, x, y) : null
       }));
     return finishLook(Object.assign(img, { px, drawn: samples.drawn },
-      remappedPalette && !local && { palette: remappedPalette },
+      evaluatedPalette && !local && { palette: evaluatedPalette },
       !specializedResolve && native.detail && { detail: native.detail },
       native.motionReference && { motionReference: native.motionReference },
       native.alpha && { alpha: native.alpha },
@@ -250,6 +251,7 @@ function render(world, o) {
       : null;
   const surface = surfaceShading(world, o, {
     eye,
+    forward: [V[2], V[6], V[10]],
     reflection,
     parallel: ortho ? [V[2], V[6], V[10]] : null,
     footprint: (dist * 2) / (tp * H),
@@ -1119,11 +1121,11 @@ function render(world, o) {
     pal = [];
   for (let i = 0; i < np; i++) pal.push(hex(i));
   const outlineIndex = world.outline?.c ?? 0,
-    exactLine = remap && Number.isInteger(outlineIndex) && outlineIndex >= 0 && outlineIndex < np,
+    exactLine = colorGrade && Number.isInteger(outlineIndex) && outlineIndex >= 0 && outlineIndex < np,
     edge = world.outline && world.outline.edge ? world.outline.edge / (2 * R) : 0,
     line = hex(world.outline ? world.outline.c : 0),
     dith = (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither,
-    localOutput = localAt && PixelLook.outputPalettes(tone?.palette || remappedPalette || world.pal, surface.palettes),
+    localOutput = localAt && PixelLook.outputPalettes(tone?.palette || evaluatedPalette || world.pal, surface.palettes),
     use = new Uint32Array(localOutput?.packed.length ?? (tone ? tone.palette.length : np)),
     ln = look.lines ? (look.lines === true ? {} : look.lines) : null,
     lines = !ink && !!ln,
@@ -1387,7 +1389,7 @@ function render(world, o) {
   }
   return finishLook({
     w: W, h: H, px, rgb: out, drawn, use,
-    ...((localOutput || tone || remappedPalette) && { palette: localOutput?.packed || tone?.palette || remappedPalette }),
+    ...((localOutput || tone || evaluatedPalette) && { palette: localOutput?.packed || tone?.palette || evaluatedPalette }),
     ...(detail && { detail }), ...(motionReference && { motionReference }),
     ...(volumeStats && { volumeStats }), ...(o.captureFog && atmosphere?.fog && { fog: atmosphere.fog }),
     ...(alpha && { alpha }), ...(orderFallback && { orderFallback })

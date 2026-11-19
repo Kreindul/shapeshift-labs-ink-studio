@@ -118,3 +118,41 @@ node cli/ink-studio.js validate examples/palette-remap.json
 node cli/ink-studio.js render examples/palette-remap.json --ortho --palette-remap off --out before.png
 node cli/ink-studio.js render examples/palette-remap.json --ortho --out after.png
 ```
+
+## Color ramps and channel curves
+
+A ramp maps a scalar to an RGB color. Stops use the source's own units
+and must increase strictly. Samples outside the stops use the nearest
+endpoint. `step` holds each stop until the next. `linear` blends between
+stops. `smooth` eases in and out between stops without overshoot.
+
+Use `finish.look.colorCurves` in JSON or `look.colorCurves` in `B.finish()`.
+
+```json
+{
+  "ramp": {
+    "interpolation": "smooth",
+    "stops": [[0, "#11172a"], [0.45, "#708b9f"], [1, "#fbe8cb"]]
+  },
+  "channels": {
+    "blue": { "stops": [[0, 0.08], [0.5, 0.62], [1, 1]] }
+  }
+}
+```
+
+The scene ramp reads the luminance of each selected palette color.
+You can use a ramp, channel curves, or both. Channel curves take inputs
+and outputs in [0, 1]. Each uses its own channel, after the ramp when
+present. Unspecified channels pass through. Animation grades feed into
+the curves, and authored palette remaps and their protections apply last.
+Stipple and raw output bypass the scene curves.
+
+The library exposes `ColorCurves.scalar(definition)`,
+`ColorCurves.ramp(definition)` and `ColorCurves.prepare(transfer)`
+as reusable samplers. Standalone ramp colors accept six-digit hex,
+packed RGB integers, or normalized RGB triples. Pass an output array
+to a ramp sampler to reuse storage. The perceptual
+`KIT.procedural.materials.ramp(anchors, options)` also accepts
+`interpolation` and keeps its existing color space and default blend.
+See [surface curves](surface-materials.md#color-curves-on-surfaces)
+to bind a ramp to depth or a field.
