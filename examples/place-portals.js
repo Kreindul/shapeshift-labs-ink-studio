@@ -53,10 +53,10 @@ module.exports = function placePortals(K, makeBuilder, makeSculpt, options = {})
   const session = K.world.portals.create({
     places: [
       { id: 'court', anchors: { door: a, pool: { origin: [2.4, 0.1, 1.8] } }, prepare: () => ({ world: court() }) },
-      { id: 'garden', anchors: { door: b, bank: { origin: [11.75, 0.5, 4] } }, prepare({ state, previous }) {
-        if (previous) return previous;
-        const saved = { lamp: state?.lamp ?? true };
+      { id: 'garden', tickPolicy: 'continue', anchors: { door: b, bank: { origin: [11.75, 0.5, 4] } }, prepare({ state }) {
+        const saved = { lamp: state?.lamp ?? true, elapsed: state?.elapsed ?? 0 };
         const asset = { world: garden(saved), checkpoint: () => ({ ...saved }),
+          step({ time }) { saved.elapsed = time; },
           setLamp(value) {
             const next = { lamp: Boolean(value) };
             if (next.lamp === saved.lamp) return;

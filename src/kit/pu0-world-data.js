@@ -258,5 +258,5 @@
     return apply(source,[{op:'set',path:['prefabs',name],value:prefab}]);
   }
   K.world = {format, manifest, apply, stamp, remix, capture};
-  K.world.data = Object.freeze({own,record,id,vector,check,copy,equal,read,selector,endpoint,portOf});
+  K.world.data = Object.freeze({own,record,safeKey,id,vector,check,copy,equal,read,selector,endpoint,portOf});
 })(KIT);

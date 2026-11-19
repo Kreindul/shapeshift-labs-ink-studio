@@ -1,4 +1,4 @@
-/* Named places, oriented apertures and retained travel handoffs. */
+/* Named places, local simulation clocks and directed travel links. */
 (function (K) {
   const W = K.world, V = K.V, { freeze, clone } = K.procedural.data;
   const finite = Number.isFinite;
@@ -61,36 +61,59 @@
   }
 
   function create({ places, links = [], saved = {} } = {}) {
-    const catalog = unique(places, 'Places'), graph = unique(links, 'Links'), memory = new Map(Object.entries(clone(saved)));
-    const exits = new Map();
-    let active = null, pending = null, walking = false, fading = null, disposed = false;
+    const catalog = unique(places, 'Places'), graph = unique(links, 'Links');
+    const exits = new Map(), away = new Map();
+    let memory = savedStates(saved), clocks = new Map();
+    let active = null, pending = null, restoring = null, stepping = false, walking = false, fading = null, disposed = false;
+    function savedStates(value) {
+      if (!W.data.record(value)) throw new TypeError('Saved place state needs a JSON record keyed by place ID');
+      return new Map(Object.entries(freeze(clone(value))));
+    }
     for (const [id, row] of catalog) {
-      if (typeof row.prepare !== 'function') throw new TypeError('Each place needs a prepare callback');
-      const anchors = new Map(Object.entries(row.anchors ?? {}).map(([key, value]) => [key, anchor(value)]));
-      catalog.set(id, { id, anchors, prepare: row.prepare });
+      const tickPolicy = row.tickPolicy ?? 'pause';
+      if (!W.data.safeKey(id) || typeof row.prepare !== 'function' || !['pause', 'continue'].includes(tickPolicy))
+        throw new TypeError('Each place needs a stable ID, a prepare callback and a pause or continue tick policy');
+      const anchors = freeze(Object.fromEntries(Object.entries(row.anchors ?? {}).map(([key, value]) => [key, anchor(value)])));
+      catalog.set(id, { id, anchors, prepare: row.prepare, tickPolicy });
     }
     function endpoint(value) {
-      const place = catalog.get(value?.place), at = place?.anchors.get(value?.anchor);
+      const place = catalog.get(value?.place), key = value?.anchor;
+      const at = typeof key === 'string' && W.data.own(place?.anchors, key) && place.anchors[key];
       if (!at) throw new TypeError('Travel endpoints need a declared place and anchor');
       return Object.freeze({ place: place.id, anchor: value.anchor, at });
     }
     for (const [id, row] of graph) {
       const from = endpoint(row.from), to = endpoint(row.to), mode = row.mode ?? 'walk';
       const radius = row.radius ?? 1, height = row.height ?? 0.7, duration = row.duration ?? 0.8;
-      if ((mode !== 'walk' && mode !== 'fade') || !positive(radius) || !positive(height) || !positive(duration) ||
+      if (!['walk', 'fade', 'drop'].includes(mode) || !positive(radius) || !positive(height) || !positive(duration) ||
           row.open !== undefined && typeof row.open !== 'function')
         throw new TypeError('Invalid travel mode, gate or trigger controls');
       const opening = mode === 'walk' ? doorway({ ...row.aperture, from: from.at, to: to.at }) : null;
-      const link = Object.freeze({ id, from, to, mode, opening, radius, height, duration, open: row.open });
+      const sweep = mode === 'drop' ? doorway({ halfWidth: radius, halfHeight: radius, shape: 'ellipse',
+        ...row.aperture, from: from.at, to: to.at }) : opening;
+      const requires = row.requires === undefined ? undefined : freeze(clone(row.requires));
+      W.query.condition(requires, {});
+      const link = Object.freeze({ id, from, to, mode, opening, sweep, radius, height, duration, open: row.open, requires });
       graph.set(id, link);
       if (!exits.has(from.place)) exits.set(from.place, []);
       exits.get(from.place).push(link);
     }
+    for (const outgoing of exits.values()) Object.freeze(outgoing);
+    const noLinks = Object.freeze([]);
 
+    const timeOf = id => clocks.get(id) ?? 0;
+    function stateOf(id, asset) {
+      const current = asset.checkpoint?.();
+      return current === undefined ? memory.get(id) : current;
+    }
     function guard() {
       if (disposed) throw new Error('The place session has been disposed');
+      if (restoring || stepping) throw new Error('Place state is already being updated');
     }
     function permits(link, actor) {
+      if (link.requires !== undefined && !W.query.condition(link.requires, {
+        actor, get state() { return stateOf(active.id, active.asset); }, time: timeOf(active.id)
+      })) return false;
       return !link.open || Boolean(link.open({ active, actor, link }));
     }
     function linked(id) {
@@ -99,7 +122,9 @@
       return link;
     }
     const release = asset => {
-      if (asset !== active?.asset) asset?.dispose?.();
+      if (typeof asset?.dispose !== 'function' || asset === active?.asset) return;
+      for (const resident of away.values()) if (resident === asset) return;
+      asset.dispose();
     };
     function cancel() {
       const job = pending;
@@ -108,20 +133,40 @@
       job.controller.abort();
       release(job.asset);
     }
+    function validateAsset(asset) {
+      if (!asset || typeof asset !== 'object')
+        throw new TypeError('Place preparation must return a payload');
+      for (const method of ['step', 'checkpoint', 'prepareArrival', 'canArrive', 'dispose']) {
+        if (asset[method] !== undefined && typeof asset[method] !== 'function')
+          throw new TypeError('Place payload ' + method + ' must be a callback');
+      }
+      return asset;
+    }
     function request(place, at, link, reason) {
       cancel();
       const from = active, controller = new AbortController(), job = { from, controller, place, link, asset: null };
       pending = job;
-      job.done = Promise.resolve().then(() => place.prepare({
-        id: place.id, anchor: at, state: memory.get(place.id), previous: from?.id === place.id ? from.asset : null,
-        signal: controller.signal, reason, link
-      })).then(asset => {
-        if (!asset || typeof asset !== 'object') throw new TypeError('Place preparation must return a payload');
+      job.done = Promise.resolve().then(async () => {
+        if (controller.signal.aborted) return null;
+        const previous = from?.id === place.id ? from.asset : away.get(place.id);
+        const context = { id: place.id, anchor: at, state: memory.get(place.id), previous: previous ?? null,
+          time: timeOf(place.id), signal: controller.signal, reason, link };
+        if (previous && place.tickPolicy === 'continue') {
+          job.resident = previous;
+          if (previous.prepareArrival) {
+            context.state = stateOf(place.id, previous);
+            await previous.prepareArrival(context);
+          }
+          return previous;
+        }
+        return place.prepare(context);
+      }).then(asset => {
         if (pending !== job) {
-          release(asset);
+          if (asset !== job.resident) release(asset);
           return null;
         }
-        job.asset = asset;
+        try { job.asset = validateAsset(asset); }
+        catch (error) { release(asset); throw error; }
         return asset;
       }).catch(error => {
         if (pending !== job) return null;
@@ -134,17 +179,25 @@
       if (pending !== job || job.from !== active || !job.asset) return null;
       const link = job.link;
       if (link && !permits(link, actor)) return null;
-      const opening = link?.opening, at = link?.to.at;
+      const opening = link?.opening, drop = link?.mode === 'drop', at = link?.to.at;
       const arrival = actor && freeze({ ...clone(actor),
         position: opening ? opening.point(actor.position) : at.origin.slice(),
-        ...(actor.velocity ? { velocity: opening ? opening.direction(actor.velocity) : [0, 0, 0] } : {}),
+        ...(actor.velocity ? { velocity: opening ? opening.direction(actor.velocity) : drop ? point(actor.velocity) : [0, 0, 0] } : {}),
         ...(actor.forward && opening ? { forward: opening.direction(actor.forward) } : {}),
         ...(actor.up && opening ? { up: opening.direction(actor.up) } : {})
       });
-      const mappedCamera = opening?.camera(camera) ?? null;
+      let mappedCamera = opening?.camera(camera) ?? null;
+      if (drop && camera) {
+        const delta = V.sub(arrival.position, actor.position);
+        mappedCamera = freeze({ ...clone(camera), eye: V.add(point(camera.eye), delta),
+          ...(camera.target ? { target: V.add(point(camera.target), delta) } : {}) });
+      }
       if (arrival && job.asset.canArrive && !job.asset.canArrive(arrival, link)) return null;
       const previous = active, state = previous?.asset.checkpoint?.();
       if (state !== undefined) memory.set(previous.id, freeze(clone(state)));
+      away.delete(job.place.id);
+      if (previous && previous.id !== job.place.id && catalog.get(previous.id).tickPolicy === 'continue')
+        away.set(previous.id, previous.asset);
       active = Object.freeze({ id: job.place.id, asset: job.asset });
       pending = null;
       release(previous?.asset);
@@ -154,7 +207,8 @@
     async function enter(id, at) {
       guard();
       if (walking || fading) throw new Error('Travel is already in progress');
-      const place = catalog.get(id), target = at === undefined ? null : place?.anchors.get(at);
+      const place = catalog.get(id);
+      const target = typeof at === 'string' && W.data.own(place?.anchors, at) ? place.anchors[at] : null;
       if (!place || at !== undefined && !target) throw new RangeError('Unknown place or arrival anchor');
       const job = request(place, target, null, 'enter');
       if (!await job.done) return null;
@@ -197,8 +251,8 @@
       guard();
       if (walking || fading) return null;
       const link = linked(id);
-      if (!actor || !link.opening || !permits(link, actor)) return null;
-      const crossing = link.opening.hit(previous, actor.position, { radius });
+      if (!actor || !link.sweep || !permits(link, actor)) return null;
+      const crossing = link.sweep.hit(previous, actor.position, { radius });
       if (!crossing) return null;
       const traveler = clone(actor), view = camera == null ? null : clone(camera);
       const loaded = prepare(id), job = pending;
@@ -260,20 +314,103 @@
       fading = playback;
       return playback;
     }
+    function place(id) {
+      const definition = catalog.get(id);
+      if (!definition) return null;
+      return Object.freeze({ id, anchors: definition.anchors, tickPolicy: definition.tickPolicy, time: timeOf(id),
+        status: active?.id === id ? 'active' : away.has(id) ? 'away' : 'inactive' });
+    }
+    function step(dt) {
+      guard();
+      if (!finite(dt) || dt < 0) throw new RangeError('Place steps need finite nonnegative time');
+      if (!dt || !active) return;
+      const residents = new Map(away).set(active.id, active.asset);
+      const ids = [...residents.keys()].sort();
+      if (ids.some(id => !finite(timeOf(id) + dt))) throw new RangeError('Place elapsed time is out of range');
+      stepping = true;
+      try {
+        for (const id of ids) {
+          const time = timeOf(id) + dt;
+          const result = residents.get(id).step?.({ id, dt, time, active: id === active.id });
+          if (typeof result?.then === 'function') {
+            Promise.resolve(result).catch(() => {});
+            throw new TypeError('Place step callbacks must be synchronous');
+          }
+          clocks.set(id, time);
+        }
+      } finally {
+        stepping = false;
+      }
+    }
     function checkpoint() {
       guard();
-      const states = new Map(memory), state = active?.asset.checkpoint?.();
-      if (state !== undefined) states.set(active.id, state);
-      return freeze({ place: active?.id ?? null, saved: clone(Object.fromEntries(states)) });
+      const states = new Map(memory), residents = new Map(away);
+      if (active) residents.set(active.id, active.asset);
+      for (const [id, asset] of residents) {
+        const state = asset.checkpoint?.();
+        if (state !== undefined) states.set(id, state);
+      }
+      return freeze({ place: active?.id ?? null, saved: clone(Object.fromEntries(states)),
+        ...(clocks.size ? { clocks: Object.fromEntries(clocks) } : {}),
+        ...(away.size ? { away: [...away.keys()].sort() } : {}) });
     }
-    return Object.freeze({ current: () => active, enter, approach, prepare, view, cross, fade, checkpoint,
+    async function restore(data) {
+      guard();
+      if (active || pending) throw new Error('Restore needs an empty place session');
+      if (!W.data.record(data) || data.place !== null && !catalog.has(data.place))
+        throw new TypeError('Checkpoint needs a declared active place or null');
+      const states = savedStates(data.saved);
+      const times = data.clocks === undefined ? {} : data.clocks;
+      if (!W.data.record(times) || !Object.entries(times).every(([id, time]) => catalog.has(id) && finite(time) && time >= 0))
+        throw new TypeError('Invalid checkpoint place clocks');
+      const nextClocks = new Map(Object.entries(times));
+      const retained = data.away === undefined ? [] : data.away;
+      if (!Array.isArray(retained) || retained.length > catalog.size || new Set(retained).size !== retained.length ||
+          Array.from(retained).some(id => id === data.place || catalog.get(id)?.tickPolicy !== 'continue') ||
+          retained.length && data.place === null)
+        throw new TypeError('Invalid checkpoint away places');
+      const current = data.place, background = retained.slice();
+      const ids = current === null ? [] : [current, ...background];
+      const controller = new AbortController(), assets = new Map();
+      restoring = controller;
+      try {
+        for (const id of ids) {
+          const asset = await catalog.get(id).prepare({ id, anchor: null, state: states.get(id), previous: null,
+            time: nextClocks.get(id) ?? 0, signal: controller.signal, reason: 'restore', link: null });
+          assets.set(id, asset);
+          if (controller.signal.aborted) return null;
+          validateAsset(asset);
+        }
+        memory = states;
+        clocks = nextClocks;
+        for (const id of background) away.set(id, assets.get(id));
+        active = current === null ? null : Object.freeze({ id: current, asset: assets.get(current) });
+        assets.clear();
+        return active;
+      } catch (error) {
+        if (controller.signal.aborted) return null;
+        throw error;
+      } finally {
+        restoring = null;
+        for (const asset of new Set(assets.values())) release(asset);
+      }
+    }
+    return Object.freeze({ current: () => active, place, linksFrom: id => exits.get(id) ?? noLinks,
+      enter, approach, prepare, view, cross, fade, step, checkpoint, restore,
       dispose() {
         if (disposed) return;
+        if (stepping) throw new Error('Place state is already being updated');
         disposed = true;
-        const previous = active;
-        active = null;
-        cancel();
-        release(previous?.asset);
+        restoring?.abort();
+        const residents = new Set(away.values());
+        if (active) residents.add(active.asset);
+        try {
+          cancel();
+        } finally {
+          active = null;
+          away.clear();
+          for (const asset of residents) release(asset);
+        }
       } });
   }
 

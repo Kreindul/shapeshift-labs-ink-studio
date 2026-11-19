@@ -158,6 +158,155 @@ test('fade waits at black for readiness, arrives at the anchor, and recovers fro
   assert.match(recovered.error.message, /offline/);
 });
 
+test('place clocks tick active and retained places, and survive a JSON checkpoint round trip', async () => {
+  const loaded = [], stepped = [], arrivals = [], released = [];
+  const hold = deferred();
+  const definitions = {
+    places: [
+      { id: 'a', anchors: { door: a }, prepare: payload },
+      { id: 'b', tickPolicy: 'continue', anchors: { door: b }, prepare: payload }
+    ],
+    links: [{ id: 'in', from, to, aperture }, { id: 'out', from: to, to: from, aperture }]
+  };
+  function payload({ id, reason, state, time }) {
+    loaded.push([id, reason, state?.elapsed, time]);
+    let elapsed = state?.elapsed ?? 0;
+    return {
+      step(frame) { elapsed += frame.dt; stepped.push([frame.id, frame.time, frame.active]); },
+      checkpoint: () => ({ elapsed }),
+      prepareArrival({ anchor, state, time, signal }) {
+        arrivals.push([anchor.origin, state.elapsed, time, signal]);
+        return hold.promise;
+      },
+      dispose: () => released.push(id)
+    };
+  }
+  const session = portals.create(definitions);
+  assert.deepEqual(session.place('a'), {
+    id: 'a', anchors: { door: portals.anchor(a) }, time: 0, status: 'inactive', tickPolicy: 'pause'
+  });
+  assert.equal(session.place('missing'), null);
+  session.step(1);
+  await session.enter('a');
+  const preview = await session.prepare('in');
+  assert.equal(session.place('b').status, 'inactive');
+  session.step(2);
+  assert.equal(preview.checkpoint().elapsed, 0);
+  assert.equal((await session.enter('b')).id, 'b');
+  session.step(3);
+  assert.equal(session.place('a').time, 2);
+  const bAsset = session.current().asset;
+  await session.enter('a', 'door');
+  const returnPreview = session.approach([0, 0, 1]);
+  await settle();
+  assert.deepEqual(arrivals[0].slice(0, 3), [b.origin, 3, 3]);
+  assert.equal(session.approach([0, 0, 100]), null);
+  assert.equal(arrivals[0][3].aborted, true);
+  session.step(4);
+  hold.resolve();
+  assert.equal(await returnPreview.ready, null);
+  assert.equal(session.place('b').status, 'away');
+  assert.deepEqual(stepped, [['a', 2, true], ['b', 3, true], ['a', 6, true], ['b', 7, false]]);
+  const save = JSON.parse(JSON.stringify(session.checkpoint()));
+  assert.deepEqual(save, { place: 'a', saved: { a: { elapsed: 6 }, b: { elapsed: 7 } },
+    clocks: { a: 6, b: 7 }, away: ['b'] });
+  assert.equal(await session.prepare('in'), bAsset);
+  assert.equal((await session.cross('in', { previous: [0, 0, 1], actor: { position: [0, 0, -1] } })).place.asset, bAsset);
+  assert.equal(session.place('b').time, 7);
+  assert.deepEqual(loaded, [['a', 'enter', undefined, 0], ['b', 'preview', undefined, 0], ['b', 'enter', undefined, 0],
+    ['a', 'enter', 2, 2]]);
+  session.dispose();
+  assert.deepEqual(released, ['b', 'a', 'a', 'b']);
+
+  const restored = portals.create(definitions);
+  await restored.restore(save);
+  assert.deepEqual(loaded.slice(-2), [['a', 'restore', 6, 6], ['b', 'restore', 7, 7]]);
+  assert.equal(restored.place('b').status, 'away');
+  assert.throws(() => restored.step(-1), /nonnegative/);
+  restored.step(0);
+  restored.step(1);
+  assert.deepEqual(stepped.slice(-2), [['a', 7, true], ['b', 8, false]]);
+  assert.deepEqual(restored.checkpoint().saved, { a: { elapsed: 7 }, b: { elapsed: 8 } });
+  const returnTrip = await restored.cross('in', { previous: [0, 0, 1], actor: { position: [0, 0, -1] } });
+  assert.deepEqual(returnTrip.place.asset.checkpoint(), { elapsed: 8 });
+  assert.equal(loaded.length, 6);
+  restored.dispose();
+});
+
+test('links describe locked one-way drops and explicit returns between stable anchors', async () => {
+  const hatch = { origin: [0, 0, 0], normal: [0, 1, 0], up: [0, 0, 1] };
+  const drop = { id: 'drop', mode: 'drop', from: { place: 'a', anchor: 'hatch' }, to, radius: 1,
+    requires: { all: [{ path: '/actor/key', value: 'brass' }, { path: '/state/open', value: true },
+      { path: '/time', op: 'gte', value: 1 }] } };
+  let open = false;
+  const session = portals.create({
+    places: [
+      { id: 'a', anchors: { hatch, door: a }, prepare: () => ({ checkpoint: () => ({ open }) }) },
+      { id: 'b', anchors: { door: b }, prepare: () => ({}) }
+    ],
+    links: [drop, { id: 'return', from: to, to: from, aperture }]
+  });
+  await session.enter('a', 'hatch');
+  assert.deepEqual(session.linksFrom('a').map(link => link.id), ['drop']);
+  assert.deepEqual(session.linksFrom('b').map(link => link.id), ['return']);
+  assert.deepEqual(session.linksFrom('c'), []);
+  assert(Object.isFrozen(session.linksFrom('a')));
+  const actor = { position: [0, -2, 0], velocity: [0, -4, 0], key: 'brass', forward: [0, 0, 1] };
+  const previous = [0, 2, 0];
+  const camera = { eye: [0, 0, 4], target: actor.position, back: [0, 0, 1] };
+  assert.equal(await session.cross('drop', { previous, actor }), null);
+  open = true;
+  session.step(1);
+  assert.equal(await session.cross('drop', { previous, actor: { ...actor, key: 'tin' } }), null);
+  assert.equal(await session.cross('drop', { previous: actor.position, actor: { ...actor, position: previous } }), null);
+  assert.equal(await session.cross('drop', { previous: [0.9, 2, 0],
+    actor: { ...actor, position: [0.9, -2, 0] }, radius: 0.2 }), null);
+  await session.prepare('drop');
+  assert.equal(session.view('drop', actor), null);
+  const travel = await session.cross('drop', { previous, actor, camera, radius: 0.2 });
+  assert.deepEqual(travel.crossing, { fraction: 0.5, point: hatch.origin });
+  assert.deepEqual(travel.actor, { ...actor, position: b.origin });
+  assert.deepEqual(travel.camera, { ...camera, eye: [8, 3, 8], target: b.origin });
+  await assert.rejects(session.cross('drop', { previous, actor }), /active place/);
+  await session.cross('return', { previous: [9, 1, 4], actor: { position: [7.5, 1, 4] } });
+  assert.equal(session.current().id, 'a');
+  session.dispose();
+});
+
+test('failed and cancelled restores release staged payloads without publishing place state', async () => {
+  const hold = deferred(), released = [];
+  let fail = true, restoringSignal;
+  const create = () => portals.create({ places: [
+    { id: 'a', prepare: () => ({ dispose: () => released.push('a') }) },
+    { id: 'b', tickPolicy: 'continue', prepare({ signal }) {
+      if (fail) throw new Error('offline');
+      restoringSignal = signal;
+      return hold.promise;
+    } }
+  ] });
+  const save = { place: 'a', saved: { a: { x: 2 } }, clocks: { a: 4 }, away: ['b'] };
+  const session = create();
+  await assert.rejects(session.restore({ ...save, away: ['a'] }), /away places/);
+  await assert.rejects(session.restore(save), /offline/);
+  assert.deepEqual(released, ['a']);
+  assert.deepEqual(session.checkpoint(), { place: null, saved: {} });
+  fail = false;
+  const restoring = session.restore(save);
+  await settle();
+  assert.equal(session.current(), null);
+  assert.equal(session.place('a').time, 0);
+  assert.throws(() => session.step(1), /already being updated/);
+  session.dispose();
+  assert.equal(restoringSignal.aborted, true);
+  hold.resolve({ dispose: () => released.push('b') });
+  assert.equal(await restoring, null);
+  assert.deepEqual(released, ['a', 'a', 'b']);
+  const oldSave = create();
+  await oldSave.restore({ place: 'a', saved: {} });
+  assert.equal(oldSave.current().id, 'a');
+  oldSave.dispose();
+});
+
 function browserProbe(createRenderer) {
   const canvas = document.querySelector('canvas');
   const renderer = createRenderer(canvas, { toolkit: { KIT, PixelLook } });
