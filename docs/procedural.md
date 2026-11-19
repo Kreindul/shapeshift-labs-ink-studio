@@ -1637,6 +1637,16 @@ input order with resolved `grounded` and `state` values. Each part and
 contact is visited a bounded number of times. Callers choose how to find
 contacts and how to present either state.
 
+`contacts.verticalPrism(footprint, bottom, top)` constructs a closed
+volume from a convex polygon in the XZ plane and two ordered Y heights.
+It owns its frozen `footprint` and world `bounds`. Use `containsPlan(x, z)`
+to restrict external samples to the footprint.
+`contacts.volumeContact(a, b, tolerance = 0)` accepts these prisms and
+`contacts.orientedBox` volumes in any combination. It tests their face
+normals and the required edge cross axes. A tolerance gives the maximum
+allowed separation along those axes. Use the boolean result to connect
+parts in a support graph.
+
 `construct.loadPaths(sockets, spans, {ground, clear, maxSpan, maxDrop})`
 places beams, supporting columns and braces. Sockets use `{id, point}`
 with an optional `bearing` to indicate an existing support. Spans use

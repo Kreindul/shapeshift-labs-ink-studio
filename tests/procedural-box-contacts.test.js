@@ -1,7 +1,36 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const K = require('..').load().KIT;
-const { orientedBox, boxContact } = K.procedural.contacts;
+const { orientedBox, boxContact, verticalPrism, volumeContact } = K.procedural.contacts;
+
+test('vertical prism contact follows the fitted footprint and height',()=>{
+  const ring=[[0,0],[2,0],[0,2]],a=verticalPrism(ring,0,1);
+  const outside=orientedBox([1.25,.5,1],[.1,.25,.1]);
+  assert(!volumeContact(a,outside));
+  assert(volumeContact(a,outside,.04));
+  assert(volumeContact(outside,a,.04));
+  const b=verticalPrism([[1,1],[1,1.5],[1.5,1]],.9,1.2);
+  assert(volumeContact(a,b));
+  assert(!volumeContact(a,verticalPrism(b.footprint,1.05,2)));
+  assert(volumeContact(a,verticalPrism(b.footprint,1.05,2),.05));
+  ring[0][0]=30;
+  assert(a.containsPlan(.5,.5));
+  assert(!a.containsPlan(1.4,1.4));
+  assert(Object.isFrozen(a.footprint));
+  assert.throws(()=>verticalPrism(ring,2,1),/ordered/);
+  assert.throws(()=>verticalPrism([[0,0],[2,0],[1,.5],[2,2],[0,2]],0,1),/convex/);
+});
+
+test('prism contact agrees with an equivalent box against tilted volumes',()=>{
+  const a=orientedBox([0,.5,0],[.8,.5,.35]);
+  const prism=verticalPrism([[-.8,-.35],[.8,-.35],[.8,.35],[-.8,.35]],0,1);
+  for(let i=0;i<96;i++){
+    const frame=K.M.mul(K.M.rot([1,0,0],.51),K.M.rot([0,1,0],i*.11));
+    const box=orientedBox([i%6*.35-.8,i%9*.24-.4,i%11*.17-.85],[.7,.12,.23],frame);
+    assert.equal(volumeContact(prism,box),boxContact(a,box),'pose '+i);
+    assert.equal(volumeContact(box,prism,.02),boxContact(box,a,.02),'tolerant pose '+i);
+  }
+});
 
 test('box contacts include a face join and reject separated diagonal volumes with overlapping bounds', () => {
   const yaw = Math.PI/4, c = Math.cos(yaw), s = Math.sin(yaw);
