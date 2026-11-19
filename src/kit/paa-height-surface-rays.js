@@ -149,5 +149,28 @@
     return { min, max, samples };
   }
 
-  P.heightSurface = { raycast, ceiling, rangeOverPlan };
+  // Fit independent sites of a footprint without shifting their plan positions.
+  function seatSites(origin, sites, height, {offset = 0, maxDelta = Infinity} = {}) {
+    if (!vector(origin) || !Array.isArray(sites) || sites.length > 4096 ||
+        typeof height !== 'function' || !Number.isFinite(offset) ||
+        !(Number.isFinite(maxDelta) || maxDelta === Infinity) || maxDelta < 0)
+      throw new Error('Surface sites need a finite origin, bounded sites and a height sampler');
+    const keys = new Set(), fitted = [];
+    for (const site of sites) {
+      const {key, offset: plan} = site || {};
+      if (typeof key !== 'string' || !key || keys.has(key) || !Array.isArray(plan) ||
+          plan.length !== 2 || !Number.isFinite(plan[0]) || !Number.isFinite(plan[1]))
+        throw new Error('Surface sites need unique keys and finite XZ offsets');
+      keys.add(key);
+      const x = origin[0] + plan[0], z = origin[2] + plan[1];
+      if (!Number.isFinite(x) || !Number.isFinite(z)) throw new Error('Surface site coordinates must be finite');
+      const y = height(x,z);
+      if (y == null) continue;
+      if (!Number.isFinite(y) || !Number.isFinite(y+offset)) throw new Error('Surface site height must be finite');
+      if (Math.abs(y-origin[1]) <= maxDelta) fitted.push({key, point:[x,y+offset,z]});
+    }
+    return fitted;
+  }
+
+  P.heightSurface = { raycast, ceiling, rangeOverPlan, seatSites };
 })(KIT);

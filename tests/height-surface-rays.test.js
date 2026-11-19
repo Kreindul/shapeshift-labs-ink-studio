@@ -3,6 +3,21 @@ const { heightSurface } = require('..').load().KIT.procedural;
 const near = (a,b) => assert(Math.abs(a-b)<1e-6, `${a} != ${b}`);
 const bounds = { min: [-6,-1,-6], max: [6,4,6] };
 
+test('independent footprint sites keep their keys and plan offsets across local relief and masks', () => {
+  const sites = [
+    {key:'left',offset:[-.5,0]}, {key:'right',offset:[.5,0]},
+    {key:'masked',offset:[0,1]}, {key:'ledgeless',offset:[0,-1]},
+  ], height = (x,z) => z > 0 ? null : z < 0 ? -4 : x - 2;
+  assert.deepEqual(heightSurface.seatSites([2,0,0], sites, height, {offset:.125,maxDelta:1}),[
+    {key:'left',point:[1.5,-.375,0]}, {key:'right',point:[2.5,.625,0]},
+  ]);
+  assert.deepEqual(heightSurface.seatSites([2,0,0], sites, (x,z)=>z < 0 ? null : height(x,z)),[
+    {key:'left',point:[1.5,-.5,0]}, {key:'right',point:[2.5,.5,0]},
+  ]);
+  assert.throws(()=>heightSurface.seatSites([2,0,0], [sites[0],sites[0]], height),/unique/);
+  assert.throws(()=>heightSurface.seatSites([2,0,0], sites, ()=>NaN),/finite/);
+});
+
 test('vertical height rays evaluate only one height and honor their physical extent',()=>{
   let queries=0;
   const surface={ bounds, height(){ queries++;return 1.5; }, normal:()=>[0,1,0], inside:x=>x<2 };

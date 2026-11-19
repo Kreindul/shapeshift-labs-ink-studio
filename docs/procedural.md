@@ -2423,6 +2423,16 @@ It throws when the candidate count exceeds the budget. Use a smaller
 spacing or extra clearance for sharply varying surfaces. Intersect the
 query ring with the heightfield's footprint first when it is bounded.
 
+`P.heightSurface.seatSites(origin, sites, height, {offset, maxDelta})` seats
+independent supports or roots of a footprint. Pass a world XYZ reference
+point and keyed sites of the form `{key, offset: [x,z]}`. Each offset is
+relative to the reference point in the horizontal plane. The height sampler
+may return null for an excluded site. A finite `maxDelta` rejects sites
+whose sampled height differs from the reference Y by too much. The optional
+vertical offset is added after that check. Results contain `{key, point}` in
+input order, so surrounding relief and masks can change while keys and
+horizontal positions remain stable. The function makes one height query per
+site, with a limit of 4,096 sites.
 
 A caller can pass a certified `slopeBound` on the horizontal gradient. This allows steep rays to solve one bracket and other rays to skip intervals that cannot cross the surface. Without a bound the query samples at regular intervals. Vertical rays evaluate the height directly. `maxDistance` defaults to 10000 world units.
 
