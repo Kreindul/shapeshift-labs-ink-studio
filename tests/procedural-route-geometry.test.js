@@ -3,6 +3,19 @@ const assert = require('node:assert/strict');
 const { routes } = require('..').load().KIT.procedural;
 const box = [[-1,-1],[1,-1],[1,1],[-1,1]];
 
+test('upright route motion preserves level surfaces and rejects stretching or shearing',()=>{
+  const guide=[[0,0,0],[0,1,0],[2,1,0],[2,2,2]],
+    moved=guide.map(([x,y,z])=>[z+3,y-.4,1-x]);
+  const rigid=routes.uprightMotion(guide,moved);
+  assert.deepEqual(rigid.t,[3,-.4,1]);
+  for(const [k,expected] of [0,0,1,0,1,0,-1,0,0].entries())assert(Math.abs(rigid.R[k]-expected)<1e-9);
+  assert.equal(routes.uprightMotion(guide,moved.map(([x,y,z])=>[x,y+x*.2,z])),null);
+  assert.equal(routes.uprightMotion(guide,moved.map(([x,y,z])=>[x*1.1,y,z])),null);
+  assert.deepEqual(routes.uprightMotion([[1,2,3],[1,4,3]],[[2,3,4],[2,5,4]]).t,[1,1,1]);
+  assert.equal(routes.uprightMotion([[0,0,0],[0,1,0]],[[1,0,1],[1,2,1]]),null);
+  assert.throws(()=>routes.uprightMotion([],[]),/paired/);
+});
+
 test('visibility graphs choose the shortest plan path around polygons and keep exact pins', () => {
   const a = [-4, 0.1, 0], b = [4, 0.4, 0],
     path = routes.visibility(a, b, [box]);

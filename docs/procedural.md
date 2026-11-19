@@ -96,6 +96,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `routes.tensor(components)`, `routes.followTensor(field, seeds)`, `routes.growStreets(seeds, options)`, `routes.parcels(outline)`, `routes.medial(rings)` | Directional street systems, connected seeded roads, frontage lots and medial paths |
 | `routes.layout(route, options)` | Fit bounded intervals on a polyline, catenary, or compatible curve. Place caller-chosen pieces using gapped endpoints and midpoint frames |
 | `routes.fitStairApproach(options)` | Fit a short stair flight from an exposed landing to a sampled carrier surface. |
+| `routes.uprightMotion(before, after, tolerance)` | Check whether paired guide points share an upright rigid transform |
 | `edgeClearance.strip(a, b, options)`, `edgeClearance.ranges(a, b, strips)` | Split a straight edge into retained and removed ranges where it crosses sloped clearance strips. |
 | `edgeClearance.clipFieldPath(points, fields, {padding, spacing, tolerance})` | Split a polyline around bounded signed fields, preserving its unblocked vertices and bends. |
 | `snapping.resolve(point, features, options)` | Project to a bounded point or segment and return the winning feature with its caller-supplied identity. |
@@ -819,6 +820,12 @@ several bends. `stations` contains horizontal run, `distances` contains 3D
 arc length, and `crossings: [{prism, from, to}]` identifies the projected
 obstacle intervals by input prism index and horizontal station. The
 profile reports blocked pins, unreachable routes and budget limits.
+
+`P.routes.uprightMotion(before, after, tolerance = 1e-5)` takes equal-length
+arrays of paired 3D points. It returns `{R, t}` for a yaw and translation
+that fit every pair within the given world-space tolerance. A vertical guide
+can translate with identity rotation. The result is `null` when spacing
+or rise changes, so a caller can refit treads or parts that need to stay level.
 
 `P.routes.guideVisibility(guide, obstacles, options)` repairs blocked
 intervals of a piecewise-linear XZ guide. Supply convex clearance footprints
