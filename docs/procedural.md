@@ -808,8 +808,12 @@ Use `visibility(start, end, obstacles, {links})` to admit a bridge,
 gate or other certified crossing. Each link supplies
 `{start: [x,z], end: [x,z], through: obstacleIndex}`. A composite obstacle
 can use a nonempty array of distinct obstacle indices for `through`.
-The link contributes two graph vertices and one bidirectional connection that
-skips the specified polygons. The ends should sit outside those polygons.
+The link contributes two graph vertices and a connection that skips the
+specified polygons. The ends should sit outside those polygons. Link
+`direction` defaults to `'both'`. Use `'forward'` for start to end or
+`'reverse'` for end to start when the crossing was checked in one direction.
+Elevation links in `prismVisibility` use the same option with the first and
+last supplied points as their ends.
 Optional `via: [[x, z], ...]` passes through up to sixteen private waypoints.
 Each leg checks the other obstacles. The complete length contributes to the
 shortest-path cost and to the interpolated grade. Waypoints count toward the
@@ -834,9 +838,18 @@ or `budget`, a sample count and the first failing point when blocked.
 Sampling resolution governs the smallest obstruction it can detect.
 Use tighter spacing or explicit obstruction checks for thin objects.
 
+Pass `sectionBands` to give the sweep up to sixteen rectangular parts.
+Each has `lateral: [min, max]` and `vertical: [min, max]` measured from
+the route center in world units. Positive lateral distances follow the
+horizontal left axis of travel, so reversing a route reverses those bands.
+Bands can describe a floor, one or two guards, or overhead equipment.
+All occupied probes share the same sample limit.
+
 `P.routes.sweepPath(points, options)` takes the same section controls and
-sample budget. It checks each leg and the full rounded joins at changes of
-heading. Clearance checks can use the point range returned for a bent link.
+sample budget. It checks each leg and the joins at changes of heading. A
+rectangular section uses full rounded joins. Banded sections sweep their
+lateral intervals through the turn, including the bevel between legs.
+Clearance checks can use the point range returned for a bent link.
 
 `P.routes.profileSection(profile, start, end, options)` fits a straight
 section of a world-space route into an extrusion of a convex profile.
@@ -844,7 +857,8 @@ Supply an affine `project([x,y,z]) => [u,v]` into the profile's chart and
 XZ endpoint positions. The section stays horizontal across its width with
 `halfWidth`, `below` and `above` in world units. `clearance` insets the
 profile in chart units. Set `minHeight`, `maxHeight` and `maxGrade` for
-the route. A grade of zero fits only level sections.
+the route. A grade of zero fits only level sections. You can also supply
+`sectionBands` to fit the occupied parts of an asymmetric section.
 
 The result contains a convex set of feasible `heights: [[startY,endY], ...]`
 and `closest([startY,endY])` for fitting toward a preferred pair. The set

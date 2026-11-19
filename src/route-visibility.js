@@ -97,7 +97,9 @@ const RouteVisibility = (() => {
     let linkPoints = vertices.length;
     for (const [index, link] of links.entries()) {
       const through = Array.isArray(link?.through) ? Array.from(link.through) : [link?.through];
-      if (!point(link?.start, 2) || !point(link?.end, 2) || dist2(link.start, link.end) <= EPS ** 2 ||
+      const direction=link?.direction===undefined?'both':link.direction;
+      if (!['forward','reverse','both'].includes(direction)||
+          !point(link?.start, 2) || !point(link?.end, 2) || dist2(link.start, link.end) <= EPS ** 2 ||
           !through.length || through.length > polygons.length || new Set(through).size !== through.length ||
           through.some(id => !Number.isInteger(id) || id < 0 || id >= polygons.length))
         throw new Error('Visibility links need two distinct XZ points and valid obstacle indices');
@@ -115,8 +117,8 @@ const RouteVisibility = (() => {
       if (linkPoints > maxVertices) throw new Error('Visibility graph exceeds its vertex budget');
       const a = vertices.push(link.start) - 1, b = vertices.push(link.end) - 1,
         bypass = new Set(through.map(id => polygons[id]));
-      linksByVertex.set(a, { next: b, index, bypass, path, length });
-      linksByVertex.set(b, { next: a, index, bypass, path: path.slice().reverse(), length });
+      if(direction!=='reverse')linksByVertex.set(a, { next: b, index, bypass, path, length });
+      if(direction!=='forward')linksByVertex.set(b, { next: a, index, bypass, path: path.slice().reverse(), length });
     }
     function check() {
       if (++work.tests > maxTests) throw exhausted;
@@ -594,14 +596,14 @@ const RouteVisibility = (() => {
     };
 
     const tunnels=Array.from(links,(link,index)=>{
-      const {points,through=[]}=link||{};
-      if(!Array.isArray(points)||points.length<2||points.length>18||
+      const {points,through=[],direction='both'}=link||{};
+      if(!['forward','reverse','both'].includes(direction)||!Array.isArray(points)||points.length<2||points.length>18||
         !Array.from(points).every(p=>point(p,3))||distance(points[0],points.at(-1))<=EPS||
         !Array.isArray(through)||!Array.from(through).every(i=>limit(i,0,prisms.length-1)))
         throw new Error('Prism links need distinct XYZ endpoints, at most sixteen bends and valid prism indices');
       const spans=points.slice(1).map((p,i)=>distance(points[i],p));
       if(spans.some(length=>length<=EPS))throw new Error('Prism links require nonzero spans');
-      return {index,points,spans,bypass:new Set(through),length:spans.reduce((sum,len)=>sum+len,0)};
+      return {index,points,spans,direction,bypass:new Set(through),length:spans.reduce((sum,len)=>sum+len,0)};
     });
 
     // Slab clipping along one segment parameter. The same interval gets
@@ -693,8 +695,8 @@ const RouteVisibility = (() => {
           !spans.every((length,i)=>permits(points[i],points[i+1],length,bypass)))continue;
         const a=add(first),b=add(last);
         if(a===null||b===null)continue;
-        connect(a,b,tunnel,points);
-        connect(b,a,tunnel,points.slice().reverse());
+        if(tunnel.direction!=='reverse')connect(a,b,tunnel,points);
+        if(tunnel.direction!=='forward')connect(b,a,tunnel,points.slice().reverse());
       }
       for(const p of waypoints)add(p);
       for(const [x,z] of sites.values())for(const y of heights)add([x,y,z]);
@@ -810,15 +812,29 @@ const RouteVisibility = (() => {
     return Object.freeze({project,lift,prismFootprint,grade,speed});
   }
 
-  // Fit constant-grade sections in an affine chart. Each vertex of the
-  // swept rectangle gives linear constraints on the two endpoint heights.
+  function clearanceBands({sectionBands,halfWidth,below,above}){
+    if(sectionBands===undefined){
+      if(![halfWidth,below,above].every(v=>Number.isFinite(v)&&v>=0))
+        throw Error('A route section needs finite nonnegative dimensions');
+      return [{lateral:[-halfWidth,halfWidth],vertical:[-below,above]}];
+    }
+    const range=values=>point(values,2)&&values[0]<=values[1];
+    if(!Array.isArray(sectionBands)||!limit(sectionBands.length,1,16)||
+      !Array.from(sectionBands).every(band=>range(band?.lateral)&&range(band?.vertical)))
+      throw Error('Route section bands need ordered finite lateral and vertical intervals');
+    return sectionBands;
+  }
+
+  // Every corner of the swept section gives linear constraints on the
+  // two endpoint heights in an affine aperture chart.
   function profileSection(profile,start,end,{
-    project,minHeight,maxHeight,maxGrade,halfWidth,below,above,clearance=0
+    project,minHeight,maxHeight,maxGrade,halfWidth,below,above,sectionBands,clearance=0
   }={}){
     if(!Array.isArray(profile)||profile.length<3||profile.length>256||!profile.every(p=>point(p,2))||
       !point(start,2)||!point(end,2)||typeof project!=='function'||!point([minHeight,maxHeight],2)||
-      minHeight>=maxHeight||![maxGrade,halfWidth,below,above,clearance].every(x=>Number.isFinite(x)&&x>=0))
+      minHeight>=maxHeight||![maxGrade,clearance].every(x=>Number.isFinite(x)&&x>=0))
       throw Error('A profile section needs a convex contour, affine chart and bounded sweep dimensions');
+    const bands=clearanceBands({sectionBands,halfWidth,below,above});
     const dx=end[0]-start[0],dz=end[1]-start[1],run=Math.hypot(dx,dz);
     if(run<=EPS)throw Error('A profile section needs a nonzero horizontal run');
     const {edges}=convexRing(profile,()=>{});
@@ -837,8 +853,8 @@ const RouteVisibility = (() => {
     clip(-1,1,maxGrade*run);
     clip(1,-1,maxGrade*run);
     for(const [i,[x,z]] of [start,end].entries()){
-      for(const sign of [-1,1])for(const y of [-below,above]){
-        const q=[x-sign*halfWidth*dz/run,y,z+sign*halfWidth*dx/run],
+      for(const {lateral,vertical} of bands)for(const u of lateral)for(const y of vertical){
+        const q=[x-u*dz/run,y,z+u*dx/run],
           a=project(q),b=project([q[0],q[1]+1,q[2]]);
         if(!point(a,2)||!point(b,2))throw Error('A profile section chart must return finite planar coordinates');
         for(const [u,v,nx,nz] of edges){
@@ -865,23 +881,25 @@ const RouteVisibility = (() => {
     return Object.freeze({heights:frozenPoints(polygon),closest});
   }
 
-  function sweep(start, end, { halfWidth, below, above, spacing = 0.12, minClearance = 0,
+  function sweep(start, end, { halfWidth, below, above, sectionBands, spacing = 0.12, minClearance = 0,
     clearance, maxSamples = 10000 } = {}) {
-    if (!point(start, 3) || !point(end, 3) || ![halfWidth, below, above, minClearance].every(v => Number.isFinite(v) && v >= 0) ||
+    if (!point(start, 3) || !point(end, 3) || !Number.isFinite(minClearance) || minClearance < 0 ||
         !(spacing > EPS) || !Number.isFinite(spacing) || typeof clearance !== 'function' ||
         !limit(maxSamples, 1, 1000000)) throw new Error('A swept route needs a finite section, spacing and a clearance field');
     const dx = end[0] - start[0], dy = end[1] - start[1], dz = end[2] - start[2], run = Math.hypot(dx, dz);
     if (run <= EPS) throw new Error('Swept routes need a nonzero horizontal run');
-    const nx = -dz / run, nz = dx / run, lengths = [Math.hypot(run, dy), halfWidth * 2, below + above];
-    const [rows, columns, layers] = lengths.map(length => Math.ceil(length / spacing));
-    if ((rows + 1) * (columns + 1) * (layers + 1) > maxSamples) return { status: 'budget', samples: 0 };
+    const nx=-dz/run,nz=dx/run,rows=Math.ceil(Math.hypot(run,dy)/spacing);
+    const grid=clearanceBands({sectionBands,halfWidth,below,above}).map(({lateral:[l,r],vertical:[b,a]})=>
+      ({l,r,b,a,columns:Math.ceil((r-l)/spacing),layers:Math.ceil((a-b)/spacing)}));
+    const rowSamples=grid.reduce((sum,band)=>sum+(band.columns+1)*(band.layers+1),0);
+    if((rows+1)*rowSamples>maxSamples)return {status:'budget',samples:0};
     let samples = 0;
     for (let i = 0; i <= rows; i++) {
       const t = i / rows;
-      for (let j = 0; j <= columns; j++) {
-        const u = columns ? halfWidth * (2 * j / columns - 1) : 0;
+      for(const {l,r,b,a,columns,layers} of grid)for (let j = 0; j <= columns; j++) {
+        const u = columns ? l+(r-l)*j/columns : l;
         for (let k = 0; k <= layers; k++) {
-          const h = layers ? -below + (below + above) * k / layers : 0;
+          const h = layers ? b+(a-b)*k/layers : b;
           const q = [start[0] + dx * t + nx * u, start[1] + dy * t + h, start[2] + dz * t + nz * u];
           const d = clearance(q);
           samples++;
@@ -893,6 +911,37 @@ const RouteVisibility = (() => {
     return { status: 'ok', samples };
   }
 
+  function sweepBandJoin(point,angle,turn,bands,{spacing,minClearance,clearance,maxSamples}){
+    let samples=0;
+    for(const {lateral:[left,right],vertical:[low,high]} of bands){
+      const layers=Math.ceil((high-low)/spacing);
+      for(const sign of [-1,1]){
+        const near=Math.max(0,sign===1?left:-right),far=sign===1?right:-left;
+        if(far<=0)continue;
+        const angles=Math.max(1,Math.ceil(Math.abs(turn)*far/spacing));
+        for(let i=0;i<=angles;i++){
+          const a=turn*i/angles,theta=angle+a+(sign<0?Math.PI:0);
+          // Cover the circular sweep and the straight bevel chord. Miter
+          // portions on the inside overlap the existing leg cross sections.
+          const ratio=Math.cos(turn/2)/Math.max(EPS,Math.cos(a-turn/2)),
+            inner=near*Math.max(0,Math.min(1,ratio)),radial=Math.ceil((far-inner)/spacing);
+          if((layers+1)*(radial+1)>maxSamples-samples)return {status:'budget',samples};
+          for(let j=0;j<=radial;j++){
+            const r=radial?inner+(far-inner)*j/radial:inner,
+              x=point[0]+r*Math.cos(theta),z=point[2]+r*Math.sin(theta);
+            for(let k=0;k<=layers;k++){
+              const q=[x,point[1]+(layers?low+(high-low)*k/layers:low),z],d=clearance(q);
+              samples++;
+              if(typeof d!=='number'||Number.isNaN(d))throw Error('A clearance field must return a signed distance');
+              if(d<minClearance)return {status:'blocked',samples,point:q,clearance:d};
+            }
+          }
+        }
+      }
+    }
+    return {status:'ok',samples};
+  }
+
   function sweepPath(points, options = {}) {
     if (!Array.isArray(points) || points.length < 2 || points.length > 4097 ||
         !Array.from(points).every(p => point(p,3)))
@@ -901,17 +950,25 @@ const RouteVisibility = (() => {
     for (let i=1;i<points.length;i++)
       if (Math.hypot(points[i][0]-points[i-1][0],points[i][2]-points[i-1][2]) <= EPS)
         throw new Error('Swept routes need a nonzero horizontal run');
-    const {halfWidth,below,above,spacing=.12,minClearance=0,clearance,maxSamples=10000}=options;
+    const {halfWidth,below,above,sectionBands,spacing=.12,minClearance=0,clearance,maxSamples=10000}=options;
+    const bands=sectionBands===undefined?null:clearanceBands(options);
     let samples=0;
     for (let i=1;i<points.length;i++) {
       if (i>1&&samples===maxSamples) return {status:'budget',samples};
       const span=sweep(points[i-1],points[i],{...options,maxSamples:maxSamples-samples});
       samples+=span.samples;
       if (span.status!=='ok') return {...span,samples};
-      if (i===points.length-1||!halfWidth) continue;
+      if (i===points.length-1||!halfWidth&&!bands) continue;
       const [a,b,c]=[points[i-1],points[i],points[i+1]],dx=b[0]-a[0],dz=b[2]-a[2],
         ex=c[0]-b[0],ez=c[2]-b[2];
       if (Math.abs(dx*ez-dz*ex)<=EPS*Math.hypot(dx,dz)*Math.hypot(ex,ez)&&dx*ex+dz*ez>0) continue;
+      if(bands){
+        const angle=Math.atan2(dx,-dz),turn=Math.atan2(dx*ez-dz*ex,dx*ex+dz*ez);
+        const join=sweepBandJoin(b,angle,turn,bands,{spacing,minClearance,clearance,maxSamples:maxSamples-samples});
+        samples+=join.samples;
+        if(join.status!=='ok')return {...join,samples};
+        continue;
+      }
       // A rounded join includes the sector between the two leg cross-sections.
       // Probe the full disk, including its boundary, at each join.
       const rings=Math.ceil(halfWidth/spacing),layers=Math.ceil((below+above)/spacing);

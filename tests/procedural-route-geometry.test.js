@@ -238,6 +238,48 @@ test('path section clearance probes the exposed corner join under a shared sampl
   assert(budget.samples<open.samples);
 });
 
+test('section bands reserve a deck and a single rail on the oriented side of a sloped run',()=>{
+  const start=[-1,.3,0],end=[1,.4,0],field=([,y,z])=>Math.max(.64-y,z+.17),
+    right={lateral:[.33,.48],vertical:[0,.67]},deck={lateral:[-.53,.53],vertical:[-.14,.01]},
+    options={spacing:.055,clearance:field,sectionBands:[deck,right]};
+  const open=routes.sweep(start,end,options);
+  assert.equal(open.status,'ok');
+  const reversed=routes.sweep(end,start,options);
+  assert.equal(reversed.status,'blocked');
+  assert(reversed.point[2]<-.25);
+  assert.equal(routes.sweep(start,end,{...options,maxSamples:open.samples-1}).status,'budget');
+  assert.throws(()=>routes.sweep(start,end,{...options,sectionBands:[{...deck,lateral:[1,-1]}]}),/intervals/);
+  const outline=[[-.8,0],[.8,0],[.8,1.4],[-.8,.63]],
+    chart={project:([,y,z])=>[z,y],minHeight:.28,maxHeight:.43,maxGrade:.15,clearance:.008};
+  assert(routes.profileSection(outline,[-1,0],[1,0],{...chart,sectionBands:[deck,right]}));
+  assert.equal(routes.profileSection(outline,[1,0],[-1,0],{...chart,sectionBands:[deck,right]}),null);
+});
+
+test('banded joins reserve rail height on the outside corner only when that side has a rail',()=>{
+  const points=[[-1,.3,0],[0,.3,0],[0,.3,1]],deck={lateral:[-.45,.45],vertical:[-.12,.035]},
+    inside={lateral:[.33,.45],vertical:[0,.64]},outside={lateral:[-.45,-.33],vertical:[0,.64]},
+    options={spacing:.045,maxSamples:24000,clearance:([x,y,z])=>Math.max(.58-y,Math.hypot(x-.26,z+.26)-.07)};
+  assert.equal(routes.sweepPath(points,{...options,sectionBands:[deck,inside]}).status,'ok');
+  assert.equal(routes.sweep(points[0],points[1],{...options,sectionBands:[deck,outside]}).status,'ok');
+  assert.equal(routes.sweep(points[1],points[2],{...options,sectionBands:[deck,outside]}).status,'ok');
+  const hit=routes.sweepPath(points,{...options,sectionBands:[deck,outside]});
+  assert.equal(hit.status,'blocked');
+  assert(hit.point[0]>.1&&hit.point[2]<-.1&&hit.point[1]>.58);
+});
+
+test('certified crossings can restrict graph traversal direction in plan and elevation',()=>{
+  const ring=[[-.8,-4],[.8,-4],[.8,4],[-.8,4]],a=[-2,.45,0],b=[2,.45,0],
+    link={start:[-1,0],end:[1,0],through:0,direction:'forward'};
+  assert.equal(routes.visibility(a,b,[ring],{links:[link]}).links?.[0].link,0);
+  assert.equal(routes.visibility(b,a,[ring],{links:[link]}).links,undefined);
+  const walls=[{ring,min:-2,max:3}],
+    opening={points:[[-1,.45,0],[1,.45,0]],through:[0],direction:'forward'},
+    options={minHeight:.1,maxHeight:1.4,maxGrade:.8,maxLength:5,links:[opening]};
+  assert.equal(routes.prismVisibility(a,b,walls,options).links?.[0].link,0);
+  assert.equal(routes.prismVisibility(b,a,walls,options).status,'unreachable');
+  assert.equal(routes.prismVisibility(b,a,walls,{...options,links:[{...opening,direction:'reverse'}]}).links?.[0].link,0);
+});
+
 test('visibility waypoints connect through a composed clearance domain and respect erasure',()=>{
   const start=[-2,.3,0],end=[0,.7,2],waypoints=[[0,0],[-1.6,1.6]];
   const clearance=(x,z)=>.52-Math.min(
