@@ -38,6 +38,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `panelFrames(spec)` | Keyed rails, posts and braces that fit chart dimensions, with optional openings and fitted surrounds |
 | `panelRelief({outline, layers, base, depthScale, budget})` | Fit keyed relief layers, hardware and trim around the contours of a convex panel |
 | `fittedRibbon({inner, outer, pitch, gap, closed, phase, sections, measure, budget})` | Fit repeating bands along paired 2D or 3D rails. Each logical cell contains quadrilateral footprints split at source edges |
+| `profileBand({profile, width, side, closed, pitch, gap, sections})` | Offset one side of a directed 2D profile and fit keyed cells along it. Width can vary by station. |
 | `fittedRailBand({inner, outer, pitch, gap, closed, phase, sections, measure, depth, direction, cellStyle, budget})` | Fit closed solid pieces along paired 3D rails. |
 | `clippedLattice({panels, runs, edges, edgeWidth, budget})` | Fit bar families and frames to convex chart patches, keeping gaps and member identities across patches. |
 | `surfaceCells.clip(cells, {boundary, holes, budget, work})` | Intersect convex cell footprints with a convex chart boundary and subtract convex holes. Group fragments by logical cell key |
@@ -2283,6 +2284,14 @@ dimension for every rail station. Each fragment still interpolates both
 actual rails. The same operation works for caps, strips, paths and bands.
 
 ### Ribbon sections
+
+`KIT.procedural.profileBand` converts a directed 2D profile into paired rails
+and fits a ribbon between them. Supply a positive scalar width or a width for
+each point. The default right side runs outside a counterclockwise closed
+profile. Set `closed: false` for an open run, or use `side: 'left'` to reverse
+the offset. Fitted cells retain source edge indices and share exact vertices
+where a piece crosses a corner. The result exposes the outer rail and marks
+any stations contracted to keep the local miters within the adjacent edges.
 
 `KIT.procedural.fittedRibbon({ inner, outer, pitch, gap, sections })` accepts
 landmarks as ordered sections. Each entry has a unique `id` and a normalized
