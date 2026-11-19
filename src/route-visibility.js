@@ -13,7 +13,7 @@ const RouteVisibility = (() => {
 
   function find(start, end, obstacles, {
     maxVertices = 600, maxTests = 2500000, links = [], waypoints = [], domain
-  } = {}) {
+  } = {}, acceptsEdge) {
     if (
       !point(start, 3) || !point(end, 3) || Math.hypot(...start.map((v, i) => end[i] - v)) <= EPS ||
       !Array.isArray(obstacles) || obstacles.length > 500 || !Array.isArray(links) || links.length > 64 ||
@@ -141,6 +141,7 @@ const RouteVisibility = (() => {
     }
     function clear(a, b, bypass) {
       work.pairs++;
+      if(acceptsEdge&&!acceptsEdge(a,b))return false;
       const box = bounds(a, b),
         dx = b[0] - a[0], dz = b[1] - a[1],
         sq = dx * dx + dz * dz;
@@ -256,6 +257,32 @@ const RouteVisibility = (() => {
     return Object.freeze(points.map(p => Object.freeze(p.slice())));
   }
 
+  // In the profile plane X is distance along the guide and Z is elevation.
+  // Visible forward edges keep the grade bound over their entire length.
+  function elevationProfile(length, start, end, barriers, {
+    maxGrade=1, minHeight=-1e6, maxHeight=1e6, maxVertices=360, maxTests=350000
+  }={}){
+    if(!Number.isFinite(length)||length<=EPS||length>1e6||!Number.isFinite(maxGrade)||maxGrade<=0||
+      !point([minHeight,maxHeight],2)||minHeight>=maxHeight||
+      ![start,end].every(y=>Number.isFinite(y)&&y>=minHeight&&y<=maxHeight)||
+      !Array.isArray(barriers)||barriers.length>500||!limit(maxVertices,2,3000)||!limit(maxTests,1,30000000))
+      throw new Error('An elevation profile needs bounded stations, pins and clearance controls');
+    const obstacles=[];
+    for(const band of barriers){
+      if(!point([band?.from,band?.to,band?.min,band?.max],4)||
+        band.from<0||band.to>length||band.to-band.from<=EPS||band.max-band.min<=EPS)
+        throw new Error('Profile barriers need positive station and elevation intervals');
+      const {from,to,min,max}=band;
+      if(max<=minHeight||min>=maxHeight)continue;
+      obstacles.push([[from,max],[to,max],[to,min],[from,min]]);
+    }
+    if(2+obstacles.length*4>maxVertices)return Object.freeze({status:'budget',work:Object.freeze({pairs:0,tests:0})});
+    const {points,...result}=find([0,0,start],[length,0,end],obstacles,{maxVertices,maxTests},
+      ([s,y],[t,z])=>t>=s&&z>=minHeight&&z<=maxHeight&&y>=minHeight&&y<=maxHeight&&
+        Math.abs(z-y)<=maxGrade*(t-s)+EPS);
+    return Object.freeze(points?{...result,points:frozenPoints(points.map(plan))}:result);
+  }
+
   function hull(points) {
     const sorted = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     const distinct = sorted.filter((p, i) => i === 0 || dist2(p, sorted[i - 1]) > EPS ** 2);
@@ -353,6 +380,6 @@ const RouteVisibility = (() => {
     return {status:'ok',samples};
   }
 
-  return Object.freeze({ find, convexFootprint, sweep, sweepPath });
+  return Object.freeze({ find, convexFootprint, sweep, sweepPath, elevationProfile });
 })();
 if (typeof module !== 'undefined') module.exports = RouteVisibility;

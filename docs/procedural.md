@@ -643,6 +643,17 @@ Use tighter spacing or explicit obstruction checks for thin objects.
 sample budget. It checks each leg and the full rounded joins at changes of
 heading. Clearance checks can use the point range returned for a bent link.
 
+`P.routes.elevationProfile(length, startY, endY, barriers, options)` finds
+a grade-limited route in the distance and elevation plane of a fixed guide.
+Each forbidden band is `{from, to, min, max}`, where `from` and `to`
+are stations along the guide and `min` and `max` are elevations. Reserve
+deck thickness, stair rise and any overhead fixtures in those bands before
+solving. `maxGrade` is rise per unit of horizontal run. `minHeight` and
+`maxHeight` restrict how far the profile can dip or climb. Successful
+results return `points: [[station, elevation], ...]` with exact endpoint
+heights. Forward-only edges keep route stations ordered. Search limits
+`maxVertices` and `maxTests` apply as in visibility routing.
+
 `P.routes.spline(route, {radius, spacing, clearance, minClearance})`
 rounds corners using quadratic splines, shrinking the trim when needed.
 Unfit corners stay in the route. The result contains the fitted control points

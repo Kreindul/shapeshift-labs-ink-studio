@@ -215,3 +215,30 @@ test('visibility waypoints connect through a composed clearance domain and respe
   assert.throws(()=>routes.visibility(start,end,[],{...options,maxVertices:3}),/vertex budget/);
   assert.throws(()=>routes.visibility(start,end,[],{domain:{clearance:()=>NaN}}),/signed distance/);
 });
+
+test('elevation profiles climb over or dip under a barrier within the forward grade limit',()=>{
+  const bands=[{from:4,to:6,min:.2,max:1.5}];
+  const over=routes.elevationProfile(10,.6,.6,bands,{minHeight:.35,maxGrade:.25});
+  assert.equal(over.status,'ok');
+  assert.deepEqual(over.points,[[0,.6],[4,1.5],[6,1.5],[10,.6]]);
+  const under=routes.elevationProfile(10,.6,.6,bands,{minHeight:.1,maxGrade:.25});
+  assert.deepEqual(under.points,[[0,.6],[4,.2],[6,.2],[10,.6]]);
+  assert.equal(routes.elevationProfile(10,.6,.6,bands,{minHeight:.35,maxGrade:.1}).status,'unreachable');
+  assert.equal(routes.elevationProfile(10,.6,.6,bands,{maxVertices:5}).status,'budget');
+});
+
+test('an elevation profile fits between overlapping high and low clearance bands',()=>{
+  const bands=[{from:3,to:7,min:-1,max:1.15},{from:4,to:8,min:1.5,max:3}];
+  const fitted=routes.elevationProfile(12,.55,.9,bands,{minHeight:.4,maxHeight:2,maxGrade:.35});
+  assert.equal(fitted.status,'ok');
+  assert.deepEqual(fitted.points[0],[0,.55]);
+  assert.deepEqual(fitted.points.at(-1),[12,.9]);
+  for(let i=1;i<fitted.points.length;i++){
+    const [a,y]=fitted.points[i-1],[b,z]=fitted.points[i];
+    assert(b>a&&Math.abs(z-y)<=.35*(b-a)+1e-9);
+    for(const band of bands)for(let s=Math.max(a,band.from)+.01;s<Math.min(b,band.to);s+=.02){
+      const height=y+(s-a)/(b-a)*(z-y);
+      assert(height<=band.min+1e-9||height>=band.max-1e-9);
+    }
+  }
+});
