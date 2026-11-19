@@ -75,6 +75,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `inputActions.compile(contexts)` | Map physical keys and analog controls to semantic actions in named contexts |
 | `emitters.compile(spec)` | Deterministic looping samples with configurable emission direction and local drift. Set `windborne: true` and pass `{wind: [x, z]}` when sampling to advect by particle age. |
 | `routes.polyline(points, options)`, `routes.aroundConvex(outline, start, end, options)` | Arc-length routes with frames and closest queries. Convex XZ routes project endpoints onto an offset perimeter and interpolate world Y |
+| `geometry.inclinedPerimeter(outline, pose, {offset, below, above})` | Offset a convex affine extrusion for a world-upright swept section. Project and lift between the height-independent outline and world space |
 | `routes.terrain(start, end, options)` | Bounded, terrain-aware search between pinned points with slope, signed clearance, keep-out regions and turn costs |
 | `hydrology.analyze(height, options)` | Priority-Flood, D8 catchments, stream orders, channel routes, wetness and optional D-infinity flow |
 | `hydrology.breach(basin)`, `hydrology.incise(basin)`, `hydrology.meander(route)`, `hydrology.corridor(routes, height)`, `hydrology.habitat(basin)` | Watershed edits, river migration and cutoff routes, levees, floodplain masks and climate fields |
@@ -727,6 +728,17 @@ respect `maxGrade`, `minHeight`, `maxHeight`, and `maxLength`. An optional
 `floor(x, z)` supplies a sampled ground constraint. The result gives
 `ok`, `blocked-pin`, `unreachable`, or `budget` with work counters, and
 frozen XYZ points on success. Tangency to the clearance boundary is allowed.
+
+`geometry.inclinedPerimeter` projects an affine extrusion's convex local
+XZ ring into a horizontal reference plane. As the world height changes, the
+cross-section drifts along the extrusion axis. Each edge of `poly` is
+padded by `offset` plus the maximum outward drift between `below` and
+`above` relative to a guide point. `raw` holds the reference section.
+Use `project(worldPoint)` and `lift(referencePoint, worldY)` to move
+between frames. `allows(points, tolerance)` clips each XYZ leg in the
+reference frame and tests that it stays outside the expanded section.
+The local extrusion axis must have a positive world Y component at least
+one fifth of its length.
 
 Supply `links: [{points, through}]` to attach explicitly cleared XYZ
 polylines to the graph. `through` lists zero-based indices of prisms whose
