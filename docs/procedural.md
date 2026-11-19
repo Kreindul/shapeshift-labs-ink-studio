@@ -979,6 +979,15 @@ a convex footprint by the turn bisector. A caller can clip sloped or
 stepped parts independently, then extrude the corner at the required
 height so neighboring parts keep their own profiles.
 
+`P.routes.landingFootprint({center, tangent, width, depth, approaches})`
+fits a level rectangular pad in the world XZ plane. Depth defaults to width.
+Each approach provides a 3D `point` and a `direction` pointing into a space
+the pad must leave clear. The function clips the pad by those planes and
+returns its remaining convex XZ outline. A plane can begin beyond the node
+to keep a short level approach before a downhill run. Use the same outline
+for the pad's rendered solid and support volumes. An empty outline means the
+approaches use all of the room at that node.
+
 `P.routes.guideVisibility(guide, obstacles, options)` repairs blocked
 intervals of a piecewise-linear XZ guide. Supply convex clearance footprints
 and optional `reserved` footprints for regions the route must stay outside,

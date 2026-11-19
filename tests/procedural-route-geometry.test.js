@@ -34,6 +34,22 @@ test('strip joins close only the outside of a turn and partition the overlapping
   assert.throws(()=>routes.stripJoin(previous,center,next,0),/positive width/);
 });
 
+test('landing footprints leave room for one or more measured approaches',()=>{
+  const center=[0,2,0],at={center,tangent:[1,.4,0],width:4,depth:2},
+    stair={point:[0,2,0],direction:[-1,-.8,0]},
+    side={point:[0,2,0],direction:[0,-.2,1]};
+  const sideBounds=ring=>[Math.min(...ring.map(p=>p[0])),Math.max(...ring.map(p=>p[0])),
+    Math.min(...ring.map(p=>p[1])),Math.max(...ring.map(p=>p[1]))];
+  assert.deepEqual(sideBounds(routes.landingFootprint(at)),[-1,1,-2,2]);
+  assert.deepEqual(sideBounds(routes.landingFootprint({...at,approaches:[stair]})),[0,1,-2,2]);
+  assert.deepEqual(sideBounds(routes.landingFootprint({...at,approaches:[stair,side]})),[0,1,-2,0]);
+  assert.deepEqual(sideBounds(routes.landingFootprint({...at,approaches:[
+    {...stair,point:[-.5,2,0]}]})),[-.5,1,-2,2]);
+  assert.deepEqual(routes.landingFootprint({...at,approaches:[
+    stair,{...stair,direction:[1,-.3,0]}]}),[]);
+  assert.throws(()=>routes.landingFootprint({...at,tangent:[0,1,0]}),/horizontal/);
+});
+
 test('upright route motion preserves level surfaces and rejects stretching or shearing',()=>{
   const guide=[[0,0,0],[0,1,0],[2,1,0],[2,2,2]],
     moved=guide.map(([x,y,z])=>[z+3,y-.4,1-x]);
