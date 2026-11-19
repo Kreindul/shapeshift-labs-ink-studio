@@ -95,6 +95,6 @@
     }
   }
 
-  const {convexFootprint,sweep,sweepPath,elevationProfile}=RouteVisibility;
-  Object.assign(P.routes, {visibility,spline,convexFootprint,sweep,sweepPath,elevationProfile});
+  const {convexFootprint,sweep,sweepPath,elevationProfile,prismVisibility}=RouteVisibility;
+  Object.assign(P.routes, {visibility,spline,convexFootprint,sweep,sweepPath,elevationProfile,prismVisibility});
 })(KIT);

@@ -242,3 +242,50 @@ test('an elevation profile fits between overlapping high and low clearance bands
     }
   }
 });
+
+test('prism visibility climbs over one solid and turns around another within the same length and grade limits',()=>{
+  const rect=(x0,x1,z0,z1)=>[[x0,z0],[x1,z0],[x1,z1],[x0,z1]];
+  const pins=[[0,.5,0],[13,.5,0]];
+  const obstacles=[{ring:rect(3,4,-9,9),min:-1,max:1.5},{ring:rect(6,8,-1.5,1.5),min:-1,max:7}];
+  const limits={minHeight:.45,maxHeight:3,maxGrade:.7,maxLength:15,floor:()=>.45};
+  const route=routes.prismVisibility(...pins,obstacles,limits);
+  assert.equal(route.status,'ok');
+  assert.deepEqual([route.points[0],route.points.at(-1)],pins);
+  assert(route.points.some(([,y])=>y>=1.5));
+  assert(route.points.some(([,,z])=>Math.abs(z)>=1.5));
+  for(let i=1;i<route.points.length;i++){
+    const [a,b]=route.points.slice(i-1,i+1);
+    assert(Math.abs(b[1]-a[1])<=.7*Math.hypot(b[0]-a[0],b[2]-a[2])+1e-9);
+  }
+  assert.equal(routes.prismVisibility(...pins,obstacles,{...limits,maxGrade:.1}).status,'unreachable');
+  assert.equal(routes.prismVisibility(...pins,obstacles,{...limits,maxVertices:4}).status,'budget');
+  assert.equal(routes.prismVisibility(...pins,obstacles,{...limits,maxTests:5}).status,'budget');
+  assert.equal(routes.prismVisibility(...pins,obstacles,{...limits,floor:()=>.7}).status,'blocked-pin');
+  assert.equal(routes.prismVisibility([3.5,.5,0],pins[1],obstacles,limits).status,'blocked-pin');
+});
+
+test('prism visibility can dip below an elevated band while bypassing a second solid',()=>{
+  const reverse=(a,b,c,d)=>[[a,c],[a,d],[b,d],[b,c]];
+  const obstacles=[{ring:reverse(3,4,-9,9),min:.65,max:8},{ring:reverse(6,8,-1.5,1.5),min:-1,max:8}];
+  const bounds={minHeight:.3,maxHeight:2,maxGrade:.7,maxLength:13,floor:()=>.3};
+  const route=routes.prismVisibility([0,1.5,0],[12,1.5,0],obstacles,bounds);
+  assert.equal(route.status,'ok');
+  assert(route.points.some(([,y])=>y<=.65));
+  assert(route.points.some(([,,z])=>Math.abs(z)>=1.5));
+  assert.equal(routes.prismVisibility([0,1.5,0],[12,1.5,0],obstacles,{...bounds,floor:()=>.8}).status,'unreachable');
+});
+
+test('bounded footprint simplification keeps the entire rounded clearance hull inside',()=>{
+  const ring=Array.from({length:128},(_,i)=>{
+    const t=i*Math.PI/64;
+    return [4+2.3*Math.cos(t),-5+.8*Math.sin(t)];
+  });
+  const dense=routes.convexFootprint(ring,{margin:.18});
+  const coarse=routes.convexFootprint(ring,{margin:.18,maxSides:16});
+  assert.equal(coarse.length,16);
+  assert(dense.length>coarse.length);
+  for(const [x,z] of dense)for(const [i,[a,b]] of coarse.entries()){
+    const [c,d]=coarse[(i+1)%coarse.length];
+    assert((c-a)*(z-b)-(d-b)*(x-a)>=-1e-9);
+  }
+});

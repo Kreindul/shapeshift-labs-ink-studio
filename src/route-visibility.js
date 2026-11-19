@@ -283,6 +283,159 @@ const RouteVisibility = (() => {
     return Object.freeze(points?{...result,points:frozenPoints(points.map(plan))}:result);
   }
 
+  // Search a finite visibility graph in X/Y/Z. Tangency is allowed on the
+  // clearance envelopes. Callers can widen a footprint and extend its
+  // elevation interval to account for the shape that will travel the route.
+  function prismVisibility(start, end, prisms, {
+    minHeight = -1e6, maxHeight = 1e6, maxGrade = 1, maxLength = 1e7,
+    maxVertices = 360, maxTests = 350000, waypoints = [], floor, spacing = .25
+  } = {}) {
+    const distance = (a,b) => Math.hypot(b[0]-a[0],b[1]-a[1],b[2]-a[2]);
+    if (!point(start,3) || !point(end,3) || distance(start,end)<=EPS ||
+        !point([minHeight,maxHeight],2) || minHeight>=maxHeight ||
+        ![start,end].every(p=>p[1]>=minHeight&&p[1]<=maxHeight) ||
+        ![maxGrade,maxLength,spacing].every(n=>Number.isFinite(n)&&n>EPS) ||
+        !limit(maxVertices,2,3000) || !limit(maxTests,1,30000000) ||
+        !Array.isArray(prisms) || prisms.length>500 ||
+        !Array.isArray(waypoints) || !Array.from(waypoints).every(p=>point(p,3)) ||
+        floor!==undefined&&typeof floor!=='function')
+      throw new Error('Prism routes need finite pins, clearance volumes and valid search limits');
+
+    const work={pairs:0,tests:0}, exhausted=Symbol('prism route budget');
+    const result=(status,points)=>Object.freeze({status,
+      ...(points&&{points:frozenPoints(points)}),work:Object.freeze({...work})});
+    const check=()=>{if(++work.tests>maxTests)throw exhausted;};
+    const solids=[],sites=new Map(),heights=new Set([start[1],end[1]]);
+    const vertices=[start,end],seen=new Set(vertices.map(p=>p.join('/')));
+    const add=p=>{
+      const key=p.join('/');
+      if(p[1]<minHeight||p[1]>maxHeight||seen.has(key)||
+        distance(start,p)+distance(p,end)>maxLength+EPS)return;
+      if(floor&&!aboveFloor(...p))return;
+      if(vertices.length>=maxVertices)throw exhausted;
+      seen.add(key);
+      vertices.push(p);
+    };
+
+    // Slab clipping along one segment parameter. The same interval gets
+    // clipped by Y and the normalized footprint half-planes.
+    function interval(a,b,solid,inside,clipHeight){
+      let lo=0,hi=1;
+      function clip(first,last){
+        if(first<=0&&last<=0)return false;
+        if(first<=0)lo=Math.max(lo,first/(first-last));
+        else if(last<=0)hi=Math.min(hi,first/(first-last));
+        return hi-lo>EPS;
+      }
+      if(clipHeight&&(!clip(a[1]-solid.min-inside,b[1]-solid.min-inside)||
+        !clip(solid.max-a[1]-inside,solid.max-b[1]-inside)))return null;
+      for(const [x,z,nx,nz] of solid.edges){
+        check();
+        if(!clip(nx*(a[0]-x)+nz*(a[2]-z)-inside,nx*(b[0]-x)+nz*(b[2]-z)-inside))return null;
+      }
+      return [lo,hi];
+    }
+    function aboveFloor(x,y,z){
+      check();
+      const height=floor(x,z);
+      if(typeof height!=='number'||Number.isNaN(height))
+        throw new Error('A prism route floor must return an elevation');
+      return y>=height-EPS;
+    }
+    function permits(a,b,length){
+      work.pairs++;
+      if(Math.abs(b[1]-a[1])>maxGrade*Math.hypot(b[0]-a[0],b[2]-a[2])+EPS)return false;
+      const box=bounds(plan(a),plan(b)),lo=Math.min(a[1],b[1]),hi=Math.max(a[1],b[1]);
+      for(const solid of solids){
+        check();
+        if(lo<solid.max-EPS&&hi>solid.min+EPS&&overlap(box,solid.box)&&interval(a,b,solid,EPS,true))return false;
+      }
+      if(floor){
+        const steps=Math.ceil(length/spacing);
+        for(let i=0;i<=steps;i++){
+          const t=i/steps;
+          if(!aboveFloor(a[0]+t*(b[0]-a[0]),a[1]+t*(b[1]-a[1]),a[2]+t*(b[2]-a[2])))
+            return false;
+        }
+      }
+      return true;
+    }
+
+    try {
+      for(const prism of prisms){
+        const {ring,min,max}=prism||{};
+        if(!Array.isArray(ring)||ring.length<3||ring.length>4096||
+          !Array.from(ring).every(p=>point(p,2))||!point([min,max],2)||max-min<=EPS)
+          throw new Error('Prism routes need convex footprints and positive height intervals');
+        if(min>=maxHeight||max<=minHeight)continue;
+        if(ring.length>maxVertices)throw exhausted;
+        const signed=ring.reduce((sum,p,i)=>sum+area2(ring[0],p,ring[(i+1)%ring.length]),0);
+        const sign=Math.sign(signed),box=[Infinity,Infinity,-Infinity,-Infinity],edges=[];
+        if(Math.abs(signed)<=EPS)throw new Error('Prism footprints need positive area');
+        for(let i=0;i<ring.length;i++){
+          const [x,z]=ring[i],next=ring[(i+1)%ring.length],dx=next[0]-x,dz=next[1]-z,len=Math.hypot(dx,dz);
+          if(len<=EPS)throw new Error('Prism footprints need distinct successive points');
+          const nx=-dz*sign/len,nz=dx*sign/len;
+          for(const p of ring){
+            check();
+            if(nx*(p[0]-x)+nz*(p[1]-z)<-EPS)throw new Error('Prism footprints must be convex');
+          }
+          edges.push([x,z,nx,nz]);
+          box[0]=Math.min(box[0],x);box[1]=Math.min(box[1],z);
+          box[2]=Math.max(box[2],x);box[3]=Math.max(box[3],z);
+          sites.set(x+'/'+z,ring[i]);
+        }
+        const solid={min,max,box,edges};
+        solids.push(solid);
+        for(const y of [min,max])if(y>=minHeight&&y<=maxHeight)heights.add(y);
+        const hit=interval(start,end,solid,0,false);
+        for(const t of hit||[]){
+          if(t<=EPS||t>=1-EPS)continue;
+          const x=start[0]+(end[0]-start[0])*t,z=start[2]+(end[2]-start[2])*t;
+          sites.set(x+'/'+z,[x,z]);
+        }
+      }
+      for(const p of [start,end]){
+        if(floor&&!aboveFloor(...p))return result('blocked-pin');
+        if(solids.some(s=>p[1]>s.min+EPS&&p[1]<s.max-EPS&&interval(p,p,s,EPS,false)))
+          return result('blocked-pin');
+      }
+      const length=distance(start,end);
+      if(length>maxLength+EPS)return result('unreachable');
+      if(permits(start,end,length))return result('ok',[start,end]);
+      for(const p of waypoints)add(p);
+      for(const [x,z] of sites.values())for(const y of heights)add([x,y,z]);
+      const costs=new Float64Array(vertices.length).fill(Infinity),previous=new Int32Array(vertices.length).fill(-1),
+        visited=new Uint8Array(vertices.length),guess=vertices.map(p=>distance(p,end));
+      costs[0]=0;
+      for(;;){
+        let current=-1,best=Infinity;
+        for(let i=0;i<vertices.length;i++){
+          const rank=costs[i]+guess[i];
+          if(!visited[i]&&rank<best){best=rank;current=i;}
+        }
+        if(current===-1)return result('unreachable');
+        if(current===1){
+          const path=[];
+          for(let id=1;id!==-1;id=previous[id])path.push(vertices[id]);
+          return result('ok',path.reverse());
+        }
+        visited[current]=1;
+        const a=vertices[current];
+        for(let i=1;i<vertices.length;i++){
+          if(visited[i]||current===0&&i===1)continue;
+          const b=vertices[i],length=distance(a,b),cost=costs[current]+length;
+          if(cost>=costs[i]||cost+guess[i]>maxLength+EPS||!permits(a,b,length))continue;
+          costs[i]=cost;
+          previous[i]=current;
+        }
+      }
+    }catch(error){
+      if(error===exhausted)return result('budget');
+      throw error;
+    }
+  }
+
   function hull(points) {
     const sorted = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     const distinct = sorted.filter((p, i) => i === 0 || dist2(p, sorted[i - 1]) > EPS ** 2);
@@ -297,19 +450,32 @@ const RouteVisibility = (() => {
     return [...chain(distinct), ...chain(distinct.reverse())];
   }
 
-  function convexFootprint(points, { margin = 0 } = {}) {
+  function convexFootprint(points, { margin = 0, maxSides } = {}) {
     if (!Array.isArray(points) || points.length < 3 || points.length > 4096 ||
-        !points.every(p => point(p, 2)) || !Number.isFinite(margin) || margin < 0 || margin > 1e4)
+        !points.every(p => point(p, 2)) || !Number.isFinite(margin) || margin < 0 || margin > 1e4 ||
+        maxSides!==undefined&&!limit(maxSides,4,256))
       throw new Error('A clearance footprint needs finite XZ samples and a nonnegative margin');
     const outline = hull(points);
     if (outline.length < 3) throw new Error('A clearance footprint needs noncollinear samples');
-    if (!margin) return frozenPoints(outline);
+
     // The octagon circumscribes a circle of radius margin. Its Minkowski sum
     // with the hull bounds the swept clearance, including at sharp tips.
     const diagonal = margin * (Math.SQRT2 - 1);
     const offsets = [[-margin, -diagonal], [-margin, diagonal], [-diagonal, -margin], [-diagonal, margin],
       [margin, -diagonal], [margin, diagonal], [diagonal, -margin], [diagonal, margin]];
-    return frozenPoints(hull(outline.flatMap(p => offsets.map(q => [p[0] + q[0], p[1] + q[1]]))));
+    const footprint=margin?hull(outline.flatMap(p=>offsets.map(q=>[p[0]+q[0],p[1]+q[1]]))):outline;
+    if(maxSides===undefined||footprint.length<=maxSides)return frozenPoints(footprint);
+    // Intersect adjacent support planes to reduce graph size at a rounded
+    // obstacle. Each plane contains the expanded hull on its inner side.
+    const planes=Array.from({length:maxSides},(_,i)=>{
+      const angle=2*Math.PI*i/maxSides,x=Math.cos(angle),z=Math.sin(angle);
+      const offset=footprint.reduce((max,p)=>Math.max(max,x*p[0]+z*p[1]),-Infinity);
+      return [x,z,offset+1e-11*(1+Math.abs(offset))];
+    });
+    return frozenPoints(hull(planes.map(([ax,az,a],i)=>{
+      const [bx,bz,b]=planes[(i+1)%planes.length],det=ax*bz-az*bx;
+      return [(a*bz-az*b)/det,(ax*b-a*bx)/det];
+    })));
   }
 
 
@@ -380,6 +546,6 @@ const RouteVisibility = (() => {
     return {status:'ok',samples};
   }
 
-  return Object.freeze({ find, convexFootprint, sweep, sweepPath, elevationProfile });
+  return Object.freeze({ find, convexFootprint, sweep, sweepPath, elevationProfile, prismVisibility });
 })();
 if (typeof module !== 'undefined') module.exports = RouteVisibility;

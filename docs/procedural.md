@@ -654,6 +654,22 @@ results return `points: [[station, elevation], ...]` with exact endpoint
 heights. Forward-only edges keep route stations ordered. Search limits
 `maxVertices` and `maxTests` apply as in visibility routing.
 
+`P.routes.prismVisibility(start, end, prisms, options)` plans in three
+dimensions through a finite visibility graph. Each prism supplies a convex
+XZ `ring` and vertical bounds `min` and `max`. Expand these bounds to reserve
+space for the object traveling the route. The graph considers footprint
+corners, straight-guide intersections, obstacle elevations, and optional
+XYZ `waypoints`. Edges use exact clipping against the convex prisms and
+respect `maxGrade`, `minHeight`, `maxHeight`, and `maxLength`. An optional
+`floor(x, z)` supplies a sampled ground constraint. The result gives
+`ok`, `blocked-pin`, `unreachable`, or `budget` with work counters, and
+frozen XYZ points on success. Tangency to the clearance boundary is allowed.
+
+For dense rounded obstacles, supply `maxSides` to `P.routes.convexFootprint`.
+It caps the number of support planes and keeps the entire margin-expanded
+hull inside the result, so the planner can use fewer vertices while
+preserving clearance.
+
 `P.routes.spline(route, {radius, spacing, clearance, minClearance})`
 rounds corners using quadratic splines, shrinking the trim when needed.
 Unfit corners stay in the route. The result contains the fitted control points
