@@ -45,7 +45,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `panelFrames({width, height, unit, beam, braceWidth, braces, periodic, budget})` | Fit posts, rails and optional diagonal braces to rectangular bays. Get stable keyed footprints and a signed chart query |
 | `planarCells.layout(bounds, mask, options)`, `planarCells.prism(cell, options)` | Stable planar cells clipped to a mask, including disconnected fragments and holes. Prisms provide distance, ray, sampling and closed mesh operations |
 | `supportSkirt({outline, ground, embed, overlap, maxDrop})` | Fill vertically below a convex planar carrier and above the supplied height field, up to the configured drop |
-| `supportCourses(skirt, {unit, joint, depth, budget})` | Fit staggered, recessed courses around a closed gravity support with a continuous solid behind them |
+| `supportCourses(skirt, {unit, joint, depth, budget, omit})` | Fit staggered, recessed courses around a closed gravity support and remove facing cells by logical ID |
 | `basins.surface(carrier, mask, options)`, `terraces.surface(carrier, configuration)` | Masked level cuts and configurable height bands. Carrier provides bounds, height, normal and domain predicates |
 | `spans.catenary(a, b, options)` | Gravity-aware sagging curve with arc-length sampling, finite frames and closest-point queries |
 | `proximity.connect(sockets, options)` | Deterministic matching of named sockets with reach, degree and compatibility limits |
@@ -2385,6 +2385,15 @@ Exceeding the bounded fragment or work budget raises a `RangeError`.
 The layout is independent of geometry, style and rendering. A consumer can
 map the polygons onto a carrier, extrude them into physical blocks, or use the
 same layout for materials and coverage on a sloped surface.
+
+### Editable support facing
+
+`supportCourses(skirt, {omit})` uses the periodic row/column IDs from
+`plan.lookup(point).cell.id`. All fragments of that logical cell are recessed
+to the backing, including fragments on either side of the perimeter seam.
+`plan.lookup(point).omitted` reports the saved choice. `plan.frontage(id)`
+returns face outlines with outward normals, clipped between the terrain and
+carrier. The signed field and sample emitter both include the recesses.
 
 ### Convex keepout subtraction
 

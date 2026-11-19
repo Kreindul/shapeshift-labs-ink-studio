@@ -2,11 +2,13 @@
 (function(K) {
   const P=K.procedural||K.authoring, clamp=K.clamp;
   P.supportCourses=(skirt, options={})=>{
-    const {unit=[.46,.22],joint=.035,depth=.035,budget=4096}=options;
+    const {unit=[.46,.22],joint=.035,depth=.035,budget=4096,omit=[]}=options;
     if(!skirt?.outline||!Array.isArray(unit)||unit.length!==2||
        !unit.every(v=>Number.isFinite(v)&&v>=.025)||!Number.isFinite(joint)||joint<0||
-       !Number.isFinite(depth)||depth<0||depth>.25||!Number.isSafeInteger(budget)||budget<4||budget>65536)
+       !Number.isFinite(depth)||depth<0||depth>.25||!Number.isSafeInteger(budget)||budget<4||budget>65536||
+       !Array.isArray(omit)||omit.length>65536||!omit.every(key=>typeof key==='string'&&/^\d{1,5}\/\d{1,5}$/.test(key)))
       throw Error('Support courses need a skirt and bounded course dimensions');
+    const omitted=new Set(omit);
     const poly=skirt.outline;
     let width=0;
     const edges=poly.map((a,i)=>{
@@ -37,7 +39,7 @@
         layout=P.fittedCourses({width,height:rows*vy,unit:[ux,vy],joint:mortar,stagger:.5,periodic:true,budget});
       }else scale*=1.4;
     }
-    if(!layout.joint)relief=0;
+    if(!layout.joint&&!omitted.size)relief=0;
     const at0=skirt.top(0,0), slope=Math.hypot(skirt.top(1,0)-at0,skirt.top(0,1)-at0);
     const topScale=1/Math.hypot(1,slope), bottomScale=1/Math.hypot(1,slope,skirt.ground.slopeBound);
     function chart([x,y,z]){
@@ -52,16 +54,27 @@
     }
     function lookup(point){
       const q=chart(point), v=clamp(q.v,0,layout.height);
-      return {u:q.u,v,side:q.side,cell:layout.at(q.u,v),joint:layout.jointDistance(q.u,v)};
+      const cell=layout.at(q.u,v);
+      return {u:q.u,v,side:q.side,cell,joint:layout.jointDistance(q.u,v),omitted:omitted.has(cell.id)};
+    }
+    function gap(u,v){
+      const jointDistance=layout.jointDistance(u,v);
+      if(!omitted.size)return jointDistance;
+      const cell=layout.at(u,v);
+      if(!omitted.has(cell.id))return jointDistance;
+      const [dx]=layout.unit, phase=cell.row%2?layout.stagger:0;
+      const lo=(cell.column+phase)*dx;
+      const run=u+Math.round((lo+dx/2-u)/layout.width)*layout.width;
+      return Math.max(jointDistance,Math.min(run-lo,lo+dx-run,v-cell.bounds.min[1],cell.bounds.max[1]-v));
     }
     function distance(point){
       const base=skirt.distance(point);
-      if(!relief||base<=-2*relief||base>=layout.joint)return base;
+      if(!relief||base<=-2*relief||base>0&&base>=layout.joint)return base;
       const q=chart(point);
       if(q.v<0||q.v>layout.height)return base;
       const [x,y,z]=point, recess=Math.max(0,Math.min(relief,
         (skirt.top(x,z)+skirt.overlap-y)*topScale,(y-skirt.bottom(x,z))*bottomScale));
-      const grooved=Math.max(base,Math.min((q.side+recess)*.5,metric*layout.jointDistance(q.u,q.v)));
+      const grooved=Math.max(base,Math.min((q.side+recess)*.5,metric*gap(q.u,q.v)));
       return base<-relief?base+(grooved-base)*clamp(2+base/relief,0,1):grooved;
     }
     function position(edge,u,y,d=0){
@@ -109,6 +122,53 @@
       }
       return count;
     }
-    return Object.freeze({layout,depth:relief,top,lookup,distance,sample});
+    let lastKey,lastFrontage;
+    function frontage(key){
+      if(lastFrontage&&key===lastKey)return lastFrontage;
+      const bands=[];
+      const row=typeof key==='string'&&layout.rows[Number(key.split('/')[0])];
+      for(const cell of row?.cells||[]){
+        if(cell.id!==key)continue;
+        const low=top-cell.inset.max[1],high=top-cell.inset.min[1];
+        for(const e of edges){
+          const from=Math.max(e.start,cell.inset.min[0]),to=Math.min(e.start+e.length,cell.inset.max[0]);
+          if(to-from<1e-7)continue;
+          const count=Math.max(1,Math.min(32,Math.ceil((to-from)/.12)));
+          const lower=[],upper=[],normal=[e.nx,0,e.nz];
+          const flush=()=>{
+            if(lower.length>1)bands.push({points:[...lower,...upper.reverse()],normal});
+            lower.length=upper.length=0;
+          };
+          function extent(u){
+            const [x,,z]=position(e,u,0);
+            const a=Math.max(low,skirt.bottom(x,z)),b=Math.min(high,skirt.top(x,z)+skirt.overlap);
+            return {u,x,z,a,b,visible:b>a};
+          }
+          function add({x,z,a,b}){
+            lower.push([x,a,z]);upper.push([x,b,z]);
+          }
+          let previous=extent(from);
+          if(previous.visible)add(previous);
+          for(let i=1;i<=count;i++){
+            const next=extent(from+(to-from)*i/count);
+            if(previous.visible!==next.visible){
+              let inside=previous.visible?previous:next,outside=previous.visible?next:previous;
+              for(let step=0;step<8;step++){
+                const mid=extent((inside.u+outside.u)/2);
+                if(mid.visible)inside=mid;else outside=mid;
+              }
+              add(inside);
+              if(!next.visible)flush();
+            }
+            if(next.visible)add(next);
+            previous=next;
+          }
+          flush();
+        }
+      }
+      lastKey=key;
+      return lastFrontage=P.data.freeze(bands);
+    }
+    return Object.freeze({layout,depth:relief,top,lookup,distance,sample,frontage});
   };
 })(KIT);
