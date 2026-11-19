@@ -2,6 +2,23 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { fittedRailBand, pieces, offsetRails } = require('..').load().KIT.procedural;
 
+test('a prepared face occlusion query preserves the union point test',()=>{
+  const identity=[1,0,0,0,1,0,0,0,1],deck=pieces.box([0,0,0],[2,.1,1],identity,{key:'deck'}),
+    cover=pieces.box([.45,.1,.2],[.7,.28,.5],[.8,0,.6,0,1,0,-.6,0,.8],{key:'cover'}),
+    outside=pieces.box([4,.1,0],[.2,.2,.2],identity,{key:'outside'});
+  const union=pieces.union([deck,cover,outside]),face=[[-2,.1,-1],[2,.1,-1],[2,.1,1],[-2,.1,1]];
+  for(const depth of [0,.002,.12]){
+    const hidden=union.faceOcclusion(deck.key,face,depth);
+    assert.equal(typeof hidden,'function');
+    for(let x=-1.97;x<2;x+=.069)for(let z=-.94;z<1;z+=.09){
+      const point=[x,.1,z];
+      assert.equal(hidden(point),union.hidden(deck.key,point,depth));
+    }
+  }
+  const onlyDeck=pieces.union([deck,outside]);
+  assert.equal(onlyDeck.faceOcclusion(deck.key,face),null);
+});
+
 const spec = {
   inner: [[0, 0, 0], [2, 0, 0]],
   outer: [[0, 1, 0], [2, 1, 0]],

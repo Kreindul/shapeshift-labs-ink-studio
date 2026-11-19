@@ -34,6 +34,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.implicitTriangles(field, bounds, options, emit)` | Stream outward triangles from the same bounded field sampler |
 | `pieces.convex`, `pieces.box`, `pieces.beam`, `pieces.tube`, `pieces.union` | Reusable solid pieces and query unions. Union meshes contain constituent shells |
 | `pieces.union(parts).projectedIntervals(a, b, direction, {outward, inward})` | Merged intervals of material within a bounded strip projected onto a segment, with gaps preserved |
+| `pieces.union(parts).faceOcclusion(exclude, corners, tolerance)` | Prepare one interior-occlusion predicate for points on a convex face, or return null if the face has no possible occluders |
 | `pieces.uprightSpan(a, b, {width, height, up, extension}, meta)` | Closed pitched band with upright ends and constant width and height |
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
 | `logicalParts.compile(pieces, identify)` | Group clipped pieces of one stock part and partition visible and omitted pieces from retained keys |
@@ -987,6 +988,9 @@ entrance and any exit close to the reservation keep straight leads.
 It can route around either open side. Success returns `{status:'ok',
 points, length}`. A failure reports `blocked-pin`, `unreachable`, or
 `budget` while leaving the input coordinates unchanged.
+When both pins need straight leads, give an `endApproach` starting at
+the destination. The same search reserves both approach footprints and
+tests both leads against the other approach and the supplied obstacles.
 
 `P.routes.stripJoin(previous, corner, next, halfWidth, options)` joins
 two equal-width strips at three planar points. It returns `null` for

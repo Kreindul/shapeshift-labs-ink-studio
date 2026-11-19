@@ -7,71 +7,96 @@
   const distance=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
   const lift=([x,z])=>[x,0,z],plan=([x,,z])=>[x,z];
   const rectangle=(lo,hi)=>[lo,[hi[0],lo[1]],hi,[lo[0],hi[1]]];
+  const validApproach=guide=>Array.isArray(guide)&&guide.length>=2&&guide.length<=256&&
+    Array.from(guide).every(vector);
+
+  function approachFrame(guide){
+    if(guide.some((p,i)=>i&&distance(p,guide[i-1])<=EPS))
+      throw new Error('A return approach needs nonzero spans');
+    const head=guide[0],first=sub(guide[1],head),length=Math.hypot(...first),
+      along=first.map(v=>v/length),side=[-along[1],along[0]];
+    return {
+      project(p){
+        const delta=sub(p,head);
+        return [dot(delta,along),dot(delta,side)];
+      },
+      unproject:([s,v])=>head.map((x,i)=>x+s*along[i]+v*side[i])
+    };
+  }
+
+  function reserve(guide,halfWidth,toeExtension,reach){
+    const last=guide.at(-1),toe=sub(last,guide.at(-2)),ratio=toeExtension/Math.hypot(...toe);
+    guide[guide.length-1]=last.map((v,i)=>v+toe[i]*ratio);
+    const occupied=guide.slice(1).map((p,i)=>P.routes.stripFootprint(guide[i],p,halfWidth));
+    const corners=occupied.flat(),lo=[0,1].map(i=>Math.min(...corners.map(p=>p[i]))),
+      hi=[0,1].map(i=>Math.max(...corners.map(p=>p[i])));
+    const outerLo=lo.map(v=>v-reach),outerHi=hi.map(v=>v+reach);
+    return {occupied,lo,hi,outerLo,outerHi,entry:[outerLo[0],0],outer:rectangle(outerLo,outerHi)};
+  }
+
+  function freeExits(pin,clearance,reach,{lo,hi,outerLo,outerHi,outer}){
+    const ends=[];
+    for(const i of [0,1]){
+      for(const [side,bound,expanded] of [[-1,lo,outerLo],[1,hi,outerHi]]){
+        if(side*(pin[i]-bound[i])<clearance-EPS)continue;
+        const point=pin.slice();
+        if(side*(pin[i]-expanded[i])>=-EPS){ends.push({point,barriers:[outer]});continue;}
+        point[i]+=side*reach;
+        // Continue along the side to the last cross section, so the inner
+        // rail has enough length before a lead that turns toward the pin.
+        const lower=outerLo.slice(),upper=outerHi.slice();
+        (side<0?lower:upper)[i]=point[i];
+        ends.push({point,barriers:[rectangle(lower,upper)]});
+      }
+    }
+    return ends;
+  }
 
   function fitReturn(approach,destination,{
-    occupiedHalfWidth,halfWidth,toeExtension=0,clearance=.025,maxLength=300,obstacles=[]
+    occupiedHalfWidth,halfWidth,toeExtension=0,clearance=.025,maxLength=300,obstacles=[],endApproach
   }={}){
-    if(!Array.isArray(approach)||approach.length<2||approach.length>256||
-      !Array.from(approach).every(vector)||!vector(destination)||
+    if(!validApproach(approach)||!vector(destination)||
       ![occupiedHalfWidth,halfWidth,clearance,toeExtension,maxLength].every(Number.isFinite)||
       occupiedHalfWidth<=0||halfWidth<=0||clearance<0||toeExtension<0||maxLength<=0||
       !Array.isArray(obstacles)||!obstacles.every(ring=>Array.isArray(ring)&&ring.length>=3&&
         ring.length<=256&&Array.from(ring).every(vector)))
       throw new Error('Return paths need bounded planar geometry, positive widths and ordered clearances');
-    const {stripFootprint}=P.routes,head=approach[0],first=sub(approach[1],head),
-      reach=halfWidth+clearance,length=Math.hypot(...first);
-    if(length<=EPS||approach.some((p,i)=>i&&distance(p,approach[i-1])<=EPS))
-      throw new Error('A return approach needs nonzero spans');
+    if(endApproach!==undefined&&(!validApproach(endApproach)||distance(destination,endApproach[0])>EPS))
+      throw new Error('An end approach must start at the destination and have bounded planar geometry');
+    const {project,unproject}=approachFrame(approach),head=approach[0],reach=halfWidth+clearance;
     if(distance(head,destination)<=EPS)return Object.freeze({status:'blocked-pin'});
     if(obstacles.length>32)return Object.freeze({status:'budget'});
-    const along=first.map(v=>v/length),side=[-along[1],along[0]];
-    const project=p=>{
-      const delta=sub(p,head);
-      return [dot(delta,along),dot(delta,side)];
-    };
-    const unproject=([s,v])=>head.map((x,i)=>x+s*along[i]+v*side[i]);
-    const guide=approach.map(project),last=guide.at(-1),toe=sub(last,guide.at(-2)),
-      ratio=toeExtension/Math.hypot(...toe);
-    guide[guide.length-1]=last.map((v,i)=>v+toe[i]*ratio);
-    const occupied=guide.slice(1).map((p,i)=>stripFootprint(guide[i],p,occupiedHalfWidth));
-    const corners=occupied.flat(),lo=[0,1].map(i=>Math.min(...corners.map(p=>p[i]))),
-      hi=[0,1].map(i=>Math.max(...corners.map(p=>p[i])));
-    const outerLo=lo.map(v=>v-reach),outerHi=hi.map(v=>v+reach);
-    const outer=rectangle(outerLo,outerHi),entry=[outerLo[0],0],pin=project(destination),
-      ends=[];
-    for(const i of [0,1]){
-      if(pin[i]<=lo[i]-clearance+EPS){
-        const point=pin.slice();
-        if(pin[i]>outerLo[i]+EPS)point[i]=pin[i]-reach;
-        ends.push({point,axis:i,near:point[i]!==pin[i],direction:-1});
-      }
-      if(pin[i]>=hi[i]+clearance-EPS){
-        const point=pin.slice();
-        if(pin[i]<outerHi[i]-EPS)point[i]=pin[i]+reach;
-        ends.push({point,axis:i,near:point[i]!==pin[i],direction:1});
-      }
+    const start=reserve(approach.map(project),occupiedHalfWidth,toeExtension,reach),
+      {entry,occupied}=start,pin=project(destination);
+    let ends;
+    if(endApproach){
+      const incoming=[pin,...endApproach.slice(1).map(project)],frame=approachFrame(incoming);
+      const end=reserve(incoming.map(frame.project),occupiedHalfWidth,toeExtension,reach);
+      occupied.push(...end.occupied.map(ring=>ring.map(frame.unproject)));
+      ends=[{point:frame.unproject(end.entry),barriers:[start.outer,end.outer.map(frame.unproject)]}];
+    }else{
+      ends=freeExits(pin,clearance,reach,start);
     }
     if(!ends.length)return Object.freeze({status:'blocked-pin'});
     const blockers=obstacles.map(ring=>RouteVisibility.convexFootprint(ring.map(project),{margin:reach,maxSides:12})),
       masks=blockers.map(ring=>P.edgeClearance.footprint(ring)),
-      blocked=(a,b)=>P.edgeClearance.ranges(lift(a),lift(b),masks).removed.length>0,
-      entrance=stripFootprint([0,0],entry,halfWidth),
-      reserveClips=occupied.some(boundary=>P.surfaceCells.clip([{key:'entry',polygon:entrance}],{boundary}).fragmentCount>0);
-    if(reserveClips||blocked([0,0],entry))return Object.freeze({status:'blocked-pin'});
+      blocked=(a,b)=>P.edgeClearance.ranges(lift(a),lift(b),masks).removed.length>0;
+    function overlapsApproach(a,b){
+      const polygon=P.routes.stripFootprint(a,b,halfWidth);
+      return polygon.length&&occupied.some(boundary=>
+        P.surfaceCells.clip([{key:'lead',polygon}],{boundary}).fragmentCount>0);
+    }
+    if(overlapsApproach([0,0],entry)||blocked([0,0],entry))
+      return Object.freeze({status:'blocked-pin'});
     const budget={maxVertices:420,maxTests:200000};
-    if(blockers.reduce((sum,ring)=>sum+ring.length,outer.length+2)>budget.maxVertices)
+    if(blockers.reduce((sum,ring)=>sum+ring.length,(endApproach?8:4)+2)>budget.maxVertices)
       return Object.freeze({status:'budget'});
     let best=null,exhausted=false,pinClear=false;
-    for(const {point:exit,axis,near,direction} of ends){
-      if(blocked(exit,pin))continue;
+    for(const {point:exit,barriers} of ends){
+      if(blocked(exit,pin)||endApproach&&overlapsApproach(exit,pin))continue;
       pinClear=true;
-      // Continue along a side all the way to the last cross section. A
-      // shortcut to a short return lead can reverse the offset inner rail.
-      const lower=outerLo.slice(),upper=outerHi.slice();
-      if(near)(direction<0?lower:upper)[axis]=exit[axis];
-      const barrier=near?rectangle(lower,upper):outer;
       const middle=distance(entry,exit)<=EPS?{status:'ok',points:[lift(entry)]}:
-        RouteVisibility.find(lift(entry),lift(exit),[barrier,...blockers],budget);
+        RouteVisibility.find(lift(entry),lift(exit),[...barriers,...blockers],budget);
       if(middle.status!=='ok'){
         exhausted||=middle.status==='budget';
         continue;

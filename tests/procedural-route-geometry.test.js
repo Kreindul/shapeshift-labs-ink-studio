@@ -33,6 +33,26 @@ test('pinned returns route around a finite approach and can use either side',()=
   assert.equal(fit({maxLength:2}).status,'unreachable');
 });
 
+test('one return clears two opposing approaches with a straight lead at each pin',()=>{
+  const first=[[0,0],[1.05,0]],second=[[7,0],[5.95,0]],end=second[0],
+    options={occupiedHalfWidth:1.5,halfWidth:1.5,toeExtension:1.5,clearance:.04,
+      maxLength:32,endApproach:second};
+  assert.equal(routes.fitReturn(first,end,options).status,'ok');
+  const shape=routes.fitReturn(first,end,options),points=shape.points;
+  assert.deepEqual(points[0],first[0]);
+  assert.deepEqual(points.at(-1),end);
+  assert(points[1][0]<=-1.54);
+  assert(points.at(-2)[0]>=8.54);
+  const side=Math.sign(points.find(p=>Math.abs(p[1])>3)[1]),
+    barrier=[[1,2*side],[6,2*side],[6,4*side],[1,4*side]];
+  const alternate=routes.fitReturn(first,end,{...options,obstacles:[barrier]});
+  assert.equal(alternate.status,'ok');
+  assert(alternate.points.some(p=>p[1]*side<-3));
+  assert.equal(routes.fitReturn(first,end,{...options,maxLength:5}).status,'unreachable');
+  assert.equal(routes.fitReturn(first,[.5,0],{...options,endApproach:[[.5,0],[2,0]]}).status,'blocked-pin');
+  assert.throws(()=>routes.fitReturn(first,end,{...options,endApproach:[[6.9,0],[5.95,0]]}),/destination/);
+});
+
 test('strip joins close only the outside of a turn and partition the overlapping strips',()=>{
   const close=(a,b)=>assert(Math.abs(a-b)<1e-8,`${a} vs ${b}`);
   const center=[2,3],previous=[0,3],next=[2,5];

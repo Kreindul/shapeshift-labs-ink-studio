@@ -14,6 +14,7 @@
       [2, 3, 7, 6],
       [3, 0, 4, 7]
     ];
+  const convexParts=new WeakSet();
   function convex(vertices, polygons, meta = {}) {
     if (
       !Array.isArray(vertices) ||
@@ -154,6 +155,7 @@
     }
     const part = Object.assign({}, info, { bounds, planes, distance, contains, intersections, sample });
     Object.defineProperty(part, 'mesh', { enumerable: true, get: meshOf });
+    convexParts.add(part);
     return Object.freeze(part);
   }
   function box(center, half, frame, meta) {
@@ -255,6 +257,25 @@
       }
       return candidates;
     }
+    function faceOcclusion(exclude,points,tolerance=.002){
+      if(!Array.isArray(points)||points.length<3||!points.every(vector)||!Number.isFinite(tolerance)||tolerance<0)
+        throw new Error('Face occlusion needs finite corners and nonnegative depth');
+      const region=A.spatial.boxOf(points),candidates=[];
+      for(const part of nearby(region.min,region.max)){
+        if(part.key===exclude||!A.spatial.overlap(part.bounds,region))continue;
+        // Every point on the face stays outside this plane if all its
+        // corners do. Account for the tolerance used by the point query.
+        if(convexParts.has(part)&&part.planes.some(({normal,offset})=>
+          points.every(point=>V.dot(normal,point)>=offset-tolerance+EPS)))continue;
+        candidates.push(part);
+      }
+      if(!candidates.length)return null;
+      return point=>{
+        for(const part of candidates)if(A.spatial.contains(part.bounds,point)&&
+          (part.contains?part.contains(point,tolerance):part.distance(point)<-tolerance))return true;
+        return false;
+      };
+    }
     function raycast(origin,direction,max=10000){
       if(!vector(origin)||!vector(direction)||V.len(direction)<EPS||!Number.isFinite(max)||max<=0)
         throw new Error('Construction rays need finite vectors and positive reach');
@@ -309,6 +330,7 @@
     return {
       bounds,
       hidden,
+      faceOcclusion,
       contains(point, tolerance = 0.002) {
         if (!vector(point) || !Number.isFinite(tolerance) || tolerance < 0)
           throw new Error('Containment needs a finite point and nonnegative depth');
