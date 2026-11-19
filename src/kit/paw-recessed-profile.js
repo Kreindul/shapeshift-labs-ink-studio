@@ -56,6 +56,50 @@
     };
   }
 
+  function gridSamples(outer, inner, back, front, floor, spacing, emit) {
+    let count = 0;
+    function reserve(size) {
+      count += size;
+      if (count > 1000000) throw new RangeError('Profile sampling exceeds its work budget');
+    }
+    function cap(rings, z) {
+      const ys = rings[0].map(p => p[1]), lo = Math.min(...ys), hi = Math.max(...ys);
+      const rows = Math.max(1, Math.ceil((hi - lo) / spacing));
+      if (rows > 1000000) throw new RangeError('Profile sampling exceeds its work budget');
+      for (let row = 0; row < rows; row++) {
+        const y = lo + (hi - lo) * (row + .5) / rows, crossings = [];
+        for (const ring of rings) for (const [i, a] of ring.entries()) {
+          const b = ring[(i + 1) % ring.length];
+          if ((a[1] > y) !== (b[1] > y))
+            crossings.push(a[0] + (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]));
+        }
+        crossings.sort((a, b) => a - b);
+        for (let i = 0; i < crossings.length; i += 2) {
+          const x = crossings[i], span = crossings[i + 1] - x;
+          if (span <= 0) continue;
+          const columns = Math.max(1, Math.ceil(span / spacing));
+          reserve(columns);
+          for (let j = 0; j < columns; j++) emit([x + span * (j + .5) / columns, y, z]);
+        }
+      }
+    }
+    function wall(ring, low) {
+      const depth = front - low, rows = Math.max(1, Math.ceil(depth / spacing));
+      for (const [i, a] of ring.entries()) {
+        const b = ring[(i + 1) % ring.length], dx = b[0] - a[0], dy = b[1] - a[1];
+        const columns = Math.max(1, Math.ceil(Math.hypot(dx, dy) / spacing));
+        reserve(columns * (rows + 1));
+        for (let j = 0; j < columns; j++) for (let row = 0; row <= rows; row++)
+          emit([a[0] + dx * j / columns, a[1] + dy * j / columns, low + depth * row / rows]);
+      }
+    }
+    cap([outer, inner], front);
+    cap([outer], back);
+    cap([inner], floor);
+    wall(outer, back);
+    wall(inner, floor);
+  }
+
   function ring(raw, center) {
     if (!Array.isArray(raw) || raw.length < 3 || raw.length > 256 || !Array.from(raw).every(point))
       throw new Error('Recessed profiles need 3 to 256 finite points per ring');
@@ -144,6 +188,7 @@
     function sample(spacing, emit) {
       if (!Number.isFinite(spacing) || spacing <= 0 || typeof emit !== 'function')
         throw new Error('Profile sampling needs positive spacing and a callback');
+      if (general) return gridSamples(outer, inner, back, front, floor, spacing, emit);
       let count = 0;
       function triangle(a, b, c) {
         const n = Math.max(1, Math.ceil(Math.max(K.V.dist(a, b), K.V.dist(b, c), K.V.dist(c, a)) / spacing));

@@ -45,3 +45,23 @@ test('a general recess produces a closed cap inside an outline with no radial ce
   assert.throws(()=>P.geometry.recessedProfile({outline,recess:[[-1,-1.5],[1,-1.5],[1,1.5],[-1,1.5]],
     span,inset,center:null}),/cannot touch/);
 });
+
+test('long thin recesses sample caps and walls within a surface-area budget', () => {
+  const outline = [[-80,-.3],[80,-.3],[80,.3],[-80,.3]];
+  const recess = [[-77,-.08],[77,-.08],[77,.08],[-77,.08]];
+  const shape = P.geometry.recessedProfile({outline,recess,center:null,span:[-.6,0],inset:.25});
+  let count = 0;
+  const faces = new Set();
+  shape.sample(.15, p => {
+    assert(Math.abs(shape.distance(p)) < 1e-8);
+    const [x,y,z] = p;
+    if (z === 0 && Math.abs(y) < .3 && (Math.abs(y) > .08 || Math.abs(x) > 77)) faces.add('front');
+    if (z === -.6 && Math.abs(y) < .3) faces.add('rear');
+    if (z === -.25 && Math.abs(y) < .08 && Math.abs(x) < 77) faces.add('floor');
+    if (z < 0 && Math.abs(y) === .3) faces.add('outer wall');
+    if (z < 0 && Math.abs(y) === .08) faces.add('recess wall');
+    count++;
+  });
+  assert(count > 16000 && count < 28000, String(count));
+  assert.deepEqual(faces,new Set(['front','rear','floor','outer wall','recess wall']));
+});

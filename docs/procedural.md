@@ -2234,7 +2234,9 @@ inside/outside queries, `mesh(metadata)` for a closed surface, and
 Pass `center: null` to triangulate the caps of arbitrary simple nested
 rings. The front cap has the recess ring as a hole. The recess and rear
 caps share their boundary vertices with the side faces. This mode
-supports outlines without a point visible from every edge.
+supports outlines without a point visible from every edge. Sampling covers
+the filled intervals on each cap and spaces side samples by edge length
+and depth, independent of the cap triangulation.
 
 `geometry.fitMonotoneOutline` takes an authored XY ring and an optional
 required XY ring. Each must have one contiguous interior span at each
