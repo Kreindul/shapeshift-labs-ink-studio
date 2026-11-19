@@ -1334,7 +1334,7 @@ field when their intensity changes. For WebGL 2, upload the samples as
 
 ### Attachment slots
 
-`P.attachments.layout(slots, families, {seed, fits, budget})` selects a family
+`P.attachments.layout(slots, families, {seed, fits, sizeFor, budget})` selects a family
 for each named slot. A slot supplies a stable `id`, a `point`, independent
 `normal` and `tangent` axes, and a three-component `room` in the caller's
 semantic size order. Optional `tags`, `chance`, `priority`, `variant`, and
@@ -1344,7 +1344,10 @@ family, respectively. Families declare `id`, `size`, optional positive
 `data` such as chart anchors or asset recipe keys.
 
 For compatible choices, seeded weighted ranking provides deterministic
-fallbacks. `fits(proposal, accepted)` can test scene clearance or reserve
+fallbacks. Use `sizeFor(family, slot)` to supply three finite, positive
+dimensions for the room check when a slot applies a size override or its
+frame changes the projected footprint. The family and seed in the result
+retain their original meaning. `fits(proposal, accepted)` can test scene clearance or reserve
 nearby space. `budget` bounds slot-family comparisons. Output entries contain
 `key`, the normalized `slot` frame, a `family`, and a local `seed`.
 For a retained scene, use that key in `doc.derive()` and let document

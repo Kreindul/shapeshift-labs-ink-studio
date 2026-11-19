@@ -63,9 +63,10 @@
     return P.data.freeze(result);
   }
 
-  function layout(slots, families, { seed = 0, fits = () => true, budget = 32768 } = {}) {
+  function layout(slots, families, { seed = 0, fits = () => true, sizeFor, budget = 32768 } = {}) {
     if (!Array.isArray(slots) || slots.length > 1024 || !Array.isArray(families) || families.length > 128 ||
-        !Number.isSafeInteger(seed) || typeof fits !== 'function' || !Number.isSafeInteger(budget) || budget < 1 || budget > 131072)
+        !Number.isSafeInteger(seed) || typeof fits !== 'function' || sizeFor !== undefined && typeof sizeFor !== 'function' ||
+        !Number.isSafeInteger(budget) || budget < 1 || budget > 131072)
       throw Error('Attachment layout needs bounded slots, families and evaluation budget');
 
     const familyIds = new Set(), candidates = families.map(raw => {
@@ -97,8 +98,11 @@
       if (!slot.pin && draw('occupancy', local) >= slot.chance) continue;
       const compatible = candidates.filter(family => {
         if (++checks > budget) throw Error('Attachment layout exceeds its candidate budget');
-        return (!slot.pin || slot.pin === family.id) && family.requires.every(tag => slot.tags.includes(tag)) &&
-          family.size.every((v, i) => v <= slot.room[i]);
+        if (slot.pin && slot.pin !== family.id || !family.requires.every(tag => slot.tags.includes(tag))) return false;
+        const size = sizeFor ? sizeFor(family, slot) : family.size;
+        if (sizeFor && (!vector(size) || size.some(v => v <= 0)))
+          throw Error('Resolved attachment dimensions must be finite and positive');
+        return size.every((v, i) => v <= slot.room[i]);
       }).map(family => ({ family, score: -Math.log(draw(family.id, local)) / family.weight }))
         .sort((a, b) => a.score - b.score || order(a.family.id, b.family.id));
       for (const { family } of compatible) {
