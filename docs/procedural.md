@@ -2218,6 +2218,15 @@ requested ID so callers can show the fallback.
 
 The plan puts the first chain before the second. It supplies `reverseFirst`, `reverseSecond` and the normalized join station `split`. `mapFirst(u)` and `mapSecond(u)` transfer positions from either input's normalized arc to the concatenation. Use the direction flags to handle sided attributes, cross-section coordinates, or directional metadata. Geometry construction and attribute precedence belong to the caller.
 
+### Linear profiles
+
+`P.linearProfile.compile([[coordinate, value], ...])` compiles a
+piecewise-linear scalar field. Coordinates increase strictly, and values
+can rise or fall. `at(coordinate)` interpolates within the domain and clamps
+outside it. The frozen `knots` supply explicit breaks for tessellation.
+`slopeBound` is the greatest absolute slope, useful for adaptive contact
+queries on composed surfaces.
+
 ### Coordinates on closed carriers
 
 `P.periodicCoordinates.wrap(value, period = 1)` returns a station in the half-open interval from zero to the period. `delta(value, origin, period = 1)` measures the signed shortest displacement, with a half-turn choosing the negative direction. Supply finite stations and a finite positive period.
