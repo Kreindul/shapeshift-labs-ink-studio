@@ -4,7 +4,9 @@ Projected effects draw animated pixel images and procedural patterns on
 splat surfaces. A layer can read a shared field for its color, coverage, or
 coordinate warp. Particle emitters can use the same path or read that field
 to decide where to spawn. All of the effects render on the scene's art-pixel
-grid before the optional text pass.
+grid before the optional text pass in the CPU renderer. Browser hosts can
+use the shared fields and material samplers to integrate these layers into
+their own pipeline. See the [WebGL renderer coverage](browser-renderer.md#feature-coverage).
 
 Try [Tidal signal](../examples/surface-effects.js) for a moving projected
 image, a revealing ribbon, ripples and sparks. [Edge shedding](../examples/edge-shedding.js)

@@ -1,6 +1,6 @@
 # Art-pixel render passes
 
-`ink-studio passes <scene>` writes color and diagnostic PNGs at the same art-pixel resolution as the render. Use `--channels depth,normal,emission` to select passes, `--px1` for native resolution, and `--out directory` to choose the destination.
+`ink-studio passes <scene>` writes CPU-rendered color and diagnostic PNGs on the same art grid. Use `--channels depth,normal,emission` to select passes, `--px1` for native resolution, and `--out directory` to choose the destination.
 
 In Node, call the library's `render(world, { passes: true })` or supply an array of channel names. The result includes `frame.passes` with `w`, `h`, and typed arrays in top-down row-major order. A caller can request any subset. A render without passes skips the per-pixel buffers. `--colored` returns passes from its native render grid.
 
@@ -12,14 +12,22 @@ In Node, call the library's `render(world, { passes: true })` or supply an array
 | `objectId`, `materialId` | Unsigned integers. Zero means unassigned. The `objects` and `materials` arrays give authored labels, where supplied. |
 | `emission` | Three floats per pixel. Premultiplied visible emissive RGB. Nearer layers attenuate emission. |
 | `splatId` | Unsigned integers. One-based splat index of the owner, with zero for an empty pixel. Stable while the world preserves its splat slots. |
+| `position`, `objectPosition` | Three floats per pixel for the owned point in world or rest-space coordinates. |
+| `protected` | Per-pixel detail protection used by the stable resolve. |
+| `emissionDepth` | Approximate depth of the nearest contributing emissive layer. |
+| `motion`, `emissionMotion` | Two floats per pixel for XY displacement in art pixels, with positive Y downward. |
 
 The owner is the nearest depth-writing fragment with effective opacity above 0.5. A layer drawn later wins a depth tie. Opaque edge sprites carry their anchor's splat ID. Coverage and emission also account for soft layers. These rules keep the depth, ID, and normal attached to the same surface.
 
 Pass a solid's `objectId` or `tag` and its material's `materialId` to attach names. Unnamed sculpted objects and materials get anonymous IDs local to the build. For direct builder splats, use `builder.describeSplats(first, end, { object, material })` with a half-open range. A directly authored emissive splat can set `emission: false` alongside `em: true` to keep the legacy shading behavior while excluding it from the emission buffer. Construct the builder with `{ renderMetadata: false }` as its third argument to skip storing these fields.
 
-Browser hosts receive `ArtPasses` in the bundle, including the channel names and GLSL helpers for ownership and blending.
+Browser hosts receive `ArtPasses` in the toolkit bundle, including the channel names and GLSL helpers for ownership and blending. The default [WebGL canvas renderer](browser-renderer.md) draws the image. Node's render API provides the diagnostic buffers described here.
 
-Additional channels are `position` and `objectPosition` for XYZ surface coordinates, `protected` for one-bit detail protection, and `emissionDepth` for the approximate nearest contributing emissive layer. `motion` and `emissionMotion` are XY displacements in art pixels with positive Y downward. Request `captureMotion: true` on the prior frame and pass its `motionReference` as `motionFrom` when rendering the next frame. The two frames must use the same art dimensions and preserve their splat slots. The emission variant also tracks translucent sources.
+For motion channels, request `captureMotion: true` on the prior frame and pass its `motionReference` as `motionFrom` when rendering the next frame. The two frames must use the same art dimensions and preserve their splat slots. The emission variant also tracks translucent sources.
+
+The PNG writer includes a `passes.json` manifest with the art dimensions,
+image scale, and available previews. Read `position` and `objectPosition`
+directly from Node's typed arrays for floating-point coordinates.
 
 ## Selective ink and stable pixels
 

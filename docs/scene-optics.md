@@ -9,6 +9,8 @@ ink-studio sheet examples/beacon-pool.js --t 0.4,0.94,1.5 --raw --out pool-motio
 
 Use `--reflections off` or `--atmosphere off` to inspect each effect separately. The software renderer supports perspective and orthographic views, and the effects run before palette quantization.
 
+The [WebGL canvas renderer](browser-renderer.md) supports the shared glass-beam pass. Planar capture, ripple-driven reflection, and volume integration in this guide use the CPU renderer unless a host implements those passes explicitly.
+
 ## Planar reflections
 
 ```js

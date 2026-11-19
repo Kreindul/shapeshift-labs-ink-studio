@@ -2,7 +2,7 @@
 
 A JavaScript toolkit for sculpting signed-distance solids, baking them into pixel-art Gaussian splats, and making them move, react, break, grow and remember what happened to them. Use it from Node, drive it through the `ink-studio` command, or embed the source bundle in an Inkwell or browser application.
 
-The package includes geometry, materials, lighting, animation, character controls, particles, physics, procedural generation, retained authoring and a headless renderer. Scene authors can use JavaScript or JSON. A host application supplies its own interactive viewport and editor interface.
+The package includes geometry, materials, lighting, animation, character controls, particles, physics, procedural generation, and retained authoring. Write scenes in JavaScript or JSON, render images through the CPU-based Node and CLI tools, or draw into a canvas with the default WebGL 2 browser renderer. Browser hosts supply the editor UI and advance the scene.
 
 ## Contents
 
@@ -25,7 +25,7 @@ The package includes geometry, materials, lighting, animation, character control
 - [Projected and procedural effects](#projected-and-procedural-effects)
 - [Reflections, ripples and atmosphere](#reflections-ripples-and-atmosphere)
 - [Embedding and custom scene collections](#embedding-and-custom-scene-collections)
-- [Optional WebGL renderer](#optional-webgl-renderer)
+- [Browser renderer](#browser-renderer)
 - [Module reference](#module-reference)
 - [Validation and development](#validation-and-development)
 
@@ -137,7 +137,11 @@ The package entry point exposes:
 | `demoFiles()` | Absolute demo source paths. |
 | `bundle()` | Toolkit source as one script string, without demo scenes. |
 | `demos()` | Demo source that appends to an existing `SCENES` array. |
-| `readMesh(file)` | Read an OBJ, glTF or GLB file and its supported companion files. |
+| `readMesh(file, { attributes })` | Read an OBJ, glTF or GLB file and its supported companion files. Request UV and material attributes where the format supplies them. |
+| `readAsset(file, options)` | Read a portable GLB with textures. PNG decoding is included. Supply a decoder for JPEGs. |
+| `readRasterAsset(file)` | Load a raster JSON manifest, including layer frames backed by PNG files, into the procedural graph's raster interface. |
+| `render(world, options)` | Return a CPU-rendered art frame with `w`, `h`, `rgb`, and `px`. Request named diagnostic buffers with `passes`. |
+| `spriteAtlas(world, options)` | Render a directional RGBA atlas with metadata and optional related maps. |
 | `exportGlb(modelOrFile, { out, ...options })` | Export indexed authoring geometry or an input mesh file as a self-contained GLB. |
 | `lint(files)` | Return lines rejected by the source comment guard. |
 | `EXPORTS` | Comma-separated names defined by the source bundle. |
@@ -617,9 +621,13 @@ Use `ink-studio catalog <words>` to search catalog entries and follow their `whe
 
 The [headless authoring guide](docs/headless-authoring.md) covers typed graphs,
 cached simulation, attribute transfer, mesh paths, layered artwork, animation
-state graphs and the retained Flooded Shrine recipe.
+state graphs and the retained Flooded Shrine recipe. The [procedural API guide](docs/procedural.md)
+also covers chart batching, blind recesses, incremental visibility, and retained
+sample withdrawal.
 
 ## Rendering and command reference
+
+The CLI and Node `render()` use the CPU renderer. Use the [browser renderer](docs/browser-renderer.md) for an interactive WebGL canvas. The two backends share scene data and several pixel-art controls. Use the same backend when recording and checking exact image baselines.
 
 | Command | Purpose |
 | --- | --- |
@@ -671,9 +679,15 @@ Common rendering controls:
 | `--w`, `--h`, `--out` | Output viewport size and destination. The renderer resolves a lower-resolution pixel grid derived from the scene's detail settings. |
 | `--px 2` | Use two screen pixels per art pixel. In `compare` and `review`, `--px` specifies the scale of the reference. |
 | `--tone stipple\|off` | Enable the stipple preset or turn off the scene's tone settings. |
+| `--ink off`, `--effects off` | Disable authored selective ink or art-pixel effects. |
+| `--snap`, `--dither-space screen\|world\|object`, `--resolve native\|coverage\|clusters` | Configure camera snapping, dither coordinates, and pixel resolve. Use `--stable off` to disable the scene's stability profile. |
+| `--splat-order center\|surface` | Choose global center ordering or local ordering using the sampled surface plane. |
+| `--volume-scale`, `--volume-steps`, `--volume-jitter` | Override the atmosphere volume's sampling settings. |
 | `--seed` | Override the scene seed. |
 | `--colored` | Use palette-aware smoothing of silhouettes and body-colored contours. |
 | `--raw` | Bypass palette styling. |
+| `--px1` | Write native art pixels with a scale of one in commands such as `render` and `passes`. |
+| `--text ascii\|symbols\|braille\|blocks`, `--tg`, `--tcolour scene\|ink\|mono` | Draw a text pass in `render`, `sheet`, or `clip`. The still renderer can also save the characters as text. |
 | `--fine` | Bake surface detail tiles for per-pixel color lookup. |
 | `--bounce` | Bake indirect lighting. |
 | `--focus x,y,z,near,far,coarse` | Concentrate surface detail around a point. |
@@ -703,7 +717,7 @@ effects, local fragment ordering and directional export.
 Use projected material layers to paint animated RGB or RGBA rasters and
 procedural patterns onto splat surfaces. Shared fields let a moving object
 reveal a surface, leave a wake, warp the surface pattern, or drive particle
-emission. The effects also render through the ASCII and Braille passes.
+emission. The CPU renderer also renders these effects through the ASCII and Braille passes.
 See [projected splat effects](docs/projected-effects.md) for recipes and APIs.
 
 ## Reflections, ripples and atmosphere
@@ -723,7 +737,7 @@ const studio = require('@shapeshift-labs/ink-studio');
 fs.writeFileSync('ink-studio.browser.js', studio.bundle());
 ```
 
-The bundle defines `makeBuilder`, `makeSculpt`, `KIT`, `PixelLook` and the other names in `studio.EXPORTS` in script scope. A browser host can render that scene data with the optional WebGL module below. The host controls input and advances animation. The CLI and the package's Node `render()` entry use the software renderer.
+The bundle defines `makeBuilder`, `makeSculpt`, `KIT`, `PixelLook` and the other names in `studio.EXPORTS` in script scope. Pass that toolkit to the [browser renderer](#browser-renderer) or to your own rendering code. The host controls input and advances animation.
 
 To append the demos to a browser script, write `const SCENES = [];` after the toolkit bundle and append `studio.demos()`. Keep source files in the order returned by `files()` when embedding individually.
 
@@ -742,9 +756,9 @@ module.exports = {
 
 Then `ink-studio scenes`, `render`, `snap` and other commands operate on that collection. The load callback returns the toolkit exports alongside `SCENES`.
 
-## Optional WebGL renderer
+## Browser renderer
 
-Import `@shapeshift-labs/ink-studio/webgl.mjs` in a browser build, or serve `webgl.mjs` and its relative `src/webgl/` modules directly. This entry is separate from the plain-script toolkit bundle and creates GPU resources when you call `createRenderer`. Pass the same toolkit and world you use to build scenes.
+In a browser bundler that resolves the package's `browser` entry, import `createRenderer` from `@shapeshift-labs/ink-studio`. This selects the WebGL 2 canvas renderer. For native browser modules, serve `webgl.mjs` and its relative `src/webgl/` files. Both forms create GPU resources when you call `createRenderer`.
 
 The following module can run after `ink-studio.browser.js` loads as a classic script. Adjust the WebGL module URL to the package location your server exposes.
 
@@ -764,13 +778,8 @@ The following module can run after `ink-studio.browser.js` loads as a classic sc
 </script>
 ```
 
-`renderer.render(world, frame)` draws into a canvas or `OffscreenCanvas`. The drawing buffer is the art resolution. Set `frame.width` and `frame.height` to resize it, or enlarge the canvas with CSS. A frame can override the scene camera with `camera: { target, dist, yaw, pitch, fov, ortho }`; angles are in radians. Advance `world.anim` in the host, then pass the current `frame.time` in seconds. Set `frame.bornAt` to the starting time for growth effects.
-
-The renderer supports palette and tone resolution, colored contours, per-pixel material patterns, edge sprites, fine ink tiles, and the shared cleanup and flicker damping passes. Frame options include `raw`, `colored`, `outline`, `tone`, `clean`, `damp`, and `edges`. Game-specific effects and view-dependent layers outside these passes use the host integration or the CLI renderer.
-
-The renderer uploads the world on first use. On later draws, pass `changedRows` as an array of changed 512-splat texture row indices, or pass `[]` when the data is unchanged. Omitting it uploads the current splat data again. Replace the corresponding world buffer or material table when editing fine tiles, ramps, or patterns. A host with its own verified depth sort can pass an `Int32Array` of splat IDs as `order`. Call `renderer.dispose()` when you remove the canvas. WebGL 2 availability is checked at creation.
-
-Hosts that own the framebuffers and effects can use `createSplatPipeline(gl, { ascii: KIT.ascii?.glsl })` from the same module. Use `programFor({ lamps, fine, textZones })` to select the program and `setOrder(ids)` followed by `draw()` to issue the instanced quads. The host binds the selected program, its uniforms, textures, and blend state. To use an existing geometry buffer, pass `draw(count, vao)` with Rebirth's corner and integer splat-ID attributes at locations 0 and 1. Omit the feature object to select the full shader. Explicitly passing all three flags as `false` selects the specialized shader when available. Dispose the pipeline when finished.
+See the [browser renderer guide](docs/browser-renderer.md) for supported effects,
+frame options, texture updates, and the lower-level integration API.
 
 ## Module reference
 
@@ -778,9 +787,14 @@ Hosts that own the framebuffers and effects can use `createSplatPipeline(gl, { a
 | --- | --- |
 | `builder.js` | Seeded generation, palettes, low-level splat emission and world buffers. |
 | `sculpt.js` | Base distance-field solids, materials, surface attributes, sampling and baking. |
+| `art-passes.js`, `art-ink.js`, `art-effects.js`, `art-stability.js` | Diagnostic channels, selective ink, temporal effects and stable art-pixel sampling. |
+| `airflow.js`, `light-schedule.js`, `splat-effects.js` | Wind, scheduled light, projected layers and emitter inputs. |
 | `pixel-look.js` | Palette-aware pixel resolve and shader helpers. |
 | `surface-look.js` | Reusable view-dependent finish evaluation and splat metadata format. |
 | `scene-optics.js` | Reflected camera transforms, normal slopes and ray integration through atmosphere. |
+| `reflection-plane.js`, `ripple-field.js`, `volume-field.js`, `volume-light.js` | Scene optics data, sampling and lighting primitives. |
+| `route-visibility.js`, `sample-coverage.js`, `sample-visibility.js`, `splat-order.js`, `swept-disc.js` | Route and splat culling, stable coverage, depth ordering, and swept-disc queries. |
+| `webgl/` | Browser draw pipeline, camera and depth order, shaders, upload and framebuffer management. |
 | `kit/k0-math.js` | Vectors, matrices, easing, keyed values and springs. |
 | `kit/k1-stage.js` | Stage, painter stack, rigs, pools, selection, sockets and bones. |
 | `kit/k2-motion.js` | Spines, IK, clips, state machines, ropes and gait. |

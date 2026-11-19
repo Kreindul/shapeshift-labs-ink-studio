@@ -56,6 +56,11 @@ across frames.
 
 ## Host integration
 
+The [WebGL canvas renderer](browser-renderer.md) reads the world's `look.tone`.
+Pass `tone` in the frame options to override the look, and set the canvas
+drawing buffer dimensions to the desired art resolution. The headless
+renderer derives that grid from its viewport and `look.pixelSize` or `--px`.
+
 `PixelLook.prepareTone(settings, KIT.procedural.materials.blueNoise)`
 returns the ordered stops, packed output palette, tile dimensions and an
 array of normalized thresholds. Prepare it once per look. A CPU host can use

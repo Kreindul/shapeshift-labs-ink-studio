@@ -2193,12 +2193,21 @@ the horizontal mask determines the exact result.
 Pass the cheaper field first. If its value is already at or below the floor,
 the second field cannot change the result.
 
+Pass a world-space `lowerBound(x, y, z, limit)` callback to a sculpt
+primitive to apply a conservative probe during field traversal. Include all
+geometry that can affect the primitive's raw signed distance in the bound.
+The traversal accounts for the primitive's blend width and bump amplitude.
+
+### Chart positions and normals
+
 Planar, cylindrical and affine-transformed charts expose
 `samplePointNormal(uv)` for callers that need only the position and normal
 from `sample(uv)`. Transformed planes reuse their constant world normal,
 including when multiple transforms are applied. A planar chart also
 provides `planePoint(uv)` when a caller only needs the position.
 Context adapters can supply the same optional method on their own charts.
+
+### Closed extrusions with blind recesses
 
 `geometry.recessedProfile` forms a solid from two XY rings and a Z span
 `[back, front]`. Supply a center visible from every edge of both rings.
@@ -2207,11 +2216,6 @@ inside the exterior ring. The inset is measured back from the front and
 must leave positive backing thickness. Use `distance([x, y, z])` for
 inside/outside queries, `mesh(metadata)` for a closed surface, and
 `sample(spacing, emit)` for points on the same surface.
-
-Pass a world-space `lowerBound(x, y, z, limit)` callback to a sculpt
-primitive to apply a conservative probe during field traversal. Include all
-geometry that can affect the primitive's raw signed distance in the bound.
-The traversal accounts for the primitive's blend width and bump amplitude.
 
 ### Retained environment profiles
 

@@ -50,14 +50,29 @@ function materialData(pixel, world) {
   return { ...data, lens };
 }
 
-function createBackend(gl, toolkit, specialize) {
+function simpleResolve(source) {
+  return source
+    .replaceAll('u_pixOn > 0.5', 'false')
+    .replaceAll('u_ao > 0.0', 'false')
+    .replaceAll('u_toneOn > 0.5', 'false')
+    .replaceAll('u_grade > 0.5', 'false')
+    .replace('if (u_gk <= 0.0) return c;', 'return c;');
+}
+
+function sameValues(a, b) {
+  return a?.length === b.length && b.every((value, i) => value === a[i]);
+}
+
+function createBackend(gl, toolkit, specialize, reuseOrder) {
   const resources = createResources(gl);
   let pipeline;
   try {
     const sources = pixelShaderSources(toolkit.PixelLook);
     const program = source => resources.program(sources.POST_VS, source);
     const post = program(sources.POST_FS), clean = program(sources.CLEAN_FS);
-    pipeline = createSplatPipeline(gl, { specialize });
+    // Rebirth hosts can opt into geometry specialization through the lower
+    // level pipeline. The canvas path specializes its own fullscreen resolve.
+    pipeline = createSplatPipeline(gl, { specialize: false });
     const emptyVao = resources.allocate('VertexArray');
     const maxSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
     const { target, table, textureUnit } = createTargets(gl, resources);
@@ -67,10 +82,39 @@ function createBackend(gl, toolkit, specialize) {
     const fine = table(1536, 7, maxSize), pattern = table(2048, 10, maxSize);
     const toneStops = resources.texture(), toneRanks = resources.texture();
     const sort = createDepthSorter();
-    let keyProgram, damp, copy, spriteProgram, spriteLayer, spriteTable, anchors;
+    let simple, simpleUnavailable = false, keyProgram, damp, copy, spriteProgram, spriteLayer, spriteTable, anchors;
     let lastWorld, lastData, lastCount, fineValues, materials, anchorCount = 0;
     let packed = empty, historyIndex = 0, historyValid = false, previousVP;
-    let toneKey, tone;
+    let toneKey, tone, sorted;
+
+    function orderFor(world, frame, camera, time, isNew) {
+      if (frame.order) {
+        pipeline.setOrder(frame.order);
+        sorted = null;
+        return;
+      }
+      const moving = world.moving ?? [], back = world.back ?? [];
+      const canReuse = reuseOrder && !world.anim?.bones?.length;
+      const clock = moving.length ? time : 0;
+      if (canReuse && !isNew && frame.changedRows?.length === 0 && sorted?.clock === clock &&
+          sameValues(sorted.view, camera.view) && sameValues(sorted.moving, moving) && sameValues(sorted.back, back)) return;
+      pipeline.setOrder(sort(world, camera.view, time));
+      sorted = canReuse ? { view: camera.view, moving: Int32Array.from(moving), back: Int32Array.from(back), clock } : null;
+    }
+
+    function resolveProgram(patterned, glass, ao, definition, grade) {
+      if (!specialize || simpleUnavailable || patterned || glass || ao || definition || grade) return post;
+      if (!simple) {
+        try {
+          simple = program(simpleResolve(sources.POST_FS));
+        } catch (error) {
+          if (gl.isContextLost()) throw error;
+          simpleUnavailable = true;
+          return post;
+        }
+      }
+      return simple;
+    }
 
     function fullscreen(shader, destination, width, height, values) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, destination);
@@ -239,7 +283,7 @@ function createBackend(gl, toolkit, specialize) {
         fineValues = world.fine;
       } else fine.bind();
       uploadBones(world.anim?.bones);
-      pipeline.setOrder(frame.order ?? sort(world, camera.view, time));
+      orderFor(world, frame, camera, time, isNew);
       if (patterned) {
         if (isNew || materials?.world !== world || materials.values !== world.pix ||
             materials.ramps !== world.ramps || materials.rampOff !== world.rampOff || materials.patterns !== world.pats) {
@@ -257,7 +301,7 @@ function createBackend(gl, toolkit, specialize) {
       gl.colorMask(true, true, true, true);
       gl.depthMask(true);
       gl.blendEquation(gl.FUNC_ADD);
-      const shader = pipeline.programFor({ lamps: false, fine: hasFine, textZones: false });
+      const shader = pipeline.programFor();
       gl.useProgram(shader.p);
       const growth = world.grow ?? {};
       shader.set({
@@ -317,7 +361,8 @@ function createBackend(gl, toolkit, specialize) {
         });
       }
       const destination = damping ? finished.framebuffer : null;
-      fullscreen(post, cleaning ? cleaned.framebuffer : destination, width, height, {
+      const resolve = resolveProgram(patterned, glass, world.ao, definition, grade);
+      fullscreen(resolve, cleaning ? cleaned.framebuffer : destination, width, height, {
         ...patternedUniforms, ...glassUniforms, ...prepareTone(definition),
         u_scene: 1, u_depth: 2, u_crispScene: 5, u_crispDepth: 6, u_keyTex: 15,
         u_pixOn: +patterned, u_keyOn: +patterned, u_sprOn: +sprites,
@@ -375,7 +420,7 @@ function createBackend(gl, toolkit, specialize) {
   }
 }
 
-export function createRenderer(canvas, { toolkit, specialize = true, contextAttributes } = {}) {
+export function createRenderer(canvas, { toolkit, specialize = true, reuseOrder = true, contextAttributes } = {}) {
   if (typeof canvas?.getContext !== 'function')
     throw new TypeError('Ink Studio needs a canvas or OffscreenCanvas');
   if (typeof toolkit?.PixelLook?.glsl !== 'string')
@@ -384,7 +429,7 @@ export function createRenderer(canvas, { toolkit, specialize = true, contextAttr
     ...contextAttributes, alpha: false, antialias: false, depth: false, stencil: false
   });
   if (!gl) throw new Error('Ink Studio GPU rendering requires WebGL 2');
-  let backend = createBackend(gl, toolkit, specialize);
+  let backend = createBackend(gl, toolkit, specialize, reuseOrder);
   let disposed = false;
   const restore = () => {
     backend?.dispose();
@@ -415,7 +460,7 @@ export function createRenderer(canvas, { toolkit, specialize = true, contextAttr
         throw new RangeError('Ink Studio frame width and height must be positive integers');
       if (![frame.time ?? 0, frame.bornAt ?? 0, frame.scale ?? 1, frame.dither ?? 0.35].every(Number.isFinite))
         throw new RangeError('Ink Studio frame parameters must be finite');
-      backend ??= createBackend(gl, toolkit, specialize);
+      backend ??= createBackend(gl, toolkit, specialize, reuseOrder);
       backend.render(world, frame, width, height);
     },
     dispose() {

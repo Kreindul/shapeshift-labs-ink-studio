@@ -31,8 +31,11 @@ function testContext() {
 }
 
 test('the optional entry imports in Node without touching the software renderer', async () => {
-  const { createRenderer, splatShaderSources } = await import('../webgl.mjs');
+  const entry = await import('../webgl.mjs');
+  const { createRenderer, splatShaderSources } = entry;
   assert.equal(typeof core.render, 'function');
+  assert.equal(entry.default, createRenderer);
+  assert.equal(require('../package.json').browser, './webgl.mjs');
   assert(splatShaderSources().vertex.startsWith('#version 300 es'));
   assert.throws(() => createRenderer({}, { toolkit: core.load() }), /canvas/);
   assert.throws(() => createRenderer({ getContext: () => null }, { toolkit: core.load() }), /requires WebGL 2/);
