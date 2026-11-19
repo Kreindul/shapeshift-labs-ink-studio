@@ -28,6 +28,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.triangulate2D(points)` | Index triples for a simple concave or convex 2D polygon |
 | `geometry.clipConvex(mesh, planes, capMetadata)`, `geometry.clipSurface(mesh, planes)` | Clip to half spaces `dot(normal, point) <= offset`. Closed convex shells receive caps, open triangle streams retain interpolated UVs/normals |
 | `geometry.clipConvexFaces(faces, planes, {capTag})` | Clip a closed convex shell of outward-wound planar faces. Keep polygons intact through clipping and tag each cap with its plane tag or the supplied default |
+| `geometry.clipPlanarFaces(faces, planes)` | Crop existing planar polygons against half spaces while retaining face attributes and leaving the cut open. |
 | `geometry.clipHeightMesh(mesh, height, {slopeBound, resolution, budget})` | Keep the part of a triangle surface above a world-space height field (height(x, z)). Subdivision near the cut follows the supplied grade bound and resolution. UVs, normals and surface metadata carry through to the uncapped result |
 | `geometry.implicitSurface(field, bounds, options)` | Marching tetrahedra for negative-inside fields, with column preparation and bounded edge refinement |
 | `geometry.implicitTriangles(field, bounds, options, emit)` | Stream outward triangles from the same bounded field sampler |
@@ -278,6 +279,11 @@ order and an optional `tag`. Supply half spaces with `normal` and `offset`
 and optionally attach a `tag` to any plane. The output has the same face record
 shape, with a cap for each plane which intersects the volume. Triangulate the
 result after clipping if the consumer uses triangle geometry.
+
+`geometry.clipPlanarFaces(faces, planes)` clips each existing convex face
+independently, including an open group or a single face. It preserves extra
+face fields such as material, normal and owner. Original faces on a clip
+plane remain, and the cut creates no new cap polygons.
 
 `surfaceCells.clip` takes records with a string `key` and convex 2D
 `polygon`, or cells from `fittedCourses` with `id` and `inset` bounds.

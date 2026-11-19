@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { KIT } = require('..').load();
-const { clipConvexFaces } = KIT.procedural.geometry;
+const { clipConvexFaces, clipPlanarFaces } = KIT.procedural.geometry;
 const { V } = KIT;
 
 const points = [
@@ -33,4 +33,18 @@ test('an oblique cut through existing edges closes the section without duplicati
   assert.deepEqual(clipConvexFaces(faces, [{ normal: [1, 0, 0], offset: -2 }]), []);
   assert.deepEqual(clipConvexFaces(faces, [{ normal: [1, 0, 0], offset: 1 }]), faces);
   assert.throws(() => clipConvexFaces(faces, [{ normal: [0, 0, 0], offset: 1 }]), /half spaces/);
+});
+
+test('planar face clipping crops independent surfaces without filling cut sides',()=>{
+  const source=[{...faces[0],material:'stone'}, {...faces[4],material:'mortar'}];
+  const result=clipPlanarFaces(source,[
+    {normal:[1,0,0],offset:.35},{normal:[0,0,1],offset:-1}
+  ]);
+  assert.equal(result.length,1);
+  assert.equal(result[0].tag,source[0].tag);
+  assert.equal(result[0].material,'stone');
+  assert.equal(result[0].points.length,4);
+  assert(result[0].points.every(p=>p[0]<=.350001&&p[2]===-1));
+  assert(source[0].points.some(p=>p[0]===1));
+  assert.deepEqual(clipPlanarFaces([],[]),[]);
 });
