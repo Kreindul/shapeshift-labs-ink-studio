@@ -1161,6 +1161,15 @@ Use the exposed `bounds` to query nearby surfaces before sampling. The
 same query can fit a ramp transition, a platform threshold, or an
 equipment loading area according to the caller's tolerances.
 
+Use `matchPatches()` for level floors with known outlines. Pass records
+with an `id`, a constant `height`, a convex XZ `footprint` and optional
+convex `holes` in that footprint. The query clips the approach against
+the union of the patches in each eligible height band. Abutting patches
+can support a single approach, and gaps between probe points still
+reject the fit. The result gives the highest elevation and elevation
+range of the overlapping patches, plus sorted `ids` when the band uses
+multiple carriers. An equal-distance tie prefers the lower elevation.
+
 `P.viewClearance.compile({eye, target, radius, feather, endFade, opacity,
 reach})` creates a camera-relative opacity field. Apply `opacityAt(point)`
 to the geometry you want to yield when it blocks the view. The effect

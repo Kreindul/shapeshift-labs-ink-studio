@@ -27,3 +27,24 @@ test('a landing rotates with the opening and ties resolve by retained identity',
   assert.deepEqual(q.match(candidates.slice().reverse()),q.match(candidates));
   assert.throws(()=>landingContact.create({sill:[0,0,0],facing:[0,1,0],width:1}),/horizontal/);
 });
+
+test('level landing patches cover a continuous seam at compatible heights',()=>{
+  const q=landingContact.create({sill:[0,1.5,1],facing:[0,0,1],width:1});
+  const patch=(id,lo,hi,height=1.5)=>({id,height,footprint:[[lo,1],[hi,1],[hi,1.4],[lo,1.4]]});
+  const left=patch('stone',-.9,.12),right=patch('wood',.12,.9,1.53);
+  const fit={id:'stone',ids:['stone','wood'],height:1.53,range:[1.5,1.53]};
+  assert.deepEqual(q.matchPatches([left,right]),fit);
+  assert.deepEqual(q.matchPatches([right,left]),fit);
+  assert.equal(q.matchPatches([left,patch('wood',.121,.9)]),null);
+  assert.equal(q.matchPatches([left,{...right,height:1.58}]),null);
+});
+
+test('a rotated approach sees interior cutouts and another patch can fill them',()=>{
+  const q=landingContact.create({sill:[2,2,3],facing:[-1,0,0],width:1});
+  const hole=[[1.8,3.11],[1.9,3.11],[1.9,3.18],[1.8,3.18]];
+  const roof={id:'roof',height:2,footprint:[[1.2,2.1],[2,2.1],[2,3.9],[1.2,3.9]],holes:[hole]};
+  assert.equal(q.matchPatches([roof]),null);
+  assert.deepEqual(q.matchPatches([roof,{id:'inlay',height:1.99,footprint:hole}]),
+    {id:'inlay',ids:['inlay','roof'],height:2,range:[1.99,2]});
+  assert.throws(()=>q.matchPatches([{...roof,height:Infinity}]),/finite/);
+});
