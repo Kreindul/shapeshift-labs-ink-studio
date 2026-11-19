@@ -327,7 +327,11 @@
         resolving = false;
       }
     }
+    function finishScheduled() {
+      if (transaction?.scheduled && !resolving) doc.commit();
+    }
     function mutate(label, fn) {
+      finishScheduled();
       if (transaction) return fn();
       return doc.transact(label, fn);
     }
@@ -392,12 +396,13 @@
       return () => hooks.delete(fn);
     };
     doc.begin = label => {
+      finishScheduled();
       if (transaction) throw new Error('A document transaction is already active');
       transaction = { label: label || 'Edit', before: checkpoint(state) };
       return doc;
     };
     doc.preview = () => {
-      if (!transaction) throw new Error('No active transaction');
+      if (!transaction || transaction.scheduled) throw new Error('No active transaction');
       try {
         resolve();
         validate(state);
@@ -413,6 +418,19 @@
       notify(previewListeners, event('preview', transaction.before, transaction.label));
       return doc.snapshot();
     };
+    function recordCommit(tx) {
+      transaction = null;
+      if (sameDocument(tx.before, state)) return false;
+      if (limit) {
+        past.push({ label: tx.label, before: tx.before, after: checkpoint(state) });
+        if (past.length > limit) past.shift();
+      }
+      future.length = 0;
+      revision++;
+      save(tx.label);
+      notify(listeners, event('commit', tx.before, tx.label));
+      return true;
+    }
     doc.commit = () => {
       if (!transaction) throw new Error('No active transaction');
       const tx = transaction;
@@ -425,17 +443,37 @@
         transaction = null;
         throw err;
       }
-      transaction = null;
-      if (sameDocument(tx.before, state)) return false;
-      if (limit) {
-        past.push({ label: tx.label, before: tx.before, after: checkpoint(state) });
-        if (past.length > limit) past.shift();
+      return recordCommit(tx);
+    };
+    // The caller supplies the same resolution hooks in its background worker.
+    // Ignore any reply after that transaction has already settled locally.
+    doc.scheduleCommit = async resolver => {
+      if(!transaction||transaction.scheduled||resolving||typeof resolver!=='function')
+        throw new Error('A scheduled commit needs one active transaction and a resolver');
+      const tx=transaction,draft=doc.snapshot();
+      tx.scheduled=true;
+      const registered=[...hooks];
+      try{
+        const result=await resolver(draft);
+        if(transaction!==tx)return false;
+        if(registered.length!==hooks.size||registered.some(fn=>!hooks.has(fn)))
+          throw new Error('Resolution hooks changed after scheduling');
+        const next=read(result);
+        if(next.id!==draft.id||next.seed!==draft.seed)
+          throw new Error('Resolved draft belongs to a different document');
+        for(const [id,entity] of Object.entries(next.entities))
+          if(same(state.entities[id],entity))next.entities[id]=state.entities[id];
+        if(sameEntries(state.styles,next.styles))next.styles=state.styles;
+        if(same(state.environment,next.environment))next.environment=state.environment;
+        state=next;invalidateStyles();
+        return recordCommit(tx);
+      }catch(error){
+        if(transaction!==tx)return false;
+        // The synchronous resolver is authoritative if the background job
+        // could not finish, including unavailable workers and stale rules.
+        tx.scheduled=false;
+        return doc.commit();
       }
-      future.length = 0;
-      revision++;
-      save(tx.label);
-      notify(listeners, event('commit', tx.before, tx.label));
-      return true;
     };
     doc.cancel = () => {
       if (!transaction) return false;
@@ -463,6 +501,7 @@
       }
     };
     function travel(from, to, key, type) {
+      finishScheduled();
       if (transaction) throw new Error('Finish the active transaction before ' + type);
       if (!from.length) return false;
       const entry = from.pop(),
@@ -602,6 +641,7 @@
       return doc;
     };
     doc.flush = () => {
+      finishScheduled();
       save('Save');
       return !doc.storageError;
     };

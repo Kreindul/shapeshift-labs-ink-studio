@@ -354,3 +354,62 @@ test('history reuses untouched records and preserves version-one recovery bytes'
   assert(d.undo());
   assert.equal(d.serialize(), beforeRestore);
 });
+
+test('scheduled resolution publishes one retained revision and preserves undo and autosave',async()=>{
+  const d=A.document(),saved=new Map(),resolve=draft=>{
+    const worker=A.document(draft);
+    worker.derive('host','roofs',[{key:'cover',type:'roof'}]);
+    return worker.snapshot();
+  };
+  d.create('house',{id:'host'});
+  d.create('house',{id:'neighbor'});
+  d.autosave({getItem:key=>saved.get(key),setItem:(key,value)=>saved.set(key,value)},'world');
+  const before=d.snapshot(),revision=d.revision(),changes=[];
+  d.onChange(event=>changes.push(event));
+  d.begin('Resize house');
+  d.update('host',{parameters:{width:7}});
+  let finish;
+  const pending=d.scheduleCommit(draft=>new Promise(done=>{finish=()=>done(resolve(draft));}));
+  assert.equal(d.revision(),revision);
+  assert.equal(d.get('host').parameters.width,7);
+  assert.equal(saved.size,0);
+  finish();
+  assert.equal(await pending,true);
+  assert.equal(d.revision(),revision+1);
+  assert.equal(d.get('neighbor'),before.entities.neighbor);
+  assert.deepEqual(changes.map(event=>event.type),['commit']);
+  assert.equal(d.entities('roof').length,1);
+  assert.equal(JSON.parse(saved.get('world')).entries.at(-1).snapshot.entities.host.parameters.width,7);
+  d.undo();
+  assert.deepEqual(d.snapshot(),before);
+  d.redo();
+  assert.equal(d.entities('roof').length,1);
+});
+
+test('new writes, cancellation and worker failure settle pending edits without accepting stale replies',async()=>{
+  const d=A.document();
+  d.create('item',{id:'item',parameters:{value:1}});
+  d.beforeCommit(doc=>{
+    const value=doc.get('item').parameters.value;
+    doc.derive('item','label',[{key:'label',type:'label',parameters:{value}}]);
+  });
+  const set=value=>{d.begin('Set value');d.update('item',{parameters:{value}});};
+  let complete;
+  set(2);
+  const old=d.scheduleCommit(draft=>new Promise(done=>{complete=()=>done(draft);}));
+  set(3);
+  complete();
+  assert.equal(await old,false);
+  d.cancel();
+  assert.equal(d.entities('label')[0].parameters.value,2);
+  assert.equal(d.get('item').parameters.value,2);
+  set(4);
+  const cancelled=d.scheduleCommit(draft=>new Promise(done=>{complete=()=>done(draft);}));
+  d.cancel();
+  complete();
+  assert.equal(await cancelled,false);
+  assert.equal(d.get('item').parameters.value,2);
+  set(5);
+  assert.equal(await d.scheduleCommit(async()=>{throw Error('worker stopped');}),true);
+  assert.equal(d.entities('label')[0].parameters.value,5);
+});

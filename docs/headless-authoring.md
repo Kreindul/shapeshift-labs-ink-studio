@@ -110,3 +110,17 @@ const world = surfaces.world(asset, {
 ```sh
 ink-studio render character.glb --uv --geometry sdf --cells 112 --thick .065 --res .045 --ortho --out character-sdf.png
 ```
+
+
+### Background transaction resolution
+
+After collecting a draft with `document.begin(label)`, a caller can use
+`await document.scheduleCommit(resolveDraft)` to resolve it in a worker.
+The callback receives a frozen draft and returns the complete resolved document
+snapshot. Configure the worker with the same generation rules and commit hooks
+as the owning document. The result records one undo step and one autosave
+revision. The document exposes the draft for rendering during resolution.
+
+A new write, undo, or explicit commit settles the pending transaction using
+the local hooks. Cancellation discards the draft, and late replies are ignored.
+A failed resolver falls back to local hooks and ordinary rollback behavior.
