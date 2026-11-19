@@ -666,6 +666,22 @@ arc length, and `crossings: [{prism, from, to}]` identifies the projected
 obstacle intervals by input prism index and horizontal station. The
 profile reports blocked pins, unreachable routes and budget limits.
 
+`P.routes.guideVisibility(guide, obstacles, options)` repairs blocked
+intervals of a piecewise-linear XZ guide. Supply convex clearance footprints
+and optional `reserved` footprints for regions the route must stay outside,
+such as the host of an offset route. The planner adds `lead` units at both
+ends of each blocked interval before merging overlaps. Each replacement
+stays within `maxDeviation` of its original interval, including the interiors
+of the returned segments.
+
+The pins and guide vertices outside the replacement intervals stay fixed.
+Successful results supply XZ `points`, `length` and
+`splices: [{from, to, first, last}]`. Distances `from` and `to` are measured
+along the original guide. Indices `first` and `last` identify the inclusive
+range in the replacement route. Apply `maxLength`, `maxVertices` and
+`maxTests` to bound the solve. The search uses a finite graph of rejoin
+points, guide bends and obstacle corners.
+
 `P.routes.prismVisibility(start, end, prisms, options)` plans in three
 dimensions through a finite visibility graph. Each prism supplies a convex
 XZ `ring` and vertical bounds `min` and `max`. Expand these bounds to reserve

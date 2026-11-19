@@ -161,7 +161,6 @@ const RouteVisibility = (() => {
     }
     function clear(a, b, bypass) {
       work.pairs++;
-      if(acceptsEdge&&!acceptsEdge(a,b))return false;
       const box = bounds(a, b),
         dx = b[0] - a[0], dz = b[1] - a[1],
         sq = dx * dx + dz * dz;
@@ -191,7 +190,7 @@ const RouteVisibility = (() => {
           if (inside(interpolate(a, b, (parameters[i] + parameters[i - 1]) / 2), polygon)) return false;
         }
       }
-      return !domain||inDomain(a,b,Math.sqrt(sq));
+      return (!acceptsEdge||acceptsEdge(a,b,check))&&(!domain||inDomain(a,b,Math.sqrt(sq)));
     }
     const result = (status, data = {}) => Object.freeze({ status, ...data, work: Object.freeze({ ...work }) });
     try {
@@ -401,6 +400,153 @@ const RouteVisibility = (() => {
       return result('ok',profile.work,{length,points:frozenPoints(points),stations:Object.freeze(samples),
         distances:Object.freeze(distances),flights:Object.freeze(flights.map(Object.freeze)),
         crossings:Object.freeze(crossings.map(Object.freeze))});
+    }catch(error){
+      if(error===exhausted)return result('budget');
+      throw error;
+    }
+  }
+
+  // The permitted path is the union of capsules along the replaced
+  // interval of the guide. Clip a test segment to that union analytically
+  // so it cannot jump between two parts of the corridor between samples.
+  function withinGuide(a,b,guide,radius,check){
+    const dx=b[0]-a[0],dz=b[1]-a[1],dd=dx*dx+dz*dz,r2=radius*radius,intervals=[];
+    const add=(lo,hi)=>{if(lo<=hi+EPS&&hi>=-EPS&&lo<=1+EPS)intervals.push([Math.max(0,lo),Math.min(1,hi)]);};
+    function slab(origin,speed,min,max){
+      if(Math.abs(speed)<=EPS)return origin>=min-EPS&&origin<=max+EPS?[-Infinity,Infinity]:null;
+      const first=(min-origin)/speed,last=(max-origin)/speed;
+      return first<last?[first,last]:[last,first];
+    }
+    for(let i=0;i<guide.length;i++){
+      check();
+      const p=guide[i],x=a[0]-p[0],z=a[1]-p[1];
+      if(dd<=EPS*EPS){
+        if(x*x+z*z<=r2+EPS)add(0,1);
+      }else{
+        const mid=-(x*dx+z*dz)/dd,r=r2-(x+dx*mid)**2-(z+dz*mid)**2;
+        if(r>=-EPS){
+          const reach=Math.sqrt(Math.max(0,r)/dd);
+          add(mid-reach,mid+reach);
+        }
+      }
+      if(i+1===guide.length)continue;
+      const q=guide[i+1],sx=q[0]-p[0],sz=q[1]-p[1],length=Math.hypot(sx,sz),tx=sx/length,tz=sz/length;
+      const along=slab(x*tx+z*tz,dx*tx+dz*tz,0,length),
+        across=slab(-x*tz+z*tx,-dx*tz+dz*tx,-radius,radius);
+      if(along&&across)add(Math.max(along[0],across[0]),Math.min(along[1],across[1]));
+    }
+    let end=0;
+    for(const [from,to] of intervals.sort((a,b)=>a[0]-b[0])){
+      if(from>end+EPS)break;
+      end=Math.max(end,to);
+      if(end>=1-EPS)return true;
+    }
+    return false;
+  }
+
+  // Repair only obstructed station intervals of a named guide. Reserved
+  // footprints constrain the splices without replacing the chosen guide.
+  function guideVisibility(guide,obstacles,{
+    reserved=[],maxDeviation=2,lead=.28,maxLength=1e6,maxVertices=360,maxTests=350000
+  }={}){
+    if(!Array.isArray(guide)||guide.length<2||guide.length>4096||!guide.every(p=>point(p,2))||
+      !Array.isArray(obstacles)||!Array.isArray(reserved)||obstacles.length+reserved.length>500||
+      !Number.isFinite(maxDeviation)||maxDeviation<=EPS||!Number.isFinite(lead)||lead<0||
+      !Number.isFinite(maxLength)||maxLength<=EPS||!limit(maxVertices,2,3000)||!limit(maxTests,1,30000000))
+      throw Error('Guide detours need finite pins, convex obstacles, and bounded clearance');
+    const exhausted=Symbol('guide visibility budget');
+    const work={pairs:0,tests:0};
+    function check(){if(++work.tests>maxTests)throw exhausted;}
+    function result(status,data={}){
+      return Object.freeze({status,...data,work:Object.freeze({pairs:work.pairs,tests:Math.min(maxTests,work.tests)})});
+    }
+    const stations=[0],segments=[];
+    for(let i=1;i<guide.length;i++){
+      const a=guide[i-1],b=guide[i],run=Math.sqrt(dist2(a,b)),from=stations.at(-1);
+      if(run<=EPS||from+run>1e6)throw Error('Guide detours need nonzero spans within the station range');
+      segments.push({a,b,from,run,box:bounds(a,b)});
+      stations.push(from+run);
+    }
+    const total=stations.at(-1);
+    function at(value){
+      if(value<=EPS)return guide[0];
+      if(value>=total-EPS)return guide.at(-1);
+      const leg=segments.find(s=>value<=s.from+s.run+EPS);
+      return interpolate(leg.a,leg.b,clamp((value-leg.from)/leg.run));
+    }
+    function between(from,to){
+      return [at(from),...guide.filter((p,i)=>stations[i]>from+EPS&&stations[i]<to-EPS),at(to)];
+    }
+    function prepare(ring){
+      if(!Array.isArray(ring)||ring.length<3||ring.length>4096||!ring.every(p=>point(p,2)))
+        throw Error('Guide detours need convex obstacle footprints');
+      return {ring,...convexRing(ring,check)};
+    }
+    try{
+      const strict=reserved.map(prepare),obstructions=obstacles.map(prepare),windows=[];
+      const all=[...strict,...obstructions];
+      for(const s of all)for(const pin of [guide[0],guide.at(-1)]){
+        check();
+        if(overlap(s.box,bounds(pin,pin))&&convexInterval(pin,pin,s.edges,check))
+          return result('blocked-pin');
+      }
+      for(const segment of segments)for(const s of all){
+        check();
+        if(!overlap(s.box,segment.box))continue;
+        const interval=convexInterval(segment.a,segment.b,s.edges,check);
+        if(!interval)continue;
+        // Reserved solids also trigger repairs if generated guide spans enter
+        // them between pins. The pins themselves never move.
+        windows.push([Math.max(0,segment.from+interval[0]*segment.run-lead),
+          Math.min(total,segment.from+interval[1]*segment.run+lead)]);
+      }
+      const ranges=[];
+      for(const [from,to] of windows.sort((a,b)=>a[0]-b[0])){
+        const last=ranges.at(-1);
+        if(last&&from<=last[1]+EPS)last[1]=Math.max(last[1],to);
+        else ranges.push([from,to]);
+      }
+      if(!ranges.length)return total<=maxLength+EPS
+        ?result('ok',{points:frozenPoints(guide),splices:Object.freeze([]),length:total})
+        :result('unreachable');
+      const out=[guide[0]],splices=[];
+      let previous=0,length=0;
+      function push(points){
+        for(const p of points){
+          const d=Math.sqrt(dist2(out.at(-1),p));
+          if(d>EPS){out.push(p);length+=d;}
+        }
+      }
+      for(const [from,to] of ranges){
+        const local=between(from,to),first=local[0],last=local.at(-1);
+        if(dist2(first,last)<=EPS*EPS)return result('unreachable');
+        const box=[Infinity,Infinity,-Infinity,-Infinity];
+        for(const [x,z] of local){
+          box[0]=Math.min(box[0],x-maxDeviation);box[1]=Math.min(box[1],z-maxDeviation);
+          box[2]=Math.max(box[2],x+maxDeviation);box[3]=Math.max(box[3],z+maxDeviation);
+        }
+        const nearby=all.filter(s=>overlap(s.box,box));
+        const waypoints=local.slice(1,-1).filter(p=>!nearby.some(s=>{
+          check();
+          return overlap(s.box,bounds(p,p))&&convexInterval(p,p,s.edges,check);
+        }));
+        const rings=nearby.map(s=>s.ring);
+        if(rings.reduce((n,ring)=>n+ring.length,2+waypoints.length)>maxVertices||work.tests>=maxTests)return result('budget');
+        const found=find([first[0],0,first[1]],[last[0],0,last[1]],rings,
+          {maxVertices,maxTests:maxTests-work.tests,waypoints},(a,b,count)=>withinGuide(a,b,local,maxDeviation,count));
+        work.tests+=found.work.tests;work.pairs+=found.work.pairs;
+        if(work.tests>maxTests)return result('budget');
+        if(found.status!=='ok')return result(found.status==='blocked-pin'?'unreachable':found.status);
+        push(between(previous,from).slice(1));
+        const start=out.length-1;
+        push(found.points.slice(1).map(plan));
+        splices.push(Object.freeze({from,to,first:start,last:out.length-1}));
+        previous=to;
+      }
+      push(between(previous,total).slice(1));
+      return length<=maxLength+EPS
+        ?result('ok',{points:frozenPoints(out),splices:Object.freeze(splices),length})
+        :result('unreachable');
     }catch(error){
       if(error===exhausted)return result('budget');
       throw error;
@@ -709,6 +855,6 @@ const RouteVisibility = (() => {
     return {status:'ok',samples};
   }
 
-  return Object.freeze({ find, convexFootprint, sweep, sweepPath, elevationProfile, guideElevation, prismVisibility });
+  return Object.freeze({ find, convexFootprint, sweep, sweepPath, elevationProfile, guideElevation, guideVisibility, prismVisibility });
 })();
 if (typeof module !== 'undefined') module.exports = RouteVisibility;

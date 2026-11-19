@@ -354,3 +354,54 @@ test('a guide preserves separate entries into one obstacle and reports an obstru
   assert(result.points.some(([,y])=>y===1.2));
   assert.equal(routes.guideElevation([[1.5,0],[4,0]],1.6,1.6,[prism],options).status,'blocked-pin');
 });
+
+test('guide detours replace only blocked station intervals and keep their clearance corridor',()=>{
+  const guide=[[-4,-1],[-3,0],[-2,0],[0,0],[2,0],[3,0],[4,1]];
+  const left=[[-2.1,-.3],[-1.6,-.3],[-1.6,.62],[-2.1,.62]];
+  const right=[[1.6,-.3],[2.1,-.3],[2.1,.62],[1.6,.62]];
+  const reserved=[[4,-3],[4,-.04],[-4,-.04],[-4,-3]];
+  const options={reserved:[reserved],lead:.3,maxDeviation:.75};
+  // The first leg approaches the guide outside the reserved footprint.
+  guide[0][1]=.8;
+  const result=routes.guideVisibility(guide,[left,right],options);
+  assert.equal(result.status,'ok');
+  assert.deepEqual(result.points[0],guide[0]);
+  assert.deepEqual(result.points.at(-1),guide.at(-1));
+  assert.equal(result.splices.length,2);
+  const [a,b]=result.splices;
+  assert(a.from<a.to&&a.to<b.from&&b.from<b.to);
+  assert.deepEqual(result.points.slice(a.last+1,b.first),[[0,0]]);
+  assert.deepEqual(result.points.slice(0,a.first),guide.slice(0,2));
+  assert.deepEqual(result.points.slice(b.last+1),guide.slice(-2));
+  for(const {first,last} of result.splices) {
+    assert.equal(result.points[first][1],0);
+    assert.equal(result.points[last][1],0);
+    assert(result.points.slice(first+1,last).some(([,z])=>z===.62));
+    for(let i=first;i<last;i++)for(let k=0;k<=40;k++){
+      const t=k/40,[x,z]=result.points[i].map((v,j)=>v+(result.points[i+1][j]-v)*t);
+      assert(z>=-.04-1e-8&&z<=.75+1e-8);
+      assert(z>=.62-1e-8||x<=-2.1||x>=2.1||(x>=-1.6&&x<=1.6));
+    }
+  }
+  const unchanged=routes.guideVisibility(guide,[],options);
+  assert.deepEqual(unchanged.points,guide);
+  assert.deepEqual(unchanged.splices,[]);
+  assert.equal(routes.guideVisibility(guide,[left,right],{...options,maxDeviation:.4}).status,'unreachable');
+  assert.equal(routes.guideVisibility(guide,[left,right],{...options,maxLength:result.length-.1}).status,'unreachable');
+  assert.equal(routes.guideVisibility(guide,[left,right],{...options,maxVertices:5}).status,'budget');
+  assert.equal(routes.guideVisibility(guide,[left,right],{...options,maxTests:71}).status,'budget');
+  assert.equal(routes.guideVisibility([[-1.9,0],[4,1]],[left],options).status,'blocked-pin');
+});
+
+test('guide detours cannot jump across the gap between two legs of a bent corridor',()=>{
+  const guide=[[-2,0],[0,0],[0,3],[2,3]],obstacle=[[-.22,1],[.3,1],[.3,2],[-.22,2]];
+  const result=routes.guideVisibility(guide,[obstacle],{lead:3,maxDeviation:.35});
+  assert.equal(result.status,'ok');
+  for(const [i,a] of result.points.slice(0,-1).entries())for(let j=0;j<=100;j++){
+    const [x,z]=a.map((n,k)=>n+(result.points[i+1][k]-n)*j/100);
+    const d=Math.min(Math.hypot(x-Math.min(0,Math.max(x,-2)),z),
+      Math.hypot(x,z-Math.min(3,Math.max(z,0))),Math.hypot(x-Math.min(2,Math.max(x,0)),z-3));
+    assert(d<=.35+1e-8);
+  }
+  assert(result.points.length>4);
+});
