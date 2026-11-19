@@ -754,6 +754,15 @@ can be a segment or point. A missing fit returns `null`. The plane
 constraints cover the whole swept section along the leg. Apply additional
 solid and terrain checks for the rest of the scene.
 
+`P.routes.fitHeightBands(samples, {maxGrade, maxPoints})` fits a grade-limited
+height profile through ordered stations. Each record supplies `at`, `min`,
+`max`, and optional `preferred` height and `keep` flag. A fixed-height
+station has equal bounds. The result contains the selected sample `indices`
+and their `elevations`; interpolate between them to satisfy every sampled
+band. Set `keep: true` at horizontal bends and other required joints.
+`null` indicates contradictory bands, insufficient grade, or insufficient
+point budget. Use the caller's geometry to verify clearances between samples.
+
 `P.routes.elevationProfile(length, startY, endY, barriers, options)` finds
 a grade-limited route in the distance and elevation plane of a fixed guide.
 Each forbidden band is `{from, to, min, max}`, where `from` and `to`
