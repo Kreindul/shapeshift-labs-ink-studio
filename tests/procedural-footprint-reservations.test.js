@@ -1,8 +1,28 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const {createFootprintReservations} = require('..').load().KIT.procedural;
+const {createFootprintReservations,placeFootprintRequests} = require('..').load().KIT.procedural;
 
 const at = (point, size=[1,1,1], tangent=[1,0,0]) => ({point,size,tangent});
+
+test('ranked fitters share occupied space, including fallback intervals and fixed obstacles', () => {
+  const spot=at([0,0,0]), obstacle=at([2.1,0,0]), high=at([0,1,0]);
+  const edited={priority:2,fit:()=>({footprint:spot,value:'edited'})};
+  const first={fit:({fits,freeIntervals})=>{
+    assert(!fits(spot));
+    const intervals=freeIntervals(spot,[1,0,0],[0,4]);
+    assert.deepEqual(intervals.map(range=>range.map(v=>Math.round(v*100)/100)),[[1.05,1.05],[3.15,4]]);
+    return {footprint:at([-1.1,0,0]),value:'shifted'};
+  }};
+  const second={fit:({fits})=>{
+    assert(!fits(at([-1.1,0,0])));
+    return {footprint:high,value:'above'};
+  }};
+  const blocked={priority:1,fit:()=>({footprint:obstacle,value:'blocked'})};
+  const result=placeFootprintRequests([first,second,edited,blocked],{obstacles:[obstacle],clearance:.05});
+  assert.deepEqual(result.map(e=>e.value),['edited','shifted','above']);
+  assert.equal(result[0].request,edited);
+  assert.throws(()=>placeFootprintRequests([{priority:Infinity,fit(){}}]),/finite priority/);
+});
 
 test('reservation uses oriented volume overlap and preserves space on other levels', () => {
   const field=createFootprintReservations({cellSize:.2});

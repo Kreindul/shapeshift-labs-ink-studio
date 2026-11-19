@@ -121,5 +121,27 @@
     });
   }
 
+  function placeFootprintRequests(requests, { obstacles = [], clearance = 0, cellSize = 2 } = {}) {
+    if (!Array.isArray(requests) || !Array.isArray(obstacles))
+      throw new Error('Footprint placement needs requests and obstacles');
+    const order = Array.from(requests, request => {
+      const priority = request?.priority ?? 0;
+      if (typeof request?.fit !== 'function' || !Number.isFinite(priority))
+        throw new Error('A footprint request needs a fitter and a finite priority');
+      return { request, priority };
+    }).sort((a, b) => b.priority - a.priority);
+    const ledger = createFootprintReservations({ clearance, cellSize });
+    for (const item of obstacles) ledger.occupy(item);
+    const tests = Object.freeze({ fits: ledger.fits, freeIntervals: ledger.freeIntervals });
+    const placements = [];
+    for (const { request } of order) {
+      const result = request.fit(tests);
+      if (result && ledger.reserve(result.footprint))
+        placements.push({ request, footprint: result.footprint, value: result.value });
+    }
+    return placements;
+  }
+
   P.createFootprintReservations = createFootprintReservations;
+  P.placeFootprintRequests = placeFootprintRequests;
 })(KIT);
