@@ -1948,7 +1948,12 @@ immutable view without changing the document or its history.
 `KIT.authoring.context(doc)` indexes spatial descriptors supplied by
 `context.register(type, { describe, raycast? })`. Descriptors provide world
 bounds and may expose named surfaces. `context.query`, `nearest`, `raycast`,
-and `anchor` use those descriptors. A rule registered with
+and `anchor` use those descriptors. A callback registered with
+`context.rayFilter(id, callback)` receives the hit, entity, context and a
+read-only copy of that raycast's options. Return `false` to reject the hit.
+Applications can pass their own JSON-compatible options to choose a filter
+policy for one query. `rayFilters: false` bypasses the registered filters for that ray.
+A rule registered with
 `context.rule({id, types, generate})` returns child specifications and can
 read named entities, related collections, and spatial regions. Changes
 invalidate affected descriptors and rules. The context reconciles within

@@ -316,17 +316,17 @@
     function raycast(origin, direction, filter) {
       if (!vector(origin) || !vector(direction) || V.len(direction) < EPS)
         throw new Error('Ray needs a finite origin and nonzero direction');
-      const f = Object.assign({ maxDistance: 10000 }, filter),
+      const f = Object.freeze(Object.assign({ maxDistance: 10000 }, filter)),
         dir = V.norm(direction);
       if (!Number.isFinite(f.maxDistance) || f.maxDistance <= 0) throw new Error('Invalid ray distance');
+      const filters = f.rayFilters === false ? [] : Array.from(rayFilters.values());
       const candidates = query(boxOf([origin, V.mad(origin, dir, f.maxDistance)]), f)
           .map(c => ({ c, near: rayBox(records.get(c.id).bounds, origin, dir, f.maxDistance) }))
           .filter(c => c.near !== null)
           .sort((a, b) => a.near - b.near),
         hits = [],
         accept = (hit, entity) =>
-          f.rayFilters === false ||
-          [...rayFilters.values()].every(fn => fn(Object.assign({ id: entity.id }, hit), entity, ctx) !== false);
+          filters.every(fn => fn(Object.assign({ id: entity.id }, hit), entity, ctx, f) !== false);
       let closest = f.maxDistance;
       for (const { c, near } of candidates) {
         const limit = Math.min(f.maxDistance, closest + 1e-7 * (1 + closest));

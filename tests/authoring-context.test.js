@@ -46,6 +46,33 @@ test('surface coordinates round-trip, skewed planes project correctly, and rays 
   near(closest.p[1], 0);
 });
 
+test('ray filters receive immutable per-query options and can reveal farther hits', () => {
+  const d=A.document(),c=A.context(d);
+  c.register('sheet',{
+    describe(e){
+      const surface=P.surface.plane({id:'face',origin:[-1,0,e.parameters.z],u:[2,0,0],v:[0,2,0]});
+      return {bounds:surface.bounds,surfaces:[surface]};
+    }
+  });
+  d.create('sheet',{id:'front',parameters:{z:3}});
+  d.create('sheet',{id:'rear',parameters:{z:1}});
+  const dispose=c.rayFilter('pick-context',(hit,entity,context,query)=>{
+    assert.equal(context,c);
+    assert(Object.isFrozen(query));
+    assert.equal(hit.id,entity.id);
+    return entity.id!=='front'||!query.skipFront;
+  });
+  const pick=options=>c.raycast([0,1,5],[0,0,-1],options)?.id;
+  assert.equal(pick(),'front');
+  assert.equal(pick({skipFront:true}),'rear');
+  assert.equal(pick({skipFront:true,maxDistance:3}),undefined);
+  assert.equal(pick({skipFront:true,rayFilters:false}),'front');
+  assert.equal(pick(),'front');
+  dispose();
+  assert.equal(pick({skipFront:true}),'front');
+  c.dispose();
+});
+
 test('cylindrical and elliptical hosts wrap normalized anchors and return actual ray intersections', () => {
   const s = P.surface.cylinder({ id: 'wall', origin: [0, 1, 0], radius: 2, height: 4 });
   const q = s.sample([1.25, 0.5]);
