@@ -31,6 +31,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.clipHeightMesh(mesh, height, {slopeBound, resolution, budget})` | Keep the part of a triangle surface above a world-space height field (height(x, z)). Subdivision near the cut follows the supplied grade bound and resolution. UVs, normals and surface metadata carry through to the uncapped result |
 | `geometry.implicitSurface(field, bounds, options)` | Marching tetrahedra for negative-inside fields, with column preparation and bounded edge refinement |
 | `pieces.convex`, `pieces.box`, `pieces.beam`, `pieces.tube`, `pieces.union` | Reusable solid pieces and query unions. Union meshes contain constituent shells |
+| `pieces.uprightSpan(a, b, {width, height, up, extension}, meta)` | Closed pitched band with upright ends and constant width and height |
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
 | `logicalParts.compile(pieces, identify)` | Group clipped pieces of one stock part and partition visible and omitted pieces from retained keys |
 | `courseRelief(layout, {profile, rise, slope})` | Give fitted cells independent relief with stable local coordinates when clipped or wrapped |
@@ -543,6 +544,12 @@ and key prefix from `meta`. Posts follow the supplied up direction. The layout
 puts posts at ends and corners, then divides each run at or below the given
 spacing. The `levels` array gives the rail heights as fractions of guard height.
 Call it with retained spans from `edgeClearance` to leave an approach opening.
+
+`pieces.uprightSpan` joins two points on the baseline of a pitched band.
+Width is measured perpendicular to the projected run and height is measured
+along `up`. The caps stand upright. An optional `extension` extends the
+same grade beyond each end by the given projected distance. The default
+zero extension keeps a cap at each input point for fitting around openings.
 
 `cantileverSupports.sites({path, outline, spacing, width, seat, minReach,
 maxReach, outward, maxSites})` fits stable station indices on a wall path

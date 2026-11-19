@@ -180,6 +180,17 @@
       Z = V.cross(X, Y);
     return box(V.mul(V.add(a, b), 0.5), [V.dist(a, b) / 2, width / 2, depth / 2], M.cols(X, Y, Z), meta);
   }
+  function uprightSpan(a, b, {width, height, up = [0, 1, 0], extension = 0} = {}, meta) {
+    if(!vector(a)||!vector(b)||!vector(up)||V.len(up)<EPS||
+       ![width,height].every(v=>Number.isFinite(v)&&v>0)||!Number.isFinite(extension)||extension<0)
+      throw Error('An upright span needs finite endpoints, positive dimensions and nonnegative extension');
+    const vertical=V.norm(up),along=V.sub(b,a),
+      plan=V.mad(along,vertical,-V.dot(along,vertical)),run=V.len(plan);
+    if(run<EPS)throw Error('An upright span needs a nonzero run across its up axis');
+    const transverse=V.norm(V.cross(vertical,plan)),frame=M.cols(transverse,vertical,V.mul(along,1/run));
+    const center=V.mad(V.mul(V.add(a,b),.5),vertical,height/2);
+    return box(center,[width/2,height/2,run/2+extension],frame,meta);
+  }
   function union(pieces) {
     if (!Array.isArray(pieces) || !pieces.length) throw new Error('A construction union needs pieces');
     const bounds = A.spatial.boxOf(pieces.flatMap(p => [p.bounds.min, p.bounds.max]));
@@ -282,5 +293,5 @@
     }
     return convex(vertices, polygons, meta);
   }
-  A.pieces = { convex, box, beam, tube, union, boxFaces: faces };
+  A.pieces = { convex, box, beam, uprightSpan, tube, union, boxFaces: faces };
 })(KIT);
