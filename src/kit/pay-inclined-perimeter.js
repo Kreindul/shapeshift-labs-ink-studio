@@ -13,12 +13,14 @@
     const R = pose.R, origin = pose.t.slice(), datum = origin[1], axis = Math.hypot(R[1], R[4], R[7]);
     if (!Number.isFinite(axis) || R[4] < EPS || R[4] < .2 * axis)
       throw new RangeError('Extrusion axis is too close to horizontal');
-    const drift = [R[1] / R[4], R[7] / R[4]];
+    const drift = [R[1] / R[4], R[7] / R[4]], frame=RouteVisibility.elevationFrame({drift,datum});
     function project([x, y, z]) {
-      return [x - drift[0] * (y - datum), datum, z - drift[1] * (y - datum)];
+      const q=frame.project([x,y,z]);
+      q[1]=datum;
+      return q;
     }
     function lift([x, , z], y) {
-      return [x + drift[0] * (y - datum), y, z + drift[1] * (y - datum)];
+      return frame.lift([x,y,z]);
     }
     const points = outline.map(([x, z]) => {
       const y = R[3] * x + R[5] * z;
@@ -76,7 +78,7 @@
       }
       return true;
     }
-    return Object.freeze({ raw: P.data.freeze(raw), poly: P.data.freeze(poly), project, lift, allows });
+    return Object.freeze({ raw: P.data.freeze(raw), poly: P.data.freeze(poly), frame, project, lift, allows });
   }
 
   P.geometry.inclinedPerimeter = inclinedPerimeter;

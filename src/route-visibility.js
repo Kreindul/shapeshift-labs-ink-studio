@@ -788,6 +788,28 @@ const RouteVisibility = (() => {
   }
 
 
+  // Work in a horizontal frame that shifts with elevation. Obstacles swept
+  // across a height interval conservatively reserve their full footprint.
+  function elevationFrame({ drift, datum=0 }={}) {
+    if(!point(drift,2)||!point([datum],1))throw Error('An elevation frame needs finite drift and datum');
+    const [dx,dz]=drift, speed=Math.hypot(dx,dz);
+    const project=([x,y,z])=>[x-(y-datum)*dx,y,z-(y-datum)*dz];
+    const lift=([x,y,z])=>[x+(y-datum)*dx,y,z+(y-datum)*dz];
+    function prismFootprint(ring,min,max,options){
+      if(!Array.isArray(ring)||ring.length<3||ring.length>2048||
+        !Array.from(ring).every(p=>point(p,2))||!point([min,max],2)||min>max)
+        throw Error('Frame footprints need a bounded ring and ordered heights');
+      return convexFootprint(ring.flatMap(([x,z])=>[
+        plan(project([x,min,z])),plan(project([x,max,z]))
+      ]),options);
+    }
+    function grade(maxGrade){
+      if(!Number.isFinite(maxGrade)||maxGrade<=0)throw Error('Frame grade must be positive and finite');
+      return maxGrade/(1+maxGrade*speed);
+    }
+    return Object.freeze({project,lift,prismFootprint,grade,speed});
+  }
+
   // Fit constant-grade sections in an affine chart. Each vertex of the
   // swept rectangle gives linear constraints on the two endpoint heights.
   function profileSection(profile,start,end,{
@@ -910,6 +932,6 @@ const RouteVisibility = (() => {
     return {status:'ok',samples};
   }
 
-  return Object.freeze({ find, convexFootprint, sweep, sweepPath, elevationProfile, guideElevation, guideVisibility, prismVisibility, profileSection });
+  return Object.freeze({ find, convexFootprint, sweep, sweepPath, elevationProfile, guideElevation, guideVisibility, prismVisibility, profileSection, elevationFrame });
 })();
 if (typeof module !== 'undefined') module.exports = RouteVisibility;

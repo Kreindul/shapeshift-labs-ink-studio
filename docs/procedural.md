@@ -765,6 +765,15 @@ results return `points: [[station, elevation], ...]` with exact endpoint
 heights. Forward-only edges keep route stations ordered. Search limits
 `maxVertices` and `maxTests` apply as in visibility routing.
 
+`P.routes.elevationFrame({drift, datum})` describes a guide plane whose
+XZ origin shifts by `drift: [dx, dz]` per unit of elevation above its
+`datum`. Use `project(worldPoint)` before planning and `lift(framePoint)`
+to recover world positions. Both retain the input Y. `prismFootprint(ring,
+min, max, options)` projects the convex horizontal footprint over the
+active height band and returns a conservative hull. `grade(maxWorldGrade)`
+returns a reference-frame grade limit that stays within the requested
+world grade after lifting. Measure final path lengths in world space.
+
 `P.routes.guideElevation(guide, startY, endY, prisms, options)` fits the
 elevation profile of a fixed piecewise-linear XZ guide. It clips each span
 against convex prism footprints and runs the grade solver in accumulated

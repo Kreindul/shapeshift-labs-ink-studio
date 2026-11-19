@@ -442,3 +442,20 @@ test('level profile sections expose a height line and reject oversized guards',(
   assert.deepEqual(result.closest([0,0]),[0,0]);
   assert.equal(routes.profileSection(outline,[0,0],[4,0],{...options,above:2}),null);
 });
+test('an elevation frame retains moving guide sections and reserves the prism at every height',()=>{
+  const {routes}=require('..').load().KIT.procedural;
+  const frame=routes.elevationFrame({drift:[-.3,.4],datum:1.5}),
+    ring=[[2,-1],[3,-1],[3,1],[2,1]],swept=frame.prismFootprint(ring,2,4);
+  const inside=([x,z])=>swept.every(([ax,az],i)=>{
+    const [bx,bz]=swept[(i+1)%swept.length];
+    return (bx-ax)*(z-az)-(bz-az)*(x-ax)>=-1e-8;
+  });
+  for(const y of [2,2.5,3,3.75,4])for(const [x,z] of ring){
+    const local=frame.project([x,y,z]);
+    assert(inside([local[0],local[2]]));
+    assert(frame.lift(local).every((value,i)=>Math.abs(value-[x,y,z][i])<1e-9));
+  }
+  const limit=1.2,grade=frame.grade(limit),a=frame.lift([0,0,0]),b=frame.lift([.6,grade,-.8]);
+  assert(Math.abs((b[1]-a[1])/Math.hypot(b[0]-a[0],b[2]-a[2])-limit)<1e-8);
+  assert.throws(()=>routes.elevationFrame({drift:[0,Infinity]}),/finite drift/);
+});
