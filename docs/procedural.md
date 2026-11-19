@@ -39,6 +39,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `fittedRailBand({inner, outer, pitch, gap, closed, phase, sections, measure, depth, direction, cellStyle, budget})` | Fit closed solid pieces along paired 3D rails. |
 | `clippedLattice({panels, runs, edges, edgeWidth, budget})` | Fit bar families and frames to convex chart patches, keeping gaps and member identities across patches. |
 | `surfaceCells.clip(cells, {boundary, holes, budget, work})` | Intersect convex cell footprints with a convex chart boundary and subtract convex holes. Group fragments by logical cell key |
+| `surfaceCells.fieldMask(sample, {bounds, cell, maxCells})` | Convert a bounded signed chart field into convex cuts and a distance query against the same polygonal regions |
 | `surfaceCells.loft(layout, {sample, levels, step, metadata, budget}, builder?)` | Map each fitted footprint onto two levels of a curved carrier. Emit closed, outward-wound fragments with shared cap and side vertices |
 | `panelFrames({width, height, unit, beam, braceWidth, braces, periodic, budget})` | Fit posts, rails and optional diagonal braces to rectangular bays. Get stable keyed footprints and a signed chart query |
 | `planarCells.layout(bounds, mask, options)`, `planarCells.prism(cell, options)` | Stable planar cells clipped to a mask, including disconnected fragments and holes. Prisms provide distance, ray, sampling and closed mesh operations |
@@ -223,6 +224,11 @@ fragments in the same chart coordinates. Shared cell keys are grouped across
 chart seams and split pieces. Material assignment and mapping chart points
 onto the host are caller policies. The work budget counts vertices visited
 by the clip operations.
+
+`surfaceCells.fieldMask` traces the negative regions of a signed chart
+field. It returns closed boundary `rings`, convex `holes` for cell clipping
+and `distance(u, v)` against those boundaries. Disconnected regions and islands are
+preserved at the chosen sampling resolution. A clear field returns `null`.
 
 `surfaceCells.loft` takes the clipped layout and calls `sample([u, v], level, key)`
 for each position. Supply an ordered pair of finite levels whose samples

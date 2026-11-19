@@ -10,6 +10,27 @@ const area = polygon => polygon.reduce((sum, p, index) => {
 const total = result => result.cells.flatMap(cell => cell.fragments).reduce((sum, polygon) => sum + area(polygon), 0);
 const near = (a, b) => assert(Math.abs(a - b) < 1e-7, a + ' != ' + b);
 
+test('sampled masks share boundaries with cell clipping and preserve islands inside a cut',()=>{
+  const {fieldMask,clip}=P.surfaceCells, bounds={min:[-2,-1.5],max:[2,1.5]};
+  const mask=fieldMask((x,y)=>Math.max(Math.hypot(x,y)-1,.37-Math.hypot(x,y)),{bounds,cell:.045});
+  assert(mask);
+  assert(mask.distance(0,0)>.33);
+  assert(mask.distance(.65,0)<-.2);
+  assert(mask.distance(1.3,0)>.27);
+  const result=clip([{key:'single-course',polygon:rectangle(-1.5,-1.3,3,2.6)}],{holes:mask.holes});
+  assert.equal(result.cells[0].key,'single-course');
+  for(const fragment of result.cells[0].fragments){
+    const point=fragment.reduce((sum,p)=>p.map((v,i)=>sum[i]+v/fragment.length),[0,0]);
+    assert(mask.distance(...point)>-1e-5);
+  }
+  const expected=7.8-Math.PI*(1-.37**2);
+  assert(Math.abs(total(result)-expected)<.025);
+  assert.equal(fieldMask(()=>Infinity,{bounds}),null);
+  const clipped=fieldMask(()=>-1,{bounds:{min:[0,0],max:[1,1]},cell:.1});
+  assert(clipped.distance(.5,.5)<-.45);
+  assert(clipped.distance(-.2,.5)>.15);
+});
+
 test('clipping handles an enclosed hole and an angled outer boundary while preserving the logical cell', () => {
   const cells = [{ key: 'panel', polygon: rectangle(0, 0, 4, 4) }];
   const boundary = [[0, 4], [4, 0], [0, 0]];

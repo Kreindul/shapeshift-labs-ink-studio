@@ -1,6 +1,6 @@
 /* Marching squares with shared edge crossings and a bilinear saddle decision. */
 (function (K) {
-  const P = K.procedural,
+  const P = K.procedural || K.authoring,
     point = p => Array.isArray(p) && p.length === 2 && p.every(v => Number.isFinite(v) && Math.abs(v) <= 1e6);
 
   function march(field, { bounds, cell = 0.1, iso = 0, maxCells = 120000 } = {}) {
