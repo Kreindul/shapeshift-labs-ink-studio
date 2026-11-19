@@ -4,7 +4,7 @@ const PNG = require('./png.js');
 const { render } = require('./render.js');
 const ArtEffects = require('../src/art-effects.js');
 
-const mapNames = ['depth', 'normal', 'emission'];
+const mapNames = ['depth', 'normal', 'emission', 'silhouette'];
 const byte = value => Math.round(Math.max(0, Math.min(1, value)) * 255);
 const integer = (value, lo, hi) => Number.isSafeInteger(value) && value >= lo && value <= hi;
 
@@ -22,6 +22,7 @@ function spriteAtlas(world, options = {}) {
       (pose !== undefined && typeof pose !== 'function'))
     throw new RangeError('Invalid sprite atlas dimensions, timing, directions, pivot or maps');
   const requested = [...new Set(maps)];
+  const passes = requested.filter(name => name !== 'silhouette');
   const count = times.length * directions, cols = Math.min(count, columns);
   const rows = Math.ceil(count / cols), w = width * cols, h = height * rows;
   if (w * h * (requested.length + 1) > 32e6) throw new RangeError('Sprite atlas exceeds its pixel budget');
@@ -47,8 +48,9 @@ function spriteAtlas(world, options = {}) {
       const i = f * directions + direction, ox = i % cols * width, oy = Math.floor(i / cols) * height;
       const image = render(world, { ...view, t: time, w: width, h: height, px: 1,
         yaw: orientation[direction], ortho: true, target: pivot,
-        transparent: true, passes: requested, artHistory: history[direction], volumeHistory: volumes[direction] });
+        transparent: true, passes, artHistory: history[direction], volumeHistory: volumes[direction] });
       const data = image.passes;
+      let pixels = 0, left = width, top = height, right = -1, bottom = -1;
       for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
         const p = y * width + x, q = (y + oy) * w + x + ox, j = p * 3, k = q * 4;
         const alpha = image.alpha[p];
@@ -58,6 +60,14 @@ function spriteAtlas(world, options = {}) {
           images.color[k + 2] = image.rgb[j + 2];
         }
         images.color[k + 3] = alpha;
+        if (images.silhouette && alpha >= 128) {
+          images.silhouette.fill(255, k, k + 4);
+          pixels++;
+          left = Math.min(left, x);
+          top = Math.min(top, y);
+          right = Math.max(right, x);
+          bottom = Math.max(bottom, y);
+        }
         if (depths && Number.isFinite(data.depth[p])) {
           minDepth = Math.min(minDepth, data.depth[p]);
           maxDepth = Math.max(maxDepth, data.depth[p]);
@@ -72,8 +82,11 @@ function spriteAtlas(world, options = {}) {
           images.emission[k + 3] = Math.max(images.emission[k], images.emission[k + 1], images.emission[k + 2]);
         }
       }
-      entries.push({ frame: f, direction, yaw: orientation[direction], time, duration,
-        rect: { x: ox, y: oy, width, height }, pivot: { x: width / 2, y: height / 2 } });
+      const entry = { frame: f, direction, yaw: orientation[direction], time, duration,
+        rect: { x: ox, y: oy, width, height }, pivot: { x: width / 2, y: height / 2 } };
+      if (images.silhouette) entry.silhouette = { pixels, bounds: pixels ? [left, top, right, bottom] : null,
+        touchesBorder: left === 0 || top === 0 || right === width - 1 || bottom === height - 1 };
+      entries.push(entry);
     }
   }
   const range = depths && (depthRange || (Number.isFinite(minDepth) ? [minDepth, maxDepth] : null));
@@ -92,6 +105,7 @@ function spriteAtlas(world, options = {}) {
     pivot: pivot.slice(), frames: entries,
     encodings: {
       color: 'straight RGBA',
+      ...(images.silhouette && { silhouette: 'binary RGBA coverage at alpha >= 128' }),
       ...(images.depth && { depth: { range, encoding: 'camera-axis distance as RGB24, alpha marks a surface' } }),
       ...(images.normal && { normal: 'world XYZ mapped from [-1,1] to RGB, alpha marks a normal' }),
       ...(images.emission && { emission: 'visible premultiplied emissive RGB, alpha is max RGB' })

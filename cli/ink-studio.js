@@ -317,7 +317,8 @@ const CMD = {
         '  lint <id ...> [--map]              pixel-art lint: orphans, doubles, jaggies, banding, pillow shading, noise, colours',
         '  review <id> [--ref pic --px 2]     a sheet of fixed shots (four sides, top, low, far, near, close), beside the last one',
         '  variants <id> --seeds 3,7,12 [--group silhouette|openness|wear --motion]  render a ranked seed contact sheet',
-        '  atlas <id> [--directions 8 --w 96 --h 96 --fps 12 --maps depth,normal,emission]  export a transparent sprite atlas',
+        '  atlas <id> [--directions 8 --w 96 --h 96 --fps 12 --maps depth,normal,emission,silhouette]  export a transparent sprite atlas',
+        '  pose-review <id> [--directions 8 --w 96 --h 96]  review named poses at sprite resolution',
         '  passes <id> [--channels coverage,depth,normal,objectId,materialId,emission]  save art-pixel render pass previews',
         '  shimmer <id> [--mode orbit|zoom|pan|still --frames 24]  how many pixels flicker over a move, and a GIF of it',
         '  crisp <id ...|all> [--t 2 --map]   how crisp at its own pixel size: stray pixels, specks, flat area, finest frequencies,',
@@ -565,6 +566,24 @@ const CMD = {
       pivot: opt.pivot ? list('pivot') : w.cam.target, view: view(), yaw: num('yaw', w.cam.yaw), times, fps, pose });
     writeAtlas(directory, atlas);
     console.log('wrote', directory, atlas.metadata.frames.length, 'frames');
+  },
+  'pose-review'() {
+    const w = build(pos[0]);
+    const blocking = w.poseBlocking;
+    if (!blocking?.markers?.length) die('pose-review needs a scene with poseBlocking landmarks');
+    const { spriteAtlas, writeAtlas } = require('./sprite-atlas.js');
+    const directory = opt.out ? path.resolve(opt.out) : path.join(OUT, w.id + '-poses');
+    const directions = num('directions', 8);
+    const atlas = spriteAtlas(w, { width: num('w', 96), height: num('h', 96), directions,
+      columns: directions, maps: ['silhouette'], yaw: num('yaw', w.cam.yaw),
+      pivot: opt.pivot ? list('pivot') : w.cam.target, view: view(),
+      fps: blocking.clip.fps, times: blocking.markers.map(marker => marker.time), pose });
+    atlas.metadata.poses = blocking.markers;
+    writeAtlas(directory, atlas);
+    const empty = atlas.metadata.frames.filter(frame => !frame.silhouette.pixels).length;
+    const atEdge = atlas.metadata.frames.filter(frame => frame.silhouette.touchesBorder).length;
+    console.log('wrote', directory, blocking.markers.length + ' poses × ' + directions + ' directions');
+    if (empty || atEdge) console.log('review:', empty + ' empty, ' + atEdge + ' touching the sprite bounds');
   },
   passes() {
     const w = build(pos[0]), t = num('t', 0);

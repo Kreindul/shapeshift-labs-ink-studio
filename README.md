@@ -356,6 +356,8 @@ Clip pose rotations use degrees; matrix rotations and many geometry options use 
 
 Additional animation APIs include `K.anim.machine`, `K.anim.face`, `K.anim.path`, `K.anim.steer`, `K.anim.track` and `K.anim.support`. Deformation maps include body squash/stretch, noodles, folds, lattices, morphs, smears, reaction fields, foliage and line boil. Apply maps on the CPU with `K.deform.apply`, or use puppet/bone skinning with an appropriate host renderer.
 
+Use [pose blocking and the pose shelf](docs/pose-blocking.md) to hold named story poses, draft in-betweens, and apply reusable poses to a puppet. The `pose-review` command checks the same landmarks as silhouettes at the size and angles of a directional sprite atlas.
+
 `K.character(B, spec, lane)` creates an input-driven character with movement, running, jumping, dashing, attacks, casting and crouching. Its specification supplies geometry and rig points; it is a toolkit for authoring a character, rather than a bundled cast of character assets. The API is documented at the top of [kk-character.js](src/kit/kk-character.js).
 
 ## Particles and interaction
@@ -644,6 +646,7 @@ The CLI and Node `render()` use the CPU renderer. Use the [browser renderer](doc
 | `render <scene> --t 1.5` | Render one PNG at a chosen time. |
 | `passes <scene>` | Save art-pixel coverage, depth, normals, IDs and emission previews. |
 | `atlas <scene> --directions 8` | Export an RGBA atlas with registered pivots and optional relighting maps. |
+| `pose-review <scene> --directions 8` | Render named poses and breakdowns as color and silhouette tiles at sprite resolution. |
 | `variants <scene> --seeds 3,7,12` | Render a ranked seed contact sheet for a scene with variant metrics. |
 | `sheet <scene> --from 0 --to 3 --n 12` | Make a labeled sheet of animation frames. |
 | `turn <scene> --n 8` | Make a sheet from multiple viewing angles. |
