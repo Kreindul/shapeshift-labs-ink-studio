@@ -63,3 +63,21 @@ test('legacy tied ranks and safe integer boundaries still produce the requested 
   }
   assert.throws(()=>heightLayers.reorder([{id:'a',order:0}],'missing',0),/existing ID/);
 });
+
+test('ordered masks edit an individual replacement before the stack is composed', () => {
+  const lower=layer('lower','add',2,8),upper=layer('upper','replace',5,8);
+  const eraser=layer('eraser','erase',0,2),repair=layer('repair','add',0,.5);
+  const cut=heightLayers.mask(upper,[{operation:'cut',weight:eraser.weight,support:eraser.support}]);
+  assert.equal(heightLayers.mask(upper,[]),upper);
+  assert.deepEqual(heightLayers.sample([lower,cut],0,0),{delta:2,coverage:1,owner:'lower'});
+  assert.equal(heightLayers.sample([lower,cut],1.5,0).delta,3.5);
+  assert(heightLayers.distance([lower,cut],0,0,'upper')>0);
+  const restored=heightLayers.mask(upper,[
+    {operation:'cut',weight:eraser.weight,support:eraser.support},
+    {operation:'repair',weight:repair.weight,support:repair.support}
+  ]);
+  assert.equal(heightLayers.sample([lower,restored],0,0).delta,5);
+  assert(heightLayers.distance([lower,restored],0,0,'upper')<0);
+  assert.equal(upper.weight(0,0),1);
+  assert.throws(()=>heightLayers.mask(upper,[{operation:'unsupported'}]),/cut or repair fields/);
+});

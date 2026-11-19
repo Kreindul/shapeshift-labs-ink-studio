@@ -1991,6 +1991,15 @@ candidates. Swept masks are one way to build the layer functions.
 
 `KIT.heightLayers.reorder(records, id, toIndex)` plans an edit to composition order. Pass records with unique `id` strings and nonnegative integer `order` values. The index is zero-based in application order. Apply the returned `{ id, order }` updates together. It keeps the existing ranks where possible and compacts tied ranks when the desired order cannot fit. `compareOrder` orders records by rank and then identity, matching legacy scenes with tied ranks.
 
+Use `KIT.heightLayers.mask(layer, edits)` to cut and repair only the
+supplied height layer before it enters the stack. Each edit supplies an
+`operation` of `cut` or `repair`, a fractional `weight(x, z)`, and a
+signed `support(x, z)`. A cut's support is its fully opaque interior.
+A repair's support covers its entire nonzero feather. The wrapper
+preserves the original height operation and applies the edits in order.
+Repair restores coverage removed from that layer, including partial
+coverage around the edge of a cut.
+
 ### Fitted profile runs
 
 `KIT.procedural.fittedProfileRun({path, profiles, pitch, gap, up, budget})`

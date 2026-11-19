@@ -50,6 +50,36 @@
     return d;
   }
 
+  // Edit the coverage of one layer before evaluating the ordered height stack.
+  function mask(layer, edits) {
+    if (!layer || typeof layer.weight !== 'function' || typeof layer.support !== 'function' ||
+        !Array.isArray(edits) || !Array.from(edits).every(edit =>
+          ['cut', 'repair'].includes(edit?.operation) &&
+          typeof edit.weight === 'function' && typeof edit.support === 'function'))
+      throw Error('Layer masks need a height layer and ordered cut or repair fields');
+    if (!edits.length) return layer;
+    const strokes = edits.slice();
+    function weight(x, z) {
+      const base = layer.weight(x, z);
+      if (base <= 0) return base;
+      let keep = 1;
+      for (const edit of strokes) {
+        const w = edit.weight(x, z);
+        keep = edit.operation === 'cut' ? keep * (1 - w) : keep + (1 - keep) * w;
+      }
+      return base * keep;
+    }
+    function support(x, z) {
+      let erased = Infinity;
+      for (const edit of strokes) {
+        const dist = edit.support(x, z);
+        erased = edit.operation === 'cut' ? Math.min(erased, dist) : Math.max(erased, -dist);
+      }
+      return Math.max(layer.support(x, z), -erased);
+    }
+    return { ...layer, weight, support };
+  }
+
   const compareOrder = (a,b) => a.order-b.order || a.id.localeCompare(b.id);
 
   function reorder(records,id,toIndex) {
@@ -77,5 +107,5 @@
     return ranks.filter((record,i) => record.order !== result[i].order);
   }
 
-  K.heightLayers = Object.freeze({ sample, distance, compareOrder, reorder });
+  K.heightLayers = Object.freeze({ sample, distance, mask, compareOrder, reorder });
 })(KIT);
