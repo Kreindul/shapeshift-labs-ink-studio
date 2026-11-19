@@ -38,3 +38,22 @@ test('source metadata remains mutable and can pass a serializable attachment rec
   assert.equal(result[0].slot.data.anchor.id, 'edge');
   assert(Object.isFrozen(result[0].slot.data.anchor));
 });
+
+test('attachment rows preserve center-relative indices as a span grows at either end', () => {
+  const row = (range, options = {}) => P.attachments.row({ range, spacing: 2, inset: 1, ...options });
+  const narrow = row([-4, 4]), wide = row([-6, 6]);
+  assert.deepEqual(narrow, [
+    { index: 0, distance: 0, range: [-1, 1] },
+    { index: -1, distance: -2, range: [-3, -1] },
+    { index: 1, distance: 2, range: [1, 3] }
+  ]);
+  assert.deepEqual(wide.slice(0, narrow.length), narrow);
+  assert.deepEqual(wide.slice(narrow.length).map(x => x.index), [-2, 2]);
+  assert.deepEqual(row([2, 10]).map(x => x.distance), [6, 4, 8]);
+  assert.deepEqual(row([2, 4]), [{ index: 0, distance: 3, range: [3, 3] }]);
+  assert.deepEqual(row([2, 3]), []);
+  assert.deepEqual(row([-100, 100], { maxPairs: 0 }).map(x => x.index), [0]);
+  assert(Object.isFrozen(wide[0].range));
+  assert.throws(() => row([3, 2]), /distance range/);
+  assert.throws(() => row([2, 4], { spacing: 0 }), /positive spacing/);
+});

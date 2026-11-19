@@ -8,6 +8,33 @@
   const unit = value => V.len(value) > 1e-8;
   const draw = (name, seed) => ((P.data.hash(name, seed) >>> 0) + 1) / 4294967297;
 
+  function row({ range, spacing, inset = 0, maxPairs = 8 }) {
+    if (!Array.isArray(range) || range.length !== 2 || !range.every(Number.isFinite) ||
+        !Number.isFinite(range[1] - range[0]) || range[1] < range[0] ||
+        !Number.isFinite(spacing) || spacing <= 0 || !Number.isFinite(inset) || inset < 0 ||
+        !Number.isSafeInteger(maxPairs) || maxPairs < 0 || maxPairs > 31)
+      throw Error('Attachment row needs a finite distance range, positive spacing and a bounded pair count');
+
+    const half = (range[1] - range[0]) / 2;
+    if (inset > half) return Object.freeze([]);
+    const center = range[0] + half;
+    const pairs = Math.min(maxPairs, Math.floor((half - inset) / spacing));
+    const stations = [];
+    function add(index) {
+      const distance = center + index * spacing;
+      stations.push({ index, distance, range: [
+        Math.max(range[0] + inset, distance - spacing / 2),
+        Math.min(range[1] - inset, distance + spacing / 2)
+      ] });
+    }
+    add(0);
+    for (let i = 1; i <= pairs; i++) {
+      add(-i);
+      add(i);
+    }
+    return P.data.freeze(stations);
+  }
+
   function layout(slots, families, { seed = 0, fits = () => true, budget = 32768 } = {}) {
     if (!Array.isArray(slots) || slots.length > 1024 || !Array.isArray(families) || families.length > 128 ||
         !Number.isSafeInteger(seed) || typeof fits !== 'function' || !Number.isSafeInteger(budget) || budget < 1 || budget > 131072)
@@ -56,5 +83,5 @@
     return P.data.freeze(placements);
   }
 
-  P.attachments = Object.freeze({ layout });
+  P.attachments = Object.freeze({ layout, row });
 })(KIT);
