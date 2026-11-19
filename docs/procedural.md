@@ -643,6 +643,20 @@ Use tighter spacing or explicit obstruction checks for thin objects.
 sample budget. It checks each leg and the full rounded joins at changes of
 heading. Clearance checks can use the point range returned for a bent link.
 
+`P.routes.profileSection(profile, start, end, options)` fits a straight
+section of a world-space route into an extrusion of a convex profile.
+Supply an affine `project([x,y,z]) => [u,v]` into the profile's chart and
+XZ endpoint positions. The section stays horizontal across its width with
+`halfWidth`, `below` and `above` in world units. `clearance` insets the
+profile in chart units. Set `minHeight`, `maxHeight` and `maxGrade` for
+the route. A grade of zero fits only level sections.
+
+The result contains a convex set of feasible `heights: [[startY,endY], ...]`
+and `closest([startY,endY])` for fitting toward a preferred pair. The set
+can be a segment or point. A missing fit returns `null`. The plane
+constraints cover the whole swept section along the leg. Apply additional
+solid and terrain checks for the rest of the scene.
+
 `P.routes.elevationProfile(length, startY, endY, barriers, options)` finds
 a grade-limited route in the distance and elevation plane of a fixed guide.
 Each forbidden band is `{from, to, min, max}`, where `from` and `to`

@@ -788,6 +788,61 @@ const RouteVisibility = (() => {
   }
 
 
+  // Fit constant-grade sections in an affine chart. Each vertex of the
+  // swept rectangle gives linear constraints on the two endpoint heights.
+  function profileSection(profile,start,end,{
+    project,minHeight,maxHeight,maxGrade,halfWidth,below,above,clearance=0
+  }={}){
+    if(!Array.isArray(profile)||profile.length<3||profile.length>256||!profile.every(p=>point(p,2))||
+      !point(start,2)||!point(end,2)||typeof project!=='function'||!point([minHeight,maxHeight],2)||
+      minHeight>=maxHeight||![maxGrade,halfWidth,below,above,clearance].every(x=>Number.isFinite(x)&&x>=0))
+      throw Error('A profile section needs a convex contour, affine chart and bounded sweep dimensions');
+    const dx=end[0]-start[0],dz=end[1]-start[1],run=Math.hypot(dx,dz);
+    if(run<=EPS)throw Error('A profile section needs a nonzero horizontal run');
+    const {edges}=convexRing(profile,()=>{});
+    let polygon=[[minHeight,minHeight],[maxHeight,minHeight],[maxHeight,maxHeight],[minHeight,maxHeight]];
+    function clip(a,b,c){
+      const next=[];
+      function push(p){if(!next.length||dist2(p,next.at(-1))>EPS*EPS)next.push(p);}
+      for(let i=0;i<polygon.length;i++){
+        const q=polygon[i],r=polygon[(i+1)%polygon.length],first=a*q[0]+b*q[1]+c,last=a*r[0]+b*r[1]+c;
+        if(first>=-EPS)push(q);
+        if((first>=-EPS)!==(last>=-EPS))push(interpolate(q,r,clamp(first/(first-last))));
+      }
+      if(next.length>1&&dist2(next[0],next.at(-1))<=EPS*EPS)next.pop();
+      polygon=next;
+    }
+    clip(-1,1,maxGrade*run);
+    clip(1,-1,maxGrade*run);
+    for(const [i,[x,z]] of [start,end].entries()){
+      for(const sign of [-1,1])for(const y of [-below,above]){
+        const q=[x-sign*halfWidth*dz/run,y,z+sign*halfWidth*dx/run],
+          a=project(q),b=project([q[0],q[1]+1,q[2]]);
+        if(!point(a,2)||!point(b,2))throw Error('A profile section chart must return finite planar coordinates');
+        for(const [u,v,nx,nz] of edges){
+          const k=nx*(b[0]-a[0])+nz*(b[1]-a[1]),c=nx*(a[0]-u)+nz*(a[1]-v)-clearance;
+          clip(i?0:k,i?k:0,c);
+          if(!polygon.length)return null;
+        }
+      }
+    }
+    const area=polygon.reduce((sum,p,i)=>sum+area2(polygon[0],p,polygon[(i+1)%polygon.length]),0);
+    function closest(target){
+      if(!point(target,2))throw Error('Profile section heights must be finite');
+      let nearest=polygon[0],distance=dist2(nearest,target),inside=area>EPS*EPS;
+      for(const [i,a] of polygon.entries()){
+        const b=polygon[(i+1)%polygon.length],d=dist2(a,b);
+        if(area2(a,b,target)<-EPS)inside=false;
+        if(d<=EPS*EPS)continue;
+        const t=clamp(((target[0]-a[0])*(b[0]-a[0])+(target[1]-a[1])*(b[1]-a[1]))/d),
+          q=interpolate(a,b,t),error=dist2(q,target);
+        if(error<distance){nearest=q;distance=error;}
+      }
+      return Object.freeze((inside?target:nearest).slice());
+    }
+    return Object.freeze({heights:frozenPoints(polygon),closest});
+  }
+
   function sweep(start, end, { halfWidth, below, above, spacing = 0.12, minClearance = 0,
     clearance, maxSamples = 10000 } = {}) {
     if (!point(start, 3) || !point(end, 3) || ![halfWidth, below, above, minClearance].every(v => Number.isFinite(v) && v >= 0) ||
@@ -855,6 +910,6 @@ const RouteVisibility = (() => {
     return {status:'ok',samples};
   }
 
-  return Object.freeze({ find, convexFootprint, sweep, sweepPath, elevationProfile, guideElevation, guideVisibility, prismVisibility });
+  return Object.freeze({ find, convexFootprint, sweep, sweepPath, elevationProfile, guideElevation, guideVisibility, prismVisibility, profileSection });
 })();
 if (typeof module !== 'undefined') module.exports = RouteVisibility;

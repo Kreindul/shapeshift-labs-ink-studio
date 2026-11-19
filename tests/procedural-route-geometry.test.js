@@ -405,3 +405,40 @@ test('guide detours cannot jump across the gap between two legs of a bent corrid
   }
   assert(result.points.length>4);
 });
+
+test('a profile section fits endpoint heights to an oblique affine chart and grade bound',()=>{
+  const outline=[[-.6,-.5],[.6,-.5],[.6,.5],[-.6,.5]],start=[1,0],end=[5,0],
+    options={project:([x,y,z])=>[z+.1*y,y-.5*x],minHeight:0,maxHeight:4,maxGrade:.5,
+      halfWidth:.32,below:.11,above:.27,clearance:.03};
+  const fit=routes.profileSection(outline,start,end,options);
+  assert(fit&&fit.heights.length>=3);
+  assert.equal(routes.profileSection(outline,start,end,{...options,maxGrade:0}),null);
+  assert.equal(routes.profileSection(outline,start,end,{...options,maxGrade:.25}),null);
+  assert.equal(routes.profileSection(outline,start,end,{...options,halfWidth:.7}),null);
+  const near=fit.closest([0,0]);
+  assert(near[1]>near[0]+1.4);
+  for(const heights of [near,...fit.heights]) {
+    assert(Math.abs(heights[1]-heights[0])<=2+1e-8);
+    for(let i=0;i<=20;i++)for(const z of [-.32,0,.32])for(const dy of [-.11,.27]){
+      const t=i/20,y=heights[0]+t*(heights[1]-heights[0]);
+      const [u,v]=options.project([1+4*t,y+dy,z]);
+      assert(Math.abs(u)<=.57+1e-8&&Math.abs(v)<=.47+1e-8);
+    }
+  }
+  const reversed=routes.profileSection(outline.slice().reverse(),end,start,options);
+  const other=reversed.closest([0,0]);
+  assert(Math.abs(other[0]-near[1])<1e-8&&Math.abs(other[1]-near[0])<1e-8);
+});
+
+test('level profile sections expose a height line and reject oversized guards',()=>{
+  const outline=[[-1,-1],[1,-1],[1,1],[-1,1]],options={
+    project:([,y,z])=>[z,y],minHeight:-2,maxHeight:2,maxGrade:0,halfWidth:.4,below:.2,above:.8,clearance:.05
+  };
+  const result=routes.profileSection(outline,[0,0],[4,0],options);
+  assert.equal(result.heights.length,2);
+  assert(result.heights.every(([a,b])=>Math.abs(a-b)<1e-9));
+  const [lo,hi]=result.closest([1,2]);
+  assert(Math.abs(lo-.15)<1e-8&&Math.abs(hi-.15)<1e-8);
+  assert.deepEqual(result.closest([0,0]),[0,0]);
+  assert.equal(routes.profileSection(outline,[0,0],[4,0],{...options,above:2}),null);
+});
