@@ -1,9 +1,30 @@
 /* Seat an upright object on a sampled support without tilting its frame.
    A footprint can reject a wet patch, a void, a step or an occupied column. */
 (function (K) {
-  const P = K.procedural || K.authoring;
+  const P = K.procedural || K.authoring, { V, M } = K;
   const columnHeights = [.07, .5, .97];
   const vec = v => Array.isArray(v) && v.length === 3 && Array.from(v).every(Number.isFinite);
+
+  function footprintFromBounds(bounds, pose) {
+    const { min, max } = bounds || {}, { R, t } = pose || {};
+    if (![min, max, t].every(vec) || min.some((v, i) => v > max[i]) ||
+        !Array.isArray(R) || R.length !== 9 || !Array.from(R).every(Number.isFinite))
+      throw Error('A footprint needs ordered local bounds and a finite affine pose');
+    const x = [R[0], 0, R[6]], z = [R[2], 0, R[8]];
+    const along = V.len(x) > 1e-8 ? x : z;
+    if (V.len(along) <= 1e-8) throw Error('A footprint needs a horizontal pose axis');
+    const tangent = V.norm(along), up = [0, 1, 0], side = [-tangent[2], 0, tangent[0]];
+    const projection = M.mul(M.tr(M.cols(tangent, up, side)), R);
+    const low = [0, 0, 0], high = [0, 0, 0];
+    for (let a = 0; a < 3; a++) for (let i = 0; i < 3; i++) {
+      const first = projection[a * 3 + i] * min[i], last = projection[a * 3 + i] * max[i];
+      low[a] += Math.min(first, last);
+      high[a] += Math.max(first, last);
+    }
+    const point = V.add(t, V.add([0, low[1], 0],
+      V.add(V.mul(tangent, (low[0] + high[0]) / 2), V.mul(side, (low[2] + high[2]) / 2))));
+    return { point, tangent, size: high.map((v, i) => Math.max(.001, v - low[i])) };
+  }
 
   function fitFootprintContact({
     center, tangent, size, height, blocked, maxSpread = .09, samples = 3,
@@ -50,5 +71,6 @@
     return P.data.freeze(fit);
   }
 
+  P.footprintFromBounds = footprintFromBounds;
   P.fitFootprintContact = fitFootprintContact;
 })(KIT);

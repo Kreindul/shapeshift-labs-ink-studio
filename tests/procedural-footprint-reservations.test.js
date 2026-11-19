@@ -1,8 +1,27 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const {createFootprintReservations,placeFootprintRequests} = require('..').load().KIT.procedural;
+const {KIT: K} = require('..').load();
+const {createFootprintReservations,placeFootprintRequests,footprintFromBounds,transforms} = K.procedural;
 
 const at = (point, size=[1,1,1], tangent=[1,0,0]) => ({point,size,tangent});
+
+test('an off-center affine box projects to a tight upright reservation',()=>{
+  const bounds={min:[-.1,.3,-.7],max:[1,1.2,.5]},
+    pose=transforms.local({position:[-1,.5,2],rotation:[.32,.52,-.13],scale:[1.5,.8,1.2]}),
+    claim=footprintFromBounds(bounds,pose),{V}=K,side=[-claim.tangent[2],0,claim.tangent[0]],
+    axes=[claim.tangent,[0,1,0],side],coordinates=[];
+  for(const x of [bounds.min[0],bounds.max[0]])for(const y of [bounds.min[1],bounds.max[1]])
+    for(const z of [bounds.min[2],bounds.max[2]]){
+      const local=V.sub(transforms.point(pose,[x,y,z]),claim.point);
+      coordinates.push(axes.map(axis=>V.dot(axis,local)));
+    }
+  for(let i=0;i<3;i++){
+    const values=coordinates.map(p=>p[i]),bottom=i===1?0:-claim.size[i]/2;
+    assert(Math.abs(Math.min(...values)-bottom)<1e-9);
+    assert(Math.abs(Math.max(...values)-(bottom+claim.size[i]))<1e-9);
+  }
+  assert.throws(()=>footprintFromBounds({min:[2,0,0],max:[1,1,1]},pose),/ordered local bounds/);
+});
 
 test('ranked fitters share occupied space, including fallback intervals and fixed obstacles', () => {
   const spot=at([0,0,0]), obstacle=at([2.1,0,0]), high=at([0,1,0]);

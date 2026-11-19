@@ -59,6 +59,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `fitSurfaceBands({domain, panels, opening, edges, obstructions, clearance})` | Keep bands mounted to a chart feature's edges and shorten or omit them to fit nearby boundaries and obstructions |
 | `alignedFeatureGroups(features, {axis, chartAxis, periods, separation})` | Group nearby aligned features on a measured chart and return ordered members and shared extents. |
 | `fitFootprintContact({center, tangent, size, height, blocked, maxSpread, samples, interval, includePoints})` | Seat an upright footprint on a sampled support and check space above it |
+| `footprintFromBounds(bounds, pose)` | Project a local box into an upright reservation with its origin offset preserved |
 | `createFootprintReservations({clearance, cellSize})` | Reserve space for oriented upright objects and test nearby candidates |
 | `placeFootprintRequests(requests, {obstacles, clearance, cellSize})` | Resolve priority-ordered fitters with one oriented clearance field |
 | `assetCatalog.create(entries)` | Search lightweight asset metadata by name, keywords and collection without loading geometry |
@@ -380,6 +381,15 @@ sample, the height `range`, and the sampled XZ `points`. Set
 `includePoints: false` when only the fitted frame and range are needed.
 The checks still use the full sample grid. A footprint with
 missing support, excessive height variation or blocked space returns `null`.
+
+`footprintFromBounds({min, max}, {R, t})` converts local bounds and an
+affine pose into the `{point, tangent, size}` accepted by both footprint
+services. The tangent follows the projected local X axis, with local Z
+available when X is vertical. The point is the center of the base of the
+resulting upright box. To seat a model, compute this claim at the original
+pose, fit the claim to the support, and apply the difference between the
+fitted and original base points to the model translation. This preserves
+an asset's original pivot even for off-center geometry or a raised base.
 
 `createFootprintReservations` manages a temporary set of oriented volume
 claims. Each claim takes `{point, tangent, size}`, where `point` is the
