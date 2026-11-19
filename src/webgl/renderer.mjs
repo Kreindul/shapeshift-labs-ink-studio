@@ -219,10 +219,10 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     }
 
     function wetVariant(water) {
-      const airPockets = Boolean(water.u_waterAirCount), layered = Boolean(water.u_waterLayered);
-      const key = +airPockets + 2 * layered;
+      const airPockets = Boolean(water.u_waterAirCount), layered = Boolean(water.u_waterLayered), atlas = Boolean(water.u_waterAtlas);
+      const key = +airPockets + 2 * layered + 4 * atlas;
       if (!wetVariants.has(key)) wetVariants.set(key, {
-        airPockets, layered, sources: pixelShaderSources(toolkit.PixelLook, { water: true, airPockets, layered })
+        airPockets, layered, atlas, sources: pixelShaderSources(toolkit.PixelLook, { water: true, airPockets, layered, atlas })
       });
       return wetVariants.get(key);
     }
@@ -234,7 +234,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         gl.clearBufferfv(gl.COLOR, 0, zero);
       } else {
         if (water) {
-          wet.background ??= program(waterBackgroundShader(wet.airPockets, wet.layered));
+          wet.background ??= program(waterBackgroundShader(wet.airPockets, wet.layered, wet.atlas));
           gl.disable(gl.BLEND);
           fullscreen(wet.background, buffer.framebuffer, width, height, { ...water,
             u_waterViewport: [width, height], u_waterBackground: options.background.slice(0, 3) });
@@ -354,7 +354,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       gl.colorMask(true, true, true, true);
       gl.depthMask(true);
       gl.blendEquation(gl.FUNC_ADD);
-      const shader = pipeline.programFor(wet ? { water: true, airPockets: wet.airPockets, layered: wet.layered } : undefined);
+      const shader = pipeline.programFor(wet ? { water: true, airPockets: wet.airPockets, layered: wet.layered, atlas: wet.atlas } : undefined);
       gl.useProgram(shader.p);
       const growth = world.grow ?? {};
       shader.set({

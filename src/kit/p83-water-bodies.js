@@ -1,7 +1,7 @@
 /* A water frame shared by world queries and the WebGL ray integrator. */
 (function (K) {
   const P = K.procedural;
-  const maxAxis = 64, maxBodies = 8;
+  const maxAxis = 64, uniformBodies = 8, maxBodies = 256, atlasSize = 2048;
   const states = new WeakMap(), sceneStates = new WeakMap(), tileScenes = new WeakMap();
   const number = value => Number.isFinite(value) && Number.isFinite(Math.fround(value));
   const pair = value => Array.isArray(value) && value.length === 2 && number(value[0]) && number(value[1]);
@@ -12,15 +12,21 @@
   function optics({
     tint = [0.05, 0.25, 0.31], extinction = [0.8, 0.32, 0.18],
     surfaceColor = [0.46, 0.75, 0.79], surface = 0.22,
-    refraction = 1.5, foam = 0.45, caustics = 0.26
+    refraction = 1.5, foam = 0.45, caustics = 0.26,
+    deepTint, depthRange = [0.25, 3],
+    sediment: { color = [0.71, 0.62, 0.39], strength = 0, height = 0.3, scale = 10 } = {}
   } = {}) {
     const rgb = values => Array.isArray(values) && values.length === 3 && Array.from(values).every(unit);
     if (!rgb(tint) || !rgb(surfaceColor) || !Array.isArray(extinction) || extinction.length !== 3 ||
         !Array.from(extinction).every(v => number(v) && v >= 0 && v <= 32) ||
-        ![surface, foam, caustics].every(unit) || !number(refraction) || refraction < 0 || refraction > 4)
+        ![surface, foam, caustics, strength].every(unit) || !number(refraction) || refraction < 0 || refraction > 4 ||
+        (deepTint !== undefined && !rgb(deepTint)) || !pair(depthRange) || depthRange[0] < 0 ||
+        !(Math.fround(depthRange[1]) > Math.fround(depthRange[0])) || !rgb(color) ||
+        !number(height) || height < 1e-4 || !number(scale) || scale <= 0 || scale > 64)
       throw new RangeError('Invalid water optics');
     return { tint: tint.slice(), extinction: extinction.slice(), surfaceColor: surfaceColor.slice(),
-      surface, refraction, foam, caustics };
+      surface, refraction, foam, caustics, deepTint: deepTint?.slice() ?? tint.slice(), depthRange: depthRange.slice(),
+      sediment: { color: color.slice(), strength, height, scale }, styled: deepTint !== undefined || strength > 0 };
   }
 
   function create({ id, bounds, resolution = [1, 1], sample, optics: look } = {}) {
@@ -128,11 +134,13 @@
     if (!name(id) || !P.verticalSpans.isGrid(grid) || grid.resolution.some(n => n > maxAxis))
       throw new TypeError('Layered water needs an ID and a span grid up to 64 × 64');
     const [nx, nz] = grid.resolution, [dx, dz] = grid.cell, { min, max } = grid.bounds;
-    const data = new Float32Array(nx * nz * 4), spans = [], labels = new Map();
+    const data = new Float32Array(nx * nz * 4), spans = [], labels = new Map(), spanProfiles = [], caps = [];
+    const profileFor = typeof look === 'function' ? look : null, style = optics(profileFor ? undefined : look);
+    const profiles = new Map();
     let low = Infinity, high = -Infinity;
     for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
       const column = grid.column(x, z), start = spans.length / 4;
-      let count = 0, lower = 0, upper = 0;
+      let count = 0, lower = 0, upper = 0, bed, top;
       column.forEach((row, i) => {
         if (row.kind === 'solid' || (row.kind === 'air' && row.id === null)) return;
         const key = row.id ?? id;
@@ -140,6 +148,12 @@
           throw new TypeError('Each span medium ID must refer to one kind');
         labels.set(key, row.kind);
         if (row.kind !== 'water') return;
+        if (count === 0 || column[i - 1]?.kind !== 'water') {
+          bed = row.min;
+          let end = i;
+          while (column[end + 1]?.kind === 'water') end++;
+          top = column[end].max;
+        }
         if (count >= 32) throw new RangeError('Layered water supports up to 32 wet spans per column');
         if (!column[i + 1] || column[i + 1].kind === 'air') {
           if (count < 16) lower |= 1 << count;
@@ -149,6 +163,11 @@
         low = Math.min(low, row.min);
         high = Math.max(high, row.max);
         spans.push(row.min, row.max, row.current[0], row.current[2]);
+        caps.push(bed, top);
+        if (profileFor) {
+          if (!profiles.has(key)) profiles.set(key, optics(profileFor(key, grid)));
+          spanProfiles.push(profiles.get(key));
+        }
       });
       data.set([start, count, lower, upper], (z * nx + x) * 4);
     }
@@ -172,7 +191,8 @@
         current: (x, y, z) => grid.at(x, y, z).current });
     }));
     const body = Object.freeze({ id, bounds, grid, media });
-    states.set(body, { nx, nz, dx, dz, data, style: optics(look), empty: !spans.length, spans: Float32Array.from(spans) });
+    states.set(body, { nx, nz, dx, dz, data, style, spanProfiles, caps: Float32Array.from(caps),
+      empty: !spans.length, spans: Float32Array.from(spans) });
     return body;
   }
 
@@ -248,10 +268,91 @@
     return lo[0] === Infinity ? null : { min: lo, max: hi };
   }
 
+  function atlasFor(bodies) {
+    const bounds = bodies.map(body => body.bounds), tree = [];
+    function branch(indices) {
+      const index = tree.length, box = P.spatial.boxOf(indices.flatMap(i => [bounds[i].min, bounds[i].max]));
+      const node = { box, body: indices.length === 1 ? indices[0] : -1, escape: 0 };
+      tree.push(node);
+      if (indices.length > 1) {
+        const midpoint = (i, axis) => (bounds[i].min[axis] + bounds[i].max[axis]) / 2;
+        const centres = P.spatial.boxOf(indices.map(i => [midpoint(i, 0), midpoint(i, 1), midpoint(i, 2)]));
+        const size = centres.max.map((v, i) => v - centres.min[i]), axis = size.indexOf(Math.max(...size));
+        indices.sort((a, b) => midpoint(a, axis) - midpoint(b, axis) || a - b);
+        const middle = indices.length >>> 1;
+        branch(indices.slice(0, middle));
+        branch(indices.slice(middle));
+      }
+      node.escape = tree.length;
+    }
+    branch(bodies.map((_, i) => i));
+    const profiles = [], byStyle = new Map(), byValue = new Map();
+    function profile(style) {
+      if (!byStyle.has(style)) {
+        const value = JSON.stringify(style);
+        if (!byValue.has(value)) {
+          byValue.set(value, profiles.length);
+          profiles.push(style);
+        }
+        byStyle.set(style, byValue.get(value));
+      }
+      return byStyle.get(style);
+    }
+    const bodyBase = tree.length * 2, styleBase = bodyBase + bodies.length * 4;
+    const blocks = bodies.map(body => {
+      const state = states.get(body);
+      return { body, ...state, defaultStyle: profile(state.style), styles: state.spanProfiles?.map(profile) };
+    });
+    const dataBase = styleBase + profiles.length * 6;
+    const texels = blocks.reduce((sum, { nx, nz, spans }) => sum + nx * nz + (spans?.length ?? 0) / 2, dataBase);
+    if (texels > atlasSize ** 2) throw new RangeError('Water scene exceeds its texture atlas budget');
+    const width = Math.min(atlasSize, Math.max(maxAxis, 2 ** Math.ceil(Math.log2(Math.sqrt(texels)))));
+    const height = Math.ceil(texels / width);
+    return air => {
+      const data = new Float32Array(width * height * 4);
+      const write = (i, column) => data.set(column, i * 4);
+      tree.forEach(({ box, escape, body }, i) => {
+        write(i * 2, [...box.min, escape]);
+        write(i * 2 + 1, [...box.max, body]);
+      });
+      profiles.forEach((row, i) => {
+        const at = styleBase + i * 6;
+        write(at, [...row.tint, row.foam]);
+        write(at + 1, [...row.extinction, row.caustics]);
+        write(at + 2, [...row.surfaceColor, row.surface]);
+        write(at + 3, [...row.deepTint, row.refraction]);
+        write(at + 4, [...row.sediment.color, row.sediment.strength]);
+        write(at + 5, [...row.depthRange, row.sediment.height, row.sediment.scale]);
+      });
+      let next = dataBase;
+      blocks.forEach(({ body, nx, nz, dx, dz, data: grid, spans, caps, styles, defaultStyle }, i) => {
+        const at = bodyBase + i * 4, start = next, tail = start + nx * nz;
+        write(at, [...body.bounds.min, start]);
+        write(at + 1, [...body.bounds.max, defaultStyle]);
+        write(at + 2, [dx, dz, nx, nz]);
+        write(at + 3, [Number(Boolean(spans)), 0, 0, 0]);
+        data.set(grid, start * 4);
+        next = tail;
+        if (!spans) return;
+        for (let column = 0; column < nx * nz; column++) {
+          const o = column * 4, first = grid[o], count = grid[o + 1];
+          data[(start + column) * 4] = tail + first * 2;
+          for (let j = 0; j < count; j++) {
+            const span = first + j, flags = grid[o + (j < 16 ? 2 : 3)], exposed = (flags >> (j % 16)) & 1;
+            write(next++, spans.subarray(span * 4, span * 4 + 4));
+            write(next++, [styles?.[span] ?? defaultStyle, exposed, caps[span * 2], caps[span * 2 + 1]]);
+          }
+        }
+      });
+      return { width, height, data, uniforms: { ...air, u_waterAtlas: 1, u_waterCount: bodies.length,
+        u_waterNodeCount: tree.length, u_waterBodyBase: bodyBase, u_waterStyleBase: styleBase } };
+    };
+  }
+
   function scene(bodies, { airPockets = [] } = {}) {
     if (!Array.isArray(bodies) || bodies.length > maxBodies || !Array.from(bodies).every(body => states.has(body)) ||
         new Set(bodies.map(body => body.id)).size !== bodies.length)
-      throw new TypeError('A water scene holds up to eight water bodies with distinct IDs');
+      throw new TypeError('A water scene holds up to 256 water bodies with distinct IDs');
     if (!Array.isArray(airPockets) || airPockets.length > 8) throw new TypeError('A water scene holds up to eight air pockets');
     const pockets = Array.from(airPockets, pocket).sort(compare);
     if (new Set([...pockets, ...bodies].map(item => item.id)).size !== pockets.length + bodies.length)
@@ -273,7 +374,15 @@
       if (group.length === 1) return first;
       if (group.some(({ row, layered }) => !layered || row.kind !== first.kind))
         throw new TypeError('Repeated span IDs must refer to the same kind across layered tiles');
-      const sample = (x, y, z) => group.find(({ row }) => row.sdf(x, y, z) < 0)?.row;
+      const index = group.length > uniformBodies ? P.spatial.pointIndex(group.map(({ row }) => row)) : null;
+      function sample(x, y, z) {
+        if (!index) return group.find(({ row }) => row.sdf(x, y, z) < 0)?.row;
+        let match;
+        index([x, y, z], row => {
+          if (!match && row.sdf(x, y, z) < 0) match = row;
+        });
+        return match;
+      }
       const combined = { id: first.id, kind: first.kind, priority: first.priority,
         bounds: P.data.freeze(P.spatial.boxOf(group.flatMap(({ row }) => [row.bounds.min, row.bounds.max]))),
         sdf: (x, y, z) => sample(x, y, z) ? -1 : 1 };
@@ -282,21 +391,28 @@
         current: (x, y, z) => sample(x, y, z).current(x, y, z) });
     }), ...pockets]);
     const layered = active.some(body => body.grid);
+    const atlas = active.length > uniformBodies || active.some(body => {
+      const { style, spanProfiles } = states.get(body);
+      return style.styled || spanProfiles?.length;
+    }) ? atlasFor(active) : null;
     const { mediumAt } = P.biomes.create({ media });
     function pack() {
-      const rows = active.reduce((sum, body) => sum + states.get(body).nz, 0);
-      const intervals = active.reduce((sum, body) => sum + (states.get(body).spans?.length ?? 0) / 4, 0);
-      const width = Math.max(maxAxis, Math.ceil(intervals / (2048 - rows)));
-      const height = Math.max(1, rows + Math.ceil(intervals / width));
-      const data = new Float32Array(width * height * 4), modes = new Int32Array(maxBodies);
-      const boxesMin = new Float32Array(maxBodies * 4), boxesMax = new Float32Array(maxBodies * 4);
-      const grids = new Float32Array(maxBodies * 4), tint = new Float32Array(maxBodies * 4);
-      const extinction = new Float32Array(maxBodies * 4), highlights = new Float32Array(maxBodies * 4);
       const airMin = new Float32Array(32), airMax = new Float32Array(32);
       pockets.forEach(({ bounds }, i) => {
         airMin.set(bounds.min, i * 4);
         airMax.set(bounds.max, i * 4);
       });
+      const air = { u_waterAirCount: pockets.length, u_waterAirMin: airMin, u_waterAirMax: airMax,
+        u_waterLayered: +layered };
+      if (atlas) return atlas(air);
+      const rows = active.reduce((sum, body) => sum + states.get(body).nz, 0);
+      const intervals = active.reduce((sum, body) => sum + (states.get(body).spans?.length ?? 0) / 4, 0);
+      const width = Math.max(maxAxis, Math.ceil(intervals / (2048 - rows)));
+      const height = Math.max(1, rows + Math.ceil(intervals / width));
+      const data = new Float32Array(width * height * 4), modes = new Int32Array(uniformBodies);
+      const boxesMin = new Float32Array(uniformBodies * 4), boxesMax = new Float32Array(uniformBodies * 4);
+      const grids = new Float32Array(uniformBodies * 4), tint = new Float32Array(uniformBodies * 4);
+      const extinction = new Float32Array(uniformBodies * 4), highlights = new Float32Array(uniformBodies * 4);
       let row = 0, tail = rows * width;
       active.forEach((body, i) => {
         const { nx, nz, dx, dz, data: grid, spans, style } = states.get(body), o = i * 4;
@@ -320,8 +436,7 @@
       });
       const uniforms = { u_waterCount: active.length, u_waterMin: boxesMin, u_waterMax: boxesMax,
         u_waterGrid: grids, u_waterTint: tint, u_waterLoss: extinction, u_waterHighlight: highlights,
-        u_waterAirCount: pockets.length, u_waterAirMin: airMin, u_waterAirMax: airMax,
-        u_waterLayered: +layered, u_waterSpanMode: modes };
+        ...air, u_waterSpanMode: modes };
       return { width, height, data, uniforms };
     }
     function changesFrom(previous) {
@@ -356,13 +471,14 @@
         !Array.from(tiles).every(P.verticalSpans.isGrid) ||
         (previous !== undefined && !old))
       throw new TypeError('Expected span grids and an optional previous span water scene');
-    const style = optics(look), key = JSON.stringify(style), cached = old?.key === key ? old.bodies : new Map();
+    const key = typeof look === 'function' ? look : JSON.stringify(optics(look ?? undefined));
+    const cached = old?.key === key ? old.bodies : new Map();
     const wet = tiles.filter(grid => grid.hasWater || grid.hasNamedAir);
-    if (wet.length > maxBodies) throw new RangeError('A span water scene supports up to eight wet or tagged-air tiles');
+    if (wet.length > maxBodies) throw new RangeError('A span water scene supports up to 256 wet or tagged-air tiles');
     const bodies = new Map();
     for (const grid of wet) {
       const id = 'span/' + grid.bounds.min.join('/');
-      bodies.set(grid, cached.get(grid) ?? fromSpans(grid, { id, optics: style }));
+      bodies.set(grid, cached.get(grid) ?? fromSpans(grid, { id, optics: look ?? undefined }));
     }
     if (old?.key === key && bodies.size === cached.size && wet.every(grid => cached.has(grid))) return previous;
     const result = scene([...bodies.values()]);

@@ -8,18 +8,21 @@ const { KIT } = require('..').load();
 const args = process.argv.slice(2);
 const runs = Number(args.find(arg => arg.startsWith('--runs='))?.slice(7) ?? 9);
 const json = args.includes('--json');
+const styled = args.includes('--styled');
 if (!Number.isSafeInteger(runs) || runs < 3 || runs > 100 ||
-    args.some(arg => arg !== '--json' && !arg.startsWith('--runs='))) {
-  console.error('Usage: node scripts/benchmark-biome-flood.js [--runs=9] [--json]');
+    args.some(arg => arg !== '--json' && arg !== '--styled' && !arg.startsWith('--runs='))) {
+  console.error('Usage: node scripts/benchmark-biome-flood.js [--runs=9] [--styled] [--json]');
   process.exit(1);
 }
 const clock = () => performance.now();
-const stages = ['spans', 'fill', 'water', 'graph', 'chunks', 'assembly', 'total'];
+const stages = ['edit', 'spans', 'fill', 'water', 'graph', 'chunks', 'assembly', 'rebuild', 'total'];
 const round = v => Number(v.toFixed(2));
 
 async function measure(fixture, brush, previous) {
-  const time = clock(), state = await fixture.build(brush, { clock, previous });
-  return { ...state, timings: { ...state.timings, total: clock() - time } };
+  const time = clock();
+  const state = previous ? await fixture.cut({ clock }) : await fixture.build(brush, { clock });
+  const total = clock() - time, edit = state.timings.edit ?? 0;
+  return { ...state, timings: { ...state.timings, edit, rebuild: total - edit, total } };
 }
 function counters(state) {
   return {
@@ -32,7 +35,8 @@ function counters(state) {
     traversalNodeTiles: state.graph.work.rebuilt.length,
     traversalLinkTiles: state.graph.work.relinked.length,
     traversalChecks: state.graph.work.checks,
-    splatChunks: state.patch.replaced.length
+    splatChunks: state.patch.replaced.length,
+    reusedSurfaces: state.patch.replaced.filter(chunk => chunk.work.reusedSurface).length
   };
 }
 function summarize(samples) {
@@ -46,17 +50,17 @@ async function main() {
   const incremental = [], full = [];
   let context;
   for (let i = -1; i < runs; i++) {
-    const local = floodValley(KIT), cold = floodValley(KIT);
+    const local = floodValley(KIT, { styled }), cold = floodValley(KIT, { styled });
     const start = await local.build();
-    const localBrush = local.brush(), coldBrush = cold.brush();
+    const coldBrush = cold.brush();
     // Alternate order after a warmup pair to limit systematic heap/JIT effects.
     let a, b;
     if (i % 2 === 0) {
-      a = await measure(local, localBrush, start);
+      a = await measure(local, null, start);
       b = await measure(cold, coldBrush);
     } else {
       b = await measure(cold, coldBrush);
-      a = await measure(local, localBrush, start);
+      a = await measure(local, null, start);
     }
     assert.deepEqual(a.world.data, b.world.data);
     assert.deepEqual(a.world.splatIds, b.world.splatIds);
@@ -75,7 +79,7 @@ async function main() {
     incremental: summarize(incremental.map(sample => sample[stage])),
     full: summarize(full.map(sample => sample[stage]))
   }]));
-  const report = { runs, warmupPairs: 1, environment: {
+  const report = { runs, warmupPairs: 1, styled, environment: {
     node: process.version, os: os.platform() + ' ' + os.release(), arch: os.arch(), cpu: os.cpus()[0]?.model
   }, ...context, timeMs, samplesMs: { incremental, full } };
   if (json) console.log(JSON.stringify(report, null, 2));

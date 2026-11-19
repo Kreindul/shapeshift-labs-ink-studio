@@ -72,6 +72,9 @@ each optical path, so a chamber can stay clear inside a flooded body.
 Layered bodies trace each wet interval in ray order. Caves can share the
 same XZ columns with water at other heights, and solid ceilings suppress the
 waterline highlights where no air touches the top of the water.
+Scenes above eight bodies or with per-medium optical profiles use a spatial
+index in the water texture atlas. Up to 256 bodies share the atlas, which is
+capped at 2048 × 2048 texels including metadata.
 
 Water bodies have optional `optics` controls. `tint` and `surfaceColor`
 take 0–1 RGB triples. `extinction` is a nonnegative RGB coefficient per
@@ -81,6 +84,12 @@ highlights are stronger at grazing angles, foam favors shallows, and
 stylized caustics fall off with depth. Screen-space refraction samples
 pixels that also see the same interface through the splat layers. The art
 palette still controls final quantization when `raw` is off.
+
+`deepTint` is an optional RGB triplet blended in between the two world-unit
+depths in `depthRange`. `sediment: {color, strength, height, scale}` adds
+stylized drifting grains. `height` sets their falloff above the bed, and a
+higher `scale` makes the grains finer. A span scene can choose these profiles
+per medium to grade a clear lake and a darker flooded cavern independently.
 
 Run the [Sunken gate example](../examples/water-bodies.html) from the repository
 root with the commands below, then open the example through the local server.

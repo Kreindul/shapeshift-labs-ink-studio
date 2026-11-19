@@ -1,15 +1,45 @@
 // Exact ray intervals through the published water columns. Distance is in
 // world units, independently of perspective, ortho, and the scene depth ramp.
-export const waterGLSL = (airPockets, layered) => `
+export const waterGLSL = (airPockets, layered, atlas) => `
 ${airPockets ? '#define WATER_AIR_POCKETS' : ''}
 uniform highp sampler2D u_waterData;
 uniform int u_waterCount;
 ${layered ? '#define WATER_LAYERED' : ''}
+${atlas ? '#define WATER_ATLAS' : ''}
+#if defined(WATER_LAYERED) || defined(WATER_ATLAS)
+precision highp int;
+#endif
+#ifdef WATER_ATLAS
+uniform int u_waterNodeCount, u_waterBodyBase, u_waterStyleBase;
+vec4 waterTexel(int i) {
+  int width = textureSize(u_waterData, 0).x;
+  return texelFetch(u_waterData, ivec2(i % width, i / width), 0);
+}
+#else
 #ifdef WATER_LAYERED
 uniform int u_waterSpanMode[8];
 #endif
 uniform vec4 u_waterMin[8], u_waterMax[8], u_waterGrid[8];
 uniform vec4 u_waterTint[8], u_waterLoss[8], u_waterHighlight[8];
+#endif
+
+struct WaterStyle {
+  vec4 tint, loss, highlight;
+  #ifdef WATER_ATLAS
+  vec4 deep, sediment, depth;
+  #else
+  float refraction;
+  #endif
+};
+WaterStyle readWaterStyle(int i) {
+  #ifdef WATER_ATLAS
+  int at = u_waterStyleBase + i * 6;
+  return WaterStyle(waterTexel(at), waterTexel(at + 1), waterTexel(at + 2),
+    waterTexel(at + 3), waterTexel(at + 4), waterTexel(at + 5));
+  #else
+  return WaterStyle(u_waterTint[i], u_waterLoss[i], u_waterHighlight[i], u_waterMax[i].w);
+  #endif
+}
 uniform mat4 u_waterView;
 uniform vec3 u_waterEye;
 uniform vec3 u_waterCamera;
@@ -54,9 +84,9 @@ float wetLength(vec2 wet, vec2 air[8], int count) {
 }
 #endif
 
-void waterSurface(int body, vec3 p, vec3 ray, vec4 column, inout vec3 light, inout vec3 through,
+void waterSurface(int body, vec3 p, vec3 ray, vec4 column, WaterStyle style, inout vec3 light, inout vec3 through,
                   inout vec3 mark) {
-  vec4 highlight = u_waterHighlight[body];
+  vec4 highlight = style.highlight;
   vec2 flow = clamp(column.zw, vec2(-4.0), vec2(4.0));
   vec2 position = p.xz - flow * (u_waterTime * 0.25);
   vec2 phase = vec2(dot(position, vec2(3.1, 1.9)), dot(position, vec2(-1.7, 4.4))) +
@@ -64,19 +94,23 @@ void waterSurface(int body, vec3 p, vec3 ray, vec4 column, inout vec3 light, ino
   vec2 ripple = sin(phase);
   float grazing = pow(max(0.0, 1.0 - abs(ray.y)), 3.0);
   float foam = (1.0 - smoothstep(0.05, 0.4, column.y - column.x)) *
-    smoothstep(0.08, 0.73, (ripple.x + ripple.y) * 0.5) * u_waterTint[body].w;
+    smoothstep(0.08, 0.73, (ripple.x + ripple.y) * 0.5) * style.tint.w;
   float opacity = clamp(highlight.w * (0.16 + 0.84 * grazing) + foam, 0.0, 1.0);
   light += through * mix(highlight.rgb, vec3(0.9, 0.98, 0.94), foam) * opacity;
   through *= 1.0 - opacity;
-  float refraction = u_waterMax[body].w;
+  #ifdef WATER_ATLAS
+  float refraction = style.deep.w;
+  #else
+  float refraction = style.refraction;
+  #endif
   if (mark.x == 0.0 && refraction > 0.0) {
     vec2 shift = round(ripple * refraction);
-    mark = vec3(1.0, (float(body * 16) + shift.x + 4.0) / 255.0, (shift.y + 4.0) / 8.0);
+    mark = vec3(1.0, float(body) / 255.0, ((shift.x + 4.0) + 9.0 * (shift.y + 4.0)) / 255.0);
   }
 }
 
 void waterInterval(int body, vec3 eye, vec3 ray, float limit, float start, float end,
-                   vec4 column, bool exposed, bool layered,
+                   vec4 column, bool exposed, bool layered, WaterStyle style, vec2 depthBounds,
                    #ifdef WATER_AIR_POCKETS
                    vec2 air[8], int airCount,
                    #endif
@@ -97,12 +131,30 @@ void waterInterval(int body, vec3 eye, vec3 ray, float limit, float start, float
     distance = wetLength(wet, air, airCount);
     #endif
     if (surface && ray.y < 0.0)
-      waterSurface(body, eye + ray * top, ray, column, light, through, mark);
-    vec3 transmission = exp(-u_waterLoss[body].rgb * distance);
-    light += through * (1.0 - transmission) * u_waterTint[body].rgb;
+      waterSurface(body, eye + ray * top, ray, column, style, light, through, mark);
+    vec3 transmission = exp(-style.loss.rgb * distance);
+    vec3 tint = style.tint.rgb;
+    #ifdef WATER_ATLAS
+    vec3 center = eye + ray * ((wet.x + wet.y) * 0.5);
+    float deep = smoothstep(style.depth.x, style.depth.y, depthBounds.y - center.y);
+    tint = mix(tint, style.deep.rgb, deep);
+    if (style.sediment.w > 0.0) {
+      vec3 drift = vec3(column.z, 0.03, column.w) * u_waterTime;
+      vec3 grainPoint = (center - drift) * style.depth.w;
+      vec3 bucket = floor(grainPoint), offset = fract(grainPoint) - 0.5;
+      float grain = fract(sin(dot(bucket, vec3(2.13, 3.71, 5.73))) * 17368.429);
+      float fleck = 1.0 - smoothstep(0.01, 0.19, dot(offset, offset));
+      float nearBed = exp(-max(0.0, center.y - depthBounds.x) / style.depth.z);
+      float grains = style.sediment.w * (0.22 + 0.78 * fleck * smoothstep(0.65, 0.97, grain)) *
+        nearBed * (1.0 - exp(-1.8 * distance));
+      light += through * style.sediment.rgb * grains;
+      through *= 1.0 - grains * 0.65;
+    }
+    #endif
+    light += through * (1.0 - transmission) * tint;
     through *= transmission;
     if (surface && ray.y > 0.0)
-      waterSurface(body, eye + ray * top, ray, column, light, through, mark);
+      waterSurface(body, eye + ray * top, ray, column, style, light, through, mark);
     surfaceSeen = surfaceSeen || surface;
     if (endpoint) {
       vec3 p = eye + ray * limit;
@@ -110,7 +162,7 @@ void waterInterval(int body, vec3 eye, vec3 ray, float limit, float start, float
       vec2 xz = p.xz - clamp(column.zw, vec2(-4.0), vec2(4.0)) * (u_waterTime * 0.17);
       float a = sin(dot(xz, vec2(7.1, 3.8)) + u_waterTime * 2.1);
       float b = sin(dot(xz, vec2(-5.2, 6.4)) - u_waterTime * 1.7);
-      caustic = smoothstep(0.78, 0.98, abs(a * b)) * exp(-max(0.0, depth) * 1.2) * u_waterLoss[body].w;
+      caustic = smoothstep(0.78, 0.98, abs(a * b)) * exp(-max(0.0, depth) * 1.2) * style.loss.w;
     }
   }
 }
@@ -121,7 +173,21 @@ void waterColumns(int body, vec3 eye, vec3 ray, float limit,
                   #endif
                   inout vec3 light, inout vec3 through,
                   inout vec3 mark, inout float caustic) {
+  #ifdef WATER_ATLAS
+  int at = u_waterBodyBase + body * 4;
+  vec4 low = waterTexel(at), high = waterTexel(at + 1), grid = waterTexel(at + 2);
+  int styleId = int(high.w);
+  #ifdef WATER_LAYERED
+  bool layered = waterTexel(at + 3).x > 0.5;
+  #endif
+  WaterStyle style = readWaterStyle(styleId);
+  #else
   vec4 low = u_waterMin[body], high = u_waterMax[body], grid = u_waterGrid[body];
+  #ifdef WATER_LAYERED
+  bool layered = u_waterSpanMode[body] == 1;
+  #endif
+  WaterStyle style = readWaterStyle(body);
+  #endif
   vec2 range = vec2(0.0, limit);
   if (!waterSlab(range, eye.x, ray.x, low.x, high.x) ||
       !waterSlab(range, eye.z, ray.z, low.z, high.z)) return;
@@ -143,19 +209,34 @@ void waterColumns(int body, vec3 eye, vec3 ray, float limit,
   bool surfaceSeen = false;
   for (int cellStep = 0; cellStep < 128; cellStep++) {
     float end = max(start, min(range.y, min(next.x, next.y)));
+    #ifdef WATER_ATLAS
+    vec4 column = waterTexel(int(low.w) + cell.y * count.x + cell.x);
+    #else
     vec4 column = texelFetch(u_waterData, cell + ivec2(0, int(low.w)), 0);
+    #endif
     if (end > start) {
       #ifdef WATER_LAYERED
-      if (u_waterSpanMode[body] == 1) {
-        int width = textureSize(u_waterData, 0).x, first = int(column.x), length = int(column.y);
+      if (layered) {
+        int first = int(column.x), length = int(column.y);
         for (int i = 0; i < 32; i++) {
           if (i >= length) break;
           int slot = ray.y < 0.0 ? length - 1 - i : i;
-          int offset = first + slot;
+          #ifdef WATER_ATLAS
+          int offset = first + slot * 2;
+          vec4 span = waterTexel(offset), info = waterTexel(offset + 1);
+          bool exposed = info.y > 0.5;
+          WaterStyle localStyle = style;
+          if (int(info.x) != styleId) localStyle = readWaterStyle(int(info.x));
+          vec2 depthBounds = info.zw;
+          #else
+          int width = textureSize(u_waterData, 0).x, offset = first + slot;
           int flags = int(slot < 16 ? column.z : column.w);
           bool exposed = (flags & (1 << (slot % 16))) != 0;
           vec4 span = texelFetch(u_waterData, ivec2(offset % width, offset / width), 0);
-          waterInterval(body, eye, ray, limit, start, end, span, exposed, true,
+          WaterStyle localStyle = style;
+          vec2 depthBounds = span.xy;
+          #endif
+          waterInterval(body, eye, ray, limit, start, end, span, exposed, true, localStyle, depthBounds,
             #ifdef WATER_AIR_POCKETS
             air, airCount,
             #endif
@@ -163,7 +244,7 @@ void waterColumns(int body, vec3 eye, vec3 ray, float limit,
         }
       } else
       #endif
-      if (column.y > column.x) waterInterval(body, eye, ray, limit, start, end, column, true, false,
+      if (column.y > column.x) waterInterval(body, eye, ray, limit, start, end, column, true, false, style, column.xy,
         #ifdef WATER_AIR_POCKETS
         air, airCount,
         #endif
@@ -208,6 +289,46 @@ vec3 waterPaint(vec3 color, vec2 pixel, vec2 size, float axial, out vec3 mark) {
     airCount++;
   }
   #endif
+  vec3 light = vec3(0), through = vec3(1);
+  float caustic = 0.0;
+  #ifdef WATER_ATLAS
+  // Each hit uses a stackless BVH walk bounded by the next nearer entry.
+  // Body interiors are disjoint, so its exit is the next search cursor.
+  float cursor = 0.0;
+  for (int j = 0; j < u_waterCount; j++) {
+    int body = -1, node = 0;
+    float first = limit, exit = limit;
+    while (node < u_waterNodeCount) {
+      vec4 low = waterTexel(node * 2), high = waterTexel(node * 2 + 1);
+      vec2 hit = vec2(cursor, first);
+      if (waterSlab(hit, eye.x, ray.x, low.x, high.x) &&
+          waterSlab(hit, eye.y, ray.y, low.y, high.y) &&
+          waterSlab(hit, eye.z, ray.z, low.z, high.z)) {
+        if (high.w < 0.0) {
+          node++;
+          continue;
+        }
+        body = int(high.w);
+        first = hit.x;
+        // The search bound clips hit.y and must not clip the actual exit.
+        vec2 extent = vec2(cursor, limit);
+        waterSlab(extent, eye.x, ray.x, low.x, high.x);
+        waterSlab(extent, eye.y, ray.y, low.y, high.y);
+        waterSlab(extent, eye.z, ray.z, low.z, high.z);
+        exit = extent.y;
+      }
+      node = int(low.w);
+    }
+    if (body < 0) break;
+    waterColumns(body, eye, ray, limit,
+      #ifdef WATER_AIR_POCKETS
+      air, airCount,
+      #endif
+      light, through, mark, caustic);
+    if (exit >= limit) break;
+    cursor = exit;
+  }
+  #else
   float starts[8];
   for (int i = 0; i < 8; i++) {
     starts[i] = 1e30;
@@ -217,8 +338,6 @@ vec3 waterPaint(vec3 color, vec2 pixel, vec2 size, float axial, out vec3 mark) {
     if (waterSlab(hit, eye.x, ray.x, low.x, high.x) && waterSlab(hit, eye.y, ray.y, low.y, high.y) &&
         waterSlab(hit, eye.z, ray.z, low.z, high.z)) starts[i] = hit.x;
   }
-  vec3 light = vec3(0), through = vec3(1);
-  float caustic = 0.0;
   for (int j = 0; j < 8; j++) {
     int body = -1;
     float first = 1e30;
@@ -234,13 +353,14 @@ vec3 waterPaint(vec3 color, vec2 pixel, vec2 size, float axial, out vec3 mark) {
       #endif
       light, through, mark, caustic);
   }
+  #endif
   return light + through * mix(color, vec3(0.93, 1.0, 0.86), caustic);
 }
 `;
 
-export const waterBackgroundShader = (airPockets, layered) => `#version 300 es
+export const waterBackgroundShader = (airPockets, layered, atlas) => `#version 300 es
 precision highp float;
-${waterGLSL(airPockets, layered)}
+${waterGLSL(airPockets, layered, atlas)}
 uniform vec2 u_waterViewport;
 uniform vec3 u_waterBackground;
 layout(location=0) out vec4 scene;

@@ -45,10 +45,36 @@
     return Object.freeze({ size, cell, origin: bounds.min, sample, values: () => values.slice() });
   }
 
+  function pointLighting({ lights = [], ambient = 1 } = {}) {
+    if (!Array.isArray(lights) || lights.length > 256 || !finite(ambient) || ambient < 0 || ambient > 2)
+      throw new RangeError('Surface lighting needs bounded lights and ambient intensity');
+    const nearby = P.spatial.pointIndex(Array.from(lights, raw => {
+      const { point, radius, color = [1, 1, 1], strength = 1, wrap = 0.24 } = raw ?? {};
+      if (!coordinates(point, 3) || !positive(radius) ||
+          !coordinates(color, 3, v => finite(v) && v >= 0 && v <= 1) ||
+          !finite(strength) || strength < 0 || strength > 8 || !finite(wrap) || wrap < 0 || wrap > 1)
+        throw new RangeError('A point lamp needs XYZ, a positive radius, RGB, strength and wrap');
+      return { point: point.slice(), color: color.slice(), radius, strength, wrap,
+        bounds: { min: point.map(v => v - radius), max: point.map(v => v + radius) } };
+    }));
+    return (rgb, { point, normal }) => {
+      const lit = rgb.map(v => v * ambient);
+      nearby(point, lamp => {
+        const delta = V.sub(lamp.point, point), distance = V.len(delta);
+        if (distance >= lamp.radius) return;
+        const facing = distance ? Math.max(0, V.dot(normal, delta) / distance) : 1;
+        const falloff = (1 - distance / lamp.radius) ** 2, power = lamp.strength * falloff *
+          (lamp.wrap + (1 - lamp.wrap) * facing);
+        for (let i = 0; i < 3; i++) lit[i] += lamp.color[i] * (95 + rgb[i] * 0.6) * power;
+      });
+      return lit.map(v => Math.min(255, v));
+    };
+  }
+
   function create({
     height, caves = [], cell = 0.25, chunkCells = 16, verticalCells = [-24, 24], terrainSlope = 1,
     layers = [], project, emit, palette = [0x13232b, 0x435a58, 0x78927a, 0xbdba92, 0xede0b9], materialRamps = {},
-    dependencyHalo = 0, maxSplats = 50000, surfaceScatter = 0
+    dependencyHalo = 0, maxSplats = 50000, surfaceScatter = 0, shadeSurface
   } = {}) {
     if (typeof height !== 'function' || !positive(cell) || cell < 1e-6 || !integer(chunkCells) || chunkCells < 1 ||
         !coordinates(verticalCells, 2, integer) || verticalCells[0] >= verticalCells[1] ||
@@ -56,6 +82,7 @@
         chunkCells ** 2 * (verticalCells[1] - verticalCells[0]) > 250000 || !finite(terrainSlope) || terrainSlope < 0 ||
         !Array.isArray(caves) || !Array.isArray(layers) || layers.length > 64 ||
         (emit !== undefined && typeof emit !== 'function') || (project !== undefined && typeof project !== 'function') ||
+        (shadeSurface !== undefined && typeof shadeSurface !== 'function') ||
         !Array.isArray(palette) || !palette.length || palette.length > 64 ||
         !Array.from(palette).every(v => integer(v) && v >= 0 && v <= 0xffffff) ||
         !finite(dependencyHalo) || dependencyHalo < 0 || !integer(maxSplats) || maxSplats < 1 ||
@@ -86,19 +113,24 @@
     }).sort((a, b) => order(a.id, b.id));
     const halo = Math.max(dependencyHalo, cell, ...population.map(({ options }) =>
       options.exclusion ? options.exclusion.maxDistance + options.spacing : 0));
-    const frames = new WeakMap(), emptyWater = P.waterBodies.scene([]);
+    const frames = new WeakMap(), realizations = new WeakMap(), geometry = new WeakMap(),
+      emptyWater = P.waterBodies.scene([]);
     const sun = V.norm([-0.43, 0.84, 0.31]), slopeFactor = 1 / Math.hypot(1, terrainSlope);
     const epsilon = cell * 0.027;
 
-    function prepare(source, { water = emptyWater, time = 0, bricks = null } = {}) {
+    function prepare(source, { water = emptyWater, time = 0, bricks = null, geometryFrom } = {}) {
       if (typeof source?.withEnvironment !== 'function' || typeof water?.changesFrom !== 'function' || !finite(time) ||
           (bricks !== null && !P.sparseBricks.isSnapshot(bricks)))
         throw new Error('A world frame needs a biome recipe view, a water scene, finite time and optional sparse bricks');
-      const terrain = source.withEnvironment({ media: water.media, solid: undefined, project: undefined });
-      const heightAt = (x, z) => {
+      const carrier = frames.get(geometryFrom);
+      if (geometryFrom !== undefined && (!carrier || carrier.source !== source || geometryFrom.bricks !== bricks ||
+          geometryFrom.time !== time))
+        throw new TypeError('Expected prepared geometry from the same authored inputs');
+      const terrain = carrier ? null : source.withEnvironment({ media: water.media, solid: undefined, project: undefined });
+      const heightAt = geometryFrom?.heightAt ?? ((x, z) => {
         const base = checked(height(x, z), 'Terrain height');
         return checked(base + terrain.heightOffsetAt(x, base, z, time), 'Realized height');
-      };
+      });
       function field(sampleHeight) {
         function base(x, y, z) {
           const point = [x, y, z];
@@ -199,7 +231,7 @@
         bakeSpanTiles: options => P.verticalSpans.bakeTiles({ ...options, solid: sampledDistance() }),
         traversalGraph: options => P.traversalGraph.create({ ...options, clearance: sampledDistance() }),
         traversal: body => P.traversal.create({ ...body, supports, clearance: point => distance(...point) }) });
-      frames.set(frame, { field, normalOf });
+      frames.set(frame, { field, normalOf, source, carrier: carrier?.carrier ?? geometryFrom ?? null });
       return frame;
     }
 
@@ -212,7 +244,7 @@
       return { index: index.slice(), key: index.join('/'), grid, bounds };
     }
 
-    function build(frame, index) {
+    function build(frame, index, retained) {
       const internals = frames.get(frame);
       if (!internals) throw new Error('Expected a frame from this biome world');
       const { key, grid, bounds } = address(index), { view, time, bricks } = frame;
@@ -223,19 +255,18 @@
         return columns.get(id);
       }
       const distance = internals.field(heightAt);
-      const surface = P.geometry.surfaceNets(distance, bounds, {
-        cell, latticeBounds: grid, topology: false, refine: 1, captureField: true,
-        normal: (x, y, z) => internals.normalOf(distance, x, y, z)
-      });
-      if (surface.points.length > maxSplats) throw new RangeError('Biome chunk exceeds its splat budget');
-      const builder = makeBuilder(hash(key, view.seed), pal, {
-        renderMetadata: false, initialCapacity: Math.max(1, surface.points.length)
-      }), ids = [];
-      const owned = p => P.spatial.contains(bounds, p) && p[0] < bounds.max[0] && p[2] < bounds.max[2];
-      for (let i = 0; i < surface.points.length; i++) {
-        let point = surface.points[i];
-        const normal = surface.normals[i];
-        const coord = surface.active[i].key.split('/').map((v, axis) => Number(v) + grid.min[axis]);
+      const sampled = retained ?? captureSurface();
+      function captureSurface() {
+        const surface = P.geometry.surfaceNets(distance, bounds, {
+          cell, latticeBounds: grid, topology: false, refine: 1, captureField: true,
+          normal: (x, y, z) => internals.normalOf(distance, x, y, z)
+        });
+        if (surface.points.length > maxSplats) throw new RangeError('Biome chunk exceeds its splat budget');
+        return { vertices: surface.points.map((point, i) => scatter(point, surface.normals[i], surface.active[i].key)),
+          field: latticeField(grid, bounds, cell, surface.fieldSamples()), work: surface.work };
+      }
+      function scatter(point, normal, localKey) {
+        const coord = localKey.split('/').map((v, axis) => Number(v) + grid.min[axis]);
         const id = 'surface/' + coord.join('/');
         if (surfaceScatter > 0) {
           const dice = K.grow.dice(hash(id, view.seed));
@@ -250,20 +281,30 @@
             if (Math.abs(distance(...projected)) <= epsilon * 1.5) point = projected;
           }
         }
-        const surfaceY = heightAt(point[0], point[2]);
+        return { id, point, normal, surfaceY: heightAt(point[0], point[2]) };
+      }
+      const builder = makeBuilder(hash(key, view.seed), pal, {
+        renderMetadata: false, initialCapacity: Math.max(1, sampled.vertices.length)
+      }), ids = [];
+      const owned = p => P.spatial.contains(bounds, p) && p[0] < bounds.max[0] && p[2] < bounds.max[2];
+      for (const { id, point, normal, surfaceY } of sampled.vertices) {
         const shade = Math.max(0, V.dot(normal, sun));
         const painted = bricks && ramps.size ? ramps.get(bricks.attributes(...V.mad(point, normal, -cell * 0.22)).material) : null;
         const color = painted ? painted[Math.round(shade * (painted.length - 1))] : (() => {
           const { ramp } = view.materialAt(...point, { surfaceY, time, probe: V.mad(point, normal, cell * 0.22) });
           return ramp[Math.round(shade * (ramp.length - 1))].map(v => Math.round(v * 255));
         })();
-        builder.disc(...point, normal, cell * (0.52 + surfaceScatter * 0.24), cell * 0.11, color, 1);
+        const shaded = shadeSurface?.(color.slice(), { point: point.slice(), normal: normal.slice(), frame }) ?? color;
+        if (shadeSurface && !coordinates(shaded, 3, v => finite(v) && v >= 0 && v <= 255))
+          throw new RangeError('Surface shading needs an RGB color in [0, 255]');
+        builder.disc(...point, normal, cell * (0.52 + surfaceScatter * 0.24), cell * 0.11, shaded, 1);
         ids.push(id);
       }
       const placements = [];
       const ground = (x, z) => {
         const y = heightAt(x, z);
-        if (bricks?.affectsColumn(x, z)) {
+        if (bricks?.affectsColumn(x, z) && !(distance(x, y, z) === 0 &&
+            distance(x, y - epsilon, z) < 0 && distance(x, y + epsilon, z) > 0)) {
           const found = frame.supports(x, z, bottom * cell, top * cell);
           return found.reduce((nearest, support) => nearest === null || Math.abs(support.y - y) < Math.abs(nearest - y) ?
             support.y : nearest, null);
@@ -298,10 +339,11 @@
       if (builder.count() > maxSplats) throw new RangeError('Biome chunk exceeds its splat budget');
       const { data, count, moving, back } = builder.finish();
       const packed = data.byteLength === data.buffer.byteLength ? data : data.slice();
-      return Object.freeze({ key, index: freeze(index.slice()), bounds, placements: scenePlacements, routes: freeze(routes),
-        field: latticeField(grid, bounds, cell, surface.fieldSamples()),
-        work: freeze({ ...surface.work, heightColumns: columns.size }),
+      const chunk = Object.freeze({ key, index: freeze(index.slice()), bounds, placements: scenePlacements, routes: freeze(routes),
+        field: sampled.field, work: freeze({ ...sampled.work, heightColumns: columns.size, reusedSurface: Boolean(retained) }),
         splats: Object.freeze({ data: packed, count, moving, back, ids: freeze(ids) }) });
+      geometry.set(chunk, sampled);
+      return chunk;
     }
 
     function makeWorld(frame, chunks, meta = {}) {
@@ -324,43 +366,52 @@
         count, data, splatIds: freeze(splatIds), moving: Int32Array.from(moving), back: Int32Array.from(back) };
     }
 
-    let building, published = null, queue = Promise.resolve();
-    const cache = P.chunks.create({ preview: entry => build(building, entry.input) });
-    function update(frame, indices) {
+    let published, queue = Promise.resolve();
+    const initial = P.chunks.create({ preview: ({ input }, { previous }) =>
+      build(input.frame, input.index, input.reuseGeometry ? geometry.get(previous) : undefined) });
+    async function realize(frame, indices, { previous } = {}) {
       if (!frames.has(frame) || !Array.isArray(indices) || indices.length > 4096)
         throw new Error('Expected a prepared frame and a bounded chunk set');
+      const old = realizations.get(previous);
+      if (previous !== undefined && !old) throw new TypeError('Expected a realization from this biome compiler');
       const requests = indices.map(address);
+      const before = previous?.frame, intent = before && frame.view.changesFrom(before.view);
+      const water = before ? frame.water.changesFrom(before.water) : [];
+      const changedBricks = before && (frame.bricks?.changesFrom(before.bricks) ?? before.bricks?.changesFrom(null));
+      const geometryDirty = before ? [...intent.regions, ...(changedBricks ?? [])] : [];
+      const dirty = [...geometryDirty, ...water];
+      const global = before && (intent.global || before.time !== frame.time), all = global || dirty.length > 4096;
+      const shareCarrier = before && (frame.water === before.water || frames.get(frame).carrier && frames.get(before).carrier);
+      const horizontal = box => ({ min: [box.min[0], bottom * cell, box.min[2]], max: [box.max[0], top * cell, box.max[2]] });
+      const dirtySurfaces = geometryDirty.map(horizontal), cache = (old ?? initial).fork();
+      const patch = await cache.update(requests.map(({ index, key, bounds }) => ({
+        key, revision: 1, bounds: P.spatial.expand(bounds, halo),
+        input: { index, frame, reuseGeometry: Boolean(shareCarrier && !global &&
+          !dirtySurfaces.some(box => P.spatial.overlap(P.spatial.expand(bounds, cell), box))) }
+      })), {
+        changedIds: all ? requests.map(row => row.key) : [],
+        regions: all ? [] : dirty.map(horizontal)
+      });
+      const result = Object.freeze({ sequence: patch.sequence, frame, removed: patch.removed,
+        replaced: Object.freeze(patch.replaced.map(row => row.value)),
+        chunks: Object.freeze(cache.entries().map(row => row.value)) });
+      realizations.set(result, cache);
+      return result;
+    }
+    function update(frame, indices) {
       const pending = queue.then(async () => {
-        const before = published;
-        const intent = before && frame.view.changesFrom(before.view);
-        const water = before ? frame.water.changesFrom(before.water) : [];
-        const changedBricks = before && (frame.bricks?.changesFrom(before.bricks) ?? before.bricks?.changesFrom(null));
-        const dirty = before ? [...intent.regions, ...water, ...(changedBricks ?? [])] : [];
-        const all = before && (intent.global || before.time !== frame.time || dirty.length > 4096);
-        building = frame;
-        let patch;
-        try {
-          patch = await cache.update(requests.map(({ index, key, bounds }) => ({
-            key, revision: 1, bounds: P.spatial.expand(bounds, halo), input: index
-          })), {
-            changedIds: all ? requests.map(row => row.key) : [],
-            regions: all ? [] : dirty.map(box => ({
-              min: [box.min[0], bottom * cell, box.min[2]], max: [box.max[0], top * cell, box.max[2]]
-            }))
-          });
-        } finally {
-          building = null;
-        }
-        published = frame;
-        return Object.freeze({ sequence: patch.sequence, frame, removed: patch.removed,
-          replaced: Object.freeze(patch.replaced.map(row => row.value)) });
+        const result = await realize(frame, indices, { previous: published });
+        published = result;
+        const { sequence, removed, replaced } = result;
+        return Object.freeze({ sequence, frame, removed, replaced });
       });
       queue = pending.catch(() => {});
       return pending;
     }
-    return Object.freeze({ prepare, build, update, makeWorld, frame: () => published,
-      chunks: () => Object.freeze(cache.entries().map(row => row.value)) });
+    const empty = Object.freeze([]);
+    return Object.freeze({ prepare, build: (frame, index) => build(frame, index), realize, update, makeWorld,
+      frame: () => published?.frame ?? null, chunks: () => published?.chunks ?? empty });
   }
 
-  P.biomeWorld = Object.freeze({ create });
+  P.biomeWorld = Object.freeze({ create, pointLighting });
 })(KIT);

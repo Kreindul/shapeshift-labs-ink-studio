@@ -112,13 +112,15 @@
       return true;
     }
 
-    function probePath(path, budget) {
-      let wet = false, length = 0;
+    function probePath(path, budget, endpoints) {
+      let wet = Boolean(endpoints?.some(node => node.medium === 'water')), length = 0;
       for (let i = 1; i < path.length; i++) {
         const a = path[i - 1], b = path[i], direction = V.sub(b, a);
         const segment = distance(a, b), steps = Math.max(1, Math.ceil(segment / stride));
         length += segment;
-        for (let j = i === 1 ? 0 : 1; j <= steps; j++) {
+        const first = i === 1 && !endpoints ? 0 : 1;
+        const last = endpoints && i === path.length - 1 ? steps - 1 : steps;
+        for (let j = first; j <= last; j++) {
           budget();
           const p = V.mad(a, direction, j / steps), row = mediumAt(...p);
           if (!row || row.kind === 'solid' || !pose(p, budget)) return null;
@@ -192,11 +194,18 @@
       }
     }
 
-    function connect(from, to) {
+    function connect(from, to, scans) {
       check();
       const wet = from.medium === 'water' || to.medium === 'water';
       const dy = to.point[1] - from.point[1], same = from.column[0] === to.column[0] && from.column[1] === to.column[1];
       let mode, scanned, points = [from.point, to.point];
+      function scan(slot) {
+        // Reversing an edge retains its swept volume. Endpoint clearance
+        // was checked when the two nodes were created.
+        if (scans[slot] === undefined) scans[slot] = probePath(points, check, [from, to]);
+        return scans[slot];
+      }
+      let raised = false;
       if (wet) {
         if (Math.abs(dy) > swimReach) return;
         mode = 'swim';
@@ -211,13 +220,14 @@
         } else mode = 'walk';
         // Lift on the lower side of a step. Try a continuous ramp first
         // for walks, then the raised path for a sharp ledge.
-        if (mode === 'walk') scanned = probePath(points, check);
+        if (mode === 'walk') scanned = scan(0);
         if (!scanned) {
+          raised = true;
           const low = dy > 0 ? from.point : to.point;
           points = [from.point, [low[0], Math.max(from.point[1], to.point[1]), low[2]], to.point];
         }
       }
-      scanned ??= probePath(points, check);
+      scanned ??= scan(+raised);
       if (!scanned || (mode === 'swim' && !scanned.wet) || (mode !== 'swim' && scanned.wet) || scanned.length === 0) return;
       const id = from.id + '>' + to.id;
       return freeze({ id, from: from.id, to: to.id, mode, length: scanned.length, points,
@@ -233,13 +243,13 @@
         relinked.push(key);
         const links = [];
         const link = (a, b) => {
-          const edge = connect(a, b);
-          if (edge) links.push(edge);
+          const scans = [], forward = connect(a, b, scans), backward = connect(b, a, scans);
+          if (forward) links.push(forward);
+          if (backward) links.push(backward);
         };
         for (const a of state.columns) {
           for (let i = 1; i < a.nodes.length; i++) {
             link(a.nodes[i - 1], a.nodes[i]);
-            link(a.nodes[i], a.nodes[i - 1]);
           }
           for (const neighbor of neighborKeys(a)) {
             const b = columns.get(neighbor);
@@ -249,7 +259,6 @@
               while (begin < b.nodes.length && b.nodes[begin].point[1] < from.point[1] - reach) begin++;
               for (let i = begin; i < b.nodes.length && b.nodes[i].point[1] <= from.point[1] + reach; i++) {
                 link(from, b.nodes[i]);
-                link(b.nodes[i], from);
               }
             }
           }

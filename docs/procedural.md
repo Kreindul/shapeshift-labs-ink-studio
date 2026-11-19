@@ -1374,8 +1374,10 @@ const eyesMedium = environment.mediumAt(...eyePosition);
   axis requires an explicit render `resolution` within that limit. Publish a
   new scene and build its biome query from the same revision when the solver
   advances. Previous frames remain readable.
-- A scene supports up to eight bodies with distinct IDs and nonoverlapping
-  XYZ bounding interiors. This uses the full span grid bounds for layered
+- A scene supports up to 256 bodies with distinct IDs and nonoverlapping
+  XYZ bounding interiors. Larger scenes use a spatial ray index in the WebGL
+  texture atlas, with a total budget of 2048 × 2048 texels including metadata.
+  The overlap check uses the full span grid bounds for layered
   bodies so tagged air and water agree across tiles. Bodies can sit at
   different heights at the same XZ.
 - `W.fromSpans(grid, {id, optics})` packs up to 32 wet intervals per column
@@ -1384,9 +1386,12 @@ const eyesMedium = environment.mediumAt(...eyePosition);
   neighboring layered bodies to keep it continuous in gameplay queries.
   Depth is measured to the top of each contiguous water run. The renderer
   highlights a waterline only where air meets the top of the run. All
-  intervals in one body share its optical settings.
+  intervals share the default optical settings when given a profile object.
+  Pass `optics(mediumId, grid)` to choose a profile per water medium in a
+  tile. Return `undefined` to select the built-in defaults. Treat the
+  resolver and captured data as immutable for each revision.
 - `W.sceneFromSpans(tiles, {previous, optics})` publishes a collection of
-  span tiles. Up to eight tiles with water or named air can enter one scene.
+  span tiles. Up to 256 tiles with water or named air can enter one scene.
   A previous scene from this helper retains bodies for unchanged grids. If
   the set of rendered grids and their optics match, it returns the same scene.
 - `W.scene(bodies, {airPockets: [{id, bounds}, ...]})` accepts up to eight
@@ -1521,7 +1526,7 @@ view.inspect(7, -9, 3, { species: 'glow-moss' });  // cave pool at the same XZ
 ### Headless biome world realization
 
 `P.biomeWorld.create({height, caves, cell, chunkCells, verticalCells,
-terrainSlope, layers, project, emit, palette, materialRamps, dependencyHalo, maxSplats, surfaceScatter})`
+terrainSlope, layers, project, emit, palette, materialRamps, dependencyHalo, maxSplats, surfaceScatter, shadeSurface})`
 realizes a retained biome recipe view against caller-supplied terrain.
 The [headless coast example](../examples/biome-world.js) walks from a ridge
 through a marsh, dives through a flooded passage, and surfaces in an
@@ -1559,6 +1564,12 @@ const trip = frame.traceRoute(coast.itinerary(frame));
   It spreads splat centers in the tangent plane, projects them onto the
   continuous solid field, and compensates for coverage with wider splats.
   The world seed and lattice coordinates determine the offsets.
+  `shadeSurface(rgb, {point, normal, frame})` can return a new RGB triplet
+  in [0, 255] before the splat is packed. Use
+  `P.biomeWorld.pointLighting({ambient, lights})` as a shader callback for
+  finite-radius lights. Each light has `point`, `radius`, and optional
+  normalized `color`, `strength` and `wrap`. A custom callback can read
+  the same medium and biome snapshot as the population rules.
 - Each population layer supplies `{id, height?, habitatOffset?, options?}`.
   Its optional height sampler receives `(x,z,frame)` and selects a support
   or returns `null`. The default uses the remaining surface of the carrier
@@ -1569,6 +1580,8 @@ const trip = frame.traceRoute(coast.itinerary(frame));
   The default emits one placeholder splat per placement.
 - Use `prepare` with the same water snapshot that the renderer should show.
   The frame takes its recipe media and air pockets from that snapshot.
+  `geometryFrom` can supply a prepared dry frame with the same recipe view,
+  bricks and time, so geometry stays identical when water is attached.
   Optional `bricks` supply sparse edits to the solid field and material
   overrides with an entry in `materialRamps`. Each override is an array of
   packed RGB colors. `frame.bakeSpans(options)` and
@@ -1653,6 +1666,56 @@ const chamber = graph.nodes.find(node => node.mediumId === 'chamber-air');
 const route = graph.route(ridge.id, chamber.id);
 ```
 
+### Biome revisions
+
+Use `P.biomeRevisions.create({compiler, tiles, indices, sources, optics, span,
+flood, agent, meta, brushGrid, historyLimit, derive})` as the entry point for
+an editable biome world. It stages the continuous terrain, span bake,
+connected water, traversal graph, splat chunks and packed render world.
+`current()` advances when every stage succeeds.
+
+```js
+const world = K.procedural.biomeRevisions.create({
+  compiler, tiles, indices,
+  sources: [{ id: 'spring', point: [1.25, -2, 0.25], level: -1.5 }],
+  optics: mediumId => waterStyles[mediumId],
+  agent: { radius: 0.14, height: 0.5, origin: [0, 0] },
+  brushGrid: { cell: 0.25, brickSize: 4 }
+});
+const first = await world.commit({ view: author.view() });
+const after = await world.sculpt({
+  operation: 'subtract', bounds: passageBounds, sdf: passageShape
+});
+const medium = after.frame.view.mediumAt(...feet);
+const route = after.graph.route(start, end);
+renderer.render(after.world, cameraOptions);
+await world.undo();
+```
+
+- `commit(patch)` accepts changes to `view`, `bricks`, `time`, `tiles`,
+  `indices`, `sources`, `optics`, or JSON render `meta`. Fields omitted from
+  a patch carry forward. A function receives the last published revision
+  and returns the patch. Commits, brushes, and history operations run in order.
+- `sculpt(brush)` applies a sparse brush to the current revision, creating
+  a brick grid from the current solid field if needed. Supply an existing
+  snapshot with `commit({bricks})` to replace the sculpt layer.
+- `undo()` and `redo()` restore the published snapshots directly. A successful
+  commit after undo starts a new branch and clears redo. `historyLimit`
+  defaults to 16. Past packed buffers may be shared, so handle them as
+  read-only render inputs.
+- `span`, `flood`, and `agent` pass author controls to their respective
+  stages. Set `agent: false` for a world without navigation. The render world
+  carries water and the traversal graph for `K.world.query.fromScene`.
+- A creator may supply `derive(staged, previous)` for additional build
+  products. Its return value appears as `revision.extra`. A thrown error
+  or rejected promise leaves publication and history unchanged. Keep
+  callbacks deterministic over captured inputs. Per-commit `clock` returns
+  a stage profile in `revision.timings`.
+- The lower-level compiler offers `realize(frame, indices, {previous})` to
+  stage an independent branch of chunk data. Colliders and sampled surfaces
+  are reused when the edit only changes water in that chunk. Use `update`
+  for the compiler-only publishing API.
+
 ### Connected flooding
 
 `P.spanFlood.create({tiles, sources, previous, origin, opening, maxChecks})`
@@ -1679,16 +1742,18 @@ walkable between the same endpoints.
 const { KIT } = require('.').load();
 const valley = require('./examples/biome-flood')(KIT);
 const before = await valley.build();
-const after = await valley.build(valley.brush(), { previous: before });
+const after = await valley.cut();
 const flooded = after.graph.changesFrom(before.graph).filter(change => change.reason === 'flooded');
 ```
 
 Run `node scripts/benchmark-biome-flood.js` from the checkout. It reports
 CPU time and work counts for rebuilding the same post-cut world with local
 updates and from scratch. It alternates order after a warmup pair, checks the
-two outcomes for equality, and reports median and p95 times. Setup, brush
-authoring, and WebGL drawing are outside the timed rebuilds.
-`--runs=N` changes the sample count and `--json` emits raw timing samples.
+two outcomes for equality, and reports median and p95 times. Setup,
+brush authoring and WebGL drawing are outside the timed rebuilds. The local lane also
+reports the single brush stroke from entry through publication.
+`--runs=N` changes the sample count, `--styled` enables the authored cave
+look, and `--json` emits raw timing samples.
 
 ### Stable spacing and finite Poisson sampling
 

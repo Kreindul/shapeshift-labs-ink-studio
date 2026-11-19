@@ -4,6 +4,11 @@ Ink Studio can advance a declarative world, apply timed actions, inspect the
 result, and replay or compare runs. A scene uses the same query descriptors
 from JavaScript and the CLI. Each query reads one published revision.
 
+For editable SDF-biome scenes, the
+[biome revision API](procedural.md#biome-revisions) stages terrain, water,
+navigation and splats together. Its packed render world can also be read
+with `K.world.query.fromScene`.
+
 ## Run and compare a watershed
 
 Save the starting checkpoint after the reservoir has settled.

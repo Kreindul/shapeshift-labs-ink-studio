@@ -42,10 +42,10 @@ export function createSplatPipeline(gl, { ascii, specialize = true, sampleCovera
       programFor(features) {
         check();
         if (features?.water) {
-          const airPockets = Boolean(features.airPockets), layered = Boolean(features.layered);
-          const key = +airPockets + 2 * layered;
+          const airPockets = Boolean(features.airPockets), layered = Boolean(features.layered), atlas = Boolean(features.atlas);
+          const key = +airPockets + 2 * layered + 4 * atlas;
           if (!water.has(key)) {
-            const wet = splatShaderSources(ascii, sampleCoverage, { water: true, airPockets, layered });
+            const wet = splatShaderSources(ascii, sampleCoverage, { water: true, airPockets, layered, atlas });
             water.set(key, resources.program(wet.vertex, wet.fragment));
           }
           return water.get(key);

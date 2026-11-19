@@ -8,7 +8,7 @@ const { execFileSync } = require('node:child_process');
 const core = require('..');
 const coastline = require('../examples/biome-world');
 const floodValley = require('../examples/biome-flood');
-const { biomes, waterBodies, motion } = core.load().KIT.procedural;
+const { biomes, waterBodies, motion, verticalSpans } = core.load().KIT.procedural;
 
 test('a water frame shares shoreline, depth and currents with biome queries and particles', () => {
   const current = [0.25, -0.5];
@@ -80,6 +80,27 @@ test('water changes bound modified columns and carry strict interior air pockets
   assert.deepEqual(waterBodies.scene([body(true)], { airPockets: [{ id: 'void', bounds }] }).changesFrom(after), []);
   assert.equal(after.pack().uniforms.u_waterAirCount, 1);
   assert.throws(() => waterBodies.scene([body(false)], { airPockets: [{ id: 'pool', bounds }] }), /distinct IDs/);
+});
+
+test('water atlas packs 256 adjacent tiles and resolves creator optics by medium', () => {
+  const make = (i, id) => verticalSpans.create({
+    bounds: { min: [i, -2, 0], max: [i + 1, 2, 1] },
+    sample: () => [{ min: -1, max: 1, kind: 'water', id }]
+  });
+  const tiles = Array.from({ length: 256 }, (_, i) => make(i, i % 2 ? 'spring' : 'lake'));
+  let calls = 0;
+  const optics = id => {
+    calls++;
+    return { tint: id === 'spring' ? [1, 0, 0] : [0, 0, 1] };
+  };
+  const scene = waterBodies.sceneFromSpans(tiles, { optics });
+  assert.equal(scene.count, 256);
+  assert.equal(scene.mediumAt(255.5, 0, 0.5).id, 'spring');
+  assert.equal(scene.pack().uniforms.u_waterAtlas, 1);
+  assert.equal(scene.pack().uniforms.u_waterNodeCount, 511);
+  assert.equal(waterBodies.sceneFromSpans(tiles, { optics, previous: scene }), scene);
+  assert.equal(calls, 256);
+  assert.throws(() => waterBodies.sceneFromSpans([...tiles, make(256, 'lake')]), /256/);
 });
 
 async function browserProbe(createRenderer, compileSprites, coastline, floodValley) {
@@ -205,6 +226,32 @@ async function browserProbe(createRenderer, compileSprites, coastline, floodVall
   const roofImage = closed => draw(world(belowStack, { blank: true, water: roof(closed) }))();
   close(roofImage(true), [0, 0, 0], 'solid ceiling has no waterline');
   if (roofImage(false)[0] < 30) throw new Error('open layered water has no waterline');
+
+  const tiled = Array.from({ length: 12 }, (_, i) => verticalSpans.create({
+    bounds: { min: [-1, -4, -1.5 + i * 0.25], max: [1, 1, -1.25 + i * 0.25] },
+    sample: () => [{ min: -4, max: 0, kind: 'water', id: i >= 6 ? 'front' : 'back' }]
+  }));
+  const lengthCamera = { ...baseCamera, target: [0, -1, -2] };
+  const atlas = waterBodies.sceneFromSpans(tiled, { optics: blackWater });
+  checkAttenuation(lengthCamera, 3, 'atlas crosses all twelve tiles along one ray', [], { water: atlas });
+  const twoLooks = waterBodies.sceneFromSpans(tiled, { optics: id => ({
+    ...blackWater, extinction: [0.7, 0.7, 0.7], tint: id === 'front' ? [1, 0, 0] : [0, 0, 1]
+  }) });
+  const tr = Math.exp(-0.7 * 1.5);
+  close(draw(world(lengthCamera, { blank: true, background: 0xffffff, water: twoLooks }))(),
+    [(1 - tr + tr * tr) * 255, tr * tr * 255, tr * 255], 'atlas composes creator profiles near to far');
+
+  const style = { ...blackWater, tint: [0.6, 0.02, 0.02], extinction: [1, 1, 1],
+    deepTint: [0.02, 0.04, 0.5], depthRange: [0.5, 2] };
+  function styledPixel(y, sediment) {
+    const scene = waterBodies.scene([volume({ optics: { ...style, sediment } })]);
+    return draw(world({ ...baseCamera, target: [0, y, -2] }, { water: scene, blank: true }))();
+  }
+  const shallow = styledPixel(-0.2), deep = styledPixel(-3.8);
+  if (!(shallow[0] > shallow[2] + 50 && deep[2] > deep[0] + 50)) throw new Error('creator depth colors were lost');
+  const bed = { strength: 0.8, color: [1, 0.5, 0.03], height: 0.45 };
+  if (styledPixel(-3.8, bed)[0] < deep[0] + 8) throw new Error('sediment should catch light near the bed');
+  close(styledPixel(-0.2, bed), shallow, 'sediment falls off above the bed');
 
   const coast = coastline(KIT), { frame } = coast.layered();
   const route = frame.traceRoute(coast.itinerary(frame));
