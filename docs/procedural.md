@@ -1153,6 +1153,11 @@ node cli/ink-studio.js render examples/poisson-patches.js --seed 1 --ortho --col
 - `P.sampling.triangles(positions, {count, seed})` adapts the sampling
   vocabulary to an imported triangle stream. It stratifies by area and
   returns world points with triangle indices and barycentric coordinates.
+- `P.sampling.centeredGridRange([min, max], count, [lo, hi])` finds the
+  half-open index range for cell centers within an inclusive region. The
+  center at index `i` stays at `min + (max - min) * ((i + .5) / count)`.
+  Apply it independently to each axis to regenerate a patch of an
+  existing lattice while preserving its spacing and phase.
 
 `examples/sampling-detail.js` uses seed 0 for centered strata, seed 1 for
 curvature-weighted jittered splats, and seed 2 for a ranked point set whose
