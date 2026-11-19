@@ -2066,6 +2066,10 @@ semantic form. For example, a sampled frame color can map to a material
 reference with local overrides. A slot with `stored` compares that target
 value against the encoded write when deciding whether the edit changes
 anything. The default compatibility policy matches descriptor families.
+For a finish that spans related records, set a slot's optional `target` to
+an existing entity ID in the receiver's document. The descriptor chooses
+that ID from the current scene. Plans merge writes for each entity,
+reject conflicting paths, and apply all related patches in one undo step.
 
 `capture(source, id)` returns a JSON-safe sample. `plan(source, ids, sample)`
 resolves target patches and reports skipped IDs for callers that need a live

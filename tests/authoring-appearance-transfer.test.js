@@ -108,3 +108,31 @@ test('encoded no-ops and caller validation use the complete plan before any targ
   assert(doc.pending());
   doc.cancel();
 });
+
+test('an appearance descriptor can bind an assembly slot to a related record atomically',()=>{
+  const d=A.document();
+  for(const [id,face,trim] of [['source','#8f5342','#547376'],['target','#cdbea9','#756452']]){
+    d.create('panel',{id,appearance:{materials:{stone:face}}});
+    d.create('trim',{id:id+'-trim',parent:id,appearance:{materials:{wood:trim}}});
+  }
+  const api=A.appearanceTransfer.create({describe(e,source){
+    const trim=source.entities[e.id+'-trim'];
+    const slot=(entity,role)=>({target:entity.id,path:['appearance','materials',role,'color'],
+      value:P.styles.material(A.styles.resolve(source,entity.id),role).color});
+    return {family:'panel',slots:{face:slot(e,'stone'),edge:slot(trim,'wood')}};
+  }});
+  const sample=api.capture(d,'source'),before=d.serialize();
+  const plan=api.apply(d,['target'],sample);
+  assert.deepEqual(plan.edits.map(edit=>edit.id),['target','target-trim']);
+  assert.deepEqual(api.capture(d,'target'),sample);
+  assert.equal(api.plan(d,['target'],sample).skipped[0].reason,'unchanged');
+  d.undo();assert.equal(d.serialize(),before);
+  const invalid=A.appearanceTransfer.create({describe:()=>({family:'panel',
+    slots:{edge:{target:'missing',path:['appearance','materials','wood']}}})});
+  assert.throws(()=>invalid.apply(d,['target'],sample),/existing entities/);
+  const conflict=A.appearanceTransfer.create({describe:e=>({family:'panel',slots:{edge:{
+    target:'target-trim',path:['appearance','materials','wood'],encode:()=>e.id==='target'?'#111111':'#222222'
+  }}})});
+  assert.throws(()=>conflict.apply(d,['source','target'],sample),/conflict on target-trim/);
+  assert.equal(d.serialize(),before);
+});
