@@ -16,6 +16,22 @@ const build = lattice => lattice.pieces({
   key: 'gate', owner: 'panel', material: 'metal', frameMaterial: 'wood'
 });
 
+test('convex containment and picking work before the mesh is requested', () => {
+  const vertices = [[0,0,0],[1,0,0],[0,1,0],[0,0,1]];
+  const part = pieces.convex(vertices, [[0,1,2],[0,1,3],[1,2,3],[2,0,3]], {key:'tetrahedron'});
+  const solid = pieces.union([part]);
+  vertices[0][0] = 20;
+  for (const point of [[.1,.1,.1],[.5,.5,.1],[0,.2,.2],[.01,.01,.01]]) {
+    for (const tolerance of [0,.01,.05]) {
+      assert.equal(part.contains(point,tolerance),part.distance(point)<-tolerance);
+      assert.equal(solid.contains(point,tolerance),part.contains(point,tolerance));
+    }
+  }
+  assert.equal(solid.raycast([.2,.2,-1],[0,0,1]).distance,1);
+  assert.deepEqual(part.mesh.bounds,part.bounds);
+  assert.equal(part.mesh,part.mesh);
+});
+
 test('a profiled lattice clips members to several convex patches and retains open cells', () => {
   const lattice = clippedLattice({ panels, runs, edges: [[[0, 0], [2, 0]]], edgeWidth: .16 });
   const rail = lattice.members.find(m => m.key === 'run/1/0');

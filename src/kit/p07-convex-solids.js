@@ -24,12 +24,13 @@
       polygons.length < 4
     )
       throw new Error('Construction pieces need finite convex vertices and faces');
+    vertices = vertices.map(point => point.slice());
     const center = V.mul(
         vertices.reduce((p, q) => V.add(p, q), [0, 0, 0]),
         1 / vertices.length
       ),
       planes = [],
-      builder = A.geometry.builder(),
+      shell = [],
       info = Object.assign({ owner: '', key: 'body', material: 'default' }, meta);
     for (const indices of polygons) {
       if (
@@ -54,22 +55,27 @@
         throw new Error('Construction faces must enclose a convex volume');
       if (!planes.some(p => V.dist(p.normal, n) < EPS && Math.abs(p.offset - offset) < EPS))
         planes.push({ normal: n, offset });
-      const X = V.norm(V.sub(points[1], points[0])),
-        Y = V.cross(n, X),
-        uv = p => [V.dot(V.sub(p, points[0]), X), V.dot(V.sub(p, points[0]), Y)];
-      for (let j = 1; j < points.length - 1; j++)
-        builder.triangle(
-          points[0],
-          points[j],
-          points[j + 1],
-          { owner: info.owner, surface: info.key, material: info.material },
-          [uv(points[0]), uv(points[j]), uv(points[j + 1])]
-        );
+      shell.push({points, normal:n});
     }
     if (planes.length < 4 || planes.some(p => V.dot(p.normal, center) >= p.offset - EPS))
       throw new Error('Construction pieces need nonzero enclosed volume');
-    const mesh = builder.finish(),
-      bounds = mesh.bounds;
+    const bounds = A.spatial.boxOf(shell.flatMap(face => face.points));
+    let mesh;
+    function meshOf() {
+      if (mesh) return mesh;
+      const builder = A.geometry.builder(),
+        meta = { owner: info.owner, surface: info.key, material: info.material };
+      for (const {points, normal} of shell) {
+        const origin = points[0], x = V.norm(V.sub(points[1], origin)), y = V.cross(normal, x),
+          uv = points.map(point => {
+            const q = V.sub(point, origin);
+            return [V.dot(q, x), V.dot(q, y)];
+          });
+        for (let j = 1; j < points.length - 1; j++)
+          builder.triangle(origin, points[j], points[j + 1], meta, [uv[0], uv[j], uv[j + 1]]);
+      }
+      return mesh = builder.finish();
+    }
     const distance = p => {
       let d = -Infinity;
       const x = p[0],
@@ -77,6 +83,11 @@
         z = p[2];
       for (const q of planes) d = Math.max(d, q.normal[0] * x + q.normal[1] * y + q.normal[2] * z - q.offset);
       return d;
+    };
+    const contains = ([x, y, z], tolerance = 0.002) => {
+      for (const {normal, offset} of planes)
+        if (!(normal[0] * x + normal[1] * y + normal[2] * z - offset < -tolerance)) return false;
+      return true;
     };
     function intersections(origin, dir, max = 10000) {
       let low = 0,
@@ -118,6 +129,7 @@
     function sample(spacing, emit) {
       if (!Number.isFinite(spacing) || spacing <= 0 || typeof emit !== 'function')
         throw new Error('Construction sampling needs positive spacing and a callback');
+      const mesh = meshOf();
       for (let i = 0; i < mesh.positions.length; i += 9) {
         const points = [0, 1, 2].map(j => Array.from(mesh.positions.slice(i + j * 3, i + j * 3 + 3))),
           order = [
@@ -140,7 +152,9 @@
         }
       }
     }
-    return Object.freeze(Object.assign({}, info, { mesh, bounds, planes, distance, intersections, sample }));
+    const part = Object.assign({}, info, { bounds, planes, distance, contains, intersections, sample });
+    Object.defineProperty(part, 'mesh', { enumerable: true, get: meshOf });
+    return Object.freeze(part);
   }
   function box(center, half, frame, meta) {
     if (
@@ -222,9 +236,11 @@
       const [x, y, z] = point;
       const candidates = grid.get(key(Math.floor(x / cell), Math.floor(y / cell), Math.floor(z / cell)));
       if (candidates) for (const p of candidates)
-        if (p.key !== exclude && A.spatial.contains(p.bounds, point) && p.distance(point) < -tolerance) return true;
+        if (p.key !== exclude && A.spatial.contains(p.bounds, point) &&
+            (p.contains ? p.contains(point, tolerance) : p.distance(point) < -tolerance)) return true;
       for (const p of large)
-        if (p.key !== exclude && A.spatial.contains(p.bounds, point) && p.distance(point) < -tolerance) return true;
+        if (p.key !== exclude && A.spatial.contains(p.bounds, point) &&
+            (p.contains ? p.contains(point, tolerance) : p.distance(point) < -tolerance)) return true;
       return false;
     }
     return {
