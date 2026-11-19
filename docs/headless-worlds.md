@@ -215,3 +215,79 @@ inform the authoring and simulation interfaces. The implementation uses Ink
 Studio's own data and solver primitives with the JavaScript standard library.
 
 See [live world scaling](world-scaling.md) for the benchmark commands and results.
+
+## Persistent interactables
+
+`KIT.world.interactions.create({id, interactables, realize})` owns a
+place's durable interaction state and timers alongside its published
+world revision. Define stable interactable IDs with JSON initial state
+and named actions. `breakable({id, point, integrity})` provides `hit` and
+reports the remaining integrity. `latch({id, point, ticks})` provides
+`press`. A positive duration activates the latch and schedules a reset.
+Pressing again restarts that timer. A zero duration makes it toggle.
+Both helpers accept cue names to select host effects.
+
+A custom action receives `{state, states, revision, point, actor, args,
+tick, timer}`. Its synchronous handler returns null to decline, or
+`{state, timers?, cue?, detail?}` to apply the action. State, actor, args,
+and detail use JSON data. An optional `validate(state)` can check the
+initial, restored, and proposed state. Named timers use relative delays.
+
+```js
+actions: {
+  strike({ state, actor }) {
+    if (state.open || !actor?.tool) return null;
+    return {
+      state: { ...state, open: true },
+      timers: { reset: { after: 90, action: 'reset' } },
+      cue: 'gate-open'
+    };
+  },
+  reset({ state, timer }) {
+    return timer === 'reset' && state.open
+      ? { state: { ...state, open: false }, cue: 'gate-close' }
+      : null;
+  }
+}
+```
+
+Use `timers: {reset: null}` to cancel a timer, or write the same name to
+reschedule it. A timer can pass JSON `args` to an action on the same
+interactable. The host advances the absolute scene clock with
+`await interactions.advance(tick)`. Timers run in deadline, interactable
+ID, and timer ID order. Ticks without actions keep the current world
+revision. `advance(tick, {limit})` defaults to at most 1024 due actions
+per call. A result with `complete: false` can be continued by advancing
+to the same target again.
+
+The synchronous or asynchronous `realize(next, before)` callback
+builds a revision from the proposed `next.states`. `next.event` describes
+the proposed action, and is null for initial publication or restore.
+Use a private [biome revision builder](procedural.md#biome-revisions) here
+to derive colliders, navigation, and packed splats from the same state.
+Read `interactions.current()` as the publication boundary. It switches
+state, clocks, and the finished revision together. An error leaves the
+last completed snapshot available, including any timer that was due.
+Actions and timer advancement are serialized. A caller can supply
+`expectedSequence` to `dispatch(id, action, {actor, args, expectedSequence})`
+so a repeated command based on an old snapshot returns null.
+
+`onEvent((event, snapshot, before) => …)` subscribes to successful
+actions and returns an unsubscribe function. Each event carries the
+world ID, sequence, tick, target, action, cue and any authored XYZ point
+or JSON detail. Listeners run synchronously after publication. Their
+errors are available in the action's `errors` array. Use the same cue
+for particles, audio, and animation. Keep presentation effects outside
+the durable world revision.
+
+`checkpoint()` returns the JSON state, sequence, local tick, and pending
+timers. On a fresh controller, `await restore()` publishes the initial
+world, or `await restore(saved)` rebuilds the saved world. Restore
+leaves the event stream quiet. Pass `checkpoint` as a [place payload
+callback](portals.md#step-and-save-places) to keep these records on
+departure. The host can advance the interaction clock only while the
+place is active, or drive it on a background update schedule.
+
+The [interactable locks example](../examples/interactable-locks.js)
+ties a breakable wall and timed gate to one traversal graph. Its debris
+uses splat samples from the wall that the committed revision removed.

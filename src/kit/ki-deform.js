@@ -21,7 +21,7 @@
                              a puff of petals or spores. o.pieces (each one's middle), from, speed (1.6), up (0.8), gravity (-4), drag (1.2),
                              shrink (what is left of a piece's size at the end, 0), life (1), vary (how much pieces differ in speed and
                              rise, 1; 0 for a ring of ripples going out evenly); set .t (seconds since it burst). Give the part
-                             a skin of the same pieces
+                             a skin of the same pieces or sample an indexed piece with .piece(index, seconds)
      K.deform.emote(o)       the 21 reaction fields (shiver, spring, curl, heartbeat, ...) over a box: o.center, width, height, right, up; set
                              .motion, .t, .k
      K.deform.foliage(o)     grass, bush or tree in wind, and brushed or struck: o.kind, base, height, width, phase; set .t, .bend, .impact
@@ -458,6 +458,9 @@
           speed * (1 - 0.4 * vary + 0.8 * vary * h)
         );
       });
+    const travel = t => drag > 0 ? (1 - Math.exp(-drag * t)) / drag : t;
+    const scaleAt = t => Math.max(0, 1 - (1 - shrink) * Math.pow(Math.min(1, t / life), 1.5));
+    const fall = t => 0.5 * g * t * t;
     const map = p => {
       const t = map.t;
       if (!(t > 0)) return p.slice();
@@ -471,18 +474,21 @@
           best = i;
         }
       }
-      const c = pcs[best],
-        v = vel[best],
-        k = drag > 0 ? (1 - Math.exp(-drag * t)) / drag : t,
-        s = Math.max(0, 1 - (1 - shrink) * Math.pow(Math.min(1, t / life), 1.5));
+      const c = pcs[best], v = vel[best], k = travel(t), s = scaleAt(t);
       return [
         c[0] + (p[0] - c[0]) * s + v[0] * k,
-        c[1] + (p[1] - c[1]) * s + v[1] * k + 0.5 * g * t * t,
+        c[1] + (p[1] - c[1]) * s + v[1] * k + fall(t),
         c[2] + (p[2] - c[2]) * s + v[2] * k
       ];
     };
     map.t = 0;
     map.pieces = pcs;
+    map.piece = (index, seconds = map.t) => {
+      if (!Number.isInteger(index) || !pcs[index] || !Number.isFinite(seconds))
+        throw new RangeError('Burst sampling needs a piece index and a finite time');
+      const t = Math.max(0, seconds), [x, y, z] = V.mad(pcs[index], vel[index], travel(t));
+      return { point: [x, y + fall(t), z], scale: scaleAt(t) };
+    };
     return map;
   };
 

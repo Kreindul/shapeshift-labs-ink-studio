@@ -153,3 +153,12 @@ An optional `weight(hit)` callback can also read a field or evaluate a
 material mask. The emitter inherits the source RGB unless `color`
 supplies a scene palette index or an index callback. The source sampler
 can also be used independently of the emitter.
+
+For one-shot debris, `K.deform.burst({pieces, from, speed, gravity, drag,
+life, shrink})` already computes analytic motion for authored piece
+centers. Sample it directly with `burst.piece(index, seconds)` to get a
+`{point, scale}` without a nearest-piece search. Sample times can be in
+any order. For packed splats, move the center to `point` and multiply
+the covariance by `scale * scale`. The [interactable locks example](../examples/interactable-locks.js)
+uses this on an effects frame after publication and keeps the collision
+and navigation revision independent of the airborne fragments.
