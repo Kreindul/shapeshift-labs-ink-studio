@@ -30,6 +30,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `geometry.clipConvexFaces(faces, planes, {capTag})` | Clip a closed convex shell of outward-wound planar faces. Keep polygons intact through clipping and tag each cap with its plane tag or the supplied default |
 | `geometry.clipHeightMesh(mesh, height, {slopeBound, resolution, budget})` | Keep the part of a triangle surface above a world-space height field (height(x, z)). Subdivision near the cut follows the supplied grade bound and resolution. UVs, normals and surface metadata carry through to the uncapped result |
 | `geometry.implicitSurface(field, bounds, options)` | Marching tetrahedra for negative-inside fields, with column preparation and bounded edge refinement |
+| `geometry.implicitTriangles(field, bounds, options, emit)` | Stream outward triangles from the same bounded field sampler |
 | `pieces.convex`, `pieces.box`, `pieces.beam`, `pieces.tube`, `pieces.union` | Reusable solid pieces and query unions. Union meshes contain constituent shells |
 | `pieces.uprightSpan(a, b, {width, height, up, extension}, meta)` | Closed pitched band with upright ends and constant width and height |
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
@@ -154,6 +155,14 @@ Use it when height, material layers, or a planar mask can be prepared once
 per column. The values must match the ordinary three-dimensional field.
 `edgeRefinements` from 0 to 12 use the ordinary field between lattice
 points to bisect nonlinear crossings within the same cell budget.
+
+`geometry.implicitTriangles(field, bounds, options, emit)` shares the
+field, column preparation, refinement and cell budget of `implicitSurface`.
+It calls `emit(a, b, c, normal)` for each outward nondegenerate triangle
+and returns the lattice sampling metadata. Vertices and normals use the
+same Float32 precision and traversal order as the finished mesh. Use the
+stream for consumers such as pixel sampling that only need one triangle
+at a time.
 
 Build the browser gallery with `node examples/procedural/build.js`. Open
 `dist/procedural-gallery.html` and move the View angle slider to inspect the

@@ -30,8 +30,8 @@
       .map(tet => [tet.filter(i => d[i] < 0), tet.filter(i => d[i] >= 0)])
       .filter(([low, high]) => low.length && high.length);
   }
-  A.geometry.implicitSurface = (field, bounds, options) => {
-    const o = Object.assign({ resolution: 0.12, maxCells: 30000, edgeRefinements: 0, meta: {} }, options);
+  function march(field, bounds, options, emit) {
+    const o = Object.assign({ resolution: 0.12, maxCells: 30000, edgeRefinements: 0 }, options);
     if (
       typeof field !== 'function' ||
       !bounds ||
@@ -83,13 +83,13 @@
         for (let y = 0; y < dimensions[1]; y++)
           for (let x = 0; x < dimensions[0]; x++) write(x, y, z, field(at(x, y, z)));
     }
-    const builder = A.geometry.builder(), edges = new Array(64);
+    const edges = new Array(64);
     const offsets = corners.map(([x, y, z]) => slot(x, y, z));
     const triangle = (a, b, c, inside) => {
       const n = V.cross(V.sub(b, a), V.sub(c, a)),
         mid = V.mul(V.add(V.add(a, b), c), 1 / 3);
-      if (V.dot(n, V.sub(mid, inside)) < 0) builder.triangle(a, c, b, o.meta);
-      else builder.triangle(a, b, c, o.meta);
+      if (V.dot(n, V.sub(mid, inside)) < 0) emit(a, c, b, n, -1);
+      else emit(a, b, c, n, 1);
     };
     for (let z = 0; z < counts[2]; z++)
       for (let y = 0; y < counts[1]; y++)
@@ -139,8 +139,23 @@
             }
           }
         }
-    return Object.assign(builder.finish(), {
-      sampling: A.data.freeze({ cells: counts.reduce((n, v) => n * v, 1), counts, resolution: step })
+    return A.data.freeze({ cells: counts.reduce((n, v) => n * v, 1), counts, resolution: step });
+  }
+  A.geometry.implicitSurface = (field, bounds, options) => {
+    const builder = A.geometry.builder();
+    const sampling = march(field, bounds, options, (a, b, c) => builder.triangle(a, b, c, options?.meta));
+    return { ...builder.finish(), sampling };
+  };
+  A.geometry.implicitTriangles = (field, bounds, options, emit) => {
+    if (typeof emit !== 'function') throw Error('Implicit triangles need an output callback');
+    return march(field, bounds, options, (a, b, c, n, sign) => {
+      const length = V.len(n);
+      if (length < 1e-8 * 1e-8) return;
+      // Recompute exact zeros only when reversing the face so the streamed
+      // normal keeps the mesh builder's signed zeros.
+      const oriented = sign < 0 && n.includes(0) ? V.cross(V.sub(b, a), V.sub(c, a)) : null;
+      const normal = length > 1e-9 ? n.map((value,i) => Math.fround((oriented ? oriented[i] : sign*value)/length)) : [0, 1, 0];
+      emit(a.map(Math.fround), b.map(Math.fround), c.map(Math.fround), normal);
     });
   };
 })(KIT);

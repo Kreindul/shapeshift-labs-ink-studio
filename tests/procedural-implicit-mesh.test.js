@@ -44,6 +44,20 @@ test('edge refinement resolves a nonlinear crossing inside a coarse cell', () =>
   assert.deepEqual(refined.sampling, linear.sampling);
   assert.throws(() => A.geometry.implicitSurface(field, box, { edgeRefinements: 13 }), /budget/);
 });
+test('the streamed implicit triangles match the mesh facets and sampling budget', () => {
+  const options = {resolution:.21, maxCells:900, edgeRefinements:2,
+    prepareColumn:(x,z)=>y=>x*x+y*y+z*z-.49};
+  const field = ([x,y,z])=>x*x+y*y+z*z-.49;
+  const mesh = A.geometry.implicitSurface(field,box,options), positions=[], normals=[];
+  const sampling = A.geometry.implicitTriangles(field,box,options,(a,b,c,n)=>{
+    positions.push(...a,...b,...c);
+    normals.push(...n,...n,...n);
+  });
+  assert.deepEqual(Float32Array.from(positions),mesh.positions);
+  assert.deepEqual(Float32Array.from(normals),mesh.normals);
+  assert.deepEqual(sampling,mesh.sampling);
+  assert.throws(()=>A.geometry.implicitTriangles(field,box,options),/output callback/);
+});
 test('sampling is bounded, empty fields stay empty and invalid inputs fail promptly', () => {
   let calls = 0;
   const m = A.geometry.implicitSurface(
