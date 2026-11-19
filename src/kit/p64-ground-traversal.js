@@ -10,9 +10,10 @@
 
   const materialTag = value => value === undefined || typeof value === 'string' && value.length > 0 && value.length <= 160;
 
-  function create({ supports, clearance, radius = .18, height = 1.64, stepUp = .34,
+  function create({ supports, clearance, transition, radius = .18, height = 1.64, stepUp = .34,
     stepDown = .48, minimumNormal = .63, stride = Math.min(.085, radius * .6), budget = 128 } = {}) {
-    if (typeof supports !== 'function' || typeof clearance !== 'function' || !range(radius, .03, 4) ||
+    if (typeof supports !== 'function' || typeof clearance !== 'function' ||
+        transition!==undefined&&typeof transition!=='function' || !range(radius, .03, 4) ||
         !range(height, radius * 2 + .05, 12) || !range(stepUp, 0, height - radius * 2 - .025) ||
         !range(stepDown, 0, 16) || !range(minimumNormal, .01, 1) || !range(stride, .005, radius) ||
         !Number.isSafeInteger(budget) || budget < 1 || budget > 2048) throw Error('Invalid traversal query or body');
@@ -29,7 +30,7 @@
       return true;
     }
 
-    function seat(x, z, floor, ceiling) {
+    function seat(x, z, floor, ceiling, from) {
       const list = supports(x, z, floor, ceiling);
       if (!Array.isArray(list) || list.length > 256) throw Error('Traversal supports must return a bounded array');
       let best = null;
@@ -39,7 +40,7 @@
         if (s.y < floor - .00001 || s.y > ceiling + .00001 || best && s.y <= best.foot[1] ||
             s.normal[1] / V.len(s.normal) + .00001 < minimumNormal) continue;
         const foot = [x, s.y, z];
-        if (fits(foot)) {
+        if (fits(foot) && (!transition || !from || transition(from,foot,s))) {
           best = { foot, support: s.id ?? null, normal: V.norm(s.normal) };
           if (s.material !== undefined) best.material = s.material;
         }
@@ -62,13 +63,13 @@
       let current = { foot: foot.slice(), support: null }, blocked = false, progress = 0;
       for (let i = 0; i < steps; i++) {
         const [x, y, z] = current.foot, lo = y - stepDown, hi = y + stepUp;
-        let next = seat(x + dx, z + dz, lo, hi);
+        let next = seat(x + dx, z + dz, lo, hi,current.foot);
         if (!next) {
           blocked = true;
           if (dx && dz) {
             const firstX = Math.abs(dx) >= Math.abs(dz);
-            next = firstX ? seat(x + dx, z, lo, hi) || seat(x, z + dz, lo, hi)
-              : seat(x, z + dz, lo, hi) || seat(x + dx, z, lo, hi);
+            next = firstX ? seat(x + dx, z, lo, hi,current.foot) || seat(x, z + dz, lo, hi,current.foot)
+              : seat(x, z + dz, lo, hi,current.foot) || seat(x + dx, z, lo, hi,current.foot);
           }
         }
         if (!next) break;

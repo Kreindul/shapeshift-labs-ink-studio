@@ -78,6 +78,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `volumeCuts.compile(specs)` | Union keyed XZ profiles extruded along Y. Provides a signed field, host subtraction, bounded exposed-boundary sampling and ray hits |
 | `clearance.field(solids).probe(bounds, options)` | Bounded sampled volume contacts for supplied solids with `id`, bounds, and distance functions |
 | `traversal.create({supports, clearance, ...body})` | Ground-following body with bounded displacement, head clearance, step limits and wall sliding |
+| `supportSweep.segment(from, to, patches, options)` | Check continuous support across level footprints with height differences and cutouts |
 | `routes.follower(route, options)` | Distance-based position and a look-ahead frame for cameras or assemblies on sampled routes |
 | `ambientMotion.create(members, {place, move, destination?, step?})` | Seeded roaming, local avoidance, temporary attraction and habitat revalidation |
 | `layerMix.create(layers, {budget})` | Combine continuous controls into bounded per-layer gains with optional fades |
@@ -438,6 +439,16 @@ supports in increments. It limits the rise and drop per increment and
 tries sliding along an axis when a diagonal is blocked. It also returns
 `blocked`, horizontal `progress`, and the planned number of increments
 as `steps`.
+
+An optional `transition(from, to, support)` can reject a candidate move
+between otherwise valid seats. It runs for direct increments and slide
+attempts. Use `supportSweep.segment(from, to, patches, {verticalTolerance})`
+for level walking surfaces with known footprints. Each patch has a constant
+`height`, convex XZ `footprint`, and optional convex `holes`. The query
+returns `start` and `end` for endpoints supported at their own elevations,
+and `covered` when the entire segment rests on the union of eligible
+patches. Intermediate patch heights must lie within the endpoints' vertical
+range. The caller supplies other policies for slopes and sampled surfaces.
 
 Use `body.move(foot, [dx, dz], {trace: true})` to collect accepted supports
 in travel order as `contacts`. A slide contributes its actual distance.
