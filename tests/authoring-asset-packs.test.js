@@ -228,3 +228,80 @@ test('GLB sockets preserve nested node positions and forward axes when fitted',(
   assert.throws(()=>A.assetMeshes.fromGLB(makeGLB([body,seat,seat]),{socketNodes:{seat:'Ride Seat'}}),/Ambiguous/);
   assert.throws(()=>A.assetMeshes.validate({...recipe,sockets:{seat:{p:[0,0,0],dir:[0,0,0]}}}),/socket/);
 });
+
+test('GLB alpha survives portable round trips with mask cutoff, blending, factors and legacy defaults', async () => {
+  const decodeImage = () => ({ width: 2, height: 1,
+    pixels: Uint8Array.from([255,0,0,0, 0,255,0,128]) });
+  async function sampler(mode, filter = 9728) {
+    const glb = texturedGLB(filter, g => {
+      g.materials[0].alphaMode = mode;
+      g.materials[0].alphaCutoff = .5;
+      g.materials[0].pbrMetallicRoughness.baseColorFactor = [1,1,1,.5];
+    });
+    const imported = await A.assetMeshes.importGLB(glb, { decodeImage });
+    return A.assetMeshes.colorSampler(A.assetMeshes.validate(JSON.parse(JSON.stringify(imported))));
+  }
+  const opaque = await sampler('OPAQUE');
+  assert.equal(opaque.opacityAt(0,0,0),1);
+  const mask = await sampler('MASK');
+  assert.equal(mask.opacityAt(0,0,0),0);
+  assert.equal(mask.opacityAt(0,1,0),0);
+  const blend = await sampler('BLEND');
+  assert.equal(blend.materialAt(0,0,0).opacity,0);
+  assert(Math.abs(blend.opacityAt(0,1,0)-64/255)<1e-6);
+  const linear = await sampler('BLEND',9729);
+  assert(Math.abs(linear.opacityAt(0,.5,0)-32/255)<1e-6);
+
+  const legacy = A.assetMeshes.fromGLB(makeGLB());
+  assert.equal(A.assetMeshes.colorSampler(legacy).opacityAt(0,.2,.3),1);
+  const malformed = JSON.parse(JSON.stringify(await A.assetMeshes.importGLB(texturedGLB(), {decodeImage})));
+  malformed.texture.images[0].alpha = 'AA==';
+  assert.throws(() => A.assetMeshes.validate(malformed),/texture image/);
+  await assert.rejects(A.assetMeshes.importGLB(texturedGLB(9728,g=>{g.materials[0].alphaMode='UNKNOWN';}),
+    {decodeImage}),/alpha material/);
+});
+
+test('vertex alpha and factor-only materials retain coverage without an image decoder', async () => {
+  const glb = texturedGLB(9728,(g,attribute) => {
+    g.meshes[0].primitives[0].attributes.COLOR_0 = attribute('VEC4',[1,1,1,0, 1,1,1,.5, 1,1,1,1]);
+    g.materials[0].alphaMode='BLEND';
+    g.materials[0].pbrMetallicRoughness={baseColorFactor:[1,0,0,.5]};
+  });
+  const asset=await A.assetMeshes.importGLB(glb);
+  const sample=A.assetMeshes.colorSampler(asset);
+  assert.equal(sample.opacityAt(0,0,0),0);
+  assert(Math.abs(sample.opacityAt(0,1,0)-.25)<.002);
+  assert.equal(sample.opacityAt(0,0,1),.5);
+  assert(Math.abs(sample.at(0,.2,.2)[0]-1)<1e-12);
+});
+
+test('transparent front layers reveal underlying thumbnail geometry, regardless of face order', () => {
+  const base=A.assetMeshes.fromGLB(makeGLB());
+  const p=[...base.positions,...base.positions.map((v,i)=>i%3===2?v-.3:v)];
+  const texture={uv:Array(12).fill(0),images:[{width:1,height:1,rgb:'////',alpha:'AA=='}],
+    maps:[{image:0,wrap:['clamp','clamp'],filter:'nearest',factor:[1,0,0],alphaMode:'MASK'}],faces:[0,-1]};
+  const raw={...base,positions:p,triangles:[0,1,2,3,4,5],colors:[[1,0,0],[0,0,1]],faceColors:[0,1],texture};
+  const render=a=>A.assetMeshes.thumbnail(a,{size:32,yaw:0,pitch:0,light:[0,0,1]});
+  const center=(16*32+16)*4;
+  assert.deepEqual(Array.from(render(raw).pixels.slice(center,center+4)),[0,0,255,255]);
+  const reverse={...raw,triangles:[3,4,5,0,1,2],faceColors:[1,0],texture:{...texture,faces:[-1,0]}};
+  assert.deepEqual(render(raw),render(reverse));
+  const translucent={...raw,texture:{...texture,images:[{width:1,height:1,rgb:'////',alpha:'gA=='}],
+    maps:[{...texture.maps[0],alphaMode:'BLEND'}]}};
+  const mixed=render(translucent).pixels.slice(center,center+4);
+  assert(mixed[0]>100&&mixed[2]>100&&mixed[3]===255);
+});
+
+test('single pixel atlases retain 128px detail while multiple images preserve existing texel budgets', async () => {
+  const decodeImage=()=>({width:128,height:128,pixels:new Uint8Array(128*128*4).fill(255)});
+  const single=await A.assetMeshes.importGLB(texturedGLB(),{decodeImage});
+  assert.equal(single.texture.images[0].width,128);
+  const two=texturedGLB(9728,g=>{
+    g.images.push({...g.images[0]});
+    g.textures.push({...g.textures[0],source:1});
+    g.materials[0].pbrMetallicRoughness.metallicRoughnessTexture={index:1,texCoord:1};
+  });
+  const multiple=await A.assetMeshes.importGLB(two,{decodeImage});
+  assert.deepEqual(multiple.texture.images.map(image=>image.width),[64,64]);
+  assert.equal(A.assetMeshes.validate(JSON.parse(JSON.stringify(multiple))).texture.images.length,2);
+});

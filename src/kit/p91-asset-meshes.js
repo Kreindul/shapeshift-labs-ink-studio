@@ -200,7 +200,7 @@
       point[0]=size*.5+(point[0]-centerX)*scale;
       point[1]=size*.5+(point[1]-centerY)*scale;
     }
-    const pixels=new Uint8ClampedArray(size*size*4), depth=new Float32Array(size*size).fill(-Infinity);
+    const pixels=new Uint8ClampedArray(size*size*4), fragments=Array.from({length:size*size},()=>[]);
     const point = index => positions.slice(index*3,index*3+3);
     for (let i=0;i<triangles.length;i+=3) {
       const ia=triangles[i], ib=triangles[i+1], ic=triangles[i+2];
@@ -219,17 +219,30 @@
         const dx=x+.5-ax, dy=y+.5-ay, u=(dx*vy-dy*vx)/area, v=(ux*dy-uy*dx)/area;
         if (u<-1e-8 || v<-1e-8 || u+v>1+1e-8) continue;
         const z=Math.fround(az+u*(bz-az)+v*(cz-az)), pixel=y*size+x;
-        if (z<=depth[pixel]) continue;
-        depth[pixel]=z;
+        const opacity=sample.opacityAt(i/3,u,v);
+        if(!opacity) continue;
         let color=flat;
         if(detailed) {
           const material=sample.materialAt(i/3,u,v,n);
           const irradiance=.22+.78*Math.max(0,V.dot(material.normal,sun));
           color=A.assetTextures.shade(material,{irradiance,light:sun,view:forward}).map(v=>Math.round(v*255));
         }
-        pixels.set(color||sample.at(i/3,u,v).map(value=>Math.round(value*gain*255)),pixel*4);
-        pixels[pixel*4+3]=255;
+        fragments[pixel].push({z,opacity,color:color||sample.at(i/3,u,v).map(value=>Math.round(value*gain*255))});
       }
+    }
+    const linear = q => q <= .04045 ? q / 12.92 : ((q + .055) / 1.055) ** 2.4;
+    const srgb = q => q <= .0031308 ? 12.92 * q : 1.055 * q ** (1 / 2.4) - .055;
+    for(const [pixel,layers] of fragments.entries()) {
+      layers.sort((a,b)=>a.z-b.z);
+      const rgb=[0,0,0];
+      let alpha=0;
+      for(let j=0;j<layers.length;j++) {
+        const layer=layers[j];
+        if(j+1<layers.length&&Math.abs(layers[j+1].z-layer.z)<1e-7) continue;
+        for(let k=0;k<3;k++) rgb[k]=linear(layer.color[k]/255)*layer.opacity+rgb[k]*(1-layer.opacity);
+        alpha=layer.opacity+alpha*(1-layer.opacity);
+      }
+      if(alpha) pixels.set([...rgb.map(c=>Math.round(srgb(c/alpha)*255)),Math.round(alpha*255)],pixel*4);
     }
     return {width:size,height:size,pixels};
   }

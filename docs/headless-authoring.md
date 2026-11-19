@@ -62,3 +62,21 @@ ink-studio variants examples/flooded-shrine.js --seeds 6,19,27,30,47,71 --group 
 ```
 
 The variant sheet is sorted by silhouette, openness or wear. The JSON sidecar includes art-resolution crisp and lint measures, and short-orbit shimmer when `--motion` is supplied. Existing snapshots can be used with `--authoring file.json`.
+
+## GLB cutouts and UV surface stamps
+
+`await studio.readAsset(file, {size: 3})` reads a portable GLB asset on Node, with the bundled PNG decoder. Supply `decodeImage` for embedded JPEGs. Embedded images retain RGB and optional alpha up to 128 pixels per edge, within the existing 16,384-texel budget.
+
+The texture sampler exposes `opacityAt(face, u, v)` and `opacityAtPoint(face, x, y, z)`. Material samples also include `opacity`. glTF `OPAQUE` ignores alpha, `MASK` applies `alphaCutoff`, and `BLEND` multiplies texture, base-color factor and vertex alpha. Older RGB recipes remain opaque. Thumbnails composite visible layers in depth order.
+
+`KIT.authoring.assetSurfaces.splat(builder, asset, options)` emits planar surface stamps carrying a UV shader. Atlas color, normal, roughness, emission and coverage are sampled at each art pixel. Texture detail therefore survives coarse splat spacing. The stamps retain underlying geometry behind cutouts and can be added to an existing scene.
+
+`assetSurfaces.world(asset, options)` wraps the same path in a standalone world. Options include `size`, `at`, `turn`, `up`, `res`, `maxSplats`, `light`, `ambient`, `palette`, `hues`, `shades` and `cam`. Splats use the renderer's usual translucent blending. Save the portable asset or scene factory to preserve UV shaders, whose functions cannot be retained in a plain JSON world dump.
+
+`assetSurfaces.field(asset, {size, cells, thick, alphaCutoff})` excludes invisible triangle patches before distance-field conversion. Visibility is sampled at twice the atlas texel density, with bounded triangle work. Fractional opacity is classified at the supplied cutoff (default 0.5). The result is a geometric signed field, so its resolution and shell thickness determine the smallest retained opening. Supply `thick` when converting open clothing or overlay surfaces.
+
+The headless CLI automatically uses UV stamps for GLBs that fit the portable asset budgets. Use `--uv` to require that path and report unsupported imports, or `--uv off` to select the existing geometry importer.
+
+```sh
+ink-studio render character.glb --uv --res .06 --ortho --out character.png
+```

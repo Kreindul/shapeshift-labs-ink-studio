@@ -33,6 +33,7 @@ for (let i = 1; i < argv.length; i++) {
 const num = (k, d) => (opt[k] === undefined ? d : +opt[k]),
   list = (k, d) => (opt[k] === undefined ? d : String(opt[k]).split(',').map(Number));
 let A = null;
+const importedAssets = new Map();
 const lib = () => A || (A = cfg.load ? cfg.load() : require('../index.js').load());
 // a diorama by its id, or a file in lab/ that exports (kit) => ({ id, name, seed, build })
 /* a mesh file is a diorama too: fitted to --size, coloured from its own materials, baked and looked at like the rest */
@@ -45,8 +46,16 @@ function meshScene(file) {
     name: path.basename(file),
     seed: 1,
     build(seed) {
-      const size = num('size', 6),
-        mesh = K.mesh.fit(raw, { size, up: opt.up, turn: num('spin', 0) }),
+      const size = num('size', 6);
+      const asset = importedAssets.get(path.resolve(file));
+      if (asset) {
+        const world = K.authoring.assetSurfaces.world(asset, {
+          size, res: num('res', size / 70), turn: num('spin', 0), up: opt.up,
+          hues: num('hues', 10), shades: num('shades', 5)
+        });
+        return world;
+      }
+      const mesh = K.mesh.fit(raw, { size, up: opt.up, turn: num('spin', 0) }),
         look = K.mesh.look(mesh, { hues: num('hues', 6), shades: num('shades', 4) }),
         B = kit.makeBuilder(seed, look.pal),
         S = K.sculpt(kit.makeSculpt(B));
@@ -278,7 +287,7 @@ const CMD = {
         '  ghost <id> [--t 2 --spacing 0.12 --n 2 | --ghosts 1.6,1.8]   one moment with those either side laid faintly over it',
         '  acts                        the ready clips, reactions, easings and cues, by name',
         '  motion <id> [--from 0 --to 12]   numbers about how it moves: speed, jumps, what goes underground',
-        '  mesh <file.obj|.gltf|.glb>  bring a mesh in: what it is made of, and a sheet of it from all round as splats',
+        '  mesh <file.obj|.gltf|.glb>  import and inspect as splats (--uv requires textured GLB stamps, --uv off uses geometry)',
         '  export-glb <scene.js|.json|.obj|.gltf|.glb> --out model.glb   write UV-mapped geometry with materials, skins and clips',
         '                              [--res 0.08 --texture-size 1024 --triangles 16000 --duration 4 --fps 30]',
         '  depth <map.png|map.json> [--image aligned.png --out-dir folder]  import a depth map as splats, a mesh and an SDF',
@@ -799,7 +808,7 @@ const CMD = {
         ' faces, ' +
         m.verts +
         ' points; ' +
-        (m.sheet
+        (m.mode === 'uv' ? 'UV surface stamps with alpha' : m.sheet
           ? 'open (' + (m.open * 100).toFixed(0) + '% of its edges are loose): treated as a sheet with thickness'
           : 'closed: treated as a solid') +
         '; materials: ' +
@@ -811,8 +820,8 @@ const CMD = {
         m.hues +
         ' colours of ' +
         (w.pal.length - 1) / m.hues +
-        ' shades, field cell ' +
-        m.cell.toFixed(3) +
+        ' shades' +
+        (m.mode === 'uv' ? ', UV-atlas detail' : ', field cell ' + m.cell.toFixed(3)) +
         ', built in ' +
         w.buildMs +
         ' ms'
@@ -1474,4 +1483,15 @@ const CMD = {
     process.exit(fails ? 1 : 0);
   }
 };
-(CMD[cmd] || (() => die('unknown command "' + cmd + '". try: ink-studio help')))();
+async function run() {
+  if (/\.glb$/i.test(pos[0] || '') && opt.uv !== 'off') {
+    try {
+      importedAssets.set(path.resolve(pos[0]), await require('../index.js').readAsset(path.resolve(pos[0]), { size: 3 }));
+    } catch (error) {
+      if (opt.uv === true) throw error;
+      console.error('UV asset import unavailable: ' + error.message + '. Using the geometry importer. Pass --uv to require UV import.');
+    }
+  }
+  await (CMD[cmd] || (() => die('unknown command "' + cmd + '". try: ink-studio help')))();
+}
+run().catch(error => { console.error(error.message); process.exitCode = 1; });

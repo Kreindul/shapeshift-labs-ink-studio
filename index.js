@@ -78,6 +78,17 @@ module.exports = {
     }
     throw new Error('do not know how to read ' + ext + ' (obj, gltf and glb are read)');
   },
+  async readAsset(file, options = {}) {
+    if (path.extname(file).toLowerCase() !== '.glb') throw Error('Portable asset import expects a GLB file');
+    const decodeImage = options.decodeImage || ((bytes, mime) => {
+      if (mime !== 'image/png') throw Error('Supply decodeImage to import embedded JPEG images');
+      const image = require('./cli/png.js').raster(Buffer.from(bytes));
+      return { width: image.w, height: image.h,
+        pixels: image.max === 255 ? image.data : Uint8Array.from(image.data, v => Math.round(v * 255 / image.max)) };
+    });
+    return module.exports.load().KIT.authoring.assetMeshes.importGLB(
+      new Uint8Array(fs.readFileSync(file)), { ...options, decodeImage });
+  },
   exportGlb: require('./cli/export-glb.js'),
   render: require('./cli/render.js').render,
   spriteAtlas: require('./cli/sprite-atlas.js').spriteAtlas,
