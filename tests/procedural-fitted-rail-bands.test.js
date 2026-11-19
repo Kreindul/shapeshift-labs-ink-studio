@@ -19,6 +19,18 @@ test('a prepared face occlusion query preserves the union point test',()=>{
   assert.equal(onlyDeck.faceOcclusion(deck.key,face),null);
 });
 
+test('bounded clearance ignores distant thin wedges without changing interior signs',()=>{
+  const blade=pieces.convex([[0,0,0],[2,0,-.1],[2,0,.1],[0,.1,0],[2,.1,-.1],[2,.1,.1]],
+    [[0,1,2],[3,4,5],[0,1,4,3],[1,2,5,4],[2,0,3,5]],{key:'blade'});
+  const hull=pieces.union([blade]),outside=[-1,.05,0];
+  assert(hull.distance(outside)<.1);
+  assert.equal(hull.clearanceWithin(outside,.18),Infinity);
+  assert.equal(hull.clearanceWithin(outside,2),1);
+  const center=[1.8,.05,0];
+  assert.equal(hull.clearanceWithin(center,.18),hull.distance(center));
+  assert(hull.clearanceWithin(center,0)<0);
+});
+
 const spec = {
   inner: [[0, 0, 0], [2, 0, 0]],
   outer: [[0, 1, 0], [2, 1, 0]],

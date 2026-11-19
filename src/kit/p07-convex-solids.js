@@ -257,6 +257,23 @@
       }
       return candidates;
     }
+    function clearanceWithin(point,reach){
+      if(!vector(point)||!Number.isFinite(reach)||reach<0)
+        throw new Error('Clearance needs a finite point and nonnegative reach');
+      const min=point.map(v=>v-reach),max=point.map(v=>v+reach);
+      let result=Infinity;
+      for(const part of nearby(min,max)){
+        const b=part.bounds;
+        const gap=Math.hypot(
+          Math.max(0,b.min[0]-point[0],point[0]-b.max[0]),
+          Math.max(0,b.min[1]-point[1],point[1]-b.max[1]),
+          Math.max(0,b.min[2]-point[2],point[2]-b.max[2]));
+        if(gap>reach)continue;
+        const d=part.distance(point);
+        result=Math.min(result,gap?Math.max(d,gap):d);
+      }
+      return result;
+    }
     function faceOcclusion(exclude,points,tolerance=.002){
       if(!Array.isArray(points)||points.length<3||!points.every(vector)||!Number.isFinite(tolerance)||tolerance<0)
         throw new Error('Face occlusion needs finite corners and nonnegative depth');
@@ -331,6 +348,7 @@
       bounds,
       hidden,
       faceOcclusion,
+      clearanceWithin,
       contains(point, tolerance = 0.002) {
         if (!vector(point) || !Number.isFinite(tolerance) || tolerance < 0)
           throw new Error('Containment needs a finite point and nonnegative depth');

@@ -35,6 +35,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `pieces.convex`, `pieces.box`, `pieces.beam`, `pieces.tube`, `pieces.union` | Reusable solid pieces and query unions. Union meshes contain constituent shells |
 | `pieces.union(parts).projectedIntervals(a, b, direction, {outward, inward})` | Merged intervals of material within a bounded strip projected onto a segment, with gaps preserved |
 | `pieces.union(parts).faceOcclusion(exclude, corners, tolerance)` | Prepare one interior-occlusion predicate for points on a convex face, or return null if the face has no possible occluders |
+| `pieces.union(parts).clearanceWithin(point, reach)` | Query local solid clearance with a world-space bounds check per piece. Returns Infinity when every piece's bounds lie beyond reach |
 | `pieces.uprightSpan(a, b, {width, height, up, extension}, meta)` | Closed pitched band with upright ends and constant width and height |
 | `fittedCourses(spec)` | Exact span fitting with stagger, periodic seams, material joints and logical cell identity |
 | `logicalParts.compile(pieces, identify)` | Group clipped pieces of one stock part and partition visible and omitted pieces from retained keys |
