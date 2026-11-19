@@ -1,6 +1,22 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const {KIT}=require('..').load(),{offsetRails,fittedRailBand}=KIT.procedural;
+
+test('miters can share the length of a span without narrowing the whole entrance',()=>{
+  const path=[[0,0,0],[1.56,0,0],[1.56,0,3.06],[-4,0,3.06],[-4,0,0],[-2.44,0,0]],halfWidth=1.44;
+  const fitted=offsetRails({path,halfWidth,shareSpan:true});
+  assert(fitted.contracted.every(value=>value===false));
+  assert(offsetRails({path,halfWidth}).contracted[1]);
+  for(let i=1;i<path.length;i++){
+    const tangent=KIT.V.sub(path[i],path[i-1]);
+    for(const rail of [fitted.left,fitted.right])
+      assert(KIT.V.dot(KIT.V.sub(rail[i],rail[i-1]),tangent)>0);
+  }
+  const short=[[0,0,0],[1,0,0],[1,0,1],[-2,0,1]];
+  const capped=offsetRails({path:short,halfWidth,shareSpan:true});
+  assert(capped.contracted[1]&&capped.contracted[2]);
+  assert(capped.right[2][2]>capped.right[1][2]);
+});
 const near=(a,b)=>assert(Math.abs(a-b)<1e-6,`${a} differs from ${b}`);
 
 test('offset rails share a true miter while retaining independently tapered endpoints',()=>{

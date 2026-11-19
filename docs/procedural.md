@@ -977,6 +977,17 @@ four corners of a constant-width strip in a planar chart. The extension adds
 the same length at each end. A collapsed span returns an empty array. Use
 the outline as a fitted surface, a convex keepout or the input for a join.
 
+`P.routes.fitReturn(approach, destination, options)` fits a finite-width
+planar route from the first approach point to a fixed destination. Supply
+the occupied `occupiedHalfWidth`, the returning `halfWidth`, and optionally
+`toeExtension`, `clearance`, `maxLength`, and obstacle polygons. Obstacles
+use their outlines before widening. The solver reserves the approach in an
+aligned frame and widens the reservation by the returning width. Its
+entrance and any exit close to the reservation keep straight leads.
+It can route around either open side. Success returns `{status:'ok',
+points, length}`. A failure reports `blocked-pin`, `unreachable`, or
+`budget` while leaving the input coordinates unchanged.
+
 `P.routes.stripJoin(previous, corner, next, halfWidth, options)` joins
 two equal-width strips at three planar points. It returns `null` for
 collinear or collapsed legs. Its `exterior` polygon fills the outside gap
@@ -2522,13 +2533,15 @@ sample range, actual radius, center and cutback. Chord error controls arc
 resolution. Set `maxDeviation` to limit how far the arc can cut inside the
 original corner. The function rejects a result that exceeds the sample budget.
 
-`KIT.procedural.offsetRails({ path, halfWidth, up, closed, miterLimit })`
+`KIT.procedural.offsetRails({ path, halfWidth, up, closed, miterLimit, shareSpan })`
 returns matching `left` and `right` rails around a sequence of 3D points.
 `halfWidth` can be one positive distance or an array for a tapered run.
 The solver measures lateral offsets in the plane perpendicular to `up`
 without flattening station heights. Closed paths use a single shared seam
 station, so supply each point once. Miters contract on very short or acute
-segments. The result flags those stations in `contracted`; split the run
+segments. Use `shareSpan: true` to let both corners draw from the same
+length allowance, so an isolated corner can use the free part of a short
+straight lead. The result flags contractions in `contracted`; split the run
 at any station listed in `reversals` before extruding the ribbon.
 
 Pass the original spine as `measure` to `fittedRibbon` or `fittedRailBand`

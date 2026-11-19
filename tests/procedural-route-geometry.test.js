@@ -12,6 +12,27 @@ test('strip footprints share the same shape when their stations are reversed',()
   assert.throws(()=>routes.stripFootprint([1,2],[4,2],.5,-.1),/extension/);
 });
 
+test('pinned returns route around a finite approach and can use either side',()=>{
+  const approach=[[0,0],[1.05,0]],end=[3.05,0],base={occupiedHalfWidth:1.5,halfWidth:1.5,
+    toeExtension:1.5,clearance:.04,maxLength:30};
+  const fit=options=>routes.fitReturn(approach,end,{...base,...options});
+  const open=fit();
+  assert.equal(open.status,'ok');
+  assert.deepEqual(open.points[0],approach[0]);
+  assert.deepEqual(open.points.at(-1),end);
+  assert(open.points[1][0]<0,'the entry moves away from the occupied approach');
+  const side=point=>Math.sign(point[1]);
+  const used=side(open.points.reduce((a,b)=>Math.abs(a[1])>=Math.abs(b[1])?a:b));
+  assert(used);
+  const wall=[[-.9,used*1.9],[3.8,used*1.9],[3.8,used*4],[-.9,used*4]];
+  const alternate=fit({obstacles:[wall]});
+  assert.equal(alternate.status,'ok');
+  assert(alternate.points.every(point=>side(point)!==used));
+  assert.deepEqual(alternate.points.at(-1),end);
+  assert.equal(routes.fitReturn(approach,[.6,.2],base).status,'blocked-pin');
+  assert.equal(fit({maxLength:2}).status,'unreachable');
+});
+
 test('strip joins close only the outside of a turn and partition the overlapping strips',()=>{
   const close=(a,b)=>assert(Math.abs(a-b)<1e-8,`${a} vs ${b}`);
   const center=[2,3],previous=[0,3],next=[2,5];
