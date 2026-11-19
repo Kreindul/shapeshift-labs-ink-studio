@@ -31,3 +31,17 @@ test('recess profiles reject crossed boundaries, an invalid center and insuffici
     { recess: [[-.3,-.3],[2,-.3],[2,.3],[-.3,.3]] }])
     assert.throws(() => P.geometry.recessedProfile({...spec,...patch}), /profile|Recess/i);
 });
+
+test('a general recess produces a closed cap inside an outline with no radial center', () => {
+  const outline=[[-2,-2],[2,-2],[2,-1],[-.4,-1],[-.4,1],[2,1],[2,2],[-2,2]],
+    recess=[[-1.5,-.5],[-.9,-.5],[-.9,.5],[-1.5,.5]],span=[-.95,0],inset=.4;
+  const volume=P.geometry.recessedProfile({outline,recess,span,inset,center:null});
+  assert(volume.distance([1,0,-.5])>0);
+  assert(volume.distance([-1.2,0,-.2])>0);
+  assert(volume.distance([-1.2,0,-.6])<0);
+  const shell=volume.mesh({owner:'concave',material:'stone'});
+  assert.equal(KIT.mesh.info(P.geometry.toKitMesh(shell,()=>[1,1,1])).open,0);
+  volume.sample(.34,p=>assert(Math.abs(volume.distance(p))<1e-8));
+  assert.throws(()=>P.geometry.recessedProfile({outline,recess:[[-1,-1.5],[1,-1.5],[1,1.5],[-1,1.5]],
+    span,inset,center:null}),/cannot touch/);
+});

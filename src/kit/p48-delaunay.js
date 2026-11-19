@@ -1,6 +1,6 @@
 /* Planar Delaunay and constrained triangulation with exact fallback predicates. */
 (function (K) {
-  const P = K.procedural,
+  const P = K.procedural || K.authoring,
     validPoint = p => Array.isArray(p) && p.length === 2 && p.every(n => Number.isFinite(n) && Math.abs(n) <= 1e6),
     limit = (n, low, high) => Number.isSafeInteger(n) && n >= low && n <= high,
     edgeKey = (a, b) => a < b ? a + ':' + b : b + ':' + a,

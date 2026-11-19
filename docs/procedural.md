@@ -64,6 +64,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `surfaceMasks.compile(strokes, {size, periodic})` | Ordered surface brush coverage in retained UVs with measured width and optional seam wrapping |
 | `profileCut({profile, span, frame})` | Bounded extrusion of a simple 2D profile in an affine frame. `subtract(hostField)` forms an opening and `lining(thickness, hostField)` returns its material band |
 | `geometry.recessedProfile({outline, recess, center, span, inset})` | Closed XY profile extruded along Z with a blind front recess, shared mesh edges and a solid backing |
+| `geometry.fitMonotoneOutline({outline, required})` | Fit a horizontal span at each height while preserving authored ledges and cutbacks where they have clearance |
 | `surfaceSection(chart, options)` | Convert between world coordinates and a section measured through the varying thickness of a surface chart |
 | `geometry.profileDistance(points)` | Compile a closed 2D ring into a reusable signed distance function `(x, y) => distance`. Concavity and either winding are supported |
 | `volumeCuts.compile(specs)` | Union keyed XZ profiles extruded along Y. Provides a signed field, host subtraction, bounded exposed-boundary sampling and ray hits |
@@ -2228,6 +2229,18 @@ inside the exterior ring. The inset is measured back from the front and
 must leave positive backing thickness. Use `distance([x, y, z])` for
 inside/outside queries, `mesh(metadata)` for a closed surface, and
 `sample(spacing, emit)` for points on the same surface.
+
+Pass `center: null` to triangulate the caps of arbitrary simple nested
+rings. The front cap has the recess ring as a hole. The recess and rear
+caps share their boundary vertices with the side faces. This mode
+supports outlines without a point visible from every edge.
+
+`geometry.fitMonotoneOutline` takes an authored XY ring and an optional
+required XY ring. Each must have one contiguous interior span at each
+height. The required ring must fit within the authored height range.
+The fitter extends the left and right traces only where required, adding
+exact intersections where one sloped side overtakes the other. It keeps
+horizontal ledges and returns a counterclockwise exterior ring.
 
 ### Retained environment profiles
 

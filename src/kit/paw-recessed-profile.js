@@ -4,6 +4,58 @@
   const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
   const point = p => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite);
 
+  function segmentsTouch(a,b,c,d) {
+    const side=(x,y,p)=>cross([y[0]-x[0],y[1]-x[1]],[p[0]-x[0],p[1]-x[1]])/
+      Math.hypot(y[0]-x[0],y[1]-x[1]);
+    const u=side(a,b,c),v=side(a,b,d),s=side(c,d,a),t=side(c,d,b);
+    const on=(p,x,y,n)=>Math.abs(n)<=EPS&&p.every((value,i)=>
+      value>=Math.min(x[i],y[i])-EPS&&value<=Math.max(x[i],y[i])+EPS);
+    return ((u>EPS&&v< -EPS||v>EPS&&u< -EPS)&&(s>EPS&&t< -EPS||t>EPS&&s< -EPS))||
+      on(c,a,b,u)||on(d,a,b,v)||on(a,c,d,s)||on(b,c,d,t);
+  }
+
+  function simple(raw) {
+    if (!Array.isArray(raw)||raw.length<3||raw.length>1024||!Array.from(raw).every(point))
+      throw Error('A triangulated recessed profile needs 3 to 1024 finite points per ring');
+    const vertices=raw.map(p=>p.slice()), edges=vertices.map((p,i)=>[p,vertices[(i+1)%vertices.length]]);
+    if(edges.some(([a,b])=>Math.hypot(a[0]-b[0],a[1]-b[1])<=EPS))
+      throw Error('Recessed profile edges must be distinct');
+    for(let i=0;i<edges.length;i++)for(let j=i+2;j<edges.length;j++){
+      if(i===0&&j===edges.length-1)continue;
+      if(segmentsTouch(...edges[i],...edges[j]))throw Error('Recessed profile cannot cross or touch itself');
+    }
+    const area=edges.reduce((n,[a,b])=>n+cross(a,b),0);
+    if(!Number.isFinite(area)||Math.abs(area)<=EPS)throw Error('Recessed profile has no area');
+    return area<0?vertices.reverse():vertices;
+  }
+
+  function cappedRings(outer,inner,back,front,floor) {
+    let frontCap,backCap,insideCap;
+    const triangulate=P.geometry.triangulatePolygon;
+    function cap(triangle,mesh,z,reverse=false) {
+      for(const indices of mesh.triangles){
+        const [a,b,c]=indices.map(i=>[...mesh.points[i],z]);
+        triangle(a,reverse?c:b,reverse?b:c);
+      }
+    }
+    return function faces(triangle,quad) {
+      frontCap||=triangulate([outer,inner]);
+      backCap||=triangulate([outer]);
+      insideCap||=triangulate([inner]);
+      cap(triangle,frontCap,front);
+      cap(triangle,backCap,back,true);
+      cap(triangle,insideCap,floor);
+      for(const [i,a] of outer.entries()){
+        const b=outer[(i+1)%outer.length];
+        quad([...a,front],[...a,back],[...b,back],[...b,front]);
+      }
+      for(const [i,a] of inner.entries()){
+        const b=inner[(i+1)%inner.length];
+        quad([...a,front],[...b,front],[...b,floor],[...a,floor]);
+      }
+    };
+  }
+
   function ring(raw, center) {
     if (!Array.isArray(raw) || raw.length < 3 || raw.length > 256 || !Array.from(raw).every(point))
       throw new Error('Recessed profiles need 3 to 256 finite points per ring');
@@ -36,10 +88,20 @@
   }
 
   function recessedProfile({ outline, recess, center = [0, 0], span, inset }) {
-    if (!point(center) || !point(span) || !Number.isFinite(inset) || inset <= EPS || span[1] - span[0] - inset <= EPS)
+    if (center!==null&&!point(center) || !point(span) || !Number.isFinite(inset) || inset <= EPS || span[1] - span[0] - inset <= EPS)
       throw new Error('A recessed profile needs a finite center, an ordered span and backing thickness');
-    const outer = ring(outline, center), inner = ring(recess, center), back = span[0], front = span[1], floor = front - inset;
-    const directions = [...outer, ...inner].map(p => {
+    const general=center===null,pivot=general?[0,0]:center.slice(),
+      outer=general?simple(outline):ring(outline,pivot),inner=general?simple(recess):ring(recess,pivot),
+      back=span[0],front=span[1],floor=front-inset,
+      exterior=P.geometry.profileDistance(outer),cavity=P.geometry.profileDistance(inner);
+    if(general){
+      if(inner.some(p=>exterior(...p)>=-EPS))throw Error('Recess must lie strictly inside the exterior profile');
+      for(const [i,a] of outer.entries())for(const [j,c] of inner.entries()){
+        if(segmentsTouch(a,outer[(i+1)%outer.length],c,inner[(j+1)%inner.length]))
+          throw Error('Recess and exterior profile cannot touch');
+      }
+    }
+    const directions = general?[]:[...outer, ...inner].map(p => {
       const theta = Math.atan2(p[1], p[0]);
       return theta < 0 ? theta + TAU : theta;
     }).sort((a, b) => a - b);
@@ -49,9 +111,8 @@
       const direction = [Math.cos(theta), Math.sin(theta)], outside = onRay(outer, direction), inside = onRay(inner, direction);
       if (Math.hypot(...outside) <= Math.hypot(...inside) + EPS)
         throw new Error('Recess must lie strictly inside the exterior profile');
-      return [outside, inside].map(([x, y]) => [x + center[0], y + center[1]]);
+      return [outside, inside].map(([x, y]) => [x + pivot[0], y + pivot[1]]);
     });
-    const pivot = center.slice(), exterior = P.geometry.profileDistance(outer), cavity = P.geometry.profileDistance(inner);
     const bounds = {
       min: [Math.min(...outline.map(p => p[0])), Math.min(...outline.map(p => p[1])), back],
       max: [Math.max(...outline.map(p => p[0])), Math.max(...outline.map(p => p[1])), front]
@@ -61,7 +122,7 @@
       return Math.max(exterior(u, v), back - z, z - front, Math.min(-cavity(u, v), z - floor));
     }
 
-    function faces(triangle, quad) {
+    function radialFaces(triangle, quad) {
       for (const [i, [a, b]] of bands.entries()) {
         const [c, d] = bands[(i + 1) % bands.length];
         const oa = [...a, front], oc = [...c, front], ib = [...b, front], id = [...d, front];
@@ -73,6 +134,7 @@
         triangle([...pivot, floor], fb, fd);
       }
     }
+    const faces=general?cappedRings(outer,inner,back,front,floor):radialFaces;
     function mesh(meta) {
       const builder = P.geometry.builder();
       faces((a, b, c) => builder.triangle(a, b, c, meta),
