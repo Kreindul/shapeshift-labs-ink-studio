@@ -243,6 +243,14 @@ chart seams and split pieces. Material assignment and mapping chart points
 onto the host are caller policies. The work budget counts vertices visited
 by the clip operations.
 
+`surfaceCells.index(plan)` indexes the result of clipping by logical cell
+key. Use `get(key)` for every surviving fragment and `contains(key, [u, v])`
+to pick it on the chart, including points on the fragment boundary.
+`excluding(keys)` returns another clipped plan with the specified logical
+cells omitted and the fragment count adjusted. The original index retains
+those fragments for restore picking. Pass either plan to lofting, sampling
+or contact generation.
+
 `surfaceCells.fieldMask` traces the negative regions of a signed chart
 field. It returns closed boundary `rings`, convex `holes` for cell clipping
 and `distance(u, v)` against those boundaries. Disconnected regions and islands are

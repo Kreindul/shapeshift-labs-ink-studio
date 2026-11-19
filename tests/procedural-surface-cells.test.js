@@ -59,6 +59,23 @@ test('overlapping cutouts subtract their combined area, and a remote cutout leav
   assert.throws(() => P.surfaceCells.clip(cells, { holes: [[[0, 0], [2, 0], [1, 1], [2, 2], [0, 2]]] }), /convex/);
 });
 
+test('indexed cells pick all surviving fragments and can omit one logical unit', () => {
+  const plan = P.surfaceCells.clip([
+    {key:'cut',polygon:rectangle(0,0,3,1)},
+    {key:'intact',polygon:rectangle(0,1,3,1)}
+  ],{holes:[rectangle(1,-.5,1,2)]});
+  const stock = P.surfaceCells.index(plan);
+  assert.equal(stock.get('cut').fragments.length,2);
+  assert(stock.contains('cut',[.5,.5]));
+  assert(stock.contains('cut',[2.5,.5]));
+  assert(!stock.contains('cut',[1.5,.5]));
+  assert(!stock.contains('missing',[1.5,.5]));
+  const reduced=stock.excluding(['cut','dormant']);
+  assert.deepEqual(reduced.cells,[stock.get('intact')]);
+  assert.equal(reduced.fragmentCount,stock.get('intact').fragments.length);
+  assert.equal(plan.cells.length,2);
+});
+
 test('fitted-course fragments on a periodic chart seam retain one logical key', () => {
   const layout = P.fittedCourses({ width: 6, height: 2, unit: [1, 1], periodic: true, stagger: .5 });
   const result = P.surfaceCells.clip(layout.cells);

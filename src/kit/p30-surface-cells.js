@@ -150,5 +150,38 @@
     return P.data.freeze({ cells: results, fragmentCount });
   }
 
-  P.surfaceCells = { clip };
+  function index(plan) {
+    if (!Array.isArray(plan?.cells) || plan.cells.length > 65536)
+      throw new Error('A surface cell index needs a bounded clipped plan');
+    const byKey = new Map();
+    let fragmentCount = 0;
+    for (const cell of plan.cells) {
+      if (typeof cell?.key !== 'string' || !cell.key || byKey.has(cell.key) ||
+          !Array.isArray(cell.fragments) || !cell.fragments.length)
+        throw new Error('Indexed surface cells need unique keys and clipped fragments');
+      fragmentCount += cell.fragments.length;
+      if (fragmentCount > 65536) throw new Error('Surface cell index exceeds its fragment budget');
+      byKey.set(cell.key, cell);
+    }
+    function contains(key, at) {
+      if (!point(at)) throw new Error('Cell lookup needs a finite chart point');
+      return byKey.get(key)?.fragments.some(polygon => polygon.every((a,i) => {
+        const b = polygon[(i + 1) % polygon.length];
+        return cross(a,b,at) >= -EPS * Math.hypot(b[0]-a[0],b[1]-a[1]);
+      })) ?? false;
+    }
+    function excluding(keys) {
+      if ((!Array.isArray(keys) && !(keys instanceof Set)) || (keys.length ?? keys.size) > 65536)
+        throw new Error('Surface cell exclusions need a bounded list of keys');
+      const omitted = new Set(keys);
+      for (const key of omitted) if (typeof key !== 'string' || !key)
+        throw new Error('Surface cell exclusions need nonempty keys');
+      const cells = plan.cells.filter(cell => !omitted.has(cell.key));
+      return Object.freeze({ cells: Object.freeze(cells),
+        fragmentCount: cells.reduce((n,cell) => n + cell.fragments.length, 0) });
+    }
+    return Object.freeze({ get: key => byKey.get(key), contains, excluding });
+  }
+
+  P.surfaceCells = { clip, index };
 })(KIT);
