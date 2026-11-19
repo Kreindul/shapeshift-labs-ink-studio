@@ -2755,6 +2755,13 @@ The layout is independent of geometry, style and rendering. A consumer can
 map the polygons onto a carrier, extrude them into physical blocks, or use the
 same layout for materials and coverage on a sloped surface.
 
+`layout.bandAt(s)` returns the interpolated `{lower, upper}` across the
+strip. `layout.keyAt(s, y)` returns the nominal logical cell at a point,
+including positions in joints. Both return null for points outside their
+domain. Use the key with your emitted stock index to check that the cell
+has physical fragments. This lookup can resolve a retained edit when a
+new pitch or datum changes the layout.
+
 ### Editable support facing
 
 `supportCourses(skirt, {omit})` uses the periodic row/column IDs from

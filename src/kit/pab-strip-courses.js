@@ -87,7 +87,29 @@
         }
       }
     }
-    return { unit: [dx, dy], length, columnPeriod: period, pieces };
+    // Resolve against the nominal cells so a retained position on a joint still
+    // identifies a logical piece. The caller can check whether it emitted stock.
+    const bands=sections.map(({s,lower,upper})=>({s,lower,upper}));
+    function bandAt(s) {
+      if(!Number.isFinite(s)||s<0||s>length)return null;
+      let low=0,high=bands.length-1;
+      while(high-low>1){
+        const mid=(low+high)>>1;
+        if(bands[mid].s<=s)low=mid;
+        else high=mid;
+      }
+      const a=bands[low],b=bands[high],t=(s-a.s)/(b.s-a.s);
+      return {lower:a.lower+(b.lower-a.lower)*t,upper:a.upper+(b.upper-a.upper)*t};
+    }
+    function keyAt(s,y) {
+      const band=bandAt(s);
+      if(!band||!Number.isFinite(y)||y<band.lower||y>=band.upper)return null;
+      const row=fullHeight?0:Math.floor((y-datum)/dy);
+      const position=(s+offset)/dx-mod(row,2)*stagger;
+      const column=s===length?Math.ceil(position)-1:Math.floor(position);
+      return row+'/'+(period?mod(column,period):column);
+    }
+    return { unit: [dx, dy], length, columnPeriod: period, pieces, bandAt, keyAt };
   }
 
   K.stripCourses = stripCourses;
