@@ -234,6 +234,40 @@
     return placements;
   }
 
+  function footprintCorridor(points, {width, headroom, below = .05, step = .6, maxVolumes = 2048} = {}) {
+    if (!Array.isArray(points) || points.length < 2 || points.length > 4096 ||
+        !Array.from(points).every(vector) || ![width,headroom,step].every(v=>Number.isFinite(v)&&v>0) ||
+        !Number.isFinite(below) || below < 0 || !Number.isSafeInteger(maxVolumes) ||
+        maxVolumes < 1 || maxVolumes > 16384)
+      throw new Error('A footprint corridor needs finite waypoints, a width, headroom and a bounded step');
+    const volumes = [];
+    function add(a,b,tangent,length) {
+      if (volumes.length >= maxVolumes) throw new Error('Footprint corridor exceeds its volume budget');
+      const low = Math.min(a[1],b[1])-below, high = Math.max(a[1],b[1])+headroom;
+      volumes.push({point:[(a[0]+b[0])/2,low,(a[2]+b[2])/2],
+        tangent:tangent.slice(),size:[length,high-low,width]});
+    }
+    let previous;
+    for (let i=1; i<points.length; i++) {
+      const a=points[i-1], b=points[i], delta=K.V.sub(b,a), run=Math.hypot(delta[0],delta[2]);
+      if (run<1e-8) {
+        if (Math.abs(delta[1])>1e-8) add(a,b,previous||[1,0,0],width);
+        continue;
+      }
+      const tangent=[delta[0]/run,0,delta[2]/run], sections=Math.ceil(run/step);
+      if (volumes.length+sections>maxVolumes)throw new Error('Footprint corridor exceeds its volume budget');
+      // A turn keeps its full cross-section at the shared waypoint.
+      if(previous&&K.V.dot(previous,tangent)<.999)add(a,a,previous,width);
+      previous=tangent;
+      for(let j=0;j<sections;j++){
+        const low=K.V.mad(a,delta,j/sections),high=K.V.mad(a,delta,(j+1)/sections);
+        add(low,high,tangent,run/sections);
+      }
+    }
+    return volumes;
+  }
+
+  P.footprintCorridor = footprintCorridor;
   P.createFootprintReservations = createFootprintReservations;
   P.placeFootprintRequests = placeFootprintRequests;
 })(KIT);

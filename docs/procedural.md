@@ -404,6 +404,14 @@ can fit on multiple decks. Insert claims in your preferred order to settle
 competing candidates deterministically. The `cellSize` changes lookup
 granularity and keeps the overlap test identical.
 
+`footprintCorridor(points, {width, headroom, below, step, maxVolumes})`
+turns an XYZ polyline into reservation claims. Supply waypoints on the
+walking surface. The claim width runs across the guide and the vertical
+range runs from `below` the lower point to `headroom` above the upper point
+in each interval. `step` bounds the horizontal length of an interval.
+A shared claim at turns keeps corners clear. Pass the claims as
+`obstacles` to `placeFootprintRequests`, or insert them with `occupy`.
+
 `freeIntervals(spec, direction, [start, end])` on the reservation field
 returns the ranges of signed distances that keep the footprint clear when
 translated in the supplied XZ direction. The direction is normalized and

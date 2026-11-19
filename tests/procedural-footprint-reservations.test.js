@@ -1,9 +1,23 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {KIT: K} = require('..').load();
-const {createFootprintReservations,placeFootprintRequests,footprintFromBounds,transforms} = K.procedural;
+const {createFootprintReservations,placeFootprintRequests,footprintFromBounds,footprintCorridor,transforms} = K.procedural;
 
 const at = (point, size=[1,1,1], tangent=[1,0,0]) => ({point,size,tangent});
+
+test('walking corridor volumes follow grade and leave room underneath elevated sections',()=>{
+  const points=[[0,0,0],[2,1,0],[2,1,2]],options={width:.7,headroom:1.5,below:.08,step:.5};
+  const corridor=footprintCorridor(points,options),ledger=createFootprintReservations();
+  assert.equal(corridor.length,9,'two runs and a continuous turn');
+  for(const volume of corridor)ledger.occupy(volume);
+  assert(!ledger.fits(at([.15,0,0],[.2,.3,.2])));
+  assert(ledger.fits(at([1.85,0,0],[.2,.3,.2])));
+  assert(!ledger.fits(at([1.85,.98,0],[.2,.3,.2])));
+  assert(!ledger.fits(at([2.2,1,-.2],[.2,.3,.2])));
+  assert(ledger.fits(at([1.45,1,1.3],[.2,.3,.2])));
+  assert(ledger.fits(at([2,2.51,1],[.2,.3,.2])));
+  assert.throws(()=>footprintCorridor(points,{...options,maxVolumes:8}),/volume budget/);
+});
 
 test('an off-center affine box projects to a tight upright reservation',()=>{
   const bounds={min:[-.1,.3,-.7],max:[1,1.2,.5]},
