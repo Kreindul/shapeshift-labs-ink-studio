@@ -2295,6 +2295,15 @@ coverage through joints and turns.
 
 ### Offset rail pairs
 
+`KIT.procedural.roundedPath(path, { radius, chordError, maxDeviation, budget })` fits
+tangent circular bends to an open 3D polyline. Each bend cuts back at most
+45% of either adjacent leg. Closely spaced turns contract their radii without
+overlap. Collinear stations and reversals retain their original points.
+The result contains the sampled `points` and `bends` with each source index,
+sample range, actual radius, center and cutback. Chord error controls arc
+resolution. Set `maxDeviation` to limit how far the arc can cut inside the
+original corner. The function rejects a result that exceeds the sample budget.
+
 `KIT.procedural.offsetRails({ path, halfWidth, up, closed, miterLimit })`
 returns matching `left` and `right` rails around a sequence of 3D points.
 `halfWidth` can be one positive distance or an array for a tapered run.
