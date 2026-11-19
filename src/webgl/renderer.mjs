@@ -83,7 +83,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     const toneStops = resources.texture(), toneRanks = resources.texture();
     const sort = createDepthSorter();
     let simple, simpleUnavailable = false, keyProgram, damp, copy, spriteProgram, spriteLayer, spriteTable, anchors;
-    let lastWorld, lastData, lastCount, fineValues, materials, anchorCount = 0;
+    let lastWorld, lastData, lastCount, lastOutput, fineValues, materials, anchorCount = 0;
     let packed = empty, historyIndex = 0, historyValid = false, previousVP;
     let toneKey, tone, sorted;
 
@@ -242,7 +242,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       textureUnit(13, spriteLayer.textures[0]);
     }
 
-    function render(world, frame, width, height) {
+    function render(world, frame, width, height, output) {
       const { raw = false, outline = true, dither = 0.35, scale = 1 } = frame;
       const look = world.look ?? {};
       const isNew = world !== lastWorld || world.data !== lastData || world.count !== lastCount;
@@ -255,10 +255,12 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       if (rw > maxSize || rh > maxSize ||
           rw > viewportLimit[0] || rh > viewportLimit[1])
         throw new RangeError('Ink Studio frame exceeds the WebGL viewport or texture size limit');
-      if (gl.canvas.width !== width) gl.canvas.width = width;
-      if (gl.canvas.height !== height) gl.canvas.height = height;
+      if (!output) {
+        if (gl.canvas.width !== width) gl.canvas.width = width;
+        if (gl.canvas.height !== height) gl.canvas.height = height;
+      }
       const resized = width !== finished.width || height !== finished.height;
-      if (isNew || resized || !damping) historyValid = false;
+      if (isNew || resized || output !== lastOutput || !damping) historyValid = false;
       geometry.resize(rw, rh);
       contours.resize(colored ? width : 1, colored ? height : 1);
       owner.resize(patterned ? width : 1, patterned ? height : 1);
@@ -360,7 +362,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
           u_gh: gaps, u_ghn: count, u_gfl: glass.floor ?? -50
         });
       }
-      const destination = damping ? finished.framebuffer : null;
+      const destination = damping ? finished.framebuffer : output;
       const resolve = resolveProgram(patterned, glass, world.ao, definition, grade);
       fullscreen(resolve, cleaning ? cleaned.framebuffer : destination, width, height, {
         ...patternedUniforms, ...glassUniforms, ...prepareTone(definition),
@@ -400,7 +402,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
           u_rng: camera.depthRange
         });
         textureUnit(8, history[next].textures[0]);
-        fullscreen(copy, null, width, height, { u_src: 8 });
+        fullscreen(copy, output, width, height, { u_src: 8 });
         historyIndex = next;
         historyValid = true;
         previousVP = vp;
@@ -409,6 +411,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       lastWorld = world;
       lastData = world.data;
       lastCount = world.count;
+      lastOutput = output;
     }
 
     const viewportLimit = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
@@ -431,13 +434,12 @@ export function createRenderer(canvas, { toolkit, specialize = true, reuseOrder 
   if (!gl) throw new Error('Ink Studio GPU rendering requires WebGL 2');
   let backend = createBackend(gl, toolkit, specialize, reuseOrder);
   let disposed = false;
-  const restore = () => {
-    backend?.dispose();
+  const lose = event => {
+    event.preventDefault();
+    // The restored context cannot delete or reuse the old resources.
     backend = null;
   };
-  const lose = event => event.preventDefault();
   canvas.addEventListener?.('webglcontextlost', lose);
-  canvas.addEventListener?.('webglcontextrestored', restore);
   return {
     render(world, frame = {}) {
       if (disposed) throw new Error('The Ink Studio renderer has been disposed');
@@ -455,20 +457,24 @@ export function createRenderer(canvas, { toolkit, specialize = true, reuseOrder 
           (!Array.isArray(frame.changedRows) || frame.changedRows.some(row =>
             !Number.isInteger(row) || row < 0 || row >= Math.max(1, Math.ceil(world.count / 512)))))
         throw new RangeError('changedRows must contain valid 512-splat row indices');
-      const width = frame.width ?? canvas.width, height = frame.height ?? canvas.height;
+      const target = frame.target;
+      const width = frame.width ?? target?.width ?? canvas.width;
+      const height = frame.height ?? target?.height ?? canvas.height;
+      const output = target?.framebuffer ?? null;
+      if (target && (width !== target.width || height !== target.height || !output || !gl.isFramebuffer(output)))
+        throw new TypeError('Draw target must match the frame size and use the renderer WebGL context');
       if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1)
         throw new RangeError('Ink Studio frame width and height must be positive integers');
       if (![frame.time ?? 0, frame.bornAt ?? 0, frame.scale ?? 1, frame.dither ?? 0.35].every(Number.isFinite))
         throw new RangeError('Ink Studio frame parameters must be finite');
       backend ??= createBackend(gl, toolkit, specialize, reuseOrder);
-      backend.render(world, frame, width, height);
+      backend.render(world, frame, width, height, output);
     },
     dispose() {
       if (disposed) return;
       disposed = true;
       backend?.dispose();
       canvas.removeEventListener?.('webglcontextlost', lose);
-      canvas.removeEventListener?.('webglcontextrestored', restore);
     }
   };
 }

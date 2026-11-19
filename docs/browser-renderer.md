@@ -52,6 +52,11 @@ tone mapping, and grading are inactive. Pass `reuseOrder: false` or
 | `edges`, `lightShape` | Toggle surface edge sprites and per-pixel line shading. |
 | `scale`, `stepAnimation` | Change the splat size or disable the shared per-pixel animation clock stepping. |
 
+Set `frame.target` to a same-context framebuffer descriptor with `framebuffer`,
+`width`, and `height` to draw offscreen. Its dimensions supply the defaults for
+the frame. The [screen transition compositor](transitions.md#render-ink-studio-worlds-directly-into-a-transition)
+can create these targets and reuse their color textures on the GPU.
+
 ## Feature coverage
 
 | Feature | WebGL canvas renderer | Node and CLI renderer |

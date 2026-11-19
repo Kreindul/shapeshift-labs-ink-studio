@@ -26,6 +26,7 @@ The package includes geometry, materials, lighting, animation, character control
 - [Reflections, ripples and atmosphere](#reflections-ripples-and-atmosphere)
 - [Embedding and custom scene collections](#embedding-and-custom-scene-collections)
 - [Browser renderer](#browser-renderer)
+- [Screen transitions](#screen-transitions)
 - [Module reference](#module-reference)
 - [Validation and development](#validation-and-development)
 
@@ -780,6 +781,18 @@ The following module can run after `ink-studio.browser.js` loads as a classic sc
 
 See the [browser renderer guide](docs/browser-renderer.md) for supported effects,
 frame options, texture updates, and the lower-level integration API.
+
+## Screen transitions
+
+The browser package includes 49 preset transitions, from blackouts and eyelid
+reveals to encounter wipes and memory dissolves. Use the compositor with Ink
+Studio render targets or your own images and textures. Presets expose timing,
+shader parameters, and cue markers. Compose custom sequences and register GLSL
+stages through the same API.
+
+The [screen transition guide](docs/transitions.md) covers each preset, playing
+sound cues, passing masks, and writing shaders. The [transition gallery](examples/transitions/index.html)
+runs from a local server.
 
 ## Module reference
 
