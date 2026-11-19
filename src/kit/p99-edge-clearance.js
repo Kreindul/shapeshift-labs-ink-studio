@@ -54,5 +54,54 @@
     return {kept,removed};
   }
 
-  P.edgeClearance=Object.freeze({strip,ranges});
+  function clipFieldPath(points, fields, {padding=0, spacing=.035, tolerance=.001}={}) {
+    if(!Array.isArray(points)||points.length<2||points.length>4097||!points.every(point)||
+       !Array.isArray(fields)||fields.length>4096||!Number.isFinite(padding)||padding<0||
+       !Number.isFinite(spacing)||!Number.isFinite(tolerance)||tolerance<=0||spacing<tolerance)
+      throw Error('Field path clearance needs bounded points, fields and sample spacing');
+    const obstacles=fields.map(field=>{
+      if(typeof field?.distance!=='function')throw Error('Path clearance fields need a distance function');
+      return {field,bounds:P.spatial.expand(P.spatial.bounds(field.bounds),padding)};
+    });
+    if(!obstacles.length)return null;
+    const runs=[];
+    let active=null,cut=false;
+    for(let i=1;i<points.length;i++){
+      const a=points[i-1],b=points[i],delta=V.sub(b,a),length=V.len(delta);
+      if(length<=EPS)continue;
+      const limits=P.spatial.boxOf([a,b]),removed=[];
+      for(const {field,bounds} of obstacles){
+        if(!P.spatial.overlap(limits,bounds))continue;
+        let low=0,high=1;
+        for(let axis=0;axis<3;axis++){
+          if(Math.abs(delta[axis])<=EPS)continue;
+          const entry=(bounds.min[axis]-a[axis])/delta[axis],exit=(bounds.max[axis]-a[axis])/delta[axis];
+          low=Math.max(low,Math.min(entry,exit));
+          high=Math.min(high,Math.max(entry,exit));
+        }
+        if(high-low<=EPS)continue;
+        const step=Math.min(spacing/length,(high-low)/4);
+        const trace=P.traceSignedIntervals(t=>field.distance(V.mad(a,delta,t))-padding,{
+          range:[low,high],step,tolerance:Math.min(step,tolerance/length),maxSamples:8193
+        });
+        removed.push(...(trace.complete?trace.intervals:[[low,high]]));
+      }
+      removed.sort((x,y)=>x[0]-y[0]||x[1]-y[1]);
+      let start=0;
+      function keep(end){
+        if(end-start<=EPS)return;
+        const p=V.mad(a,delta,start);
+        if(!active||V.dist(active.at(-1),p)>EPS)runs.push(active=[p]);
+        active.push(V.mad(a,delta,end));
+      }
+      for(const [low,high] of removed){
+        keep(low);
+        if(high>start){start=high;active=null;cut=true;}
+      }
+      keep(1);
+    }
+    return cut?P.data.freeze(runs):null;
+  }
+
+  P.edgeClearance=Object.freeze({strip,ranges,clipFieldPath});
 })(KIT);

@@ -87,6 +87,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `routes.layout(route, options)` | Fit bounded intervals on a polyline, catenary, or compatible curve. Place caller-chosen pieces using gapped endpoints and midpoint frames |
 | `routes.fitStairApproach(options)` | Fit a short stair flight from an exposed landing to a sampled carrier surface. |
 | `edgeClearance.strip(a, b, options)`, `edgeClearance.ranges(a, b, strips)` | Split a straight edge into retained and removed ranges where it crosses sloped clearance strips. |
+| `edgeClearance.clipFieldPath(points, fields, {padding, spacing, tolerance})` | Split a polyline around bounded signed fields, preserving its unblocked vertices and bends. |
 | `snapping.resolve(point, features, options)` | Project to a bounded point or segment and return the winning feature with its caller-supplied identity. |
 | `railGuard(options, meta)` | Build closed rail and upright post pieces with adjustable height, spacing and rail levels. |
 | `cantileverSupports.sites(options)`, `cantileverSupports.fitMount(options, distance)`, `cantileverSupports.bracket(site, options, meta)` | Fit bearing sites along an edge or to a nearby solid field and build support profiles. |
@@ -513,6 +514,13 @@ defaults to zero. `above` and `below` default to .20 world units.
 corridors and returns ordered normalized `{kept, removed}` intervals. Sample
 these intervals on the original edge to build separate guard, trim or fence
 pieces. For piecewise-linear edges, apply the query to each segment.
+
+`edgeClearance.clipFieldPath` accepts a polyline and fields with world
+`bounds` and `distance(point)`. It reserves `padding` world units on either
+side of each crossing. `spacing` controls discovery and `tolerance` refines
+the cut locations. It returns the retained polylines, an empty array when
+the whole guide is blocked, or `null` when the guide is clear. If a trace
+uses its entire work budget, it omits that field's bounded intersection.
 
 `snapping.resolve(position, features, {tolerance, axes})` returns the eligible
 feature, projected point, distance and segment parameter `t`, or `null`.
