@@ -12,6 +12,8 @@
   }
 
   function splat(builder, raw, options = {}) {
+    if (options.geometry === 'sdf') return sdfSplat(builder, raw, options);
+    if (options.geometry !== undefined && options.geometry !== 'mesh') throw Error('Unknown asset geometry mode');
     const { V } = K;
     const { asset, mesh, sampler } = fitted(raw, options);
     const res = options.res ?? .06;
@@ -82,7 +84,9 @@
     return builder.finish({
       cam: { target, dist: radius * 3.6, yaw: .43, pitch: .15, sway: 0, ...options.cam },
       radius: Math.max(1, radius), detail: 1 / (options.res ?? .06), dither: 0,
-      look: { pixelSize: 2 }, mesh: { ...K.mesh.info(placed.mesh), mode: 'uv', hues: look.ramps.length }
+      look: { pixelSize: 2 }, mesh: { ...K.mesh.info(placed.mesh), mode: 'uv', geometry: options.geometry ?? 'mesh', hues: look.ramps.length },
+      ...(placed.field && { sdf: { dimensions: placed.field.n, spacing: placed.field.h,
+        sourceTriangles: asset.triangles.length / 3, reconstructedTriangles: placed.mesh.tri.length / 3 } })
     });
   }
 
@@ -94,7 +98,7 @@
         options.thick !== undefined && (!Number.isFinite(options.thick) || options.thick < 0))
       throw Error('Asset fields need 2–128 cells and nonnegative thickness');
     if (!Number.isFinite(cutoff) || cutoff <= 0 || cutoff > 1) throw Error('Invalid field alpha cutoff');
-    const positions = [], triangles = [];
+    const positions = [], triangles = [], sourceFaces = [];
     function emit(face, points, a, b, c) {
       const center = [(a[0]+b[0]+c[0])/3, (a[1]+b[1]+c[1])/3];
       if (sampler.opacityAt(face, ...center) < cutoff) return;
@@ -103,6 +107,7 @@
       const first = positions.length / 3;
       for (const [x, y] of [a, b, c]) positions.push(...K.V.add(origin, K.V.add(K.V.mul(u, x), K.V.mul(v, y))));
       triangles.push(first, first+1, first+2);
+      sourceFaces.push(face);
     }
     for (let face=0; face<asset.triangles.length/3; face++) {
       const ids=Array.from(mesh.tri.slice(face*3,face*3+3));
@@ -122,7 +127,60 @@
       }
     }
     if (!triangles.length) throw Error('Asset has no visible surface at this alpha cutoff');
-    return K.mesh.field(K.mesh.make(positions,triangles),{cells,thick:options.thick});
+    const result = K.mesh.field(K.mesh.make(positions,triangles),{cells,thick:options.thick});
+    // Distance-grid ownership points into the visible patches, retaining their original UV face.
+    result.sourceFaces = Int32Array.from(sourceFaces);
+    result.sourcePositions = mesh.pos.slice();
+    result.sourceFace = (x, y, z) => result.sourceFaces[result.tri(x, y, z)];
+    return result;
+  }
+
+  function sdfSplat(builder, raw, options) {
+    const placed = fitted(raw, options);
+    const grid = options.field ?? field(raw, options);
+    if (typeof grid.sd !== 'function' || typeof grid.sourceFace !== 'function')
+      throw Error('Textured SDF stamps need an asset field with source-face ownership');
+    // A supplied field owns its coordinate frame, even when the caller omits its original fit options.
+    const sampler = grid.sourcePositions ? A.assetTextures.sampler({
+      ...placed.asset, positions: Array.from(grid.sourcePositions)
+    }) : placed.sampler;
+    const res = options.res ?? .06;
+    const maxSplats = options.maxSplats ?? 250000;
+    if (!Number.isFinite(res) || res <= 0 || !Number.isSafeInteger(maxSplats) || maxSplats < 1)
+      throw Error('Asset surface stamps need positive spacing and a splat budget');
+    const light = K.V.norm(options.light ?? [-.5, .8, .7]);
+    const ambient = options.ambient ?? .36;
+    if (!Number.isFinite(ambient) || ambient < 0 || ambient > 1) throw Error('Invalid asset ambient light');
+    const surface = { layers: { atlas: {
+      type: 'projected', ink: true,
+      pattern({ sample }, output) {
+        const p = sample.position;
+        const source = grid.sourceFace(...p);
+        if (!Number.isInteger(source) || source < 0) { output[4] = 0; return; }
+        const material = sampler.materialAtPoint(source, ...p, sample.normal);
+        const irradiance = ambient + (1 - ambient) * Math.max(0, K.V.dot(material.normal, light));
+        const rgb = A.assetTextures.shade(material, { irradiance, light, view: K.V.norm(sample.view) });
+        for (let k = 0; k < 3; k++) output[k] = rgb[k];
+        output[4] = material.opacity;
+      }
+    } } };
+    const sculpt = makeSculpt(builder);
+    sculpt.sun = light;
+    const solid = K.sdf.solid(sculpt, grid, { r: [options.color ?? 1], surface }, {
+      resolution: options.resolution ?? grid.h, maxCells: options.maxCells ?? 2000000, res
+    });
+    const first = builder.count();
+    // Preflight the same area-sampling rule used by mesh solids before mutating the builder.
+    let samples = 0;
+    const { pos, tri } = solid.mesh;
+    for (let i = 0; i < tri.length; i += 3) {
+      const [a, b, c] = Array.from(tri.slice(i, i + 3), id => Array.from(pos.slice(id * 3, id * 3 + 3)));
+      samples += K.V.len(K.V.cross(K.V.sub(b, a), K.V.sub(c, a))) / (1.6 * res * res);
+    }
+    if (Math.floor(samples + .5) > maxSplats) throw Error('Asset surface stamps exceed the splat budget');
+    sculpt.bake();
+    builder.describeSplats?.(first, builder.count(), { object: options.object ?? 'imported-asset', material: 'sdf-uv-atlas' });
+    return { first, count: builder.count() - first, mesh: solid.mesh, field: grid };
   }
   A.assetSurfaces = Object.freeze({ splat, world, field });
 })(KIT);

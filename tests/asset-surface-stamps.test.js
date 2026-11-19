@@ -32,3 +32,32 @@ test('alpha-aware fields omit invisible faces and round trip through the SDF rea
   const saved={format:'ink-studio-sdf-grid-v1',origin:field.lo,dimensions:field.n,spacing:field.h,values:Array.from(field.D)};
   assert.equal(K.depth.readField(saved).sd(-.6,1,-.15),field.sd(-.6,1,-.15));
 });
+
+test('SDF splats transfer source UVs and cutouts onto reconstructed geometry', () => {
+  const options={size:3,cells:48,thick:.12,res:.065,palette:[0,0xff0000,0x0000ff],ambient:1,
+    cam:{target:[0,1.5,0],dist:5,pitch:0,yaw:0}};
+  const grid=K.authoring.assetSurfaces.field(raw,options);
+  const w=K.authoring.assetSurfaces.world(raw,{...options,geometry:'sdf',field:grid});
+  assert.equal(w.mesh.geometry,'sdf');
+  assert.equal(w.sdf.sourceTriangles,4);
+  assert(w.sdf.reconstructedTriangles>4);
+  assert.equal(w.sdf.spacing,grid.h);
+  const image=studio.render(w,{w:96,h:96,px:1,ortho:true});
+  const at=(im,x,y)=>Array.from(im.rgb.slice((y*96+x)*3,(y*96+x)*3+3));
+  assert.deepEqual(at(image,35,48),[0,0,255]);
+  assert.deepEqual(at(image,61,48),[255,0,0]);
+  const refit=K.authoring.assetSurfaces.world(raw,{...options,size:6,geometry:'sdf',field:grid});
+  const refitImage=studio.render(refit,{w:96,h:96,px:1,ortho:true});
+  assert.deepEqual(at(refitImage,61,48),[255,0,0]);
+  assert.deepEqual(at(refitImage,35,48),[0,0,255]);
+
+  const carved={...grid,sd(x,y,z) {
+    return Math.max(grid.sd(x,y,z),.57-Math.hypot(x-.6,y-1.5,z));
+  }};
+  const cut=K.authoring.assetSurfaces.world(raw,{...options,geometry:'sdf',field:carved});
+  const cutImage=studio.render(cut,{w:96,h:96,px:1,ortho:true});
+  assert.deepEqual(at(cutImage,61,48),[0,0,0]);
+  assert.deepEqual(at(cutImage,35,48),[0,0,255]);
+  assert.throws(()=>K.authoring.assetSurfaces.world(raw,{...options,geometry:'sdf',field:grid,maxSplats:1}),/budget/);
+  assert.throws(()=>K.authoring.assetSurfaces.world(raw,{...options,geometry:'wrong'}),/geometry mode/);
+});

@@ -80,3 +80,23 @@ The headless CLI automatically uses UV stamps for GLBs that fit the portable ass
 ```sh
 ink-studio render character.glb --uv --res .06 --ortho --out character.png
 ```
+
+### Textured SDF reconstruction
+
+Pass `geometry: 'sdf'` to `assetSurfaces.world` or `assetSurfaces.splat` for the complete mesh → alpha-aware SDF → reconstructed surface → UV/material transfer → splat pipeline. The default remains `geometry: 'mesh'`.
+
+The alpha field retains the original face that owns each visible patch. The reconstructed splats use that ownership to sample the original atlas at each rendered pixel, while their positions and normals come from the reconstructed surface. This preserves the source color, alpha, roughness, normal and emission channels through remeshing. Small cutouts and closely spaced layers remain limited by field resolution and shell thickness.
+
+```js
+const surfaces = studio.load().KIT.authoring.assetSurfaces;
+const asset = await studio.readAsset('character.glb', {size: 3});
+const world = surfaces.world(asset, {
+  geometry: 'sdf', size: 6, cells: 112, thick: .065, res: .045
+});
+```
+
+`cells` controls field resolution, `resolution` optionally controls reconstruction spacing, and `res` controls splat spacing. `world.sdf` records field dimensions, spacing, source triangle count and reconstructed triangle count for inspection. An optional `field` can supply a modified asset field, retaining its `sourceFace` lookup. This supports SDF carving before textured splat baking. A plain distance grid without source-face ownership needs that attribution restored before UV transfer.
+
+```sh
+ink-studio render character.glb --uv --geometry sdf --cells 112 --thick .065 --res .045 --ortho --out character-sdf.png
+```

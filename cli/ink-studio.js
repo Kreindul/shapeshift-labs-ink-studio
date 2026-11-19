@@ -51,7 +51,9 @@ function meshScene(file) {
       if (asset) {
         const world = K.authoring.assetSurfaces.world(asset, {
           size, res: num('res', size / 70), turn: num('spin', 0), up: opt.up,
-          hues: num('hues', 10), shades: num('shades', 5)
+          hues: num('hues', 10), shades: num('shades', 5), geometry: opt.geometry,
+          cells: num('cells', 64), thick: opt.thick === undefined ? undefined : +opt.thick,
+          resolution: opt.resolution === undefined ? undefined : +opt.resolution
         });
         return world;
       }
@@ -808,7 +810,7 @@ const CMD = {
         ' faces, ' +
         m.verts +
         ' points; ' +
-        (m.mode === 'uv' ? 'UV surface stamps with alpha' : m.sheet
+        (m.mode === 'uv' ? (m.geometry === 'sdf' ? 'SDF reconstruction with UV transfer and alpha' : 'UV surface stamps with alpha') : m.sheet
           ? 'open (' + (m.open * 100).toFixed(0) + '% of its edges are loose): treated as a sheet with thickness'
           : 'closed: treated as a solid') +
         '; materials: ' +
