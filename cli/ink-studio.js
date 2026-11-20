@@ -779,6 +779,7 @@ const CMD = {
         '  authoring inspect <scene> [--authoring snapshot.json] [--part id]   inspect retained parts',
         '  authoring preview <scene> <edits.json> [--authoring snapshot.json] [--image preview.png]   stage and validate edits',
         '  authoring apply <scene> <edits.json> [--authoring snapshot.json] --out snapshot.json   save validated edits',
+        '  authoring suggest-breakable <scene> --at x,y,z [--radius 1] [--voxel .1] [--ids]   suggest a connected breakable part',
         '  --params JSON --parameter-time SEC   supply shared controls and choose the material bake time for a diorama',
         '  scene apply|stamp|remix|capture|upgrade|sync-prefab|history|promote <world> ...  edit or derive a world manifest',
         '    scene upgrade <world|checkpoint> <instance> --to PREFAB [--migration FILE] [--dry-run]',
@@ -925,6 +926,15 @@ const CMD = {
     else process.stdout.write(json);
   },
   authoring() {
+    if (pos[0] === 'suggest-breakable') {
+      if (pos.length !== 2 || typeof opt.at !== 'string' || opt.at.split(',').some(value => !value.trim()))
+        throw new Error('Usage: ink-studio authoring suggest-breakable <scene> --at x,y,z [--radius 1] [--voxel .1] [--ids]');
+      const { ids, ...suggestion } = lib().KIT.authoring.breakables.suggest(build(pos[1]), {
+        at: list('at'), radius: num('radius'), voxel: num('voxel')
+      });
+      process.stdout.write(JSON.stringify({ ...suggestion, samples: ids.length, ...(opt.ids && { ids }) }, null, 2) + '\n');
+      return;
+    }
     return require('./authoring.js')(pos, opt, {
       scene,
       render(world) {
