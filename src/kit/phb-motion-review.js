@@ -112,9 +112,9 @@
   }
 
   /* Close the endpoint on native pose channels and ease the delta in along the tail. */
-  function loopFix(clip, times, first) {
-    const startPose = clip.sample(0, {}, { sourceTime: true });
-    const lastPose = clip.sample(clip.dur, {}, { sourceTime: true });
+  function loopFix(sample, times, first) {
+    const startPose = sample(0);
+    const lastPose = sample(times.at(-1));
     const start = times[first], end = times.at(-1), tracks = [];
     const parts = new Set([...Object.keys(startPose), ...Object.keys(lastPose)]);
     for (const part of parts) {
@@ -140,13 +140,16 @@
     return { start, end, tracks };
   }
 
-  function create({ clip, puppet, probes, height, fps = 24, loop = clip?.loop, ground = () => 0 } = {}) {
+  function create({ clip, puppet, probes, height, fps = 24, loop = clip?.loop, ground = () => 0,
+    loopSource, applyFixes } = {}) {
     const duration = clip?.dur, count = Math.ceil(duration * fps);
     if (typeof clip?.sample !== 'function' || typeof clip.time !== 'function' ||
         typeof puppet?.solve !== 'function' || typeof puppet.point !== 'function' ||
         !Array.isArray(probes) || !probes.length || probes.length > 32 ||
         !Number.isFinite(height) || height <= 0 || !Number.isFinite(duration) || duration <= 0 || typeof loop !== 'boolean' ||
-        !Number.isFinite(fps) || fps < 6 || fps > 120 || count > 3600 || typeof ground !== 'function')
+        !Number.isFinite(fps) || fps < 6 || fps > 120 || count > 3600 || typeof ground !== 'function' ||
+        (loopSource !== undefined && typeof loopSource !== 'function') ||
+        (applyFixes !== undefined && typeof applyFixes !== 'function'))
       throw new TypeError('Motion review needs a clip, puppet, reference height and valid sample rate');
     const ids = new Set();
     probes = Array.from(probes, probe => {
@@ -209,7 +212,7 @@
     function accept(id) {
       if (layers.has(id)) return { ...layers.get(id) };
       const finding = get(id);
-      const fix = finding.kind === 'loop-pop' ? loopFix(clip, times, finding.first)
+      const fix = finding.kind === 'loop-pop' ? loopFix(loopSource ?? (t => clip.sample(t, {}, { sourceTime: true })), times, finding.first)
         : positionFix(finding, tracks.get(finding.probe), times, band);
       if (!fix?.tracks.length) return null;
       const layer = { id, name: finding.label + ' · ' + finding.name, enabled: true, phase: 'corrective',
@@ -228,6 +231,8 @@
     function sample(time, out, { sourceTime = false, before = false } = {}) {
       if (!Number.isFinite(time)) throw new TypeError('Sample time must be finite');
       const t = sourceTime ? clamp(time, 0, duration) : clip.time(time);
+      if (!before && layers.size && applyFixes)
+        return applyFixes(t, [...layers.values()].filter(layer => layer.enabled), out);
       const pose = clip.sample(t, out, { sourceTime: true });
       return before || !layers.size ? pose : A.layers(pose, [...layers.values()], t, duration, 'corrective');
     }

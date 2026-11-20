@@ -11,12 +11,14 @@ const integer = (value, lo, hi) => Number.isSafeInteger(value) && value >= lo &&
 function spriteAtlas(world, options = {}) {
   const {
     width = 96, height = 96, directions = 8, times = [0], fps = 12, columns = directions,
-    pivot = world.cam.target, yaw = world.cam.yaw, maps = [], pose, view = {}, depthRange
+    pivot = world.cam.target, yaw = world.cam.yaw, maps = [], pose, view = {}, depthRange, sourceTimes
   } = options;
   if (!integer(width, 1, 2048) || !integer(height, 1, 2048) || !integer(directions, 1, 64) ||
       !integer(columns, 1, 256) || !Number.isFinite(fps) || fps <= 0 || fps > 240 ||
       !Array.isArray(times) || !times.length || times.length > 512 ||
       times.some((time, i) => !Number.isFinite(time) || time < 0 || (i && time <= times[i - 1])) ||
+      (sourceTimes !== undefined && (!Array.isArray(sourceTimes) || sourceTimes.length !== times.length ||
+        Array.from(sourceTimes).some(time => !Number.isFinite(time) || time < 0) || typeof pose !== 'function')) ||
       !Array.isArray(pivot) || pivot.length !== 3 || !pivot.every(Number.isFinite) || !Number.isFinite(yaw) ||
       !Array.isArray(maps) || maps.some(map => !mapNames.includes(map)) ||
       (pose !== undefined && typeof pose !== 'function'))
@@ -40,13 +42,13 @@ function spriteAtlas(world, options = {}) {
     ? Array.from({ length: directions }, () => volumeHistory()) : [];
   const orientation = Array.from({ length: directions }, (_, i) => yaw + i * Math.PI * 2 / directions);
   for (let f = 0; f < times.length; f++) {
-    const time = times[f];
-    if (pose) pose(world, time);
+    const time = times[f], sourceTime = sourceTimes?.[f] ?? time;
+    if (pose) pose(world, sourceTime);
     else world.anim?.update?.(f ? time - times[f - 1] : 0, time);
     const duration = f + 1 < times.length ? times[f + 1] - time : 1 / fps;
     for (let direction = 0; direction < directions; direction++) {
       const i = f * directions + direction, ox = i % cols * width, oy = Math.floor(i / cols) * height;
-      const image = render(world, { ...view, t: time, w: width, h: height, px: 1,
+      const image = render(world, { ...view, t: sourceTime, w: width, h: height, px: 1,
         yaw: orientation[direction], ortho: true, target: pivot,
         transparent: true, passes, artHistory: history[direction], volumeHistory: volumes[direction] });
       const data = image.passes;
@@ -82,7 +84,7 @@ function spriteAtlas(world, options = {}) {
           images.emission[k + 3] = Math.max(images.emission[k], images.emission[k + 1], images.emission[k + 2]);
         }
       }
-      const entry = { frame: f, direction, yaw: orientation[direction], time, duration,
+      const entry = { frame: f, direction, yaw: orientation[direction], time, duration, ...(sourceTimes && { sourceTime }),
         rect: { x: ox, y: oy, width, height }, pivot: { x: width / 2, y: height / 2 } };
       if (images.silhouette) entry.silhouette = { pixels, bounds: pixels ? [left, top, right, bottom] : null,
         touchesBorder: left === 0 || top === 0 || right === width - 1 || bottom === height - 1 };

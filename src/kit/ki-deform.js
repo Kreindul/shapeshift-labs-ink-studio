@@ -1039,6 +1039,12 @@
     all.sort((a, b) => a[0] - b[0]);
     const Mx = new Float32Array(nb * 12),
       pup = { parts, names, order, pose: {}, bones: Mx, count: nb, time: 0 };
+    let poseSampler;
+    pup.setPoseSampler = sample => {
+      if (typeof sample !== 'function') throw new TypeError('A puppet pose sampler must be a function');
+      poseSampler = sample;
+      return pup;
+    };
     const ch = (name, c, fb) => {
       const p = pup.pose[name];
       return p && p[c] !== undefined ? p[c] : fb;
@@ -1259,7 +1265,8 @@
       pose(t, dt) {
         pup.time = t;
         pup.clear();
-        if (def.pose) def.pose(t, dt, pup);
+        const sample = poseSampler ?? def.pose;
+        if (sample) sample(t, dt, pup);
         pup.flush();
       }
     });

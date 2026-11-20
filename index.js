@@ -93,6 +93,7 @@ module.exports = {
   exportGlb: require('./cli/export-glb.js'),
   render: require('./cli/render.js').render,
   spriteAtlas: require('./cli/sprite-atlas.js').spriteAtlas,
+  previewTimeline: require('./cli/animation-timeline.js').previewTimeline,
   readRasterAsset(file) {
     return require('./cli/raster-asset.js').readRasterAsset(file, module.exports.load().KIT.procedural.graph.raster);
   },

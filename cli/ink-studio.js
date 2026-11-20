@@ -339,6 +339,9 @@ const CMD = {
         '  authored-contacts <id> [--at seconds] [--out report.json]  inspect contact ranges and socket transfer timing',
         '  motion-fx <id> [--at seconds] [--out report.json]  inspect keyed FX layers and sampled effect output',
         '  cloth-review <id> [--pose seconds] [--through seconds] [--bake take.json]  preview a cloth pose and optionally bake it',
+        '  animation-timeline <id> [--state context.json] [--stage block|spline|polish] [--at seconds] [--part name]',
+        '    [--loop start,end|off] [--finding kind-or-id|off] [--direction index] [--fix accept|mute|enable|remove]',
+        '    [--preview directory] [--frames count --w width --h height] [--before] [--out report.json]',
         '  passes <id> [--channels coverage,depth,normal,objectId,materialId,emission]  save art-pixel render pass previews',
         '  shimmer <id> [--mode orbit|zoom|pan|still --frames 24]  how many pixels flicker over a move, and a GIF of it',
         '  crisp <id ...|all> [--t 2 --map]   how crisp at its own pixel size: stray pixels, specks, flat area, finest frequencies,',
@@ -690,6 +693,82 @@ const CMD = {
     const regions = Object.fromEntries(['pin', 'free', 'protected'].map(role => [role, review.regions().filter(value => value === role).length]));
     process.stdout.write(JSON.stringify({ scene: world.id, sourceTime: demo.selected(),
       nu: review.nu, nv: review.nv, regions, ...review.state(), ...(bake && { bake }) }, null, 2) + '\n');
+  },
+  'animation-timeline'() {
+    const world = build(pos[0]), timeline = world.animationTimeline;
+    if (typeof timeline?.report !== 'function') die('animation-timeline needs a scene with world.animationTimeline');
+    for (const key of ['state', 'preview', 'out', 'stage', 'at', 'part', 'direction', 'loop', 'finding', 'fix', 'frames', 'w', 'h'])
+      if (opt[key] === true) die('--' + key + ' needs a value');
+    const state = opt.state && path.resolve(opt.state);
+    const reportFile = opt.out && path.resolve(opt.out);
+    if (state && state === reportFile) die('--state and --out need different paths');
+    let saved;
+    if (state && fs.existsSync(state)) {
+      saved = JSON.parse(fs.readFileSync(state, 'utf8'));
+      if (saved.scene !== world.id) die('Timeline state belongs to another scene');
+      timeline.restore(saved.context);
+    }
+    const patch = {};
+    if (opt.stage !== undefined) patch.stage = opt.stage;
+    if (opt.at !== undefined) patch.time = num('at');
+    if (opt.part !== undefined) patch.part = opt.part === 'off' ? null : opt.part;
+    if (opt.direction !== undefined) patch.direction = num('direction');
+    if (opt.loop === 'off') patch.loop = null;
+    else if (opt.loop !== undefined) {
+      const ends = String(opt.loop).split(',');
+      if (ends.length !== 2 || ends.some(value => !value.trim())) die('--loop needs start,end or off');
+      const [start, end] = ends.map(Number);
+      patch.loop = { start, end, wraps: start > end };
+    }
+    if (opt.finding === 'off') timeline.clearFocus();
+    timeline.set(patch);
+    if (opt.finding && opt.finding !== 'off') timeline.focus(opt.finding);
+    const motion = timeline.motionReview();
+    for (const layer of saved?.corrections ?? []) {
+      if (!motion?.accept(layer.id)) die('Saved correction is no longer available: ' + layer.id);
+      motion.setEnabled(layer.id, layer.enabled);
+    }
+    if (opt.fix !== undefined) {
+      const id = timeline.snapshot().focus?.id;
+      if (!id) die('--fix needs a focused motion finding');
+      if (opt.fix === 'accept') {
+        if (!motion.accept(id)) die('No correction is available for ' + id);
+        motion.setEnabled(id, true);
+      } else if (opt.fix === 'remove') motion.remove(id);
+      else if (opt.fix === 'mute' || opt.fix === 'enable') {
+        if (!motion.setEnabled(id, opt.fix === 'enable')) die('Accept this correction before changing its state');
+      } else die('--fix needs accept, mute, enable, or remove');
+    }
+    const before = !!opt.before, report = { scene: world.id, ...timeline.report({ before }) };
+    if (opt.at !== undefined || report.state.focus) report.frame = timeline.frame(report.state.time, { before });
+    if (opt.preview) {
+      const { previewTimeline } = require('./animation-timeline.js');
+      const { writeAtlas } = require('./sprite-atlas.js');
+      const directory = path.resolve(opt.preview);
+      if ([state, reportFile].some(file => file && ['atlas.json', 'color.png', 'silhouette.png']
+        .some(name => file === path.join(directory, name)))) die('Use a different path for the timeline state or report');
+      const atlas = previewTimeline(world, { width: num('w'), height: num('h'), frames: num('frames'), before,
+        view: view(), yaw: num('yaw'), pivot: opt.pivot ? list('pivot') : undefined });
+      writeAtlas(directory, atlas);
+      report.preview = { directory, ...atlas.metadata };
+    }
+    const json = JSON.stringify(report, null, 2) + '\n';
+    if (reportFile) {
+      fs.mkdirSync(path.dirname(reportFile), { recursive: true });
+      fs.writeFileSync(reportFile, json);
+    }
+    if (state) {
+      fs.mkdirSync(path.dirname(state), { recursive: true });
+      const pending = state + '.' + require('node:crypto').randomUUID() + '.tmp';
+      try {
+        fs.writeFileSync(pending, JSON.stringify({ scene: world.id, context: report.state,
+          corrections: report.lanes.corrections.map(({ id, enabled }) => ({ id, enabled })) }, null, 2) + '\n');
+        fs.renameSync(pending, state);
+      } finally {
+        if (fs.existsSync(pending)) fs.unlinkSync(pending);
+      }
+    }
+    if (!reportFile) process.stdout.write(json);
   },
   passes() {
     const w = build(pos[0]), t = num('t', 0);

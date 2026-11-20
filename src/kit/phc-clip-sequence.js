@@ -23,12 +23,12 @@
     const u = (time - step.in) / (step.out - step.in);
     if (step.ease === 'linear') return step.start + u * step.duration;
     let low = 0, high = 1;
-    for (let i = 0; i < 36; i++) {
+    for (let i = 0; i < 52; i++) {
       const mid = (low + high) / 2;
       if (A.ease(mid, step.ease) < u) low = mid;
       else high = mid;
     }
-    return step.start + (low + high) / 2 * step.duration;
+    return step.start + high * step.duration;
   }
 
   function clipPose(clip, step, elapsed) {
@@ -105,7 +105,7 @@
     if ((root !== undefined && !idOf(root)) || ((alignment !== 'source' || feet.length) && !root) ||
         (puppet && root && (!Object.hasOwn(puppet.parts, root) || puppet.parts[root].parent)))
       throw new TypeError('Root placement needs a top-level position part');
-    const library = new Map(Object.entries(clips));
+    const library = new Map(Object.entries(clips)), holds = new Map();
     const soleIds = new Set();
     const soles = Array.from(feet, foot => {
       let part = puppet?.parts?.[foot?.part];
@@ -117,11 +117,16 @@
       return { ...foot, point: foot.point.slice() };
     });
     function getClip(id) {
-      const clip = library.get(id);
+      const source = library.get(id), clip = source?.clip ?? source;
       if (typeof clip?.sample !== 'function' || !Array.isArray(clip.tracks) || !Array.isArray(clip.cues) ||
-          !Number.isFinite(clip.dur) || clip.dur <= 0)
+          !Number.isFinite(clip.dur) || clip.dur <= 0 ||
+          (source !== clip && (typeof source.held?.sample !== 'function' || !Array.isArray(source.markers))))
         throw new TypeError('Unknown or invalid clip: ' + id);
       return clip;
+    }
+    function getHeld(id) {
+      if (!holds.has(id)) holds.set(id, library.get(id).held ?? A.poseBlocking.heldClip(getClip(id)));
+      return holds.get(id);
     }
     function normalize(spec) {
       if (!idOf(spec?.id) || !idOf(spec.clip)) throw new TypeError('A clip instance needs an ID and source clip');
@@ -180,7 +185,8 @@
       if (!Array.isArray(specs) || !specs.length || specs.length > 64)
         throw new RangeError('A sequence needs one to 64 clip instances');
       if (!alignments.includes(placement) || (placement !== 'source' && !root)) throw new TypeError('Invalid sequence alignment');
-      const instances = [], handoffs = [], keys = [], cues = [], ids = new Set();
+      const instances = [], handoffs = [], keys = [], cues = [], markers = [], ids = new Set();
+      const exactTimes = new Map();
       let duration = 0;
       for (const raw of specs) {
         const step = normalize(raw);
@@ -200,10 +206,22 @@
         }
         const instance = Object.freeze({ ...step, start, end: duration, offset: Object.freeze(offset.slice()) });
         instances.push(instance);
+        const mapped = new Map();
+        exactTimes.set(step.id, mapped);
+        function authoredTime(sourceTime) {
+          const time = stepTime(instance, sourceTime);
+          mapped.set(time, sourceTime);
+          return time;
+        }
+        for (const marker of library.get(step.clip).markers ?? []) {
+          if (marker.time < step.in || marker.time > step.out) continue;
+          markers.push(Object.freeze({ ...marker, step: step.id, clip: step.clip,
+            sourceTime: marker.time, time: authoredTime(marker.time) }));
+        }
         for (const track of clip.tracks) for (const key of track.keys ?? []) {
           const sourceTime = key.t ?? key.time;
           if (sourceTime >= step.in && sourceTime <= step.out) keys.push(Object.freeze({
-            step: step.id, clip: step.clip, part: track.part, channel: track.ch, sourceTime, time: stepTime(instance, sourceTime)
+            step: step.id, clip: step.clip, part: track.part, channel: track.ch, sourceTime, time: authoredTime(sourceTime)
           }));
         }
         for (const cue of clip.cues) {
@@ -242,11 +260,13 @@
         }
         if (!Number.isSafeInteger(cycle)) throw new RangeError('Sequence cycle exceeds timing precision');
         const step = instances.find(instance => phase < instance.end) ?? last;
-        return { time: phase, cycle, step, sourceTime: stepSource(step, phase - step.start), finished: mode === 'once' && phase === duration };
+        const sourceTime = exactTimes.get(step.id).get(phase) ?? stepSource(step, phase - step.start);
+        return { time: phase, cycle, step, sourceTime, finished: mode === 'once' && phase === duration };
       }
       function sample(time, out, options) {
         const { step, sourceTime, cycle } = at(time, options);
-        const pose = getClip(step.clip).sample(sourceTime, {}, { sourceTime: true });
+        const clip = options?.held ? getHeld(step.clip) : getClip(step.clip);
+        const pose = clip.sample(sourceTime, {}, { sourceTime: true });
         const mode = options?.mode ?? 'once';
         if (root) {
           const base = rootAt(pose), offset = mode === 'travel-loop' ? V.mad(step.offset, travel, cycle) : step.offset;
@@ -312,7 +332,7 @@
         const weakest = handoffs.reduce((a, b) => a.score <= b.score ? a : b);
         change = changedRange(weakest.time, weakest.time, duration, weakest.to);
       }
-      const plan = Object.freeze({ steps: Object.freeze(instances), duration, alignment: placement, travel,
+      const plan = Object.freeze({ steps: Object.freeze(instances), duration, fps, alignment: placement, travel, markers: Object.freeze(markers),
         handoffs: Object.freeze(handoffs), keys: Object.freeze(keys), cues: Object.freeze(cues), change, at, sample, eventsBetween,
         suggestCut,
         edit(id, patch) {

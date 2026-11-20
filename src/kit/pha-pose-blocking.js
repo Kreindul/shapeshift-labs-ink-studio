@@ -167,6 +167,20 @@
     return Object.freeze({ clip, held, markers: Object.freeze(markers) });
   }
 
+  function heldClip(clip) {
+    const times = [...new Set((clip.tracks ?? []).flatMap(track =>
+      (track.keys ?? []).map(key => key.t ?? key.time)))].sort((a, b) => a - b);
+    return Object.freeze({ sample(time, out) {
+      let lo = 0, hi = times.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (times[mid] <= time) lo = mid + 1;
+        else hi = mid;
+      }
+      return clip.sample(times[lo - 1] ?? 0, out, { sourceTime: true });
+    } });
+  }
+
   A.poseShelf = Object.freeze({ create: shelf });
-  A.poseBlocking = Object.freeze({ create: blocking });
+  A.poseBlocking = Object.freeze({ create: blocking, heldClip });
 })(KIT);
