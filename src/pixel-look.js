@@ -728,7 +728,7 @@ vec3 inkToneResolve(vec3 color, ivec2 pixel) {
   return share >= mix(0.5, rank, u_inkToneAmount) ? b.rgb : a.rgb;
 }`;
   return { nearest, rgbWeights:weights, ink, resolve, glsl, presets, toneSettings, prepareTone, toneIndex, toneGlsl, bayerRank, outputPalettes, localIndex,
-    bindRoles, roleColor, reserveEntries, preparePalette, prepareLookPolicy, preparePaletteConstraints, paletteIndex, mediumTransform,
+    bindRoles, roleColor, paletteSelector, reserveEntries, preparePalette, prepareLookPolicy, preparePaletteConstraints, paletteIndex, mediumTransform,
     prepareRemap, gradePalette, prepareColorStack, colorGrade, framePalette };
 })();
 if (typeof module !== 'undefined') module.exports = PixelLook;
