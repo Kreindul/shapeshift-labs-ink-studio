@@ -32,6 +32,7 @@
       if([schedule,needWhen,needPriority,needEffects,needRates,commitment,urgent].every(x=>x===undefined))return null;
       enabled=true;
       check(commitment===undefined||commitment==='finish'&&spec.duration!==undefined,'Invalid activity commitment '+name);
+      check(needEffects===undefined||spec.duration!==undefined,'Activity need effects need a duration '+name);
       check(urgent===undefined||typeof urgent==='boolean','Invalid activity urgency '+name);
       check(needWhen===undefined||meters.size>0&&record(needWhen),'Invalid activity need condition '+name);
       Q.condition(needWhen,defaults);

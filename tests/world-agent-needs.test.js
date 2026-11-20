@@ -174,4 +174,7 @@ test('a schedule requires a clock and modifiers refer to declared meters',()=>{
   const names=world();
   names.systems.crew.config.decisions.activities.eat.needEffects.energy=-3;
   assert.throws(()=>W.runtime.validate(names),/Invalid activity need effects/);
+  const ongoing=world();
+  delete ongoing.systems.crew.config.decisions.activities.eat.duration;
+  assert.throws(()=>W.runtime.validate(ongoing),/Activity need effects need a duration/);
 });

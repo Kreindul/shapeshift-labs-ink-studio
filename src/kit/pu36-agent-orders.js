@@ -189,8 +189,8 @@
       return entry.phase===phase&&entry.reason===reason?entry:{...entry,phase,reason};
     }
     function completed(book,entry,result,agent,ctx){
-      const {blockedTicks,...rest}=entry;
-      const next={...rest,step:entry.step+1,entered:entry.elapsed,results:[...entry.results,{...result,tick:ctx.tick}]};
+      const next={...entry,step:entry.step+1,entered:entry.elapsed,results:[...entry.results,{...result,tick:ctx.tick}]};
+      if(next.blockedTicks!==undefined)delete next.blockedTicks;
       return next.step===catalog.get(entry.task).steps.length?
         finish({...book,active:null},next,'succeeded',null,agent,ctx):
         {...book,active:status(next,'starting')};
@@ -236,9 +236,14 @@
       }
       function motion(row,phase,reason=null){
         const limit=entry.blockedTimeout??catalog.get(entry.task).blockedTimeout;
-        const {blockedTicks,...rest}=entry;
-        if(limit===undefined||phase!=='blocked')return {...book,active:status(blockedTicks===undefined?entry:rest,phase,reason)};
-        const ticks=(entry.phase==='blocked'?blockedTicks??0:0)+Number(advanced);
+        if(limit===undefined)return {...book,active:status(entry,phase,reason)};
+        if(phase!=='blocked'){
+          const next=status(entry,phase,reason);
+          if(next.blockedTicks===undefined)return {...book,active:next};
+          const {blockedTicks,...cleared}=next;
+          return {...book,active:cleared};
+        }
+        const ticks=(entry.phase==='blocked'?entry.blockedTicks??0:0)+Number(advanced);
         const next={...status(entry,phase,reason),blockedTicks:ticks};
         return ticks>=limit?finish({...book,active:null},next,'failed','route-blocked',row,ctx):
           {...book,active:next};
