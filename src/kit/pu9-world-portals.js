@@ -67,9 +67,12 @@
     return result;
   }
 
-  function create({ places, links = [], saved = {} } = {}) {
+  function create({ places, links = [], templates = [], saved = {} } = {}) {
     const catalog = unique(places, 'Places'), graph = unique(links, 'Links');
+    const recipes = unique(templates, 'Place templates');
     const exits = new Map(), away = new Map(), observers = new Set();
+    let instances = new Map(), entrances = new Map(), visits = new Map();
+    const noLinks = Object.freeze([]);
     let memory = savedStates(saved), clocks = new Map();
     let active = null, pending = null, restoring = null, stepping = false, handoff = false;
     let walking = false, fading = null, disposed = false;
@@ -77,21 +80,23 @@
       if (!W.data.record(value)) throw new TypeError('Saved place state needs a JSON record keyed by place ID');
       return new Map(Object.entries(freeze(clone(value))));
     }
-    for (const [id, row] of catalog) {
+    function definition(id, row) {
       const tickPolicy = row.tickPolicy ?? 'pause';
       if (!W.data.safeKey(id) || typeof row.prepare !== 'function' || !['pause', 'continue'].includes(tickPolicy))
         throw new TypeError('Each place needs a stable ID, a prepare callback and a pause or continue tick policy');
       const anchors = freeze(Object.fromEntries(Object.entries(row.anchors ?? {}).map(([key, value]) => [key, anchor(value)])));
-      catalog.set(id, { id, anchors, prepare: row.prepare, tickPolicy });
+      return { id, anchors, prepare: row.prepare, tickPolicy };
     }
-    function endpoint(value) {
-      const place = catalog.get(value?.place), key = value?.anchor;
+    for (const [id, row] of catalog) catalog.set(id, definition(id, row));
+    for (const [id, row] of recipes) recipes.set(id, definition(id, row));
+    function endpoint(value, places = catalog) {
+      const place = places.get(value?.place), key = value?.anchor;
       const at = typeof key === 'string' && W.data.own(place?.anchors, key) && place.anchors[key];
       if (!at) throw new TypeError('Travel endpoints need a declared place and anchor');
       return Object.freeze({ place: place.id, anchor: value.anchor, at });
     }
-    for (const [id, row] of graph) {
-      const from = endpoint(row.from), to = endpoint(row.to), mode = row.mode ?? 'walk';
+    function makeLink(id, row, from, to, entrance) {
+      const mode = row.mode ?? 'walk';
       const radius = row.radius ?? 1, height = row.height ?? 0.7, duration = row.duration ?? 0.8;
       if (!['walk', 'fade', 'drop'].includes(mode) || !positive(radius) || !positive(height) || !positive(duration) ||
           row.open !== undefined && typeof row.open !== 'function')
@@ -103,14 +108,108 @@
         ...row.aperture, from: from.at, to: to.at }) : opening;
       const requires = row.requires === undefined ? undefined : freeze(clone(row.requires));
       W.query.condition(requires, {});
-      const link = Object.freeze({ id, from, to, mode, opening, sweep, radius, height, duration,
-        open: row.open, requires, transfer: row.transfer });
+      return Object.freeze({ id, from, to, mode, opening, sweep, radius, height, duration,
+        open: row.open, requires, transfer: row.transfer, ...(entrance === undefined ? {} : { entrance }) });
+    }
+    function attach(link) {
+      graph.set(link.id, link);
+      exits.set(link.from.place, Object.freeze([...(exits.get(link.from.place) ?? noLinks), link]));
+    }
+    function detach(link) {
+      graph.delete(link.id);
+      const remaining = exits.get(link.from.place).filter(other => other !== link);
+      if (remaining.length) exits.set(link.from.place, Object.freeze(remaining));
+      else exits.delete(link.from.place);
+    }
+    for (const [id, row] of graph) {
+      const link = makeLink(id, row, endpoint(row.from), endpoint(row.to));
       graph.set(id, link);
-      if (!exits.has(from.place)) exits.set(from.place, []);
-      exits.get(from.place).push(link);
+      if (!exits.has(link.from.place)) exits.set(link.from.place, []);
+      exits.get(link.from.place).push(link);
     }
     for (const outgoing of exits.values()) Object.freeze(outgoing);
-    const noLinks = Object.freeze([]);
+
+    function addInstance({ id, template, seed, params = {} } = {}, places = catalog, known = instances) {
+      const recipe = recipes.get(template);
+      if (!W.data.id(id) || !recipe || !Number.isSafeInteger(seed) || !W.data.record(params))
+        throw new TypeError('A place instance needs an ID, a declared template, an integer seed and JSON parameters');
+      const spec = freeze(clone({ id, template, seed, params }));
+      if (known.has(id) && W.data.equal(known.get(id), spec)) return known.get(id);
+      if (places.has(id)) throw new RangeError('Place ID is already in use: ' + id);
+      if (places.size >= 4096) throw new RangeError('Place limit reached');
+      places.set(id, { ...recipe, id, prepare: context => recipe.prepare({ ...context, instance: spec }) });
+      known.set(id, spec);
+      return spec;
+    }
+    function registerInstance(spec) {
+      guard();
+      return addInstance(spec);
+    }
+    function makeEntrance({ id, source, to, at, aperture, returnTo, open, entered }, places, known) {
+      if (!W.data.id(id) || !places.has(source) || source === to?.place || !known.has(to?.place) ||
+          typeof open !== 'boolean' || typeof entered !== 'boolean' || !open && !entered)
+        throw new TypeError('A portable entrance needs an ID, a source and a distinct place instance');
+      const from = Object.freeze({ place: source, anchor: null, at: anchor(at) });
+      const target = endpoint(to, places);
+      const pose = freeze({ position: point(returnTo?.position),
+        ...(returnTo.forward === undefined ? {} : { forward: point(returnTo.forward) }),
+        ...(returnTo.up === undefined ? {} : { up: point(returnTo.up) }) });
+      const landing = Object.freeze({ ...from, at: freeze({ ...from.at, origin: pose.position }) });
+      const inId = 'portable:' + id + ':in', outId = 'portable:' + id + ':out';
+      if (graph.has(inId) || graph.has(outId)) throw new RangeError('Portable link ID is already in use: ' + id);
+      const entry = makeLink(inId, {
+        aperture, open: () => !visits.has(target.place)
+      }, from, target, id);
+      const exit = makeLink(outId, {
+        aperture, transfer: ({ arrival }) => arrival.velocity ? { ...arrival, ...pose, velocity: [0, 0, 0] } : { ...arrival, ...pose }
+      }, target, landing, id);
+      const args = freeze({ id, source, to: { place: target.place, anchor: target.anchor },
+        at: { origin: point(at.origin), normal: point(at.normal ?? [0, 0, 1]), up: point(at.up ?? [0, 1, 0]) },
+        aperture: { halfWidth: entry.opening.halfWidth, halfHeight: entry.opening.halfHeight,
+          shape: entry.opening.shape }, returnTo: pose });
+      return { args, entry, exit, open, entered };
+    }
+    function installEntrance(row) {
+      if (row.open) attach(row.entry);
+      if (row.entered) attach(row.exit);
+    }
+    function openEntrance({ id, to, at, aperture, returnTo } = {}) {
+      guard();
+      if (!active || walking || fading) throw new Error('Opening an entrance needs a settled active place');
+      if (entrances.has(id)) throw new RangeError('Entrance ID is already in use: ' + id);
+      if (entrances.size >= 4096) throw new RangeError('Portable entrance limit reached');
+      const basis = anchor(at);
+      const row = makeEntrance({ id, source: active.id, to, at, aperture,
+        returnTo: returnTo ?? { position: basis.origin, forward: basis.normal, up: basis.up },
+        open: true, entered: false }, catalog, instances);
+      entrances.set(id, row);
+      installEntrance(row);
+      return row.entry;
+    }
+    function closeEntrance(id) {
+      guard();
+      const row = entrances.get(id);
+      if (!row?.open) return false;
+      row.open = false;
+      detach(row.entry);
+      if (!row.entered) entrances.delete(id);
+      if (pending?.link === row.entry) cancel();
+      return true;
+    }
+    function commitEntrance(link) {
+      if (link.entrance === undefined) return;
+      const row = entrances.get(link.entrance), destination = row.entry.to.place;
+      if (link === row.entry) {
+        row.entered = true;
+        visits.set(destination, row);
+        attach(row.exit);
+      } else {
+        row.entered = false;
+        visits.delete(destination);
+        detach(row.exit);
+        if (!row.open) entrances.delete(link.entrance);
+      }
+    }
 
     const timeOf = id => clocks.get(id) ?? 0;
     function stateOf(id, asset) {
@@ -260,6 +359,7 @@
           release(source?.asset);
           return Object.freeze({ ...arrival, place: active });
         }
+        commitEntrance(link);
         const sourceDisposition = source.asset === active.asset ? 'reused' : away.has(source.id) ? 'retained' : 'released';
         const event = Object.freeze({ ...arrival, place: active, source, sourceDisposition });
         const errors = [];
@@ -432,21 +532,42 @@
       }
       return freeze({ place: active?.id ?? null, saved: clone(Object.fromEntries(states)),
         ...(clocks.size ? { clocks: Object.fromEntries(clocks) } : {}),
-        ...(away.size ? { away: [...away.keys()].sort() } : {}) });
+        ...(away.size ? { away: [...away.keys()].sort() } : {}),
+        ...(instances.size ? { portable: { version: 1, instances: [...instances.values()],
+          entrances: [...entrances.values()].map(row => ({ ...row.args, open: row.open, entered: row.entered })) } } : {}) });
+    }
+    function restorePortable(data) {
+      const places = new Map(catalog), known = new Map(instances);
+      const entries = new Map(), returns = new Map();
+      if (data !== undefined) {
+        if (!W.data.record(data) || data.version !== 1) throw new TypeError('Invalid portable place checkpoint');
+        for (const spec of unique(data.instances, 'Place instances').values()) addInstance(spec, places, known);
+        for (const spec of unique(data.entrances, 'Portable entrances').values()) {
+          const row = makeEntrance(spec, places, known), destination = row.entry.to.place;
+          if (row.entered) {
+            if (returns.has(destination)) throw new TypeError('An instance can have only one pending return');
+            returns.set(destination, row);
+          }
+          entries.set(spec.id, row);
+        }
+      }
+      return { places, known, entries, returns };
     }
     async function restore(data) {
       guard();
       if (active || pending) throw new Error('Restore needs an empty place session');
-      if (!W.data.record(data) || data.place !== null && !catalog.has(data.place))
+      if (!W.data.record(data)) throw new TypeError('Invalid place session checkpoint');
+      const { places: restoredPlaces, known, entries, returns } = restorePortable(data.portable);
+      if (data.place !== null && !restoredPlaces.has(data.place) || data.place === null && entries.size)
         throw new TypeError('Checkpoint needs a declared active place or null');
       const states = savedStates(data.saved);
       const times = data.clocks === undefined ? {} : data.clocks;
-      if (!W.data.record(times) || !Object.entries(times).every(([id, time]) => catalog.has(id) && finite(time) && time >= 0))
+      if (!W.data.record(times) || !Object.entries(times).every(([id, time]) => restoredPlaces.has(id) && finite(time) && time >= 0))
         throw new TypeError('Invalid checkpoint place clocks');
       const nextClocks = new Map(Object.entries(times));
       const retained = data.away === undefined ? [] : data.away;
-      if (!Array.isArray(retained) || retained.length > catalog.size || new Set(retained).size !== retained.length ||
-          Array.from(retained).some(id => id === data.place || catalog.get(id)?.tickPolicy !== 'continue') ||
+      if (!Array.isArray(retained) || retained.length > restoredPlaces.size || new Set(retained).size !== retained.length ||
+          Array.from(retained).some(id => id === data.place || restoredPlaces.get(id)?.tickPolicy !== 'continue') ||
           retained.length && data.place === null)
         throw new TypeError('Invalid checkpoint away places');
       const current = data.place, background = retained.slice();
@@ -455,7 +576,7 @@
       restoring = controller;
       try {
         for (const id of ids) {
-          const asset = await catalog.get(id).prepare({ id, anchor: null, state: states.get(id), previous: null,
+          const asset = await restoredPlaces.get(id).prepare({ id, anchor: null, state: states.get(id), previous: null,
             time: nextClocks.get(id) ?? 0, signal: controller.signal, reason: 'restore', link: null });
           assets.set(id, asset);
           if (controller.signal.aborted) return null;
@@ -463,6 +584,11 @@
         }
         memory = states;
         clocks = nextClocks;
+        for (const [id, definition] of restoredPlaces) catalog.set(id, definition);
+        instances = known;
+        entrances = entries;
+        visits = returns;
+        for (const row of entrances.values()) installEntrance(row);
         for (const id of background) away.set(id, assets.get(id));
         active = current === null ? null : Object.freeze({ id: current, asset: assets.get(current) });
         assets.clear();
@@ -476,6 +602,7 @@
       }
     }
     return Object.freeze({ current: () => active, place, linksFrom: id => exits.get(id) ?? noLinks,
+      registerInstance, openEntrance, closeEntrance,
       enter, approach, prepare, checkArrival, cancelPreparation, view, cross, fade, onCross, step, checkpoint, restore,
       dispose() {
         if (disposed) return;

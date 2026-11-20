@@ -57,6 +57,68 @@ places. A failed load leaves the session empty. The format also accepts
 older `{place, saved}` checkpoints. Save the actor and camera separately
 if the experience needs their exact poses on reload.
 
+## Portable entrances and persistent instances
+
+Pass `templates` to `portals.create()` alongside the ordinary `places`.
+A template supplies the same anchors, preparation callback and optional tick
+policy as a place. Register each workshop, home or dungeon with a stable
+instance ID, a template ID, an integer seed and optional JSON parameters.
+The template's `prepare` receives the frozen descriptor as `context.instance`,
+along with the usual `context.state`. Keep changes such as moved furnishings,
+opened chests and solved puzzles in the payload's `checkpoint()`. Repeated
+registration of the same descriptor returns the existing descriptor. A
+different recipe needs a different instance ID.
+
+```js
+const session = portals.create({
+  places: [{ id: 'field', prepare: loadField }],
+  templates: [{
+    id: 'workshop',
+    anchors: { door: { origin: [0, 1.25, 0] } },
+    prepare({ instance, state, signal }) {
+      return loadWorkshop(instance.seed, instance.params, state, signal);
+    }
+  }]
+});
+
+session.registerInstance({
+  id: 'carpenter-workshop', template: 'workshop', seed: 71, params: { finish: 'oak' }
+});
+await session.enter('field');
+const entrance = session.openEntrance({
+  id: 'workshop-door',
+  at: { origin: [4, 1.25, 8], normal: [0, 0, 1] },
+  to: { place: 'carpenter-workshop', anchor: 'door' },
+  aperture: { halfWidth: 0.9, halfHeight: 1.2 },
+  returnTo: { position: [4, 1.25, 8.5], forward: [0, 0, 1] }
+});
+await session.prepare(entrance.id);
+const visit = await session.cross(entrance.id, { previous, actor, camera });
+```
+
+`openEntrance` installs a walk link in the active place at the supplied
+world-space anchor. Use it with `linksFrom`, `approach`, `view`, `checkArrival`
+and `cross` like an authored link. A successful crossing installs a return link
+at the instance's arrival anchor. The return restores the captured position
+and optional `forward` and `up`, carrying the traveler's current properties
+and clearing velocity if present. By default, the position and facing come
+from the entrance anchor. The return prepares its destination around the
+captured position and runs the destination's `canArrive` check there. A
+blocked return can be tried again.
+
+`closeEntrance('workshop-door')` removes the entry and cancels its outstanding
+preparation. The return remains available until used, including when another
+portable visit is nested inside it. Each instance has at most one outstanding
+return in a session. Open entrances stay available until closed and can be
+crossed again after returning. To relocate one, close it and open a new
+entrance to the same instance. The instance retains its checkpoint.
+
+The same session checkpoint also saves registered recipes, open entrances
+and outstanding returns. Supply the same templates when restoring in a new
+session. Templates and the host's save storage belong to the application.
+Run `node examples/portable-workshop.js` to move a crate, save inside with the
+entrance closed, reload, and reopen the workshop from a different position.
+
 ## Use the travel lifecycle
 
 Call `session.prepare(linkId)` to preload the destination, or let
