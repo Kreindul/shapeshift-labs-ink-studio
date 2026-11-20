@@ -1,16 +1,16 @@
 /* Environment tracks drive both rendered weather and retained surface forcing. */
 const WeatherBinding = (() => {
   const Front = typeof WeatherFront === 'undefined' ? require('./weather-front.js') : WeatherFront;
-  const outside = { rain:0, snowfall:0, air:10, humidity:.44, windX:0, windZ:0, fogDensity:1, wetness:0, light:0 };
+  const outside = { rain:0, snowfall:0, air:10, humidity:.44, windX:0, windZ:0, windGust:1, fogDensity:1, wetness:0, light:0 };
   const velocity = ({ windX, windZ }) =>
     windX === undefined && windZ === undefined ? undefined : [windX ?? 0, windZ ?? 0];
   const defaults = {
     rain: 'rain', snowfall: 'snowfall', air: 'airTemperature', humidity: 'humidity',
-    windX: 'windX', windZ: 'windZ', fogDensity: 'fogDensity', wetness: 'surfaceWetness', light: 'daylight'
+    windX: 'windX', windZ: 'windZ', windGust: 'windGust', fogDensity: 'fogDensity', wetness: 'surfaceWetness', light: 'daylight'
   };
   const ranges = {
     rain: [0,1000], snowfall: [0,1000], air: [-240,500], humidity: [0,1],
-    windX: [-20,20], windZ: [-20,20], fogDensity: [0,64], wetness: [0,1], light: [0,1]
+    windX: [-20,20], windZ: [-20,20], windGust: [0,3], fogDensity: [0,64], wetness: [0,1], light: [0,1]
   };
   function record(value, name) {
     if (!value || ![Object.prototype, null].includes(Object.getPrototypeOf(value)))
@@ -163,6 +163,7 @@ const WeatherBinding = (() => {
     const fogFronts = active.filter(front => front.target.fogDensity !== undefined);
     const fogStep = fogFronts.length ? Math.min(...fogFronts.map(front => front.step)) : 0;
     const localWind = active.some(front => front.target.wind);
+    const localGust = active.some(front => front.target.windGust !== undefined);
     const localWetness = active.some(front => front.target.wetness !== undefined);
     function frame(time, parameters) {
       const signal = parameters ? read(parameters) : uniform(time);
@@ -185,10 +186,12 @@ const WeatherBinding = (() => {
         rainHere: region && ((x,z) => rainGain(region.value('rain',x,z))),
         snowHere: region && ((x,z) => snowGain(region.value('snowfall',x,z))),
         windAt: signal.wind && (t => uniform(t).wind),
-        windHere: localWind && ((t,x,z,fallback) => {
+        gustAt: signal.windGust !== undefined ? (t => uniform(t).windGust) : undefined,
+        gustHere: localGust ? (t,x,z) => at(t).value('windGust',x,z) ?? 1 : undefined,
+        windHere: localWind ? (t,x,z,fallback) => {
           const field = at(t);
           return [field.value('windX',x,z, fallback[0]),field.value('windZ',x,z, fallback[1])];
-        }),
+        } : undefined,
         fogGain(volume) {
           if (fogVolumes && !fogVolumes.has(volume.id)) return 1;
           if (fogStep) return { step:fogStep, sample:(x,z) => region.value('fogDensity',x,z) ?? 1 };

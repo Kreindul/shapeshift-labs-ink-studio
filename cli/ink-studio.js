@@ -213,7 +213,7 @@ function pose(w, t) {
 const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
 if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
   die('--px needs a positive integer');
-let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride;
+let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride;
 function skyProfileOverrides(value) {
   if (typeof value !== 'string') die('--sky-profile expects track=profile pairs');
   const pairs = value.split(',').map(entry => entry.split('=').map(part => part.trim()));
@@ -274,6 +274,14 @@ function weatherOption() {
   if (value === false || value === 'off') return false;
   if (value === true || value === 'on') return true;
   return weatherOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
+}
+
+function windFieldOption() {
+  const value = opt['wind-field'];
+  if (value === undefined) return undefined;
+  if (value === 'off') return false;
+  if (value === true || value === 'on') return true;
+  return windFieldOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
 }
 
 function precipitationOption() {
@@ -348,6 +356,7 @@ const view = extra =>
       weatherBinding: weatherOption(),
       retainedWeather: onOffOption('retained-weather'),
       weatherFronts: onOffOption('weather-fronts'),
+      windField: windFieldOption(),
       precipitation: precipitationOption(),
       rainImpacts: rainImpactOption(),
       skyTime: num('sky-time'),
@@ -495,6 +504,7 @@ const CMD = {
         'cloud options: --cloud-field file.json|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',
         'sky options: --sky-environment file.json|off --sky-time seconds --sky-profile track=profile --sky-reflections scene|material',
         'weather options: --weather-binding on|off|file.json --retained-weather on|off --weather-fronts on|off --world-precipitation on|off|file.json --rain-impacts on|off|file.json',
+        'wind options: --wind-field on|off|file.json',
         'aerial options: --aerial-perspective on|off --aerial-start units --aerial-density per-unit --aerial-contrast 0..1',
         'view options: --surface off (no finish layers) --water off --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --px1 (native art pixels) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (remove lone pixels) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n',
         'fog lighting options: --volume-local-lights on|off --volume-local-shadows on|off',

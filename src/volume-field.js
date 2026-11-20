@@ -38,9 +38,10 @@ const VolumeField = (() => {
         if (!Number.isFinite(distance)) throw new RangeError('The shape SDF must return finite distances');
         if (distance >= 0) return 0;
         const t = feather ? clamp(-distance / feather, 0, 1) : 1;
-        const wx = drift[0] + (context?.wind?.[0] || 0) * windInfluence;
-        const wz = drift[1] + (context?.wind?.[1] || 0) * windInfluence;
-        const variation = noise ? clamp(noise(x - wx * time, y, z - wz * time, time), 0, 1) : 1;
+        const local = noise && windInfluence && context?.windOffset?.(x,y,z);
+        const wx = local ? drift[0]*time + local[0]*windInfluence : (drift[0] + (context?.wind?.[0] || 0)*windInfluence)*time;
+        const wz = local ? drift[1]*time + local[1]*windInfluence : (drift[1] + (context?.wind?.[1] || 0)*windInfluence)*time;
+        const variation = noise ? clamp(noise(x - wx, y, z - wz, time), 0, 1) : 1;
         return t * t * (3 - 2 * t) * (1 - breakup + breakup * variation);
       },
       skip: conservative ? (x, y, z, direction, time) => Math.max(0, sdf(x, y, z, time)) : undefined

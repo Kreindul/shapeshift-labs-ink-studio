@@ -87,10 +87,9 @@ const CloudField = (() => {
       }
       return cache.get(softness);
     }
-    function frame(time, shadows, light = [-.52, .64, .57]) {
-      if (!Number.isFinite(time) || !Number.isFinite(vx*time) || !Number.isFinite(vz*time))
-        throw new RangeError('Cloud time is out of range');
-      const dx=vx*time, dz=vz*time;
+    function frame(time, shadows, light = [-.52, .64, .57], displacement) {
+      if (!Number.isFinite(time)) throw new RangeError('Cloud time is out of range');
+      const [dx,dz] = vector(displacement ?? [vx*time,vz*time],2,'Cloud displacement');
       function sample(data, x, z) {
         if (!Number.isFinite(x) || !Number.isFinite(z)) return 0;
         const u=(x-minX-dx)/sx-.5, v=(z-minZ-dz)/sz-.5;

@@ -295,6 +295,11 @@
       }
     }
     try {
+      WindField.settings(st.finish.windField);
+    } catch (error) {
+      bad('finish.windField', error.message);
+    }
+    try {
       WeatherBinding.settings(st.finish.weatherBinding);
     } catch (error) {
       bad('finish.weatherBinding', error.message);

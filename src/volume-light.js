@@ -65,15 +65,18 @@ const VolumeLight = (() => {
     if (typeof field !== 'function' || !Number.isFinite(bias) || bias <= 0 || !Number.isFinite(step) || step <= 0 ||
         !Number.isSafeInteger(steps) || steps < 1 || steps > 256 || !Number.isFinite(safety) || safety <= 0 || safety > 1)
       throw new RangeError('Invalid density occluder settings');
-    return (x, y, z, direction, stop) => {
+    function hitDistance(x, y, z, direction, stop) {
       let distance = bias;
       for (let i = 0; i < steps && distance < stop; i++) {
         const d = field(x + direction[0] * distance, y + direction[1] * distance, z + direction[2] * distance);
-        if (d < 0) return true;
+        if (d < 0) return distance;
         distance += Math.max(step, d * safety);
       }
-      return false;
-    };
+      return Infinity;
+    }
+    const hit = (x,y,z,direction,stop) => hitDistance(x,y,z,direction,stop) !== Infinity;
+    hit.hitDistance = hitDistance;
+    return hit;
   }
 
   function mediumColor(volume, density) {

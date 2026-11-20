@@ -63,14 +63,14 @@ function frame(world, override, { time, wind, windAt, localWind, weather, lamps,
   const historyLength = duration + (impacts?.lookback ?? 0);
   const uniformDrift = windPath(time, historyLength, wind, duration > 0 ? windAt : undefined);
   const histories = new Map(), uniform = new Map();
-  function driftFor(index,x,z) {
+  function driftFor(index,x,y,z) {
     if (!localWind || !duration) return uniformDrift;
     if (!histories.has(index)) {
       const velocityAt = t => {
         if (!uniform.has(t)) uniform.set(t,windAt?.(t) ?? wind);
-        return localWind(t,x,z,uniform.get(t));
+        return localWind(t,x,z,uniform.get(t),y);
       };
-      histories.set(index,windPath(time,historyLength,localWind(time,x,z,wind),velocityAt));
+      histories.set(index,windPath(time,historyLength,localWind(time,x,z,wind,y),velocityAt));
     }
     return histories.get(index);
   }
@@ -109,7 +109,7 @@ function frame(world, override, { time, wind, windAt, localWind, weather, lamps,
         const cycle = time / period + phase;
         if (impacts.lookback / period > 4096) throw new RangeError('Rain impact history exceeds the emitter budget');
         const youngest = (cycle - Math.floor(cycle)) * period;
-        const drift = driftFor(row,x,z);
+        const drift = driftFor(row,x,y,z);
         for (let born = youngest; born <= impacts.lookback + period; born += period) {
           const contact = hit(x, y, z, speed, height, born, Math.min(born, period), drift);
           if (!contact || born - contact.age > impacts.lookback) continue;
@@ -143,7 +143,7 @@ function frame(world, override, { time, wind, windAt, localWind, weather, lamps,
     if (!gain || !alpha || (!uniformRate && !localRate)) return null;
     const cycle = time * speed / height + phase, fraction = cycle - Math.floor(cycle);
     const age = fraction * height / speed;
-    const drift = driftFor(index,x,z);
+    const drift = driftFor(index,x,y,z);
     if (!snow && y - speed * age <= receivers[0]?.y && hit(x, y, z, speed, height, age, age, drift)) return null;
     const total = drift(age);
     function point(progress) {

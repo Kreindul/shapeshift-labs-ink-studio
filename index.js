@@ -12,7 +12,7 @@ const files = () =>
   [
     'src/frame-budget.js', 'src/ink-veil.js', 'src/sprite-surface.js', 'src/target-selectors.js', 'src/splat-provenance.js',
     'src/art-passes.js', 'src/art-ink.js', 'src/art-effects.js', 'src/art-stability.js',
-    'src/color-space.js', 'src/color-curves.js', 'src/color-lut.js', 'src/color-stack.js', 'src/pixel-look.js', 'src/reflection-plane.js', 'src/airflow.js', 'src/light-schedule.js',
+    'src/color-space.js', 'src/color-curves.js', 'src/color-lut.js', 'src/color-stack.js', 'src/pixel-look.js', 'src/reflection-plane.js', 'src/airflow.js', 'src/wind-field.js', 'src/light-schedule.js',
     'src/route-visibility.js', 'src/sample-coverage.js', 'src/sample-visibility.js', 'src/swept-disc.js', 'src/splat-order.js', 'src/splat-codec.js', 'src/ripple-field.js',
     'src/cloud-field.js', 'src/volume-field.js', 'src/volume-light.js', 'src/sky-environment.js', 'src/weather-front.js', 'src/weather-binding.js', 'src/scene-optics.js', 'src/splat-effects.js',
     'src/look-inputs.js', 'src/render-stages.js', 'src/surface-look.js', 'src/builder.js', 'src/sculpt.js'

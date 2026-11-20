@@ -2675,7 +2675,7 @@ over the retained world.
 Use [weather bindings](weather-binding.md) to run the rendering and retained fields from the same environment tracks. Use [world-space precipitation](world-precipitation.md) for rain and snow that can hit scene geometry and catch local light.
 
 `airflow.frame([x, z])` converts horizontal scene velocity into raw transport
-and a bounded displacement vector for flexible materials. Use
+and a bounded displacement vector for flexible materials. A [shared wind field](wind-field.md) adds gust profiles and local shelter. Use
 `airflow.bend(time, phase, frequency, reach)` for a scalar gust in scene
 units. The matching GLSL function is available in `airflow.glsl`. Cloth,
 foliage or other flexible surfaces can give each sculpt sample its own reach via

@@ -5,6 +5,7 @@ Enable `weatherBinding: true` on a scene with a [sky environment](shared-sky-ref
 | Profile channel | Effect |
 | --- | --- |
 | `rain` | Rain rate for the solver. Mark rain splats with `K.weather.fall(B, { kind: 'rain', profile: true, ... })` to drive their opacity from this rate. |
+| `windGust` | Optional gust multiplier from 0 to 3 for the [shared wind field](wind-field.md). |
 | `windX`, `windZ` | Horizontal world velocity in scene units per second. Moves and tilts bound rain, bends airflow-enabled materials, transports wind-driven fog density fields, and contributes to drying. |
 | `humidity`, `airTemperature`, `daylight` | Humidity and daylight are fractions. Air temperature is in degrees Celsius. All three feed the retained moisture and thermal model. |
 | `snowfall` | Deposition rate for retained snow and opacity for profile-bound [world-space flakes](world-precipitation.md). |
