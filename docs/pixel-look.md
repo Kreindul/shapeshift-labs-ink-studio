@@ -685,3 +685,29 @@ node cli/ink-studio.js render examples/look-blending.js --ortho \
 node cli/ink-studio.js render examples/look-blending.js --ortho \
   --params '{"variant":"reversed"}' --out reversed.png
 ```
+
+## Coverage-aware grading
+
+Set `finish.look.coverageAware` on a diorama or
+`visual.look.coverageAware` on a simulation world to `true`, or pass
+`--coverage-aware on` to `render` or `sim render`. This applies scoped
+looks and local palettes at
+each splat's shaded contribution. A glass look changes the pane's RGB
+at its own opacity. The visible objects behind it contribute their own
+graded colors. Masks are sampled at each contribution's surface point.
+The blend can contain RGB values between the authored swatches. The
+`look/output` probe reports the sampled contribution color. Supply
+`rgb` and a point for a masked rule.
+
+The `material` and `lit` render stages already grade contributions
+independently. In the CLI and software renderer, both paths retain
+translucent layers in front of per-pixel patterns and apply glass
+refraction to the backdrop contribution. Use a `frame` rule to grade
+the resolved image or a `palette` stage to quantize the final blend.
+These coverage-aware paths use the software renderer.
+
+```sh
+node cli/ink-studio.js render examples/coverage-aware-glass.js --ortho --out glass.png
+node cli/ink-studio.js render examples/coverage-aware-glass.js --ortho \
+  --params '{"glass":"clear"}' --out clear.png
+```

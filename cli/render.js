@@ -12,6 +12,7 @@ const ArtEffects = require('../src/art-effects.js');
 const ArtStability = require('../src/art-stability.js');
 const { footprint, sampledDepth } = require('./splat-sampling.js');
 const { createMaskResolve, applyMasks } = require('./look-mask-resolve.js');
+const { contributionLook, contributionLayers } = require('./look-contributions.js');
 const blueNoiseTiles = new WeakMap();
 function blueNoise(world, { seed }) {
   if (!blueNoiseTiles.has(world)) blueNoiseTiles.set(world, new Map());
@@ -105,7 +106,9 @@ function render(world, o, preparedPalettes) {
   const stages = !o.raw && RenderStages.plan(world, {
     blueNoise: settings => blueNoise(world, settings), skipMasks: o.lookMasks === false
   });
-  const legacyLook = styled && !stages;
+  const coverageAware = !o.raw && (o.coverageAware ?? look.coverageAware) === true;
+  const retainContributions = coverageAware || Boolean(stages);
+  const legacyLook = styled && !retainContributions;
   const ink = styled ? ArtInk.prepare(o.ink ?? look.ink, world.pal) : null;
   const effects = styled ? ArtEffects.prepare(o.artEffects ?? look.effects, world.pal) : null;
   const stable = ArtStability.prepare(o.stable ?? look.stable);
@@ -140,11 +143,11 @@ function render(world, o, preparedPalettes) {
   if (look.pixelSize !== undefined && (!Number.isSafeInteger(look.pixelSize) || look.pixelSize < 1))
     throw new RangeError('look.pixelSize must be a positive integer');
   const tone = legacyLook ? PixelLook.prepareTone(o.tone ?? look.tone, settings => blueNoise(world, settings)) : null;
-  const paletteRules = legacyLook ? PixelLook.preparePaletteConstraints(o.paletteConstraints ?? look.paletteConstraints, {
+  const paletteRules = legacyLook || coverageAware ? PixelLook.preparePaletteConstraints(o.paletteConstraints ?? look.paletteConstraints, {
     palette: world.pal, roles: world.paletteRoles, blueNoise: settings => blueNoise(world, settings),
     context: world.surfaceEffects, skipMasks: o.lookMasks === false, skipMaskedStacks: o.colorStack === false
   }) : preparedPalettes;
-  const colorGrade = legacyLook && !tone && PixelLook.colorGrade(world.pal, world.paletteRoles, an.grade,
+  const colorGrade = (legacyLook || coverageAware) && !tone && PixelLook.colorGrade(world.pal, world.paletteRoles, an.grade,
     o.paletteRemap ?? look.paletteRemap, o.colorCurves ?? look.colorCurves, o.colorLut ?? look.colorLut,
     o.colorStack ?? look.colorStack);
   const grade = colorGrade || an.grade;
@@ -274,7 +277,7 @@ function render(world, o, preparedPalettes) {
           o.reflectionScale ?? 1
         )
       : null;
-  const surface = surfaceShading(world, stages ? { ...o, paletteConstraints: false } : o, {
+  const surface = surfaceShading(world, stages && !coverageAware ? { ...o, paletteConstraints: false } : o, {
     eye,
     forward: [V[2], V[6], V[10]],
     reflection,
@@ -289,12 +292,14 @@ function render(world, o, preparedPalettes) {
     ? Object.assign(Array(layerPalettes.length).fill(undefined), surface?.constraints).concat(paletteRules.palettes)
     : surface?.constraints;
   const localPalettes = paletteRules ? layerPalettes.concat(paletteRules.palettes.map(policy => policy.swatches)) : layerPalettes;
-  const localAt = localPalettes.length && !o.raw ? new Uint32Array(W * H) : null;
+  const localAt = localPalettes.length && !o.raw && !retainContributions ? new Uint32Array(W * H) : null;
   const targetSlots = paletteRules?.slots(world);
   const defaultSlot = paletteRules?.defaultSlot || 0;
   const overlay = localAt && localConstraints?.some(policy => policy?.mask) &&
     { slots: new Uint32Array(W * H), owners: new Uint32Array(W * H) };
   const fallbackSlot = defaultSlot ? layerPalettes.length + defaultSlot : 0;
+  const contribution = coverageAware && localPalettes.length ? contributionLook(localPalettes, localConstraints, targetSlots,
+    layerPalettes.length, fallbackSlot, Array.from(world.pal, (_, i) => hex(i)), grade) : null;
   const unmasked = slot => localConstraints?.[slot - 1]?.mask ? 0 : slot;
   function localSlot(i, layer, pixel) {
     const target = targetSlots?.[i];
@@ -441,7 +446,10 @@ function render(world, o, preparedPalettes) {
     win = PIX ? new Int32Array(W * H).fill(-1) : null;
   // Keep later translucent coats when the opaque receiver is recoloured per pixel.
   let surfaceOverlay = null;
-  const stagedFrames = stages?.surfaceMask ? sampleFrames(world, t) : null;
+  const bend = world.refract === undefined ? 6 : world.refract;
+  let contributions = retainContributions && PIX ? contributionLayers(col, captured, W, H, true, bend) : null;
+  const stageMasks = stages?.surfaceMask || contribution && localConstraints?.some(policy => policy?.mask);
+  const stagedFrames = stageMasks ? sampleFrames(world, t) : null;
   const maskFrames = stagedFrames && new Map();
   function stageFrame(i) {
     if (!maskFrames.has(i)) maskFrames.set(i, stagedFrames(i));
@@ -464,6 +472,8 @@ function render(world, o, preparedPalettes) {
   let deferred = sortedSurfaces ? new Map() : null, deferredCount = 0, orderFallback = false;
   function composite(p, i, z, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass) {
     const p3 = p * 3, ia = 1 - a;
+    if (retainContributions && glass && bend && !contributions) contributions = contributionLayers(col, captured, W, H, false, bend);
+    if (contributions) contributions.before(p, pr, pg, pb, a, wd && a > .5, glass && !wd, dn);
     col[p3] = pr * a + col[p3] * ia;
     col[p3 + 1] = pg * a + col[p3 + 1] * ia;
     col[p3 + 2] = pb * a + col[p3 + 2] * ia;
@@ -494,7 +504,7 @@ function render(world, o, preparedPalettes) {
         if (axialDepth) axialDepth[p] = z;
       }
     } else if (glass) gls[p] = Math.min(1, gls[p] + a * 0.5);
-    else if (win && !coat && a > 0.5) win[p] = -1;
+    else if (win && !retainContributions && !coat && a > 0.5) win[p] = -1;
   }
 
   function playFragments(sort) {
@@ -629,7 +639,7 @@ function render(world, o, preparedPalettes) {
       x1 = Math.min(W - 1, Math.ceil(sx + ex)),
       y0 = Math.max(0, Math.floor(sy - ey)),
       y1 = Math.min(H - 1, Math.ceil(sy + ey));
-    const coat = PIX && hasSurface && (!writesDepth || reflectInRaster || surface.reveals(i));
+    const coat = !retainContributions && PIX && hasSurface && (!writesDepth || reflectInRaster || surface.reveals(i));
     if (coat && !surfaceOverlay) surfaceOverlay = new Float32Array(W * H * 4);
     r = Math.min(r, 1);
     g = Math.min(g, 1);
@@ -708,10 +718,18 @@ function render(world, o, preparedPalettes) {
           hit = surfacePoint(rayAt(ix + 0.5, iy + 0.5), normal, x, y, z, -cz, R);
           [pr, pg, pb, alpha, highlight, paletteId] = surface.shade(i, ...hit, x, y, z, pr, pg, pb, ix + 0.5, iy + 0.5);
         }
-        if (staged?.lit) {
-          const sample = litMask ? stageSample(i, hit ?? (litNormal ?
-            surfacePoint(rayAt(ix + .5, iy + .5), litNormal, x, y, z, -cz, R) : [x, y, z])) : undefined;
-          [pr, pg, pb] = RenderStages.apply(staged.lit, [pr, pg, pb], sample);
+        const scoped = contribution?.applies(i, paletteId);
+        if (staged?.lit || scoped) {
+          let sample;
+          if (litMask || (scoped && contribution.masked(i, paletteId))) {
+            const sampleNormal = litNormal ?? stageFrame(i).normal;
+            const point = hit ?? (sampleNormal ?
+              surfacePoint(rayAt(ix + .5, iy + .5), sampleNormal, x, y, z, -cz, R) : [x, y, z]);
+            sample = stageSample(i, point);
+          }
+          let rgb = [pr, pg, pb];
+          if (scoped) rgb = contribution.shade(i, paletteId, rgb, ix, H - 1 - iy, sample, highlight <= .22);
+          [pr, pg, pb] = staged?.lit ? RenderStages.apply(staged.lit, rgb, sample) : rgb;
         }
         if (staged?.lit || (fragmentSurface && reflectInRaster)) {
           pr += (fog[0] - pr) * fogMix;
@@ -986,9 +1004,19 @@ function render(world, o, preparedPalettes) {
         const sample = masked ? stageSample(i, [HX[p], HY[p], HZ[p]]) : undefined;
         const base = staged?.material ? stagedMaterial(i, staged.material, PALC[ci], sample) : PALC[ci];
         const c = surface?.has(i) ? surface.shade(i, HX[p], HY[p], HZ[p], X[i], Y[i], Z[i], ...base, x + 0.5, y + 0.5) : base;
-        const lit = staged?.lit ? RenderStages.apply(staged.lit, c, sample) : c;
+        let rgb = c;
+        if (contribution?.applies(i, c[5])) {
+          const site = sample ?? (contribution.masked(i, c[5]) ? stageSample(i, [HX[p], HY[p], HZ[p]]) : undefined);
+          rgb = contribution.shade(i, c[5], c, x, H - 1 - y, site, !(c[4] > .22));
+        }
+        const lit = staged?.lit ? RenderStages.apply(staged.lit, rgb, sample) : rgb;
         const kf = world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dep[p]) * world.fog.max : 0;
         if (surfaceGlint) surfaceGlint[p] = c[4] > 0.22;
+        if (retainContributions) {
+          contributions.replacePattern(p, [0, 1, 2].map(channel => lit[channel] + (fog[channel] - lit[channel]) * kf));
+          if (detail && surface?.projected(i) && c[4] > 0.22) detail[(H - 1 - y) * W + x] = 1;
+          continue;
+        }
         if ((surfaceOverlay?.[p * 4 + 3] || 0) < 0.5) {
           if (localAt) localAt[p] = localSlot(i, c[5], p);
           if (detail && surface?.projected(i) && c[4] > 0.22) detail[(H - 1 - y) * W + x] = 1;
@@ -1132,6 +1160,7 @@ function render(world, o, preparedPalettes) {
       }
     }
   }
+  contributions?.refract(gls, dep);
   let atmosphere, volumeStats;
   if (axialDepth) {
     const quality = atmosphereQuality({ ...world.volumeQuality, ...o.volumeQuality });
@@ -1165,8 +1194,7 @@ function render(world, o, preparedPalettes) {
     // (the picture the contour look takes its insides from is worked on first, as the page does: glass bends it, contact shade darkens it)
     let c2 = col;
     if (o.worked) {
-      const bend = world.refract === undefined ? 6 : world.refract,
-        aoK = world.ao ? (world.ao.k === undefined ? 0.5 : world.ao.k) : 0,
+      const aoK = world.ao ? (world.ao.k === undefined ? 0.5 : world.ao.k) : 0,
         aoR = world.ao ? (world.ao.range || 0.6) / (2 * R) : 1,
         at = (x, y) => clamp(y, 0, H - 1) * W + clamp(x, 0, W - 1),
         TAPS = [2, 0, -2, 0, 0, 2, 0, -2, 1, 1, -1, 1, 1, -1, -1, -1];
@@ -1177,7 +1205,7 @@ function render(world, o, preparedPalettes) {
             gx = gls[at(x + 1, y)] - gls[at(x - 1, y)],
             gy = gls[at(x, y + 1)] - gls[at(x, y - 1)];
           let q = p;
-          if (gls[p] + Math.abs(gx) + Math.abs(gy) > 0) q = at(x + Math.round(gx * bend), y + Math.round(gy * bend));
+          if (!retainContributions && gls[p] + Math.abs(gx) + Math.abs(gy) > 0) q = at(x + Math.round(gx * bend), y + Math.round(gy * bend));
           let k = 1;
           if (aoK > 0) {
             let occ = 0;
@@ -1217,7 +1245,7 @@ function render(world, o, preparedPalettes) {
     dith = (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither,
     localOutput = localAt && PixelLook.outputPalettes(tone?.palette || evaluatedPalette || world.pal, localPalettes),
     local = localAt && { constraints: localConstraints, palettes: localPalettes, output: localOutput, scene: pal, grade: !tone && grade },
-    use = new Uint32Array(stages ? 0 : localOutput?.packed.length ?? (tone ? tone.palette.length : np)),
+    use = new Uint32Array(retainContributions ? 0 : localOutput?.packed.length ?? (tone ? tone.palette.length : np)),
     ln = look.lines ? (look.lines === true ? {} : look.lines) : null,
     lines = !ink && !!ln,
     lineGap = ln ? (ln.gap || 0.3) / (2 * R) : 1,
@@ -1227,8 +1255,7 @@ function render(world, o, preparedPalettes) {
     G = (x, y) => gls[clamp(y, 0, H - 1) * W + clamp(x, 0, W - 1)];
   // (as in the page: glass bends what is behind it, by how its own thickness changes across the picture; and, where a diorama asks for it,
   //  a pixel with nearer things close round it is shaded, so that what moves still sits in its own shadow)
-  const bend = world.refract === undefined ? 6 : world.refract,
-    aoK = world.ao ? (world.ao.k === undefined ? 0.5 : world.ao.k) : 0,
+  const aoK = world.ao ? (world.ao.k === undefined ? 0.5 : world.ao.k) : 0,
     aoR = world.ao ? (world.ao.range || 0.6) / (2 * R) : 1,
     AOT = [
       [2, 0],
@@ -1248,7 +1275,7 @@ function render(world, o, preparedPalettes) {
         b = col[p * 3 + 2];
       const yo = H - 1 - y,
         q = (yo * W + x) * 3;
-      if (!o.raw) {
+      if (!o.raw && !retainContributions) {
         const gx = G(x + 1, y) - G(x - 1, y),
           gy = G(x, y + 1) - G(x, y - 1);
         if (gls[p] + Math.abs(gx) + Math.abs(gy) > 0) {
@@ -1300,7 +1327,7 @@ function render(world, o, preparedPalettes) {
         g = line[1];
         b = line[2];
       }
-      if (stages) {
+      if (retainContributions) {
         out[q] = Math.round(clamp(r, 0, 1) * 255);
         out[q + 1] = Math.round(clamp(g, 0, 1) * 255);
         out[q + 2] = Math.round(clamp(b, 0, 1) * 255);

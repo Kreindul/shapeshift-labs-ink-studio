@@ -44,6 +44,7 @@
       return binding;
     }
     function validate() {
+      W.data.check(look?.coverageAware === undefined || typeof look.coverageAware === 'boolean', 'coverageAware must be a boolean');
       RenderStages.prepare(look?.renderStages, paletteOptions);
       if (look?.paletteConstraints || Object.hasOwn(config.look ?? {}, 'asset') || Object.hasOwn(config.look ?? {}, 'targets')) {
         PixelLook.prepareColorStack(look.colorStack, paletteOptions.palette, paletteOptions.roles);

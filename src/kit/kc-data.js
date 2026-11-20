@@ -304,6 +304,8 @@
     } catch (error) {
       bad('finish.look.asset', error.message);
     }
+    if (look?.coverageAware !== undefined && typeof look.coverageAware !== 'boolean')
+      bad('finish.look.coverageAware', 'coverageAware must be a boolean');
     if (look?.pixelSize !== undefined && (!Number.isSafeInteger(look.pixelSize) || look.pixelSize < 1))
       bad('finish.look.pixelSize', 'pixelSize must be a positive integer');
     try {

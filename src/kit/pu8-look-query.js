@@ -48,7 +48,8 @@
       const options = { palette: world.pal, roles: world.paletteRoles, blueNoise, context: world.surfaceEffects };
       plan ??= PixelLook.preparePaletteConstraints(world.look?.paletteConstraints, options) ?? false;
       const { paletteRemap, colorCurves, colorLut, colorStack, tone } = world.look ?? {};
-      const tonePlan = PixelLook.prepareTone(tone, blueNoise);
+      const coverageAware = world.look?.coverageAware === true;
+      const tonePlan = coverageAware ? null : PixelLook.prepareTone(tone, blueNoise);
       const scene = Array.from(world.pal, rgb), grade = !tonePlan &&
         (PixelLook.colorGrade(world.pal, world.paletteRoles, world.anim?.grade, paletteRemap, colorCurves, colorLut, colorStack) ||
         world.anim?.grade);
@@ -61,19 +62,21 @@
           surfacePalettes.set(binding, PixelLook.prepareLookPolicy(surface.paletteConstraint, options));
         const policy = id ? plan.palettes[id - 1] : target.kind === 'splat' &&
           (surfacePalettes.get(binding) || (plan && plan.palettes[plan.defaultSlot - 1]));
-        const rowPalette = policy ? policy.packed : target.kind === 'splat' ? palette : null;
+        const rowPalette = policy ? policy.packed : !coverageAware && target.kind === 'splat' ? palette : null;
         const packed = input && rowPalette && (policy ? rowPalette[PixelLook.paletteIndex(policy, input, ...pixel, {
           scene, grade, useDither: target.kind === 'splat'
         })] : rowPalette[tonePlan ? PixelLook.toneIndex(tonePlan, ...input, ...pixel) : PixelLook.nearest(input, scene, false)]);
         let sampled = input && (packed == null ? input.slice() : rgb(packed));
         const spatial = policy?.mask;
         const amount = spatial && (at || rest) ? spatial({ position: rest, worldPosition: at, time }) : null;
-        if (sampled && amount !== null) {
-          const underlying = policy === surfacePalettes.get(binding) ? undefined : surfacePalettes.get(binding);
-          const fallback = underlying && !underlying.mask ? underlying : plan && plan.palettes[plan.defaultSlot - 1];
+        if (sampled && spatial && (coverageAware || amount !== null)) {
+          const underlying = surfacePalettes.get(binding), defaultPolicy = plan && plan.palettes[plan.defaultSlot - 1];
+          const fallback = underlying && !underlying.mask ? underlying : defaultPolicy;
           const dry = base ?? (fallback && !fallback.mask ? rgb(fallback.packed[PixelLook.paletteIndex(fallback, input, ...pixel,
-            { scene, grade })]) : rgb(palette[tonePlan ? PixelLook.toneIndex(tonePlan, ...input, ...pixel) : PixelLook.nearest(input, scene, false)]));
-          sampled = sampled.map((color, i) => dry[i] * (1 - amount) + color * amount);
+            { scene, grade })]) : coverageAware ? input :
+            rgb(palette[tonePlan ? PixelLook.toneIndex(tonePlan, ...input, ...pixel) : PixelLook.nearest(input, scene, false)]));
+          const weight = amount ?? 0;
+          sampled = sampled.map((color, i) => dry[i] * (1 - weight) + color * weight);
         }
         return { target, count, asset: policy?.assetId ?? (id ? null : surface?.lookAssetId ?? null), rule: rule?.select ?? null,
           palette: rowPalette && Array.from(rowPalette), ...(spatial && { maskWeight: amount }), ...(sampled && { rgb: sampled }) };

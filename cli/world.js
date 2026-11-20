@@ -235,6 +235,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
           colorCurves:opt['color-curves']==='off'?false:undefined,
           colorLut:require('./lut.js').override(opt.lut),
           paletteConstraints:require('./palette-constraints.js').override(opt['palette-constraints']),
+          coverageAware:opt['coverage-aware']===undefined?undefined:opt['coverage-aware']!=='off',
           lookMasks:opt['look-masks']==='off'?false:undefined,
           colorStack:require('./color-stack.js').override(opt['color-stack']),t:run.view().time});
         const output=path.resolve(opt.out);
