@@ -53,12 +53,15 @@
     'Visual volume must name a live volume system');
     const consumers = Object.values(systems).filter(system => system.checkFields);
     const visualFabric=world.visual?.fields?.deformables;
-    if (consumers.length || world.visual?.fields?.surface!==undefined || visualFabric!==undefined) {
+    const visualLinks=world.visual?.fields?.routedLinks;
+    if (consumers.length || world.visual?.fields?.surface!==undefined || visualFabric!==undefined || visualLinks!==undefined) {
       const query = Q.create({world},systems);
       for (const system of consumers) system.checkFields(query);
       W.materials.checkSurface(query,world.visual?.fields?.surface);
       if(visualFabric!==undefined)check((Array.isArray(visualFabric)?visualFabric:[visualFabric]).every(field=>
         typeof field==='string'&&query.field(field)?.role==='deformable-surfaces'), 'Invalid visual deformable surface field');
+      if(visualLinks!==undefined)check((Array.isArray(visualLinks)?visualLinks:[visualLinks]).every(field=>
+        typeof field==='string'&&query.field(field)?.role==='routed-links'), 'Invalid visual routed link field');
     }
     const systemDependencies = Object.entries(systems).filter(([,system])=>system.dependencies !== undefined);
     let fieldQuery;
@@ -324,6 +327,13 @@
       for (const name of names) states[name] = rootedState(systems[name].initial(
         context(name,world,Object.freeze({}),0,{},() => {},initialQuery)));
       states = freeze(states);
+      const initializers=names.filter(name=>systems[name].settleInitial);
+      if(initializers.length){
+        const snapshot=states, sceneQuery=Q.create(view(),systems,projection), settled={...snapshot};
+        for(const name of initializers)settled[name]=rootedState(systems[name].settleInitial(snapshot[name],
+          context(name,world,snapshot,0,{},()=>{},sceneQuery)));
+        states=freeze(settled);
+      }
       transfers.validateBalances(states);
       const startQuery = Q.create(view(),systems,projection);
       const initialOutputs = {};

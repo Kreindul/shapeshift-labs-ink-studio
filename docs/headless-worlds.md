@@ -679,6 +679,7 @@ reaches the feeder.
 | `water` | Bounded XZ shallow water with live bed edits, fractional face openings, conservative pump transfer, sensors and probes for the bed, depth, current and volume. An `obstacle` field may supply signed solid clearance. |
 | `mechanics` | Boxes, capsules and convex compounds with swept contact and shared clearance and support queries. Fixed and powered mounts, transmission ratios and stall reports, physical separation, configurable box fracture, wheel traction, buoyancy, thrust and sail forces. |
 | `deformables` | Checkpointed XPBD cloth and rope with scene attachments, terrain and solid contact, loads, tears, support queries and rain collection. |
+| `routed-links` | Socket-to-socket cables, hoses and belt loops with guide points, slack, tension, break limits, typed signals, torque transmission and conservative transfers. |
 | `navigation` | Bounded walking, swimming or flying route traces. Ground search can take depth, clearance and wear into account. Hosts can also expose the volumetric traversal graph. |
 | `habitat` | Authored species rules evaluate world fields and nearby or reachable resources. Probes return a score, suitability and the reasons behind the decision. |
 | `agents` | Ground, swim and flight movement with replanning, scene-aware destinations and optional limb contacts. Agents publish their real movement contacts for other systems. |
@@ -808,6 +809,54 @@ ink-studio sim fork yard.run.json --actions examples/world-deformable-yard.comma
 ink-studio probe cut.run.json --field world/history
 ```
 
+## Routed cables, hoses and belts
+
+Give a `routed-links` system a table under `config.links`. Each entry has
+`from` and `to` anchors and optional ordered `guides`. An anchor can be an
+XYZ point or an `entity` with an optional `socket` and local `offset`.
+Anchors follow the entity's current pose. Add `returnGuides` for a closed
+belt. The route goes through `to` and the return guides before closing at
+`from`. A pulley arc can use several closely spaced guides.
+
+Set the installed `length` or supply `slack` to add to the distance at the
+initial posed sockets. Loose spans sag in the configured `gravity` direction.
+The model uses the length difference and `stiffness` to calculate tension
+when the route is taut. Set `breakTension`, `breakStrain` (fractional stretch),
+or both. Exceeding a limit latches a break and records the segment, point,
+threshold reading and tick in world history. A missing socket interrupts
+delivery until the anchor resolves again. Add `routes/reactions` to a
+mechanics system's `routedLoads` list to apply taut-link forces at the
+moving sockets and guides.
+
+Choose a `carry` record based on the payload.
+
+| `kind` | Configuration and runtime interface |
+| --- | --- |
+| `signal` | Set `type` to `bool`, `number`, `vec3`, `record` or `event`. Wire `in.<link>` and `out.<link>` as ordinary typed ports. Disconnection publishes the type's zero value or the configured `idle` value. |
+| `transfer` | Bind two compatible `system/account` endpoints using `from` and `to`. Supply `rate` per second or `amount` per update. Fluid and energy use the same conservative accounting, capacity checks and receipts as other transfers. A slow route scales its rate by its solver interval. |
+| `drive` | Wire the driving shaft speed to `speed.<link>` and the driven shaft's resistance to `load.<link>`. `speed-out.<link>` sends the speed times `ratio` and `load-out.<link>` reflects torque times the absolute ratio. `capacity` limits delivered torque and `engageTension` sets the minimum grip. `slipping.<link>` reports a loose or overloaded drive. Use `externalLoad: true` on a mechanics joint to expose `load.<joint>` and `external-load.<joint>`. |
+
+`enable.<link>` switches the carrier while the installed route remains
+under tension. `active.<link>` and `tension.<link>` publish the sampled
+state. Ports follow the runtime's ordinary stateful timing. The `links`
+field reports the current geometry, installed length, status and latest
+transfer receipt. It can show `over-limit` after a machine moves in the
+current tick, with the break applied when the route next steps. `route`
+traces the same geometry for one link. For rendering set
+`visual.fields.routedLinks` to the `links` field.
+
+Use `cut` with a link and optional zero-based `segment` and `fraction`.
+`repair` rejoins a cut or snapped link and can set a new installed `length`.
+`pay-out` changes that length. `reroute` replaces selected endpoints or guide
+lists. All four actions can be scheduled and replayed.
+
+```sh
+ink-studio sim run examples/world-routed-workshop.json --actions examples/world-routed-workshop.commands.json --ticks 40 --record workshop.run.json
+ink-studio trace workshop.run.json routes/route --args '{"link":"hose"}'
+ink-studio probe workshop.run.json --field world/transfers
+ink-studio sim render workshop.run.json --colored --out routed-workshop.png
+```
+
 ## Extend the runtime in JavaScript
 
 ```js
@@ -833,6 +882,8 @@ include `checkAction(type,args)`, `validateState(state)`, `pose(state,id)`,
 `fields`, `traces`, typed `inputs` and `outputs`, and
 `output(state,context)`. A consumer can implement `checkFields(query)`
 to bind and check its field references when the runtime compiles.
+`settleInitial(state, context)` can resolve installed geometry against the
+shared initial snapshot after all systems have created their state.
 Use `W.spatialFields.define(spec, read)` to publish a custom scalar,
 vector, or categorical field. The callback receives the projected
 `point`, the regular query context, and an `explain` flag. Return a

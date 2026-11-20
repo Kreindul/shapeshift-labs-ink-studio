@@ -59,8 +59,11 @@
     check(config.contactEvents===undefined || typeof config.contactEvents==='boolean','contactEvents must be boolean');
     const start=config.bodies??{}, jointSpecs=config.joints??{}, forceSpecs=config.forces??{};
     const fabricFields=config.deformables??[];
+    const routeFields=config.routedLoads??[];
     check(Array.isArray(fabricFields)&&fabricFields.length<=16&&fabricFields.every(field=>typeof field==='string')&&
       new Set(fabricFields).size===fabricFields.length,'Invalid deformable surface fields');
+    check(Array.isArray(routeFields)&&routeFields.length<=16&&routeFields.every(field=>typeof field==='string')&&
+      new Set(routeFields).size===routeFields.length,'Invalid routed load fields');
     check([start,jointSpecs,forceSpecs].every(group=>record(group)&&Object.keys(group).length<=512&&Object.keys(group).every(id)),
       'Mechanics needs bounded body, joint and force tables');
     const richer=fabricFields.length>0||Object.values(start).some(item=>item?.collider!==undefined);
@@ -129,13 +132,18 @@
       check(vector(axis)&&V.len(axis)>1e-8&&vector(anchor)&&vector(offset)&&vector(range,2)&&range[0]<=range[1]&&
         [spec.ratio??1,spec.speed??0,spec.capacity??1e9,spec.load??0,spec.at??0].every(Number.isFinite)&&
         (spec.capacity??1)>=0&&(spec.load??0)>=0&&(spec.ratio??1)!==0&&
-        (!spec.drive||own(jointSpecs,spec.drive))&&['speed','position'].includes(spec.mode??'speed'),
+        (!spec.drive||own(jointSpecs,spec.drive))&&['speed','position'].includes(spec.mode??'speed')&&
+        (spec.externalLoad===undefined||typeof spec.externalLoad==='boolean'),
         'Invalid joint settings for ' + key);
       claimed.set(spec.child,key);
       initials[key]={active:true,value:clamp(spec.at??0,...range),speed:0,load:0,stalled:false};
       inputs['drive.'+key]={type:'number',default:spec.mode==='position'?spec.at??0:spec.speed??0};
       outputs['speed.'+key]='number';
       outputs['stalled.'+key]='bool';
+      if(spec.externalLoad){
+        inputs['external-load.'+key]='number';
+        outputs['load.'+key]='number';
+      }
     }
     function orderedJoints(order,dependency) {
       const done=new Set(), visiting=new Set();
@@ -199,10 +207,11 @@
         check(Number.isFinite(ratio)&&Math.abs(ratio)<=1e6,'Transmission ratio exceeds its budget');
         roots[key]=root;ratios[key]=ratio;
         const staticLoad=spec.load??0, linked=spec.loadField?ctx.query.probe(spec.loadField,{entity:state.bodies[spec.child]?.entity}):null;
-        const load=staticLoad+(linked?.status==='ok'&&Number.isFinite(linked.value)?Math.max(0,linked.value):0);
+        const externalLoad=spec.externalLoad?Math.max(0,ctx.input['external-load.'+key]):0;
+        const load=staticLoad+externalLoad+(linked?.status==='ok'&&Number.isFinite(linked.value)?Math.max(0,linked.value):0);
         demand[root]=(demand[root]??0)+(s.active?load*Math.abs(ratio):0);
         if (loading && s.active) {
-          (loading[root]??=[]).push({joint:key,ratio,load,staticLoad,...(spec.loadField && {field:spec.loadField,
+          (loading[root]??=[]).push({joint:key,ratio,load,staticLoad,...(spec.externalLoad&&{externalLoad}),...(spec.loadField && {field:spec.loadField,
             status:linked?.status??'unavailable',reading:Number.isFinite(linked?.value)?linked.value:null})});
         }
         next[key]={...s,load};
@@ -301,6 +310,21 @@
         if(!root||!joints[key].active)continue;
         if(!mounts.has(root))mounts.set(root,[]);
         mounts.get(root).push(key);
+      }
+      if(routeFields.length){
+        const byEntity=new Map();
+        for(const body of Object.values(state.bodies))if(!byEntity.has(body.entity))byEntity.set(body.entity,body.id);
+        for(const field of routeFields){
+          const read=ctx.query.probe(field);
+          if(read.status!=='ok')continue;
+          for(const load of read.value){
+            const child=byEntity.get(load.entity), root=child&&roots[child];
+            if(!root||bodies[root].fixed)continue;
+            force[root]=V.add(force[root]??zero,load.force);
+            const arm=V.sub(load.point,state.bodies[root].position);
+            torque[root]=V.add(torque[root]??zero,V.cross(arm,load.force));
+          }
+        }
       }
       function wheelSupport(point,radius,root) {
         let y=ground(ctx,point), support=null;
@@ -640,8 +664,9 @@
       }
       return count?{status:'ok',value,body:nearest}:Q.missing('no bodies','empty');
     }
-    return {...((config.surface!==undefined||fabricFields.length)&&{dependencies:{reads:[config.surface,...fabricFields].filter(Boolean)}}),
-    ...((sails.length||config.surface!==undefined||fabricFields.length) && {checkFields(query) {
+    return {...((config.surface!==undefined||fabricFields.length||routeFields.length)&&
+      {dependencies:{reads:[config.surface,...fabricFields,...routeFields].filter(Boolean)}}),
+    ...((sails.length||config.surface!==undefined||fabricFields.length||routeFields.length) && {checkFields(query) {
       for (const sail of sails) windSampler(query,sail);
       W.materials.checkSurface(query,config.surface);
       const names=fabricFields.map(field=>{
@@ -650,6 +675,12 @@
         return descriptor.name;
       });
       check(new Set(names).size===names.length,'Duplicate deformable surface field');
+      const routes=routeFields.map(field=>{
+        const descriptor=query.field(field);
+        check(descriptor?.role==='routed-reactions','Expected a routed reaction field '+field);
+        return descriptor.name;
+      });
+      check(new Set(routes).size===routes.length,'Duplicate routed reaction field');
     }}),inputs,outputs,initial(ctx) {
       const bodies={...initialBodies}, joints={...initials};
       follow(bodies,ctx.world);
@@ -711,6 +742,7 @@
       for(const [key,joint] of Object.entries(state.joints)){
         out['speed.'+key]=joint.speed;
         out['stalled.'+key]=joint.stalled;
+        if(jointSpecs[key].externalLoad)out['load.'+key]=joint.networkLoad??((jointSpecs[key].load??0)+(joint.load??0));
       }
       if (config.contactEvents) out.contacts=state.contacts;
       if(fabricFields.length)out['deformable-loads']=state.fabricLoads;

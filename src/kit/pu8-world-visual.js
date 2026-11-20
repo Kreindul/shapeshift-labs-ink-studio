@@ -208,6 +208,23 @@
     S.bake();
     const fabricFields=Array.isArray(fields.deformables)?fields.deformables:fields.deformables?[fields.deformables]:[];
     const sun=V.norm([-.55,.8,.45]);
+    const linkFields=Array.isArray(fields.routedLinks)?fields.routedLinks:fields.routedLinks?[fields.routedLinks]:[];
+    for(const field of linkFields){
+      const read=query.probe(field);
+      if(read.status!=='ok')continue;
+      for(const {id,entity,material,radius,paths,look} of Object.values(read.value)){
+        const first=B.count(), target=targetFor(entity), ramp=look??[19,20,21,22,23];
+        for(const points of paths)for(let i=1;i<points.length;i++){
+          const a=points[i-1], b=points[i], d=V.sub(b,a), length=V.len(d);
+          if(length<1e-6)continue;
+          const axis=V.mul(d,1/length), light=1-.65*Math.abs(V.dot(axis,sun));
+          const color=B.P[ramp[Math.min(ramp.length-1,Math.floor(light*ramp.length))]]??B.P[1];
+          const count=Math.min(256,Math.max(1,Math.ceil(length/Math.max(.18,radius*4))));
+          for(let j=0;j<count;j++)B.stick(...V.lerp(a,b,(j+.5)/count),axis,length/count*.61,radius,color,2.7);
+        }
+        B.describeSplats?.(first,B.count(),{object:id,material,target});
+      }
+    }
     for(const field of fabricFields){
       const read=query.probe(field);
       if(read.status!=='ok')continue;
