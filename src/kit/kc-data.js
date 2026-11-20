@@ -413,6 +413,11 @@
       bad('finish.celestialTracks', error.message);
     }
     try {
+      AreaLights.prepare(st.finish.areaLights);
+    } catch (error) {
+      bad('finish.areaLights', error.message);
+    }
+    try {
       SplatRelighting.settings(st.finish.relighting);
     } catch (error) {
       bad('finish.relighting', error.message);
@@ -1307,12 +1312,13 @@
     const { detailBudgets, shadowArt } = st0.finish.look ?? {};
     const B = (env.makeBuilder || makeBuilder)(seed, pal, detailBudgets === undefined && shadowArt === undefined ?
       undefined : { detailBudgets, shadowArt });
+    const keepLightCasters = AreaLights.prepare(st0.finish.areaLights).some(light => light.shadows && light.intensity);
     let S, grp;
     function startSculpt() {
       S = K.sculpt((env.makeSculpt || makeSculpt)(B));
       S.sun = B.norm(st0.sun);
       if (st0.finish.look?.pixel) S.pixel = true;
-      S.keepRenderSdf = Boolean(st0.finish.look?.sdfAssist);
+      S.keepRenderSdf = keepLightCasters || Boolean(st0.finish.look?.sdfAssist);
       S.captureAlbedo = Boolean(st0.finish.liveSun) ||
         Array.isArray(st0.finish.look?.renderStages) && st0.finish.look.renderStages.some(rule => rule.stage === 'material');
       if (st0.amb !== undefined) S.amb = st0.amb;
