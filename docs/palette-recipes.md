@@ -221,6 +221,49 @@ samples and call `KIT.palette.extract({ width, height, data }, options)`.
 An `ImageData` object can be passed directly. Both entry points accept
 `{ size, alpha }` and return the CLI's report.
 
+## Measure palette usage at export size
+
+Use the same camera, time, and art resolution as the intended export.
+Omit `--select` to measure the whole frame.
+
+```sh
+ink-studio palette usage examples/palette-composition.js --w 368 --h 188 --px 1 \
+  --select '{"material":"fabric","effect":"bounce"}' --out fabric-usage.json
+```
+
+Select an authored `object` or `material` by its label. A screen
+`region` uses `[x, y, width, height]` in top-down art pixels and is
+clipped to the image. A world region uses
+`{"min":[x,y,z],"max":[x,y,z]}` and tests owned surface positions.
+An `effect` selects the final palette assignment for `fog`,
+`clouds`, `sky`, `emission`, `bounce`, or `shadow`. Combine fields
+to measure their intersection.
+
+Counts come from the exact RGB bytes of the rendered frame. Fully
+transparent pixels are excluded. Partial pixels count once. Object
+and material selections follow the [surface ownership pass](art-passes.md).
+When export and ownership pass grids differ, ownership uses the
+nearest source pixel at each export pixel centre.
+
+Each row reports its swatch, pixel count, fraction of selected pixels,
+and declaration status. Identical RGB swatches share a row. Compiled
+palette declarations cover scene and scoped palettes, including
+reserved swatches. An offscreen object or gated-off palette effect
+can report its unused declarations with zero visible pixels.
+Colours introduced by blending or overlays appear in the counts and
+are flagged as undeclared when they match no applicable declaration.
+
+The `unused` list contains declared swatches with zero matches.
+The `rare` list contains declared swatches with at least one match
+and at most `--rare-pixels` (default 3) or `--rare-share`
+(default .001, or 0.1% of the selected pixels). Set a threshold to
+zero to disable that criterion.
+
+Node callers can use
+`ink.paletteUsage(world, { w, h, px, t, select, rarePixels, rareShare })`
+and pass the usual render options. Pose mutable worlds using the same
+workflow as a direct render.
+
 ## Transfer a reference ramp
 
 ```js
