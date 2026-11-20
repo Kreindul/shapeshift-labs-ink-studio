@@ -52,10 +52,13 @@
       own(systems,world.visual.volume)&&typeof systems[world.visual.volume].volumeFrame==='function',
     'Visual volume must name a live volume system');
     const consumers = Object.values(systems).filter(system => system.checkFields);
-    if (consumers.length || world.visual?.fields?.surface!==undefined) {
+    const visualFabric=world.visual?.fields?.deformables;
+    if (consumers.length || world.visual?.fields?.surface!==undefined || visualFabric!==undefined) {
       const query = Q.create({world},systems);
       for (const system of consumers) system.checkFields(query);
       W.materials.checkSurface(query,world.visual?.fields?.surface);
+      if(visualFabric!==undefined)check((Array.isArray(visualFabric)?visualFabric:[visualFabric]).every(field=>
+        typeof field==='string'&&query.field(field)?.role==='deformable-surfaces'), 'Invalid visual deformable surface field');
     }
     const systemDependencies = Object.entries(systems).filter(([,system])=>system.dependencies !== undefined);
     let fieldQuery;

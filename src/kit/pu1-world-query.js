@@ -370,7 +370,7 @@
         ...(description?.spatial && {type:description.type,spatial:description.spatial}),
         ...(grid ? {grid} : {}),samples:points.map(point => ({point,...api.probe(field,point,args)}))};
     }
-    const api = Object.freeze({inspect,spatial,target,field,sampler,
+    const api = Object.freeze({inspect,spatial,target,frame:fieldFrame,field,sampler,
       renderVolume:name=>own(systems,name)?systems[name].volumeFrame?.(states[name]):null,
       select:selector=>look().select(selector),
       inspectLook:options=>look().inspect(options,api),

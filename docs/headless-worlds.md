@@ -678,6 +678,7 @@ reaches the feeder.
 | `exchange` | Enabled links that request a fixed amount per tick or a rate per second. |
 | `water` | Bounded XZ shallow water with live bed edits, fractional face openings, conservative pump transfer, sensors and probes for the bed, depth, current and volume. An `obstacle` field may supply signed solid clearance. |
 | `mechanics` | Boxes, capsules and convex compounds with swept contact and shared clearance and support queries. Fixed and powered mounts, transmission ratios and stall reports, physical separation, configurable box fracture, wheel traction, buoyancy, thrust and sail forces. |
+| `deformables` | Checkpointed XPBD cloth and rope with scene attachments, terrain and solid contact, loads, tears, support queries and rain collection. |
 | `navigation` | Bounded walking, swimming or flying route traces. Ground search can take depth, clearance and wear into account. Hosts can also expose the volumetric traversal graph. |
 | `habitat` | Authored species rules evaluate world fields and nearby or reachable resources. Probes return a score, suitability and the reasons behind the decision. |
 | `agents` | Ground, swim and flight movement with replanning, scene-aware destinations and optional limb contacts. Agents publish their real movement contacts for other systems. |
@@ -736,6 +737,70 @@ translation for that tick. Checkpoints and replays retain the report.
 ink-studio sim run examples/world-continuous-colliders.json --ticks 1 --record workshop.run.json
 ink-studio probe workshop.run.json --field rig/impacts
 ink-studio sim render workshop.run.json --colored --out workshop.png
+```
+
+## Cloth and rope in a simulation
+
+A `deformables` system stores point positions, velocities, broken links,
+attachments and collected water in the world checkpoint. Each shape has a
+stable ID under `config.shapes`. A `cloth` uses an origin `at`, edge vectors
+`u` and `v`, and grid counts `nu` and `nv`. A `rope` uses an ordered `points`
+polyline. Set `mass` for the whole shape, `radius` for point clearance, and
+`stretch`, `shear` and `bend` for constraint compliance where applicable.
+`tear` is the stretch ratio at which a link breaks. `style: "net"` draws the
+structural strands of a cloth grid. Support is evaluated on its intact faces.
+
+An `attachments` record maps names to a `node` index and either a world
+`point` or an `entity` with an optional `socket` and local `offset`. Cloth
+indices advance across `u` first. Attachments follow the target frame on each
+tick. They act as kinematic pins. The `attach` and `detach` actions emit
+events, and an attachment releases with reason `target-lost` if its target
+disappears. Use `load` with a shape, a node and an impulse vector to apply a
+scripted load. `cut` breaks structural links within a radius of a world point
+and opens the affected cells for queries and rendering. Stretch tears and
+scripted cuts emit `deformable-tear` with the link index.
+
+Bind `bed`, `clearance` or `wind` to shared height, signed-distance or vector
+fields. Point contacts use the same obstacle geometry as other world systems.
+`support` publishes the upper side of intact cloth triangles and the upper
+surface of rope strands. Set a shape's `support` to `false` for a handline or
+other visual or moving accessory. The system's `supports` list can combine
+these records with existing support fields such as `rig/support`.
+
+To catch a rigid body, add the deformable `surfaces` field to a mechanics
+system's `deformables` array. Mechanics sweeps a bottom-center support point
+per body against the upper cloth faces. The preceding snapshot provides the
+surface geometry, and a typed event connection applies the reaction to the
+face's nodes on the following solver step. A walking agent can use the same
+`support` field. Set `contactEvents: true` on its `agents` system and connect
+its `contacts` output to the deformable `traffic` input. A footfall's `weight`
+acts as a mass and `trafficDuration` sets the impulse duration in seconds.
+
+```json
+[
+  { "from": "rig/deformable-loads", "to": "fabric/loads" },
+  { "from": "traffic/contacts", "to": "fabric/traffic" }
+]
+```
+
+A cloth shape with `water` collects rain at a rate of depth per second from
+`water.rain`, the system's numeric `rain` field, or both. Each intact face
+catches rain according to its horizontal projected area. `water.capacity`
+sets its maximum retained depth, `water.density` converts volume to mass,
+and `water.drain` is a drainage rate per second. The `water` probe reports
+captured, retained, drained and spilled volumes, a balance error, and the
+latest runoff positions. The retained mass loads the cloth. Runoff is exposed
+to the host for routing into other systems.
+
+Set `visual.fields.deformables` to the `surfaces` field to render the current
+shape. The yard example includes a catch net, a rain tarp and a rope bridge.
+
+```sh
+ink-studio sim run examples/world-deformable-yard.json --ticks 70 --record yard.run.json
+ink-studio probe yard.run.json --field fabric/water
+ink-studio sim render yard.run.json --colored --out yard.png
+ink-studio sim fork yard.run.json --actions examples/world-deformable-yard.commands.json --ticks 83 --record cut.run.json
+ink-studio probe cut.run.json --field world/history
 ```
 
 ## Extend the runtime in JavaScript

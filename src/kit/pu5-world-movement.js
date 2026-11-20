@@ -174,6 +174,7 @@
     return {initial:()=>null,fields:{suitability:{type:'record',read:suitability}}};
   }
   function agents(config,{catalog}) {
+    check(config.contactEvents===undefined||typeof config.contactEvents==='boolean','contactEvents must be boolean');
     bounds(config.bounds);
     const initial={}, profiles=config.species??{}, source=config.agents??{}, poseCache=new WeakMap();
     check(record(profiles)&&record(source)&&Object.keys(source).length<=512,'Invalid creature catalog');
@@ -316,6 +317,7 @@
       return {...previous,position:moved,direction,route,cursor,retry,mode:profile.mode,travel,footprints,limbs};
     }
     return {initial:()=>({agents:initial,contacts:[]}),dependencies:routeDependencies(config),
+    ...(config.contactEvents&&{outputs:{contacts:'event'},output:state=>({contacts:state.contacts})}),
     ...(config.surface!==undefined&&{checkFields:query=>W.materials.checkSurface(query,config.surface)}),validateState(state){
       check(record(state?.agents)&&Array.isArray(state.contacts)&&Object.keys(state.agents).length===Object.keys(initial).length&&
         Object.entries(state.agents).every(([key,agent])=>own(initial,key)&&own(profiles,agent.species)&&vector(agent.position)&&

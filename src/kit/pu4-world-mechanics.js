@@ -58,9 +58,12 @@
   function mechanics(config,{catalog}) {
     check(config.contactEvents===undefined || typeof config.contactEvents==='boolean','contactEvents must be boolean');
     const start=config.bodies??{}, jointSpecs=config.joints??{}, forceSpecs=config.forces??{};
+    const fabricFields=config.deformables??[];
+    check(Array.isArray(fabricFields)&&fabricFields.length<=16&&fabricFields.every(field=>typeof field==='string')&&
+      new Set(fabricFields).size===fabricFields.length,'Invalid deformable surface fields');
     check([start,jointSpecs,forceSpecs].every(group=>record(group)&&Object.keys(group).length<=512&&Object.keys(group).every(id)),
       'Mechanics needs bounded body, joint and force tables');
-    const richer=Object.values(start).some(item=>item?.collider!==undefined);
+    const richer=fabricFields.length>0||Object.values(start).some(item=>item?.collider!==undefined);
     const continuous=config.continuous??richer, advanced=richer||continuous, iterations=config.contactIterations??10;
     check((config.continuous===undefined||typeof config.continuous==='boolean')&&Number.isSafeInteger(iterations)&&
       iterations>=1&&iterations<=32,'Invalid mechanical contact controls');
@@ -68,6 +71,7 @@
     const surface=W.surfaceState, surfaceChannels=K.procedural.surfaceState.channels(config.surfaceChannels);
     const initialCharts={};
     if (config.contactEvents) outputs.contacts='event';
+    if(fabricFields.length)outputs['deformable-loads']='event';
     const index = W.spatial.create(), indexed = new Map(), poseCache = new WeakMap();
     let indexedBodies = null, unbounded = 0, enoughBodies = false;
     const entityNames = new Set(Object.entries(start).map(([key,row])=>row.entity??key));
@@ -268,6 +272,11 @@
       }
     }
     function step(state,ctx) {
+      const fabric=fabricFields.flatMap(field=>{
+        const read=ctx.query.probe(field);
+        return read.status==='ok'?[{system:ctx.query.field(field).name.split('/')[0],surfaces:read.value}]:[];
+      });
+      const fabricLoads=new Map();
       const joints=advanceJoints(state,ctx), bodies={...state.bodies};
       follow(bodies,ctx.world);
       for(const key of mountOrder){
@@ -304,6 +313,10 @@
             for(const hit of W.colliders.columns(other,x,z,low,high)){
               if(hit.normal[1]>.4&&hit.y>y){y=hit.y;support=other;}
             }
+          }
+          for(const {surfaces} of fabric){
+            const seat=W.fabricContact.columns(surfaces,x,z,low,high).find(seat=>seat.normal[1]>.4);
+            if(seat&&seat.y>y){y=seat.y;support=surfaces[seat.shape];}
           }
         }
         const at=[point[0],y,point[2]];
@@ -364,7 +377,14 @@
       let motion, swept;
       if(advanced){
         const plane=!config.terrain?config.ground??0:undefined, sounded=new Set();
-        motion=W.contactMotion.prepare(bodies,roots,masses,{ground:plane,onGround(child,root,approach) {
+        motion=W.contactMotion.prepare(bodies,roots,masses,{ground:plane,fabric,onFabric(seat,key,magnitude){
+          const {system,shape,face,nodes,weights,point,normal}=seat, body=bodies[key],
+            token=JSON.stringify([key,system,shape,face]), previous=fabricLoads.get(token);
+          const impulse=V.mad(previous?.impulse??zero,normal,magnitude);
+          const ratio=magnitude/V.len(impulse);
+          fabricLoads.set(token,{system,shape,face,nodes,weights:previous?V.lerp(previous.weights,weights,ratio):weights,
+            point:previous?V.lerp(previous.point,point,ratio):point,impulse,body:key,entity:body.entity});
+        },onGround(child,root,approach) {
           const body=bodies[root], at=[bodies[child].position[0],plane,bodies[child].position[2]];
           const floor=groundMaterial(ctx,at), surface=bodyMaterial(ctx,bodies[child]);
           const coefficient=friction(surface?.friction,floor?.friction), speed=Math.hypot(body.velocity[0],body.velocity[2]);
@@ -513,7 +533,8 @@
             wheel:key,...(cue&&{cue})});
         }
       }
-      return {...state,bodies,joints,contacts,...(continuous&&{impacts:swept.impacts,impactLimited:swept.limited})};
+      return {...state,bodies,joints,contacts,...(continuous&&{impacts:swept.impacts,impactLimited:swept.limited}),
+        ...(fabricFields.length&&{fabricLoads:[...fabricLoads.values()]})};
     }
     function detach(state,key,ctx) {
       check(own(state.joints,key)&&state.joints[key].active,'Unknown or detached joint ' + key);
@@ -619,15 +640,22 @@
       }
       return count?{status:'ok',value,body:nearest}:Q.missing('no bodies','empty');
     }
-    return {...(config.surface!==undefined&&{dependencies:{reads:[config.surface]}}),
-    ...((sails.length||config.surface!==undefined) && {checkFields(query) {
+    return {...((config.surface!==undefined||fabricFields.length)&&{dependencies:{reads:[config.surface,...fabricFields].filter(Boolean)}}),
+    ...((sails.length||config.surface!==undefined||fabricFields.length) && {checkFields(query) {
       for (const sail of sails) windSampler(query,sail);
       W.materials.checkSurface(query,config.surface);
+      const names=fabricFields.map(field=>{
+        const descriptor=query.field(field);
+        check(descriptor?.role==='deformable-surfaces','Expected a deformable surface field '+field);
+        return descriptor.name;
+      });
+      check(new Set(names).size===names.length,'Duplicate deformable surface field');
     }}),inputs,outputs,initial(ctx) {
       const bodies={...initialBodies}, joints={...initials};
       follow(bodies,ctx.world);
       placeMounted(bodies,joints,0);
       return {bodies,joints,contacts:[],...(Object.keys(initialCharts).length&&{surfaceCharts:initialCharts}),
+        ...(fabricFields.length&&{fabricLoads:[]}),
         ...(continuous&&{impacts:[],impactLimited:false})};
     },step,validateState(state){
       check(record(state?.bodies)&&record(state.joints)&&Object.keys(state.bodies).length<=1024&&
@@ -641,6 +669,9 @@
         if(body.collider!==undefined)check(advanced&&!body.surfaceState&&
           W.data.equal(body.half,W.colliders.local(body.collider).half),'Invalid saved collider dimensions');
       }
+      if(fabricFields.length)check(Array.isArray(state.fabricLoads)&&state.fabricLoads.every(load=>record(load)&&
+        id(load.system)&&id(load.shape)&&id(load.body)&&vector(load.point)&&vector(load.impulse)),
+      'Invalid saved deformable reactions');
       if(continuous)check(Array.isArray(state.impacts)&&state.impacts.length<=64&&typeof state.impactLimited==='boolean'&&
         state.impacts.every(hit=>record(hit)&&own(state.bodies,hit.a)&&(hit.b===null||own(state.bodies,hit.b))&&vector(hit.normal)&&
           vector(hit.parts,2)&&Number.isFinite(hit.speed)&&Number.isFinite(hit.at)&&hit.at>=0&&hit.at<=1),
@@ -682,6 +713,7 @@
         out['stalled.'+key]=joint.stalled;
       }
       if (config.contactEvents) out.contacts=state.contacts;
+      if(fabricFields.length)out['deformable-loads']=state.fabricLoads;
       return out;
     },
     fields:{
@@ -689,6 +721,7 @@
       joints:{type:'record',read:({state})=>Q.ok(state.joints)},
       contacts:{type:'records',read:({state})=>Q.ok(state.contacts??[])},
       impacts:{type:'record',read:({state})=>Q.ok({impacts:state.impacts??[],limited:state.impactLimited??false})},
+      ...(fabricFields.length&&{'deformable-loads':{type:'records',read:({state})=>Q.ok(state.fabricLoads)}}),
       'surface-state':{type:'record',read:readSurface},
       'surface-charts':{type:'record',read:({state})=>state?.surfaceCharts?
         Q.ok({charts:state.surfaceCharts,channels:surfaceChannels}):Q.missing('surface atlas is unavailable')},

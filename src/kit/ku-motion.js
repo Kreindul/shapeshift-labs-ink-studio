@@ -85,6 +85,17 @@
     };
   };
 
+  K.xpbd.ropeLinks = (count,compliance,tear,bend,guardBends=false) => {
+    const links=[], spans=[];
+    for(let a=0;a<count-1;a++){
+      spans.push(links.length);
+      links.push({a,b:a+1,compliance,ratio:tear,kind:'stretch'});
+      if(bend&&a+2<count)links.push({a,b:a+2,compliance:bend,ratio:0,kind:'bend'});
+    }
+    if(guardBends)for(const link of links)if(link.kind==='bend')link.guards=spans.slice(link.a,link.b);
+    return links;
+  };
+
   K.xpbd.rope = (B, o) => {
     o = o || {};
     const sim = o.sim || K.xpbd.sim(o),
@@ -117,10 +128,8 @@
       }
       ids.push(sim.point(p, 1 / (o.mass || 0.05), w));
     }
-    for (let k = 0; k < n; k++) {
-      sim.link(ids[k], ids[k + 1], o.comp || 0, o.tear || 0);
-      if (k + 2 <= n && o.bend) sim.link(ids[k], ids[k + 2], o.bend, 0);
-    }
+    for(const {a,b,compliance,ratio} of K.xpbd.ropeLinks(n+1,o.comp||0,o.tear||0,o.bend))
+      sim.link(ids[a],ids[b],compliance,ratio);
     const X0 = sim.X;
     const pinTo = (i, f) => {
       const p0 = [X0[i * 3], X0[i * 3 + 1], X0[i * 3 + 2]];

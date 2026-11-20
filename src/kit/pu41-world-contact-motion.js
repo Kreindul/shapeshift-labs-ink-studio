@@ -1,7 +1,7 @@
 /* Deterministic translation in impact order, with iterative overlap cleanup. */
 (function(K) {
   const W=K.world, C=W.colliders, {V}=K, eps=1e-8, zero=[0,0,0], down=[0,-1,0];
-  function prepare(bodies,roots,masses,{ground,onGround}={}) {
+  function prepare(bodies,roots,masses,{ground,onGround,fabric,onFabric}={}) {
     const keys=Object.keys(bodies).sort(), groups=new Map();
     for(const key of keys){
       const root=roots[key];
@@ -17,13 +17,14 @@
       }
     }
     const velocity=root=>groups.has(root)?bodies[root].velocity:zero;
-    function adjust(a,b,normal,depth=0) {
+    function adjust(a,b,normal,depth=0,surface) {
       const ra=roots[a], rb=b===null?null:roots[b], wa=groups.has(ra)?1/masses[ra]:0, wb=groups.has(rb)?1/masses[rb]:0;
       const denom=wa+wb, speed=V.dot(V.sub(velocity(ra),velocity(rb)),normal);
       if(speed>eps){
         if(wa)bodies[ra]={...bodies[ra],velocity:V.mad(bodies[ra].velocity,normal,-speed*wa/denom)};
         if(wb)bodies[rb]={...bodies[rb],velocity:V.mad(bodies[rb].velocity,normal,speed*wb/denom)};
-        if(b===null)onGround?.(a,ra,speed);
+        if(surface)onFabric?.(surface,a,speed*masses[ra]);
+        else if(b===null)onGround?.(a,ra,speed);
       }
       if(depth>0){
         shift(ra,V.mul(normal,-depth*wa/denom));
@@ -40,6 +41,21 @@
         if(duration===0?gap>eps:delta>=-eps||gap+delta>eps)continue;
         const part=shape.parts.find(part=>part.min[1]===shape.min[1]).part;
         visit(key,{normal:down,gap,time:duration?Math.max(0,Math.min(1,gap/-delta)):0,parts:[part,-1]});
+      }
+    }
+    function fabricHits(duration,visit) {
+      if(!fabric?.length)return;
+      for(const key of keys){
+        const root=roots[key];
+        if(!groups.has(root))continue;
+        const {min,max,parts}=C.geometry(bodies[key]);
+        const point=[(min[0]+max[0])*.5,min[1],(min[2]+max[2])*.5];
+        const delta=V.mul(velocity(root),duration), skin=duration?0:Math.min(.12,(max[1]-min[1])*.5);
+        for(const {system,surfaces} of fabric){
+          const seat=W.fabricContact.sweep(surfaces,point,delta,skin);
+          if(seat)visit(key,{...seat,parts:[parts.find(part=>part.min[1]===min[1]).part,-1],
+            surface:{...seat,system}});
+        }
       }
     }
     function candidates(duration,visit) {
@@ -62,10 +78,11 @@
         let moved=false;
         function solve(a,b,hit) {
           const depth=hit.gap<-eps?-hit.gap:0;
-          const speed=adjust(a,b,hit.normal,depth);
+          const speed=adjust(a,b,hit.normal,depth,hit.surface);
           moved ||= depth>0||speed>eps;
         }
         floorHits(0,(a,hit)=>solve(a,null,hit));
+        fabricHits(0,(a,hit)=>solve(a,null,hit));
         candidates(0,(a,b)=>{
           const hit=C.contact(bodies[a.key],bodies[b.key]);
           if(hit)solve(a.key,b.key,hit);
@@ -89,13 +106,16 @@
             first={a,b,contact};
         }
         floorHits(remaining,(a,hit)=>choose(a,null,hit));
+        fabricHits(remaining,(a,hit)=>choose(a,null,hit));
         candidates(remaining,(a,b)=>choose(a.key,b.key,C.sweep(bodies[a.key],bodies[b.key],V.sub(a.motion,b.motion))));
         if(!first){move(remaining);return {impacts,limited:false};}
         const {a,b,contact}=first, travel=contact.time*remaining;
         move(travel);
         remaining-=travel;
-        const speed=adjust(a,b,contact.normal);
-        impacts.push({a,b,parts:contact.parts,normal:contact.normal,at:1-remaining/dt,speed});
+        const speed=adjust(a,b,contact.normal,0,contact.surface);
+        const {system,shape,face}=contact.surface??{};
+        impacts.push({a,b,parts:contact.parts,normal:contact.normal,at:1-remaining/dt,speed,
+          ...(system&&{surface:{system,shape,face}})});
         if(contact.limited)return {impacts,limited:true};
         settle(iterations);
       }

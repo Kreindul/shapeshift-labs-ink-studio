@@ -249,5 +249,9 @@
     }
     return best;
   }
-  W.colliders=Object.freeze({local,geometry,distance,columns,contact,sweep});
+  function capsuleColumn(a,b,radius,origin,low) {
+    const hit=rayCapsule({points:[a,b],radius},origin,down,origin[1]-low);
+    return hit&&{point:V.mad(origin,down,hit.t),normal:hit.normal};
+  }
+  W.colliders=Object.freeze({local,geometry,distance,columns,contact,sweep,capsuleColumn});
 })(KIT);
