@@ -127,6 +127,33 @@ contains `field`, optional `at`, and optional `args`.
 When a case supplies `look`, the sweep renders every case from the same
 simulation snapshot. [Look cases and color metrics](pixel-look.md#compare-looks-on-a-fixed-view) use the same format as `compare`.
 
+### Scheduled observations and parameter sweeps
+
+Give `sim sweep <world|checkpoint|run> <plan.json>` an object to share
+the same observations across runs. The plan sets the absolute sample
+ticks. Add `--out report.json` to keep the aligned report.
+
+| Plan field | Behavior |
+| --- | --- |
+| `observations` | Named measurements. Each names a query `field` and can supply `at`, `args`, a `path` into a record or vector, and `units` for a projected value. |
+| `ticks` | Shared tick list or `{from,to,every}` range. The final tick is always included. Each observation can override the schedule. |
+| `seeds` | Distinct integer seeds. Each setting runs once per seed. With no list, the run uses the authored seed. |
+| `parameters` | Named bindings with a `values` list and either a manifest `path` or an unconnected input `port`. Inputs default to the starting checkpoint's next tick and accept an explicit `tick`. |
+| `cases` | Named cases with an `id` and optional `edits` and `actions`. Each case runs every combination of parameter values and seeds. |
+| `actions` | Commands shared by every run. Case commands and parameter inputs are queued after the common actions. |
+
+A checkpoint or recording starts at its saved tick and keeps pending
+commands. Vary it through scheduled inputs and actions. Manifest edits
+and different seeds start fresh world runs.
+
+Use `KIT.world.observations.prepare(plan).run(source, options)` to reuse
+a compiled schedule, or call `KIT.world.observations.run(source, plan, options)`
+directly. `options.runtime` accepts the usual custom implementations and
+worker pool. The report retains each reading with its run, tick, time,
+units, and query status. Each setting also reports the available count
+and numeric minimum, maximum, and mean at each scheduled tick. Missing
+samples keep their query status, and mixed units suppress numeric summaries.
+
 `--assert checks.json` accepts an array of field checks with `field`, optional
 `at`, optional `args`, optional expected `status` (default `ok`), and a
 `when` condition. Use `tick` to check one earlier frame or `byTick` to allow
@@ -524,6 +551,41 @@ record a decision with its selected input keys, evidence IDs, and output
 keys. Pass the returned decision ID in `ctx.emit(kind, detail, [id])`
 to explain a specific event.
 
+### Inspect a selected object or region
+
+Trace `world/causal-inspection` with an entity and optional socket, an XYZ
+point and optional radius, or world `bounds` with `min`, `max`, and
+optional `axes`. An entity selection matches recorded entity references
+and spatial evidence at its current position. A region matches
+historically recorded positions or overlapping edit bounds.
+
+The report includes the selected target, live conditions, matching
+evidence roots, and the causal edges actually recorded. Choose current
+field values with `fields` or signal values with `ports`. Located transfer
+accounts appear automatically. A regional field read samples its center.
+`since`, `maxRoots`, `maxDepth`, and `limit` bound the search. The report
+marks missing ancestors and reports when recording is disabled or no
+evidence was retained for a selection.
+
+Set `"causality":{"inspection":true}` to capture before-and-after
+balances for settled transfers. Each balance cites the receipt and the
+prior observed balance. Pending or blocked transfers produce no balance
+change. Account positions are captured at settlement for historical
+region queries. An existing world using `"causality":true` can still
+inspect its recorded decisions and events.
+
+In the CLI, select an object with `--entity` and `--socket`, or pass
+the region descriptor as JSON in `--select` while tracing
+`world/causal-inspection`. In the browser, `mountCausalInspection` from
+`webgl.mjs` exposes an optional panel with current readings and links
+between recorded nodes. Supply a query or a function that returns the
+latest query. Named `targets` can populate a selector. Call `select(at)`
+with an entity or region after a scene pick, and `refresh()` when the
+committed snapshot changes. The default slot accepts the host's scene or
+map. Style the panel with CSS parts, `--ink-cause-*` properties, or a
+custom `stylesheet` with `defaultStyles:false`. Labels, value formatting,
+and visible controls are configurable.
+
 ## Physical material assets
 
 A versioned asset pack can carry a `materials` list alongside families
@@ -781,6 +843,7 @@ are visible during checkpoint and replay review.
 | `control` | Typed arithmetic, thresholds, selection, binary logic, pulses, latches, timers and hysteresis. |
 | [`puzzle`](puzzles.md) | Ordered switches, timed windows, reusable recipes, blocker traces and bounded solution witnesses. |
 | [`action-windows`](action-windows.md) | Assignable action phases, swept contact outcomes, phase guards, and switches or fractures driven by landing contacts. |
+| [`adaptive-music`](adaptive-music.md) | Emotion and world-driven score state, beat-aligned section changes, and named cue intents. |
 | `store` | Bounded numeric, integer, or vector accounts with named resources and units. |
 | `exchange` | Enabled links that request a fixed amount per tick or a rate per second. |
 | `logistics` | Resource stocks, atomic recipes, scheduled shipments, conservative accounting, and upstream shortage traces. |

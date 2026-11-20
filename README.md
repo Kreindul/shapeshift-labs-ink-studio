@@ -721,6 +721,10 @@ typed connections, state reads, event kinds, and execution dependencies.
 neighborhood values and gradients with solvers and entity queries.
 [Interactive checkpoint branching](docs/simulation-checkpoints.md#interactive-checkpoint-branching)
 retains named outcomes, queued edits, and shared starting points in one session.
+[Causal inspection](docs/headless-worlds.md#inspect-a-selected-object-or-region)
+links selected objects and regions to recorded actions, transfers, and prior states.
+[Scheduled observations](docs/headless-worlds.md#scheduled-observations-and-parameter-sweeps)
+reuse measurements across seeds and settings and report aligned results.
 The watershed and quarry examples run entirely from the CLI. The [puzzle recipes guide](docs/puzzles.md) shows how to wire ordered
 switches to a physical gate, inspect blockers and verify a solution. The [agent decision guide](docs/agent-decisions.md)
 covers reachable activity choices and confirmed arrivals.
@@ -804,6 +808,7 @@ Common rendering controls:
 | `--inspection-focus id` | Prioritize an inspection target without changing the camera. |
 | `--composite file.json\|off` | Set independent world and screen-layer resolutions. See [mixed-resolution compositing](docs/mixed-resolution.md). |
 | `--render-graph file.json\|off` | Order and scope screen-space passes. See [the render graph](docs/render-graph.md). |
+| `--feedback-fps n` and `--feedback-cuts t1,t2` | Set a fixed feedback replay rate and explicit scene-time resets for clips and sheets. |
 | `--volume-scale`, `--volume-steps`, `--volume-jitter` | Override the atmosphere volume's sampling settings. |
 | `--seed` | Override the scene seed. |
 | `--colored` | Use palette-aware smoothing of silhouettes and body-colored contours. |
@@ -1026,3 +1031,5 @@ Named targets can drive shared brackets, labels, glyph ripples, depth visibility
 `KIT.paint` adds dependency-free spectral paint mixing, reusable swatch recipes, tint/shade controls, gradients and baked RGB ramps or mixture lookup tables. See [paint mixing](docs/paint-mixing.md) and the [interactive Pigment atelier](examples/paint-mixing.html).
 
 `KIT.curve` includes clothoid chains, torus knots, Lissajous curves, logarithmic spirals, superellipses and flowers with shared arc-length paths for sweeps, route followers, particles, camera rails and curved text. See [curve families](docs/curve-families.md) and the [interactive Curve conservatory](examples/curve-families.html).
+
+`KIT.curve` also supports cached closest-point queries, curvature estimates, adaptive sampling and periodic interpolation. `KIT.Q` supplies dependency-free quaternion SLERP/SQUAD, path-frame rotations and quaternion animation channels. See [curve analysis](docs/curve-analysis.md) and [Path observatory](examples/curve-analysis.html).
