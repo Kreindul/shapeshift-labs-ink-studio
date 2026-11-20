@@ -184,6 +184,16 @@
         return {...base,status:'ok',point,matched:hits.length,hits:hits.slice(0,options.limit)};
       });
     }
+    read.anyAgent=(point,radius,test)=>{
+      for(const {rows} of sections(['agent'])){
+        let found=false;
+        rows.visit(point,radius,({row})=>{
+          if(!found&&K.V.dist(point,row.position)<=radius&&test(row))found=true;
+        });
+        if(found)return true;
+      }
+      return false;
+    };
     return read;
   }
   W.occupancy=Object.freeze({create});

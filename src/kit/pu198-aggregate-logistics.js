@@ -7,6 +7,7 @@
     check(settings.model==='ledger'&&Object.keys(settings).every(key=>key==='model'),
       'Invalid logistics aggregate model');
     const {resources,processes,routes}=layout;
+    const staffed=processes.some(row=>row.work);
     const quantities=Object.fromEntries(resources.map(({key,units,type})=>[key,{units,exact:type==='integer'}]));
     function pack(state,closed){
       const {process,links,...work}=state;
@@ -38,7 +39,7 @@
         validateDetail(expand(state));
       },
       step(state,ctx){
-        const next=F.advance(layout,state.work,ctx,row=>state.closed[indices.get(row.key)]?{status:'closed-at-sampling'}:null);
+        const next=F.advance(layout,staffed?expand(state):state.work,ctx,row=>state.closed[indices.get(row.key)]?{status:'closed-at-sampling'}:null);
         return pack(next,state.closed);
       },
       output(state){
@@ -59,7 +60,7 @@
         write:(state,value)=>freeze({...state,work:account.write(state.work,value)})
       }])),
       fields:{stocks:ctx=>stocks({...ctx,state:ctx.state.work}),
-        ledger:({state})=>Q.ok(F.ledger(layout,state.work)), 'stock-bodies':({state})=>stockBodies(state.work)},
+        ledger:({state})=>Q.ok(F.ledger(layout,state.work)), 'stock-bodies':({state,query})=>stockBodies(state.work,query)},
       describe:state=>({routes:routes.length,cachedRoutes:routes.filter(row=>row.checkRoute).length,blockedRoutes:state.closed.filter(Boolean).length})
     };
   }

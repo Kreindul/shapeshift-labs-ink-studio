@@ -25,7 +25,8 @@
     const resourceIndex=index(resources), accounts=[], accountIndex=new Map();
     check(resources.length,'Logistics needs at least one resource');
     const containers=entries(config.containers,'containers').map(([key,row])=>{
-      check(record(row)&&(row.position===undefined||point(row.position)),'Invalid logistics container '+key);
+      check(record(row)&&(row.position===undefined||point(row.position))&&
+        (row.at===undefined||row.position===undefined&&W.worksites.target(row.at)),'Invalid logistics container '+key);
       const specs=entries(row.stocks,'stocks');
       check(specs.length,'Logistics container has no stocks: '+key);
       const stocks=specs.map(([resource,spec])=>{
@@ -34,14 +35,15 @@
         const {initial=0,max=null,display}=spec;
         check(quantity(initial,commodity.type)&&(max===null||quantity(max,commodity.type,initial)),
           'Invalid initial stock or capacity for '+pin);
-        if(display!==undefined)check(record(display)&&point(display.at)&&point(display.half)&&
+        if(display!==undefined)check(record(display)&&(point(display.at)&&display.offset===undefined||
+          display.at===undefined&&point(display.offset)&&(row.at!==undefined||row.position!==undefined))&&point(display.half)&&
           display.half.every(n=>n>=.01&&n<=100)&&max>0,'Stock display needs an XYZ origin, positive half sizes and capacity for '+pin);
         const account=accounts.length;
         accountIndex.set(pin,account);
         accounts.push({key:pin,container:key,resource:resourceIndex.get(resource),type:commodity.type,initial,max,display});
         return account;
       });
-      return {key,position:row.position,stocks};
+      return {key,position:row.position,at:row.at??row.position,stocks};
     });
     check(accounts.length>0&&accounts.length<=512,'Logistics needs between 1 and 512 stock accounts');
     const containerIndex=index(containers);
@@ -82,7 +84,8 @@
       const recipe=record(row)&&recipes[recipeIndex.get(row.recipe)];
       check(recipe&&range(row.speed??1,0,64),'Invalid process recipe or speed for '+key);
       const inputs=bindings(recipe.inputs,row.inputs??{},key+' inputs'), outputs=bindings(recipe.outputs,row.outputs??{},key+' outputs');
-      return {key,recipe:recipe.key,duration:recipe.duration,speed:row.speed??1,inputs,outputs,...enabled(row,key)};
+      return {key,recipe:recipe.key,duration:recipe.duration,speed:row.speed??1,inputs,outputs,...enabled(row,key),
+        ...(row.work!==undefined&&{work:W.worksites.configure(row.work)})};
     });
     const routes=entries(config.links??{},'links').map(([key,row])=>{
       check(record(row)&&typeof row.resource==='string'&&resourceIndex.has(row.resource),'Invalid logistics link resource for '+key);

@@ -68,6 +68,7 @@
     }
     for(const i of processOrder){
       const row=processes[i], {key,inputs,outputs,duration}=row;
+      if(row.work){nextProcesses[i]=state.process[i];continue;}
       const enabled=ctx.input['enable-process.'+key], speed=W.fields.clamp(ctx.input['speed.'+key],0,64);
       let left=ctx.dt*speed, job=jobs[i], count=0, blocked=[], status='idle';
       if(!enabled||!speed)status=enabled?'paused':'disabled';
@@ -130,6 +131,53 @@
     }
     return {...state,stocks,time,complete,jobs,shipments,credit,produced,consumed,process:nextProcesses,links:nextRoutes};
   }
+  function work(layout,state,i,{workers,arrived,dt,enabled,speed},effect){
+    const row=layout.processes[i], {key,inputs,outputs,duration,work}=row, previous=state.workSites[key];
+    const speedLimit=W.fields.clamp(speed,0,64);
+    let job=state.jobs[i], stocks=state.stocks, blocked=[], finished=false, labor=0, status='paused', reason=null;
+    if(state.complete[i]>=work.batches)status='completed';
+    else if(!enabled||!speedLimit){status=enabled?'paused':'disabled';reason='disabled';}
+    else if(!arrived)reason='worksite-missing';
+    else if(workers.length<work.minWorkers)reason='workers';
+    else {
+      if(job===null){
+        const draft=stocks.slice();
+        blocked=batch(draft,inputs,-1,layout.accounts);
+        if(!blocked.length){stocks=draft;job=duration;}
+      }
+      if(blocked.length){status='blocked';reason='materials';}
+      else{
+        const effort=dt*speedLimit*workers.reduce((sum,worker)=>sum+worker.rate,0);
+        labor=Math.min(effort,job);
+        job=effort>=job||rounded(effort,job)?0:job-effort;
+        status='working';
+        if(job===0){
+          const draft=stocks.slice();
+          blocked=batch(draft,outputs,1,layout.accounts);
+          reason=blocked.length?'output':effect();
+          status=reason?'blocked':'completed';
+          if(!reason){stocks=draft;job=null;finished=true;}
+        }
+      }
+    }
+    const summary={workers,labor,reason};
+    const process={status,blocked,batches:Number(finished)};
+    const result={state,finished,reason,demandChanged:reason!==previous.reason};
+    if(!finished&&job===state.jobs[i]&&stocks===state.stocks&&W.data.equal(summary,previous)&&
+      W.data.equal(process,state.process[i]))return result;
+    const jobs=state.jobs.slice(), processes=state.process.slice();
+    jobs[i]=job;processes[i]=process;
+    const next={...state,stocks,jobs,process:processes,workSites:{...state.workSites,[key]:summary}};
+    if(finished){
+      const complete=state.complete.slice(), consumed=state.consumed.slice(), produced=state.produced.slice();
+      complete[i]++;
+      for(const {account,amount} of inputs)consumed[layout.accounts[account].resource]+=amount;
+      for(const {account,amount} of outputs)produced[layout.accounts[account].resource]+=amount;
+      Object.assign(next,{complete,consumed,produced});
+    }
+    return {...result,state:next};
+  }
+
   function ledger(layout,state){
     const {resources,accounts,processes,routes}=layout;
     const stored=zeros(resources), inProgress=zeros(resources), inTransit=zeros(resources), initial=zeros(resources);
@@ -149,5 +197,5 @@
         error:total-initial[i]-produced[i]+consumed[i]-received[i]+sent[i]}];
     }));
   }
-  W.logisticsFlow=Object.freeze({advance,ledger,zeros});
+  W.logisticsFlow=Object.freeze({advance,work,ledger,zeros});
 })(KIT);

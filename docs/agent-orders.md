@@ -34,6 +34,8 @@ while the order runs.
 
 Add [jobs and reservations](job-reservations.md) when an order must claim
 limited capacity or a single-use job before any of its steps run.
+[Physical work](physical-work.md) adds range-checked transfers and a
+`work` step for staffed logistics recipes.
 
 ## Issue, interrupt, and cancel
 

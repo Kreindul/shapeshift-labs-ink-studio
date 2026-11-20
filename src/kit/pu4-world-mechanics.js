@@ -917,8 +917,32 @@
       }
       return count?{status:'ok',value,body:nearest}:Q.missing('no bodies','empty');
     }
-    const structural=Object.keys(structures).length>0;
-    return {navigationSource(field,state){
+    const structural=Object.keys(structures).length>0, serviceable=structural||Object.keys(wearSpecs).length>0;
+    function checkRepair(args){
+      check(record(args)&&Object.keys(args).length===1&&(own(structures,args.body)||own(wearSpecs,args.joint)),
+        'A repair effect needs a structural body or wear-tracked joint');
+    }
+    function repair(state,{body,joint},batch,ctx){
+      if(joint!==undefined){
+        const prior=state.joints[joint];
+        if(!prior.active)return {reason:'joint-detached'};
+        const next={...prior,durability:durability.jointInitial(prior.value)};
+        ctx.emit('joint-repaired',{joint,body:jointSpecs[joint].child});
+        return {state:{...state,joints:{...state.joints,[joint]:next}}};
+      }
+      const prior=state.bodies[body];
+      if(!prior)return {reason:'repair-body-missing'};
+      const {bend,...straight}=prior;
+      const bodies=bend?{...state.bodies,[body]:straight}:state.bodies;
+      if(bend){
+        const {min,max}=K.procedural.spatial.boxOf([boundsOf(prior).min,boundsOf(prior).max,
+          boundsOf(straight).min,boundsOf(straight).max]);
+        for(const field of ['bodies','support','clearance'])ctx.spatial?.write(field,{min,max},'material-repaired');
+      }
+      ctx.emit('body-repaired',{body,entity:prior.entity,at:prior.position});
+      return {state:{...state,bodies,beams:{...state.beams,[body]:durability.beamInitial(structures[body])}}};
+    }
+    return {...(serviceable&&{workEffects:{repair:{check:checkRepair,run:repair}}}),navigationSource(field,state){
       if(state&&(field==='clearance'||field==='support'&&!config.terrain)){
         const key=state.bodies;
         return {key,changes:old=>changedBounds(old,key)};

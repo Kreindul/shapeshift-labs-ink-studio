@@ -113,6 +113,7 @@
     const chunks=W.simulationChunks.compile(world,systems);
     const aggregates=W.simulationAggregate.bind(systems,chunks);
     const reservations=W.reservations.bind(systems);
+    const worksites=W.worksites.bind(systems);
     if (world.visual?.volume!==undefined) check(typeof world.visual.volume==='string'&&
       own(systems,world.visual.volume)&&typeof systems[world.visual.volume].volumeFrame==='function',
     'Visual volume must name a live volume system');
@@ -201,7 +202,7 @@
     check(order.length === names.length, 'Instantaneous signal cycle; use a delay or a stateful system');
     const causePolicy = W.causality.policy(world.causality);
     const rates = schedule.active ? W.rates.bind(schedule,systems,ports,incoming,order) : null;
-    return {world,systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,aggregates,reservations,causePolicy};
+    return {world,systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,aggregates,reservations,worksites,causePolicy};
   }
   function actionCheck(raw, plan, min = 1) {
     check(record(raw) && tickOK(raw.tick) && raw.tick >= min && record(raw.args ?? {}) &&
@@ -304,7 +305,7 @@
       world=result.world;
     }
     const {plan, weather = weatherProgram(world), timeline = W.sceneTimeline(world)}=result;
-    const {systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,aggregates,reservations,causePolicy} = plan;
+    const {systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,aggregates,reservations,worksites,causePolicy} = plan;
     const regions=regionRevisions===undefined?null:W.regionRevisions.capture(world,regionRevisions,systems);
     const debug=traceSteps===undefined?null:W.stepDebug.capture(traceSteps);
     const partitioned=workerPool&&new Set(names.filter(name=>{
@@ -651,10 +652,11 @@
         emit:makeEmit('world')
       });
       if(chunkStep)nextChunkState=chunkStep.state;
-      if(reservations)Object.assign(drafts,reservations.run(drafts,{tick:at,emit:makeEmit},name=>{
+      const detailed=name=>{
         const managed=chunks?.managed.get(name), entry=managed&&nextChunkState.entries[managed.chunk];
         return !entry||!entry.sleeping&&!managed.models.has(entry.level);
-      }));
+      };
+      if(reservations)Object.assign(drafts,reservations.run(drafts,{tick:at,emit:makeEmit},detailed));
       if (transfers.producers.length) {
         const before = Object.freeze({...drafts});
         const requestQuery = Q.create(view(nextWorld,before,lastSignals,at,[],causalState,nextChunkState),systems,projection);
@@ -684,6 +686,12 @@
       })) : [];
       for(const [name,confirmed] of confirmations??[])
         drafts[name]=rootedState(systems[name].receiveTransfers(drafts[name],confirmed,{tick:at,emit:makeEmit(name)}));
+      aggregates?.transition(drafts,nextChunkState,makeEmit('world'));
+      worksites?.run(drafts,{tick:at,dt:nextWorld.dt,detailed,root:rootedState,emit:makeEmit,
+        input:name=>currentValues(name,nextManual,{},outputs,delays),
+        query:()=>Q.create(view(nextWorld,{...drafts},lastSignals,at,receipts,causalState,nextChunkState),systems,projection),
+        context:(name,query)=>context(name,nextWorld,Object.freeze({...drafts}),at,{},makeEmit(name),query,spatial(name,false))
+      });
       let nextSpatial = spatialSampling;
       if (slowReaders.size && (trace || Object.keys(spatialSampling).length)) {
         nextSpatial = {...spatialSampling};
@@ -706,7 +714,6 @@
         }
         nextSpatial=freeze(nextSpatial);
       }
-      aggregates?.transition(drafts,nextChunkState,makeEmit('world'));
       const committed = freeze(drafts);
       const spent = {};
       let workerResults=null, workerBatches=0, workersThisTick=0;

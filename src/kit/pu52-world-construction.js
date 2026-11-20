@@ -12,6 +12,9 @@
   const zeroes=values=>values.map(n=>n===0?0:n);
 
   function construction(config,{id:system,catalog}) {
+    check(config.initiallyBuilt===undefined||typeof config.initiallyBuilt==='boolean','Invalid construction activation setting');
+    const planned=config.initiallyBuilt===false, empty=freeze({});
+    const bodiesOf=state=>state?.built===false?empty:state?.layout.bodies??empty;
     const solver=P.construct.constraints.compile(config.points??{},config.constraints??[]);
     const blocks=config.blocks??[], spans=config.spans??[];
     check(Array.isArray(blocks)&&Array.isArray(spans)&&blocks.length+spans.length<=256,'Construction needs bounded part lists');
@@ -102,19 +105,35 @@
       if(!equal(state.layout,proposed)){
         const area=P.spatial.boxOf([state.layout.bounds.min,state.layout.bounds.max,proposed.bounds.min,proposed.bounds.max]);
         ctx.spatial?.write('layout',area,'construction-refit');
-        if(!equal(state.layout.bodies,proposed.bodies)){
+        if(state.built!==false&&!equal(state.layout.bodies,proposed.bodies)){
           for(const key of ['bodies','support','clearance'])ctx.spatial?.write(key,area,'construction-refit');
           ctx.spatial?.rebuilt('construction-parts',{parts:Object.keys(proposed.bodies).length},area);
         }
       }
       ctx.emit('construction-refit',{members:proposed.members,openings:proposed.openings});
-      return freeze({pins,layout:proposed,rejected:null});
+      return freeze({...state,pins,layout:proposed,rejected:null});
+    }
+    function build(state,args,batch,ctx){
+      if(state.built)return {reason:'already-built'};
+      const bodies=Object.values(state.layout.bodies);
+      const identity=M.rot(up,0);
+      const occupied=bodies.some(body=>ctx.query.anyAgent(body.position,V.len(body.half)+12,({position,height,radius})=>{
+        const low=height>radius*2+epsilon?0:-radius;
+        const collider={kind:'capsule',a:[0,low+radius,0],b:[0,low+height-radius,0],radius};
+        const hit=W.colliders.contact(body,{position,rotation:identity,collider});
+        return hit&&hit.gap<-epsilon;
+      }));
+      if(occupied)return {reason:'footprint-occupied'};
+      for(const field of ['layout','bodies','support','clearance'])
+        ctx.spatial?.write(field,state.layout.bounds,'construction-built');
+      ctx.emit('construction-built',{bounds:state.layout.bounds,parts:bodies.length});
+      return {state:{...state,built:true}};
     }
     function support({state,target,args}) {
       if(!state||!target.point)return Q.missing('construction state and point required');
       const [x,y,z]=target.point, high=args.high??y+.5, low=args.low??y-4;
       check(Number.isFinite(low)&&Number.isFinite(high)&&low<=high,'Invalid construction support interval');
-      return Q.ok(Object.values(state.layout.bodies).flatMap(body=>{
+      return Q.ok(Object.values(bodiesOf(state)).flatMap(body=>{
         const hit=W.mechanics.column(body,x,z,low,high);
         return hit&&hit.normal[1]>.25?[hit]:[];
       }).sort((a,b)=>b.y-a.y||a.id.localeCompare(b.id)));
@@ -122,14 +141,18 @@
     return {
       navigationSource(field,state){
         if(state&&['clearance','support'].includes(field)){
-          const key=state.layout.bodies;
+          const key=bodiesOf(state);
           return {key,changes:old=>W.mechanics.changedBounds(old,key)};
         }
       },
-      initial:()=>freeze({pins:{},layout:initial,rejected:null}),
+      initial:()=>freeze({pins:{},layout:initial,rejected:null,...(planned&&{built:false})}),
+      ...(planned&&{workEffects:{build:{
+        check(args){check(record(args)&&!Object.keys(args).length,'A build effect accepts no arguments');},run:build
+      }}}),
       actions:{refit},checkAction(type,args){if(type==='refit')pinsOf(args);},
       validateState(state){
-        check(record(state)&&record(state.layout)&&own(state,'rejected'),'Invalid saved construction state');
+        check(record(state)&&record(state.layout)&&own(state,'rejected')&&
+          (planned?typeof state.built==='boolean':state.built===undefined),'Invalid saved construction state');
         solver.checkPins(state.pins);
         check(state.layout.status==='ok'&&equal(state.layout,fit(state.pins)),'Invalid saved construction layout');
         if(state.rejected!==null){
@@ -141,8 +164,8 @@
         }
       },
       dependencies:{reads:[system+'/layout'],writes:['layout','bodies','support','clearance'].map(key=>system+'/'+key)},
-      *poseEntities(state){for(const body of Object.values(state?.layout.bodies??{}))yield body.entity;},
-      pose(state,entity){return Object.values(state?.layout.bodies??{}).find(body=>body.entity===entity)??null;},
+      *poseEntities(state){for(const body of Object.values(bodiesOf(state)))yield body.entity;},
+      pose(state,entity){return Object.values(bodiesOf(state)).find(body=>body.entity===entity)??null;},
       fields:{
         layout:{type:'record',read:({state})=>state?Q.ok(state.layout):Q.missing('construction state required')},
         fit:{type:'record',read:({state,args})=>{
@@ -152,12 +175,13 @@
           const pins={...state.pins,...pinsOf(args)};
           return Q.ok({...fit(pins),pins});
         }},
-        bodies:{type:'record',read:({state})=>state?Q.ok(state.layout.bodies):Q.missing('construction state required')},
+        ...(planned&&{built:{type:'boolean',qualified:true,read:({state})=>Q.ok(state.built)}}),
+        bodies:{type:'record',read:({state})=>state?Q.ok(bodiesOf(state)):Q.missing('construction state required')},
         support:{type:'records',units:'world',read:support},
         clearance:{type:'number',units:'world',read({state,target,args}) {
           if(!state||!target.point)return Q.missing('construction state and point required');
           let nearest=Infinity, owner;
-          for(const body of Object.values(state.layout.bodies)){
+          for(const body of Object.values(bodiesOf(state))){
             if([body.id,body.entity].includes(args.exclude))continue;
             const d=W.mechanics.distance(body,target.point);
             if(d<nearest){nearest=d;owner=body.id;}

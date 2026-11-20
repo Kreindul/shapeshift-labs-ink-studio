@@ -9,11 +9,11 @@
     const accounts = {}, initial = {};
     for (const [key,spec] of Object.entries(specs)) {
       check(id(key) && record(spec),'Invalid store account '+key);
-      const {resource,units,type='number',min,max} = spec;
+      const {resource,units,type='number',min,max,at} = spec;
       check(['number','integer','vec2','vec3'].includes(type),'Invalid store account type '+type);
       const normalized = T.balanceOf({type,name:key},{balance:spec.initial,min,max}).report;
       initial[key] = normalized.balance;
-      accounts[key] = {resource,units,type,read:state=>({balance:state[key],min:normalized.min,max:normalized.max}),
+      accounts[key] = {resource,units,type,...(at!==undefined&&{at}),read:state=>({balance:state[key],min:normalized.min,max:normalized.max}),
         write:(state,balance)=>({...state,[key]:balance})};
     }
     return {accounts,initial:()=>initial};

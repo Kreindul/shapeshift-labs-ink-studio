@@ -544,9 +544,37 @@
           Q.ok(select(row)):Q.missing('unknown live agent or generation','missing');
       }};
     }
+    function spawnAgent(state,args,ctx){
+        const roster=S.get(state), {agent}=args;
+        check(!S.find(roster,agent),'Agent already exists '+agent);
+        check(S.count(roster)<maxAgents,'Agent capacity exceeded');
+        const row=makeAgent(agent,args), draft=S.edit(roster), generation=draft.add(row);
+        ctx.emit('agent-spawned',{agent,entity:row.entity,generation,at:row.position});
+        const decisions=policy?.managed(agent)?{...state.decisions,[agent]:policy.initial[agent]}:state.decisions;
+        return packed(draft.finish(),state.contacts,decisions,state.routeWork,state.crowd);
+      }
+    function checkRecruit(args){
+      check(record(args)&&Object.keys(args).every(key=>['prefix','species','at','name','task','metadata'].includes(key))&&
+        id(args.prefix)&&args.prefix.length<=80&&W.worksites.target(args.at),'Invalid recruitment effect');
+      checkAgent(args.prefix,{...args,position:S.zero});
+    }
+    function recruit(state,args,batch,ctx){
+      const agent=args.prefix+'.'+batch, roster=S.get(state);
+      if(S.find(roster,agent))return {reason:'recruit-id-in-use'};
+      if(S.count(roster)>=maxAgents)return {reason:'recruit-roster-full'};
+      const at=W.worksites.frame(ctx.query,args.at)?.point, profile=profileFor({species:args.species,entity:agent});
+      const position=at&&fit(ctx,profile,at);
+      if(!position)return {reason:'recruit-site-unfit'};
+      const radius=profile.radius;
+      const center=profile.mode==='walk'?V.add(position,[0,radius+.001,0]):position;
+      const {results:[space]}=ctx.query.spatialBatch({queries:[{op:'occupancy',at:center,radius,kinds:['agent','body'],clearance:[]}]});
+      if(space.state!=='free')return {reason:'recruit-site-occupied'};
+      return {state:spawnAgent(state,{...args,agent,position},ctx)};
+    }
     return {initial:()=>packed(initialRoster,[],policy?.initial),
     shareCheckpoint:true,viewState:S.view,legacyCheckpoint:S.legacyState,dependencies:routeDependencies(config),
     ...(crowd&&{inputs:crowd.inputs}),
+    workEffects:{recruit:{check:checkRecruit,run:recruit}},
     occupancy:{
       kind:'agent',key:S.get,rows:state=>occupants(S.get(state)),
       distance:({x,z,a,b,radius},point)=>Math.hypot(point[0]-x,
@@ -557,7 +585,14 @@
         {profiles,fit,bounds:config.bounds,contacts:config.contactEvents,validateState,occupants,blockedCoarse:crowd?.blockedCoarse});
     },
     ...(config.contactEvents&&{outputs:{contacts:'event'},output:state=>({contacts:state.contacts})}),
-    ...(orders&&{reservationOrders:{
+    ...(orders&&{orderWork:{check:orders.checkWork,*rows(state,ctx){
+      const roster=S.get(state);
+      for(const slot of S.order(roster)){
+        if(roster.pages[slot.p].details[slot.i].orders?.active?.phase!=='working')continue;
+        const request=orders.workRequest(ctx,S.read(roster,slot));
+        if(request)yield request;
+      }
+    }},reservationOrders:{
       check:orders.checkReservations,rows:reservations,
       outcome(state,owner){
         const row=S.select(reservationRoster(state),owner.agent);
@@ -572,7 +607,7 @@
         const requests=[];
         if(budget>0)for(const {row,request} of pendingTransfers(S.get(state))){
           const entry=row.orders.active;
-          if(entry.reservation&&orders.claim(ctx,row,entry)?.status!=='held')continue;
+          if(entry.reservation&&orders.claim(ctx,row,entry)?.status!=='held'||orders.transferBlocker(ctx,row,request))continue;
           requests.push(request);
           if(requests.length===budget)break;
         }
@@ -628,15 +663,7 @@
           });
         }
       }),
-      spawn(state,args,ctx){
-        const roster=S.get(state), {agent}=args;
-        check(!S.find(roster,agent),'Agent already exists '+agent);
-        check(S.count(roster)<maxAgents,'Agent capacity exceeded');
-        const row=makeAgent(agent,args), draft=S.edit(roster), generation=draft.add(row);
-        ctx.emit('agent-spawned',{agent,entity:row.entity,generation,at:row.position});
-        const decisions=policy?.managed(agent)?{...state.decisions,[agent]:policy.initial[agent]}:state.decisions;
-        return packed(draft.finish(),state.contacts,decisions,state.routeWork,state.crowd);
-      },
+      spawn:spawnAgent,
       despawn(state,args,ctx){
         const roster=S.get(state), {slot,row}=requireAgent(roster,args), draft=S.edit(roster);
         const decisions=policy&&{...state.decisions};

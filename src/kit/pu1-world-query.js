@@ -182,10 +182,12 @@
       if (spec.point !== undefined) check(vector(spec.point), 'Expected a finite XYZ point');
       return spec.point ? {...spec,point:spec.point.slice()} : spec;
     }
-    function spatialBatch(spec) {
-      spatialBatchRead??=W.occupancy.create({entities:world.entities,states,systems,frame:fieldFrame,target,
+    function occupancy(){
+      return spatialBatchRead??=W.occupancy.create({entities:world.entities,states,systems,frame:fieldFrame,target,
         condition,probe:(name,site,args)=>api.probe(name,site,args)});
-      return freeze({tick,time:base.time,results:spatialBatchRead(spec)});
+    }
+    function spatialBatch(spec) {
+      return freeze({tick,time:base.time,results:occupancy()(spec)});
     }
     function add(descriptors, system, collection, handler) {
       for (const [key,item] of Object.entries(collection ?? {})) {
@@ -244,7 +246,8 @@
       }},
       account:{type:'record',read:({args}) => {
         const balance = transfers().inspect(states,args.account);
-        return balance ? ok(balance) : missing('unknown transfer account','missing');
+        return balance ? ok(balance.at===undefined?balance:{...balance,position:W.worksites.frame(api,balance.at)?.point??null}) :
+          missing('unknown transfer account','missing');
       }},
       transfers:{type:'record',read:()=>ok({tick:view.transfers?.[0]?.tick??tick,receipts:view.transfers??[]})},
       ...(view.weatherTrackState && { 'weather-tracks':{type:'record',read:()=>ok(view.weatherTrackState)} }),
@@ -417,7 +420,7 @@
         ...(description?.spatial && {type:description.type,spatial:description.spatial}),
         ...(grid ? {grid} : {}),samples:points.map(point => ({point,...api.probe(field,point,args)}))};
     }
-    const api = Object.freeze({inspect,spatial,spatialBatch,target,frame:fieldFrame,field,sampler,navigation,navigationSource,
+    const api = Object.freeze({inspect,spatial,spatialBatch,anyAgent:(...args)=>occupancy().anyAgent(...args),target,frame:fieldFrame,field,sampler,navigation,navigationSource,
       simulationClock:name=>view.simulationChunks?.clocks[name],
       renderVolume:name=>own(systems,name)?systems[name].volumeFrame?.(states[name]):null,
       renderWater:name=>own(systems,name)?systems[name].waterFrame?.(states[name]):null,

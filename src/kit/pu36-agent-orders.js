@@ -10,7 +10,7 @@
   const keyRef=(value,key)=>keys(value,[key])&&id(value[key]);
   const modes=['append','interrupt','replace'];
   const outcomes=['succeeded','failed','cancelled'];
-  const phases=['queued','starting','moving','waiting','blocked','settling',...outcomes];
+  const phases=['queued','starting','moving','waiting','blocked','settling','working',...outcomes];
   const blank=freeze({serial:0,active:null,paused:[],queue:[],outcomes:[]});
   const runnable=book=>Boolean(book&&(book.active||book.paused.length||book.queue.length));
   const holding=book=>own(book,'priorTask');
@@ -20,8 +20,8 @@
     const {tasks,maxQueued=16,historyLimit=16}=config;
     check(integer(maxQueued,1,256)&&integer(historyLimit,1,64)&&record(tasks)&&
       integer(Object.keys(tasks).length,1,256),'Orders need a bounded task catalog and queue');
-    const fields=new Set(), staticTransfers=[];
-    let validateTransfer, validateReservation;
+    const fields=new Set(), staticTransfers=[], staticWork=[];
+    let validateTransfer, validateReservation, validateWork;
     const catalog=new Map(Object.entries(tasks).map(([name,spec])=>{
       check(id(name)&&keys(spec,['steps'])&&Array.isArray(spec.steps)&&integer(spec.steps.length,1,32),'Invalid order task '+name);
       const targets=new Set(), params=new Set();
@@ -53,8 +53,8 @@
               'Invalid order event in '+name);
             break;
           case 'transfer':{
-            check(keys(step,['op','from','to','amount','mode'])&&(step.mode===undefined||['exact','partial'].includes(step.mode)),
-              'Invalid order transfer in '+name);
+            check(keys(step,['op','from','to','amount','mode','reach'])&&(step.mode===undefined||['exact','partial'].includes(step.mode))&&
+              (step.reach===undefined||W.worksites.reach(step.reach)),'Invalid order transfer in '+name);
             const refs=[step.from,step.to,step.amount].filter(value=>keyRef(value,'param'));
             for(const ref of refs)params.add(ref.param);
             for(const value of [step.from,step.to])if(!keyRef(value,'param'))W.data.endpoint(value);
@@ -63,6 +63,13 @@
             staticTransfers.push({step,parameterized:refs.length>0});
             break;
           }
+          case 'work':
+            check(keys(step,['op','site','batch','rate'])&&
+              (step.batch===undefined||W.worksites.positive(step.batch))&&(step.rate===undefined||W.worksites.rate(step.rate)),
+              'Invalid order work in '+name);
+            if(keyRef(step.site,'param'))params.add(step.site.param);
+            else {W.data.endpoint(step.site);staticWork.push(step);}
+            break;
           default: throw Error('Unknown order task step in '+name);
         }
       }
@@ -74,6 +81,10 @@
       const get=value=>reference(value,order.params,'param');
       return {from:get(step.from),to:get(step.to),amount:get(step.amount),mode:step.mode??'exact',
         ...(requestId&&{id:requestId})};
+    }
+    function checkTransfer(step,params){
+      const {from,to}=validateTransfer(transfer(step,{params}));
+      check(step.reach===undefined||from.at!==undefined&&to.at!==undefined,'Contact transfer needs two located accounts');
     }
     function orderShape(order){
       const spec=catalog.get(order.task);
@@ -88,7 +99,9 @@
       const orderSite=value=>site(value)||keyRef(value,'claim')&&own(order.reservation?.require,value.claim);
       check(keys(targets,spec.targets)&&spec.targets.every(key=>orderSite(targets[key]))&&
         keys(params,spec.params)&&spec.params.every(key=>own(params,key)),'Invalid targets or parameters for order '+order.task);
-      if(validateTransfer)for(const step of spec.steps)if(step.op==='transfer')validateTransfer(transfer(step,{params}));
+      if(validateTransfer)for(const step of spec.steps)if(step.op==='transfer')checkTransfer(step,params);
+      if(validateWork)for(const step of spec.steps)if(step.op==='work')
+        validateWork(reference(step.site,params,'param'),step.batch??1);
     }
     function checkIssue(args){
       check(keys(args,['agent','generation','mode','order'])&&(args.mode===undefined||modes.includes(args.mode))&&
@@ -206,6 +219,22 @@
           {...book,active:status(entry,point?moved.phase:'blocked',point?moved.reason:'target-missing')};
         return {row:moved.agent,book:next};
       }
+      if(step.op==='work'){
+        const site=reference(step.site,entry.params,'param'), [system,process]=W.data.endpoint(site);
+        const report=ctx.query.probe(system+'/worksite',undefined,{process}).value, batch=step.batch??1;
+        if(report?.completed>=batch){
+          const row=movement.hold(agent,entry.task).agent;
+          return {row,book:completed(book,entry,{op:'work',site,batch},row,ctx)};
+        }
+        if(report?.position&&K.V.dist(agent.position,report.position)>report.radius+1e-8){
+          const moved=movement.move(agent,report.position,entry);
+          return {row:moved.agent,book:{...book,active:status(entry,moved.phase??'moving',moved.reason??null)}};
+        }
+        const {agent:row,clearing}=movement.hold(agent,entry.task);
+        const ready=Boolean(report?.position&&!clearing), pending=report?.completed+1<batch;
+        const reason=clearing?'crossing':!ready?'worksite-missing':pending?'prior-batch':report.reason;
+        return {row,book:{...book,active:status(entry,ready?'working':'waiting',reason)}};
+      }
       const {agent:row,clearing}=movement.hold(agent,entry.task);
       if(clearing)return {row,book:{...book,active:status(entry,'waiting','crossing')}};
       if(step.op==='emit'){
@@ -213,7 +242,10 @@
           ...(reservation&&{grants:reservation.grants})});
         return {row,book:completed(book,entry,{op:'emit',kind:step.kind},row,ctx)};
       }
-      if(step.op==='transfer')return {row,book:{...book,active:status(entry,'settling')}};
+      if(step.op==='transfer'){
+        const reason=step.reach===undefined?null:W.worksites.contact(ctx.query,transfer(step,entry),row.position,step.reach);
+        return {row,book:{...book,active:status(entry,reason?'blocked':'settling',reason)}};
+      }
       if(entry.elapsed-entry.entered<(step.ticks??0))
         return {row,book:{...book,active:status(entry,'waiting','duration')}};
       if(step.field!==undefined){
@@ -231,6 +263,19 @@
         const step=catalog.get(active.task).steps[active.step];
         return transfer(step,active,'order.'+agent.generation+'.'+active.sequence+'.'+active.step);
       }
+    }
+    function transferBlocker(ctx,agent,request){
+      const entry=agent.orders.active, step=catalog.get(entry.task).steps[entry.step];
+      return step.reach===undefined?null:W.worksites.contact(ctx.query,request,agent.position,step.reach);
+    }
+    function workRequest(ctx,agent){
+      const entry=agent.orders?.active;
+      if(entry?.phase!=='working'||entry.timeout!==undefined&&entry.elapsed>=entry.timeout||
+        entry.reservation&&claim(ctx,agent,entry)?.status!=='held')return;
+      const step=catalog.get(entry.task).steps[entry.step];
+      if(step.op!=='work')return;
+      return {site:reference(step.site,entry.params,'param'),batch:step.batch??1,rate:step.rate??1,
+        agent:agent.id,generation:agent.generation,at:agent.position};
     }
     function receive(agent,receipt,ctx){
       const book=agent.orders, entry=book.active, result={op:'transfer',receipt,tick:ctx.tick};
@@ -266,10 +311,13 @@
         check(integer(row.step,0,steps.length)&&
           (row.phase==='succeeded'?row.step===steps.length:row.step<steps.length)&&
           (row.phase!=='settling'||steps[row.step].op==='transfer')&&
+          (row.phase!=='working'||steps[row.step].op==='work')&&
           row.results.length===row.step+Number(blockedTransfer)&&row.results.every((result,i)=>{
             if(!record(result)||!tick(result.tick)||result.op!==steps[i]?.op)return false;
             if(result.op==='move')return vector(result.at);
             if(result.op==='emit')return result.kind===steps[i].kind;
+            if(result.op==='work')return result.site===reference(steps[i].site,row.params,'param')&&
+              result.batch===(steps[i].batch??1);
             if(result.op!=='transfer')return true;
             const request=transfer(steps[i],row), receipt=result.receipt;
             return record(receipt)&&receipt.tick===result.tick&&receipt.from===request.from&&receipt.to===request.to&&
@@ -290,7 +338,11 @@
       }
       for(const row of book.outcomes)entry(row,true);
     }
-    return {checkIssue,checkCancel,issue,cancel,advance,validate,pending,receive,claim,
+    return {checkIssue,checkCancel,issue,cancel,advance,validate,pending,receive,claim,transferBlocker,workRequest,
+      checkWork(validate){
+        validateWork=validate;
+        for(const step of staticWork)validate(step.site,step.batch??1);
+      },
       checkReservations(validate){validateReservation=validate;},
       tasks:Object.fromEntries(catalog),hasTransfers:staticTransfers.length>0,
       checkFields(query){
@@ -298,7 +350,7 @@
       },
       checkTransfers(validate){
         validateTransfer=validate;
-        for(const {step,parameterized} of staticTransfers)if(!parameterized)validate(transfer(step,{params:{}}));
+        for(const {step,parameterized} of staticTransfers)if(!parameterized)checkTransfer(step,{});
       }};
   }
   W.agentOrders=Object.freeze({create,blank,runnable,holding});

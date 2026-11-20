@@ -48,11 +48,12 @@
         check(id(key) && record(spec) && id(spec.resource) && typeof spec.units === 'string' &&
           spec.units.trim().length > 0 && own(sizes,spec.type) &&
           typeof spec.read === 'function' && typeof spec.write === 'function','Invalid transfer account '+name);
-        const {resource,units,type,read,write} = spec;
-        accounts.set(name,{system,name,type,resource,units,read,write});
+        const {resource,units,type,read,write,at} = spec;
+        check(at===undefined||W.worksites.target(at),'Invalid transfer endpoint '+name);
+        accounts.set(name,{system,name,type,resource,units,read,write,...(at!==undefined&&{at})});
       }
     }
-    const summary = ({name,type,resource,units}) => ({name,type,resource,units});
+    const summary = ({name,type,resource,units,at}) => ({name,type,resource,units,...(at!==undefined&&{at})});
 
     function validate(raw, allowZero = false) {
       check(record(raw) && Object.keys(raw).every(key=>['from','to','amount','mode','id'].includes(key)) &&

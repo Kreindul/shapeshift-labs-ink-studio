@@ -39,6 +39,9 @@ movement, waits, events, and conservative transfers.
 [Jobs and reservations](job-reservations.md) arbitrate shared capacity and
 single-use work across agent rosters.
 
+[Physical work and production](physical-work.md) connect located stocks,
+staffed recipes, and construction, repair, or recruitment effects.
+
 [First-divergence debugging](first-divergence.md) compares timelines
 tick by tick and reports actual inputs and changed state paths.
 
