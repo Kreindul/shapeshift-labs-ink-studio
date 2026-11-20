@@ -1,0 +1,81 @@
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+const { pathToFileURL } = require('node:url');
+
+function runWebGL({ chrome, hardware }, buildFixture, runFixtures, inputs) {
+  const executable = chrome || process.env.INK_TEST_CHROME || [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'
+  ].find(file => fs.existsSync(file)) || 'google-chrome';
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ink-look-webgl-'));
+  try {
+    fs.writeFileSync(path.join(temp, 'bundle.js'), require('../index.js').bundle());
+    const page = path.join(temp, 'index.html');
+    const renderer = pathToFileURL(path.resolve(__dirname, '../webgl.mjs')).href;
+    fs.writeFileSync(page, `<!doctype html><pre id="result">pending</pre>
+<script src="bundle.js"></script>
+<script type="module">
+import { createRenderer } from ${JSON.stringify(renderer)};
+const result = document.querySelector('#result');
+try {
+  const kit = { KIT, PixelLook, makeBuilder };
+  const cases = (${runFixtures.toString()})(kit, ${buildFixture.toString()},
+    (${browserBackend.toString()})(kit, createRenderer), ${JSON.stringify(inputs)});
+  result.textContent = encodeURIComponent(JSON.stringify({ ...cases, browser: navigator.userAgent }));
+} catch (error) {
+  result.textContent = encodeURIComponent(JSON.stringify({ error: error.message }));
+}
+</script>`);
+    const software = hardware ? [] : ['--enable-unsafe-swiftshader', '--use-angle=swiftshader'];
+    const html = execFileSync(executable, ['--headless', '--no-first-run', '--disable-background-networking',
+      '--allow-file-access-from-files', ...software,
+      '--user-data-dir=' + path.join(temp, 'profile'), '--dump-dom', pathToFileURL(page).href],
+    { timeout: 120000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const output = /<pre id="result">([^<]*)<\/pre>/.exec(html)?.[1];
+    if (!output || output === 'pending') throw new Error('Chrome did not complete the WebGL fixture page');
+    const result = JSON.parse(decodeURIComponent(output));
+    if (result.error) throw new Error(result.error);
+    return result;
+  } catch (error) {
+    if (error.code === 'ENOENT') throw new Error('A Chrome or Chromium executable is required. Set --chrome or INK_TEST_CHROME.');
+    throw error;
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function browserBackend(kit, createRenderer) {
+  return (width, height, view) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const renderer = createRenderer(canvas, { toolkit: kit });
+    const gl = canvas.getContext('webgl2');
+    const debug = gl.getExtension('WEBGL_debug_renderer_info');
+    const driver = gl.getParameter(debug ? debug.UNMASKED_RENDERER_WEBGL : gl.RENDERER);
+    return {
+      driver,
+      draw(world) {
+        renderer.render(world, view);
+        gl.finish();
+      },
+      sample(points) {
+        const pixel = new Uint8Array(4);
+        return Object.fromEntries(Object.entries(points).map(([name, [x, y]]) => {
+          gl.readPixels(x, height - 1 - y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+          const error = gl.getError();
+          if (error !== gl.NO_ERROR) throw new Error('WebGL readback failed with error ' + error);
+          return [name, Array.from(pixel.slice(0, 3))];
+        }));
+      },
+      close() {
+        renderer.dispose();
+        gl.getExtension('WEBGL_lose_context')?.loseContext();
+      }
+    };
+  };
+}
+
+module.exports = runWebGL;

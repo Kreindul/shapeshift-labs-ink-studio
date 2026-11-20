@@ -532,6 +532,39 @@ and RMSE in normalized sRGB. LUT measurements use cell midpoints.
 `--max-error` rejects a bake that exceeds the measured channel
 tolerance, and `--exact` requires an exact representation.
 
+## Profile looks and check renderer parity
+
+```sh
+node cli/ink-studio.js look profile --renderer both --frames 60 --warmup 5 \
+  --splats 256 --w 160 --h 100 --out look-profile.json
+node cli/ink-studio.js look parity --out look-parity.json
+```
+
+The profiler renders identical geometry and views with no look, a
+global LUT, and a scoped palette. The JSON report includes fixture
+construction, renderer initialization, first-frame time, and a
+separate measurement of look planning and target assignment. First-frame
+time includes each renderer's lazy setup. Warmed frame timings include
+p50, p95, min, max, and mean, with deltas from the no-look case.
+WebGL waits for submitted work to finish each frame. It averages up
+to four consecutive frames per timing sample to improve precision on
+fast GPUs. Set `--batch 1` for individual WebGL frame timings. Pixel
+readback runs only during parity checks.
+
+The parity command samples matching pixels in both renderers. Fixtures
+cover tetrahedral and trilinear LUT interpolation, linear-light
+conversion through a declared numeric range, scoped palette selection,
+spatial mask blending, and overlapping glass. Reports include both RGB
+values, the expected sample colors, and the maximum absolute difference
+in 8-bit channel values. The spatial mask and per-splat glass cases use
+control renders to identify known WebGL gaps. Unexpected differences
+exit with status 1. Add `--strict` to fail on known gaps as well.
+
+Profiling defaults to the headless renderer. WebGL runs require Chrome
+or Chromium. Use `--chrome` or `INK_TEST_CHROME` to select an executable.
+WebGL uses SwiftShader by default. Pass `--hardware` to let Chrome choose
+its normal backend and check the graphics driver recorded in the report.
+
 ## Inspect and validate looks
 
 `look inspect` accepts a scene, simulation world, saved checkpoint, run

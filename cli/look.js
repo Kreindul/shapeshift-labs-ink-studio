@@ -375,7 +375,7 @@ function assertValid(report) {
 
 function report(output, options, source) {
   if (options.out !== undefined && typeof options.out !== 'string') throw new TypeError('--out needs a path');
-  if (options.out && path.resolve(options.out) === path.resolve(source)) throw new TypeError('--out needs a separate path');
+  if (options.out && source !== undefined && path.resolve(options.out) === path.resolve(source)) throw new TypeError('--out needs a separate path');
   return write([pretty(output)], options.out);
 }
 

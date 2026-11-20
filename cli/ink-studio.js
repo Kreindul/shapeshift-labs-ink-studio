@@ -314,6 +314,9 @@ const CMD = {
         '  look inspect <scene|run|look-file> [--renderer headless|webgl]   list bindings, dependencies and targets',
         '  look sample <look-file> [--look pack/look] [--colors JSON | --chart] [--out file.json|chart.png]',
         '  look bake <look-file> [--format auto|palette|lut] [--swatches file] [--size N] [--out bundle.json]',
+        '  look parity [--chrome path] [--hardware] [--strict] [--out report.json]   check CPU and WebGL look fixtures',
+        '  look profile [--renderer headless|webgl|both] [--frames N] [--warmup N] [--splats N] [--w N --h N]',
+        '    [--batch N] [--chrome path] [--hardware] [--out report.json]   benchmark look setup and frame time',
         '  look import <file> [--out pack.json] [--id pack/look]   import a LUT or palette as a versioned look',
         '  look export <file> [--out file | --format json|cube|gpl|pal|hex]   convert or sample a look',
         '    --look pack/look --params JSON --size N --swatches palette-file --report report.json --exact',
@@ -384,6 +387,10 @@ const CMD = {
   },
   look() {
     const io = require('./look.js');
+    if (pos[0] === 'parity' || pos[0] === 'profile') {
+      if (pos.length !== 1) die('Usage: ink-studio look ' + pos[0] + ' [options]');
+      return require('./look-renderers.js').run(pos[0], opt);
+    }
     if (pos[0] === 'bake') {
       if (pos.length !== 2) die('Usage: ink-studio look bake <look-file> [--format auto|palette|lut]');
       return io.bake(pos[1], opt, lib());
