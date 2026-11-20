@@ -507,7 +507,7 @@ The [glaze firing trials](../examples/chroma-glazes.js) project both definitions
 | `swatches` | Indexed swatches in palette order |
 | `brightness` | OKLab lightness bars in palette order |
 | `saturation` | HSV saturation bars in palette order |
-| `closest-pairs` | Distinct index pairs sorted by Euclidean distance in OKLab, with ties in index order |
+| `closest-pairs` | Distinct index pairs sorted by Euclidean distance in OKLab, with lightness differences and ties in index order |
 | `dither-pairs` | Bayer dither tiles containing only the two source swatches at each mix share |
 
 Set `cell: [width, height]` and `gap` in native texels. Use `columns` for swatch and closest-pair grids, or set `labels: false` for unlabelled art. Pair charts accept an optional `limit` for the number of automatically ranked pairs. For dithering, supply ordered `pairs` such as `[[0, 5], [2, 10]]`. Each `mix` share gives the requested fraction of the second swatch and defaults to `[0, 0.25, 0.5, 0.75, 1]`. The report includes the actual fraction of texels for each tile. Cell sizes divisible by four fit complete Bayer tiles.
@@ -522,6 +522,36 @@ ink-studio render examples/palette-chart-archive.js --w 382 --h 168 --px 1 --raw
 ```
 
 PNG files carry the palette in their indexed colour table and preserve transparent gaps. `chart.raster()` also exposes RGB, alpha and the original swatch indices as typed arrays. The JSON export includes the cell bounds and measurements plus a self-contained `raster` for an [indexed projected material](projected-effects.md#indexed-palette-charts). The [pigment archive](../examples/palette-chart-archive.js) mounts charts on sculpted display boards.
+
+## Review duplicate and close swatches
+
+```sh
+ink-studio palette pairs palette-report.json --sort distance --limit 12 --scale 16 --out pair-review
+```
+
+The input accepts a JSON array of colours or an object with a
+`palette` array, including output from `palette extract`.
+The review compares RGB8 values and preserves the original swatch
+indices, including all copies of an identical RGB value.
+
+`pairs.json` contains duplicate groups and every distinct index pair,
+with ranks for Euclidean OKLab distance and absolute OKLab lightness
+separation. A pair is `close` when its distance is at most
+`--max-distance` (default .035). The separate `lowLightnessSeparation`
+flag uses `--max-lightness` (default .02). Two strongly different hues
+can have nearly the same lightness.
+
+`native.png` shows each pair as two adjacent art pixels. `view.png`
+enlarges those exact pixels by `--scale` with nearest-neighbour
+sampling. Transparent gutters separate pairs. `--sort lightness`
+changes which pairs appear first. `--limit` sets how many pairs appear
+in the previews, and `--columns` sets their layout. The JSON report
+maps each cell's bounds on the native grid to its two palette indices.
+
+Use `KIT.palette.reviewPairs({ palette, sort, limit, columns,
+maxDistance, maxLightnessDelta })` with up to 256 swatches. Read
+`.report` for the measurements and use `.preview(scale)` for RGB and
+alpha bytes.
 
 
 ## Fit a target with two swatches
