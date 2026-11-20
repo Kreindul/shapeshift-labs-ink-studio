@@ -4,7 +4,7 @@
   const { clone, freeze } = P.data;
   const finite = Number.isFinite, xyz = v => W.data.vector(v) && Array.from(v).every(finite);
   const defaults = {
-    radius: 0.18, height: 1.64, stepUp: 0.32, groundSnap: 0.16, minimumNormal: 0.63,
+    radius: 0.18, height: 1.64, flatBottom: false, stepUp: 0.32, groundSnap: 0.16, minimumNormal: 0.63,
     walkSpeed: 3.4, groundAcceleration: 28, airAcceleration: 9, jumpSpeed: 4.6, gravity: 14, terminalSpeed: 20,
     swimSpeed: 2.25, swimVerticalSpeed: 1.8, swimAcceleration: 12, currentScale: 1, buoyancy: 0,
     swimEnter: 0.52, swimExit: 0.39, eyes: 0.91, climbHeight: 0.75, climbReach: 0.42,
@@ -35,7 +35,8 @@
         allowSupport !== undefined && typeof allowSupport !== 'function')
       throw new TypeError('Invalid character tuning or movement extensions');
     const t = Object.freeze({ ...defaults, ...tuning });
-    if (Object.entries(t).some(([key, value]) => !finite(value) || key !== 'buoyancy' && value < 0) ||
+    if (typeof t.flatBottom !== 'boolean' || Object.entries(t).some(([key, value]) =>
+        key !== 'flatBottom' && (!finite(value) || key !== 'buoyancy' && value < 0)) ||
         t.radius < 0.03 || t.radius > 4 || t.height < 2 * t.radius + 0.05 || t.height > 12 ||
         t.stepUp > t.height - 2 * t.radius - 0.025 || t.groundSnap > 16 || t.climbHeight > 1000 ||
         t.minimumNormal < 0.01 || t.minimumNormal > 1 || t.maxStep <= 0 || t.maxStep > 1 ||
@@ -44,6 +45,8 @@
       throw new RangeError('Invalid character body, medium thresholds or time limits');
     const { radius, height } = t, half = height / 2;
     const shaft = half - radius, sections = Math.max(1, Math.ceil(shaft * 2 / (radius * 0.55)));
+    const sole=t.flatBottom?P.traversal.footprint(radius):null;
+    const soleHeights=[-half,-half+radius*.5,-shaft];
     const stride = Math.min(0.085, radius * 0.5), extensions = new Map(Object.entries(modes)), worlds = new WeakMap();
     const above = (p, y) => [p[0], p[1] + y, p[2]];
     const horizontal = v => [v[0], 0, v[2]];
@@ -65,7 +68,7 @@
         throw new TypeError('A character world needs supports, point clearance and an optional medium query');
       if (!worlds.has(world)) worlds.set(world, P.traversal.create({
         supports: (...args) => world.supports(...args), clearance: (...args) => world.clearance(...args),
-        radius, height, stepUp: t.stepUp, stepDown: t.groundSnap, minimumNormal: t.minimumNormal
+        radius, height, flatBottom:t.flatBottom, stepUp: t.stepUp, stepDown: t.groundSnap, minimumNormal: t.minimumNormal
       }));
       return worlds.get(world);
     }
@@ -76,10 +79,16 @@
       return m;
     }
     function fits(world, p) {
+      function clear(point, required) {
+        const d=world.clearance(point,radius);
+        if(!finite(d)&&d!==Infinity)throw new TypeError('Character clearance must be signed distance or positive infinity');
+        return d>=required-.0005;
+      }
       for (let i = 0; i <= sections; i++) {
-        const d = world.clearance(above(p, -shaft + i * (2 * shaft / sections)), radius);
-        if (!finite(d) && d !== Infinity) throw new TypeError('Character clearance must be signed distance or positive infinity');
-        if (d < radius - 0.0005) return false;
+        if(!clear(above(p,-shaft+i*(2*shaft/sections)),radius))return false;
+      }
+      if(sole)for(const [x,z] of sole){
+        for(const y of soleHeights)if(!clear([p[0]+x,p[1]+y,p[2]+z],0))return false;
       }
       return true;
     }

@@ -5,6 +5,7 @@ const { characters, cameras } = KIT.world;
 const ground = y => ({ y, normal: [0, 1, 0], id: 'floor', material: 'stone' });
 const flat = { supports: () => [ground(0)], clearance: point => point[1] };
 const dead = { kind: 'air' };
+const corner=(x,y)=>Math.hypot(Math.max(0,x),Math.max(0,y))+Math.min(0,Math.max(x,y));
 
 function simulate(controller, state, world, frames, input) {
   let actor = state, last;
@@ -46,6 +47,39 @@ test('the capsule steps up, jumps once while held, falls and stops against thin 
   assert(hit.actor.position[2] > 0.25);
   assert(fast.fits(thin, hit.actor.position));
   assert.throws(() => fast.step(hit.actor, {}, 40, thin), /time budget/);
+});
+
+test('a flat-bottom character lands and jumps with only its sole overlapping a ledge', () => {
+  const tuning={radius:.25,height:1,stepUp:0}, ledge={supports:x=>x<=0?[ground(0)]:[],
+    clearance:([x,y])=>corner(x,y)};
+  const controller=characters.create({tuning:{...tuning,flatBottom:true}});
+  const rounded=characters.create({tuning});
+  const actor=controller.state({position:[.21,.81,0],velocity:[0,-2,0]});
+  const seated=simulate(controller,actor,ledge,24,{climb:false});
+  assert.equal(seated.actor.mode,'ground');
+  assert.deepEqual(seated.actor.position,[.21,.5,0]);
+  assert.equal(seated.support.support,'floor');
+  assert.equal(simulate(rounded,actor,ledge,24,{climb:false}).actor.mode,'air');
+  const jump=controller.step(seated.actor,{jump:true},1/60,ledge);
+  assert(jump.events.some(event=>event.type==='jump'));
+  const walked=simulate(controller,seated.actor,ledge,24,{move:[1,0],climb:false});
+  assert(walked.actor.position[0]>.25);
+  assert.equal(walked.actor.mode,'air');
+});
+
+test('a flat-bottom character checks toe clearance and keeps the rounded head and standing height', () => {
+  const tuning={radius:.3,height:1.2,stepUp:.22}, toe=characters.create({tuning:{...tuning,flatBottom:true}});
+  const rounded=characters.create({tuning});
+  const sill={supports:x=>[ground(x>=.8?.14:0)],clearance:([x,y])=>Math.min(y,corner(.8-x,y-.14))};
+  const center=[.52,.6,0];
+  assert(rounded.fits(sill,center));
+  assert(!toe.fits(sill,center));
+  assert(toe.fits(flat,center));
+  const walked=simulate(toe,toe.state({position:[0,.6,0]}),sill,40,{move:[1,0]});
+  assert(walked.actor.position[0]>1.2);
+  assert(Math.abs(walked.actor.position[1]-.74)<1e-6);
+  assert(toe.fits({...flat,clearance:([x,y])=>Math.min(y,corner(.8-x,1.07-y))},center));
+  assert.throws(()=>characters.create({tuning:{flatBottom:'yes'}}),/Invalid character body/);
 });
 
 test('water currents, separate eye probes and climb-out use the scene queries', () => {

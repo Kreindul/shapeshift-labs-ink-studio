@@ -704,10 +704,15 @@ XYZ coordinates. The body's position and rotation apply to the whole shape.
 
 | `collider.kind` | Shape parameters |
 | --- | --- |
-| `capsule` | Segment endpoints `a` and `b` and a `radius`. Matching endpoints make a sphere. |
+| `capsule` | Segment endpoints `a` and `b` and a `radius`. Matching endpoints make a sphere. Set `flatBottom: true` with distinct endpoints to put a flat sole at `a` and keep the rounded cap at `b`. |
 | `box` | `half` extents with optional local offset `at` and yaw `turn` in radians. |
 | `convex` | `vertices` and ordered `faces` made of vertex indices. Supply one closed convex shell with planar faces. A hull can have up to 24 vertices and 32 faces. |
 | `compound` | `parts` with up to 12 boxes, capsules or convex hulls. The gaps between the parts remain open. |
+
+For a centered upright flat-bottom capsule, put `a` at minus half the desired
+height and `b` one radius below the top. For example, a 1.2-unit tall capsule
+with radius 0.3 uses `a: [0, -0.6, 0]` and `b: [0, 0.3, 0]`. Mechanics uses a
+convex hull with a planar sole and a faceted dome for collision and rendering.
 
 Add `continuous: true` to a mechanics system to sweep translations in impact
 order. A system with any authored `collider` enables sweeps by default. Set
@@ -944,6 +949,11 @@ seconds and a world-space XZ move input. Swimming uses the vertical input,
 with jump also available as an ascend button. Jumping from the ground
 uses a button press edge. Set `climb: false` to disable the automatic
 climb from the waterline onto a reachable, clear ledge.
+
+Set `tuning.flatBottom: true` for a platformer-style sole. The controller
+keeps the configured radius and overall height and samples support across the
+flat footprint. It can land, stand and jump with its center past a ledge
+while part of its foot still overlaps. The shape still has a rounded head.
 
 The reported movement includes the next `actor`, swept `segments`,
 `events`, and the body and eye media. The defaults switch between

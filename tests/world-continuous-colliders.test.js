@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { KIT: { world: W } } = require('..').load();
+const { KIT: { world: W, M } } = require('..').load();
 const workshop = require('../examples/world-continuous-colliders.json');
 
 const rig = (bodies,config={}) => W.runtime.create({dt:.1,systems:{rig:{kind:'mechanics',config:{
@@ -108,4 +108,35 @@ test('colliders require a valid capsule and a closed, ordered convex shell', () 
   assert.throws(()=>rig({shape:{collider:{...gate,faces:gate.faces.slice(0,-1)}}}),/closed shell/);
   assert.throws(()=>rig({shape:{collider:sphere(0)}}),/Invalid capsule/);
   assert.throws(()=>rig({shape:{collider:null}}),/Expected a collider/);
+});
+
+test('a flat-bottom capsule lands on its overhanging rim and survives replay', () => {
+  const collider={kind:'capsule',a:[0,-.6,0],b:[0,.3,0],radius:.3,flatBottom:true};
+  const run=rig({ledge:{fixed:true,position:[-.5,-.1,0],half:[.5,.1,1]},
+    runner:{position:[.24,2,0],velocity:[0,-30,0],collider}});
+  run.step();
+  const [{a,b,normal,at}]=state(run).impacts;
+  assert.deepEqual([a,b],['ledge','runner']);
+  close(normal[1],1);
+  close(at,1.4/3);
+  const body=state(run).bodies.runner;
+  close(body.position[1],.6);
+  close(body.velocity[1],0);
+  close(W.colliders.distance(body,[.24,1.2,0]),0);
+  close(W.colliders.distance(body,[.24,-.04,0]),.04);
+  assert.deepEqual(packed(W.runtime.replay(packed(run.recording())).checkpoint()),packed(run.checkpoint()));
+  assert.throws(()=>rig({shape:{collider:{...sphere(.3),flatBottom:true}}}),/distinct endpoints/);
+});
+
+test('a rotated flat capsule exposes a planar support across its base', () => {
+  const body={id:'sole',material:'rubber',position:[1,2,0],rotation:M.rot([0,0,1],Math.PI),
+    collider:{kind:'capsule',a:[0,-.6,0],b:[0,.3,0],radius:.3,flatBottom:true}};
+  const bounds=W.colliders.geometry(body);
+  close(bounds.max[1],2.6);
+  close(bounds.min[1],1.4);
+  for(const x of [.75,1,1.25]){
+    const [hit]=W.colliders.columns(body,x,0,1,4);
+    close(hit.y,2.6);
+    close(hit.normal[1],1);
+  }
 });

@@ -4,11 +4,17 @@
   const {clamp}=W.fields, {freeze}=P.data;
   const eps=1e-8, axisX=[1,0,0], down=[0,-1,0];
   const shapes=new WeakMap(), boxes=new WeakMap(), poses=new WeakMap();
+  const shapeKeys=new WeakMap(), flatShapes=new Map(), flatPoses=new Map(), facetedPairs=new Map();
   const xyz=point=>vector(point)&&point.every(n=>Math.abs(n)<=1e4);
   const positive=n=>Number.isFinite(n)&&n>=.005&&n<=1e4;
   const keys=(row,allowed)=>record(row)&&Object.keys(row).every(key=>allowed.includes(key));
   const between=(v,a,b)=>v>=a-eps&&v<=b+eps;
   const length2=v=>V.dot(v,v);
+  function remember(map,key,value) {
+    if(map.size===32)map.delete(map.keys().next().value);
+    map.set(key,value);
+    return value;
+  }
   const closest=(p,a,b)=>{
     const step=V.sub(b,a), length=length2(step);
     return length?V.mad(a,step,clamp(V.dot(V.sub(p,a),step)/length,0,1)):a;
@@ -38,10 +44,40 @@
     const normals=[[0,0,-1],[0,0,1],[0,-1,0],[1,0,0],[0,1,0],[-1,0,0]].map(p=>M.app(R,p));
     return poly(vertices,P.pieces.boxFaces,normals);
   }
+  function flatCapsule(a,b,radius) {
+    const key=[...a,...b,radius].join(','), cached=flatShapes.get(key);
+    if(cached)return cached;
+    const axis=V.norm(V.sub(b,a)), right=V.perp(axis), front=V.cross(axis,right);
+    const sides=16, arcs=4, vertices=[], faces=[];
+    const directions=Array.from({length:sides},(_,i)=>{
+      const angle=2*Math.PI*i/sides;
+      return V.add(V.mul(right,Math.cos(angle)),V.mul(front,Math.sin(angle)));
+    });
+    function ring(center,r) {for(const direction of directions)vertices.push(V.mad(center,direction,r));}
+    ring(a,radius);
+    for(let i=0;i<arcs;i++){
+      const angle=Math.PI*.5*i/arcs;
+      ring(V.mad(b,axis,radius*Math.sin(angle)),radius*Math.cos(angle));
+    }
+    const tip=vertices.push(V.mad(b,axis,radius))-1;
+    faces.push(directions.map((_,i)=>sides-1-i));
+    for(let row=0;row<arcs;row++)for(let i=0;i<sides;i++){
+      const j=(i+1)%sides, base=row*sides;
+      faces.push([base+i,base+j,base+sides+j,base+sides+i]);
+    }
+    for(let i=0;i<sides;i++)faces.push([arcs*sides+i,arcs*sides+(i+1)%sides,tip]);
+    const normals=faces.map(([i,j,k])=>V.norm(V.cross(V.sub(vertices[j],vertices[i]),V.sub(vertices[k],vertices[i]))));
+    return remember(flatShapes,key,freeze({...poly(vertices,faces,normals),facetedKey:key}));
+  }
   function component(raw) {
     check(record(raw),'Expected a collider part');
     if(raw.kind==='capsule'){
-      check(keys(raw,['kind','a','b','radius'])&&xyz(raw.a)&&xyz(raw.b)&&positive(raw.radius),'Invalid capsule collider');
+      check(keys(raw,['kind','a','b','radius','flatBottom'])&&xyz(raw.a)&&xyz(raw.b)&&positive(raw.radius)&&
+        (raw.flatBottom===undefined||typeof raw.flatBottom==='boolean'),'Invalid capsule collider');
+      if(raw.flatBottom){
+        check(V.dist(raw.a,raw.b)>=eps,'A flat-bottom capsule needs distinct endpoints');
+        return flatCapsule(raw.a,raw.b,raw.radius);
+      }
       return {kind:'capsule',vertices:[raw.a,raw.b],radius:raw.radius};
     }
     if(raw.kind==='box'){
@@ -82,6 +118,22 @@
     shapes.set(shape,output);
     return output;
   }
+  function edgeVectors(points,edges) {
+    const vectors=[];
+    for(const [i,j] of edges){
+      const d=V.sub(points[j],points[i]);
+      if(length2(d)<=eps*eps)continue;
+      const v=V.norm(d);
+      if(!vectors.some(u=>Math.abs(V.dot(u,v))>1-1e-12))vectors.push(v);
+    }
+    return vectors;
+  }
+  function flatPose(part,rotation) {
+    const key=part.facetedKey+'/'+rotation.join(','), cached=flatPoses.get(key);
+    if(cached)return cached;
+    const points=part.vertices.map(p=>M.app(rotation,p));
+    return remember(flatPoses,key,{points,vectors:edgeVectors(points,part.edges)});
+  }
   function geometry(body) {
     if(poses.has(body))return poses.get(body);
     let parts;
@@ -91,19 +143,17 @@
       parts=[boxes.get(body.half)];
     }
     const result=parts.map((part,partId)=>{
-      const points=part.vertices.map(p=>V.add(body.position,M.app(body.rotation,p))), radius=part.radius??0;
+      const flat=part.facetedKey===undefined?null:flatPose(part,body.rotation);
+      const points=flat?flat.points.map(p=>V.add(body.position,p)):
+        part.vertices.map(p=>V.add(body.position,M.app(body.rotation,p)));
+      const radius=part.radius??0;
       const min=[0,1,2].map(i=>Math.min(...points.map(p=>p[i]))-radius);
       const max=[0,1,2].map(i=>Math.max(...points.map(p=>p[i]))+radius);
       const dirs=part.directions?.map(n=>M.app(body.rotation,n))??[];
       const faces=part.faces?.map((face,i)=>({ids:face,n:dirs[i]}))??[];
-      const edges=part.edges??[[0,1]], vectors=[];
-      for(const [i,j] of edges){
-        const d=V.sub(points[j],points[i]);
-        if(length2(d)<=eps*eps)continue;
-        const v=V.norm(d);
-        if(!vectors.some(u=>Math.abs(V.dot(u,v))>1-1e-12))vectors.push(v);
-      }
-      return {kind:part.kind,part:partId,points,radius,faces,edges,vectors,min,max};
+      const edges=part.edges??[[0,1]], vectors=flat?.vectors??edgeVectors(points,edges);
+      return {kind:part.kind,part:partId,points,radius,faces,edges,vectors,min,max,
+        flat,source:part,position:body.position,rotation:body.rotation};
     });
     const bounds={min:[0,1,2].map(i=>Math.min(...result.map(p=>p.min[i]))),
       max:[0,1,2].map(i=>Math.max(...result.map(p=>p.max[i])))};
@@ -182,19 +232,60 @@
     const dots=part.points.map(p=>V.dot(p,axis)), shift=offset?V.dot(offset,axis):0;
     return [Math.min(...dots)-part.radius+shift,Math.max(...dots)+part.radius+shift];
   }
-  function sat(a,b,offset) {
-    let gap=-Infinity, normal;
-    function test(axis) {
-      const [lo,hi]=projection(a,axis,offset), [min,max]=projection(b,axis);
-      if(min-hi>gap){gap=min-hi;normal=axis;}
-      if(lo-max>gap){gap=lo-max;normal=V.mul(axis,-1);}
-    }
+  function visitAxes(a,b,test) {
     for(const f of a.faces)test(f.n);
     for(const f of b.faces)test(f.n);
     for(const u of a.vectors)for(const v of b.vectors){
       const cross=V.cross(u,v), length=V.len(cross);
       if(length>eps)test(V.mul(cross,1/length));
     }
+  }
+  function poseKey({source,rotation}) {
+    if(!shapeKeys.has(source))shapeKeys.set(source,source.facetedKey!==undefined?`flat:${source.facetedKey}`:
+      JSON.stringify([source.vertices,source.faces]));
+    return shapeKeys.get(source)+'/'+rotation.join(',');
+  }
+  function axesAtOrigin(part) {
+    const {source,rotation,edges,flat}=part;
+    const points=flat?.points??source.vertices.map(p=>M.app(rotation,p));
+    return {...part,points,vectors:flat?.vectors??edgeVectors(points,edges)};
+  }
+  function facetedContact(a,b,offset) {
+    // Faceted domes have many candidate axes. The projection intervals depend on orientation only.
+    const key=poseKey(a)+'|'+poseKey(b);
+    let axes=facetedPairs.get(key);
+    if(!axes){
+      const left=axesAtOrigin(a), right=axesAtOrigin(b), seen=new Set();
+      axes=[];
+      visitAxes(left,right,axis=>{
+        const rounded=axis.map(n=>Math.round(n*1e12));
+        const sign=rounded.find(n=>n!==0)<0?-1:1, fingerprint=rounded.map(n=>n*sign).join(',');
+        if(seen.has(fingerprint))return;
+        seen.add(fingerprint);
+        const [lo,hi]=projection(left,axis), [min,max]=projection(right,axis);
+        axes.push({axis,forward:min-hi,backward:lo-max});
+      });
+      remember(facetedPairs,key,axes);
+    }
+    const delta=V.sub(V.sub(b.position,a.position),offset??[0,0,0]);
+    let gap=-Infinity, normal;
+    for(const {axis,forward,backward} of axes){
+      const shift=V.dot(delta,axis);
+      if(forward+shift>gap){gap=forward+shift;normal=axis;}
+      if(backward-shift>gap){gap=backward-shift;normal=V.mul(axis,-1);}
+    }
+    return {gap,normal};
+  }
+  function sat(a,b,offset) {
+    if(a.kind==='poly'&&b.kind==='poly'&&(a.source.facetedKey!==undefined||b.source.facetedKey!==undefined))
+      return facetedContact(a,b,offset);
+    let gap=-Infinity, normal;
+    function test(axis) {
+      const [lo,hi]=projection(a,axis,offset), [min,max]=projection(b,axis);
+      if(min-hi>gap){gap=min-hi;normal=axis;}
+      if(lo-max>gap){gap=lo-max;normal=V.mul(axis,-1);}
+    }
+    visitAxes(a,b,test);
     return {gap,normal};
   }
   function separation(a,b,offset) {

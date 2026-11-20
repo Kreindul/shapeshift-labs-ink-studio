@@ -9,16 +9,27 @@
   const range = (v, a, b) => Number.isFinite(v) && v >= a && v <= b;
 
   const materialTag = value => value === undefined || typeof value === 'string' && value.length > 0 && value.length <= 160;
+  function footprint(radius) {
+    const offsets=[[0,0]];
+    for(let i=0;i<16;i++){
+      const angle=Math.PI*i/8, x=Math.cos(angle)*radius, z=Math.sin(angle)*radius;
+      offsets.push([x,z]);
+      if(i%2===0)offsets.push([x*.5,z*.5]);
+    }
+    return offsets;
+  }
 
   function create({ supports, clearance, transition, radius = .18, height = 1.64, stepUp = .34,
-    stepDown = .48, minimumNormal = .63, stride = Math.min(.085, radius * .6), budget = 128 } = {}) {
+    stepDown = .48, minimumNormal = .63, stride = Math.min(.085, radius * .6), budget = 128, flatBottom = false } = {}) {
     if (typeof supports !== 'function' || typeof clearance !== 'function' ||
         transition!==undefined&&typeof transition!=='function' || !range(radius, .03, 4) ||
         !range(height, radius * 2 + .05, 12) || !range(stepUp, 0, height - radius * 2 - .025) ||
         !range(stepDown, 0, 16) || !range(minimumNormal, .01, 1) || !range(stride, .005, radius) ||
-        !Number.isSafeInteger(budget) || budget < 1 || budget > 2048) throw Error('Invalid traversal query or body');
+        !Number.isSafeInteger(budget) || budget < 1 || budget > 2048 || typeof flatBottom !== 'boolean')
+      throw Error('Invalid traversal query or body');
     const lower = stepUp + radius + .005, upper = height - radius,
       sections = Math.max(1, Math.ceil((upper - lower) / (radius * .65)));
+    const seats=flatBottom?footprint(radius):[[0,0]];
 
     function fits(p) {
       for (let i = 0; i <= sections; i++) {
@@ -31,18 +42,20 @@
     }
 
     function seat(x, z, floor, ceiling, from) {
-      const list = supports(x, z, floor, ceiling);
-      if (!Array.isArray(list) || list.length > 256) throw Error('Traversal supports must return a bounded array');
       let best = null;
-      for (const s of list) {
-        if (!s || !Number.isFinite(s.y) || !vector(s.normal, 3) || V.len(s.normal) < 1e-8 ||
-            (s.id !== undefined && typeof s.id !== 'string') || !materialTag(s.material)) throw Error('Traversal support needs height and normal');
-        if (s.y < floor - .00001 || s.y > ceiling + .00001 || best && s.y <= best.foot[1] ||
-            s.normal[1] / V.len(s.normal) + .00001 < minimumNormal) continue;
-        const foot = [x, s.y, z];
-        if (fits(foot) && (!transition || !from || transition(from,foot,s))) {
-          best = { foot, support: s.id ?? null, normal: V.norm(s.normal) };
-          if (s.material !== undefined) best.material = s.material;
+      for(const [dx,dz] of seats){
+        const list = supports(x+dx, z+dz, floor, ceiling);
+        if (!Array.isArray(list) || list.length > 256) throw Error('Traversal supports must return a bounded array');
+        for (const s of list) {
+          if (!s || !Number.isFinite(s.y) || !vector(s.normal, 3) || V.len(s.normal) < 1e-8 ||
+              (s.id !== undefined && typeof s.id !== 'string') || !materialTag(s.material)) throw Error('Traversal support needs height and normal');
+          if (s.y < floor - .00001 || s.y > ceiling + .00001 || best && s.y <= best.foot[1] ||
+              s.normal[1] / V.len(s.normal) + .00001 < minimumNormal) continue;
+          const foot = [x, s.y, z];
+          if (fits(foot) && (!transition || !from || transition(from,foot,s))) {
+            best = { foot, support: s.id ?? null, normal: V.norm(s.normal) };
+            if (s.material !== undefined) best.material = s.material;
+          }
         }
       }
       return best;
@@ -121,5 +134,5 @@
     return Object.freeze({ advance, reset });
   }
 
-  P.traversal = Object.freeze({ create, cadence });
+  P.traversal = Object.freeze({ create, cadence, footprint });
 })(KIT);
