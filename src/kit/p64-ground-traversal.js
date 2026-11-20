@@ -93,7 +93,7 @@
       }
       return { ...current, steps, blocked, progress, ...(contacts && { contacts }) };
     }
-    return Object.freeze({ stand, move, radius, height, stepUp, stepDown });
+    return Object.freeze({ stand, move, radius, height, stepUp, stepDown, maxDistance:stride*budget });
   }
   function cadence({ spacing = .62, first = spacing * .35, budget = 256 } = {}) {
     if (!range(spacing, .025, 20) || !range(first, 0, spacing) || !Number.isSafeInteger(budget) || budget < 1 || budget > 4096)

@@ -168,33 +168,53 @@
   }
 
   function grid(cell=4){
-    const buckets=new Map(), rows=[], outside=[];
+    const buckets=new Map(), rows=new Set(), outside=new Set();
     const key=(x,y,z)=>x+','+y+','+z, at=n=>Math.floor(n/cell);
-    function add(point,row){
-      rows.push(row);
+    function cellOf(point){
       const [x,y,z]=point.map(at);
-      if(![x,y,z].every(Number.isSafeInteger)){
-        outside.push(row);
-        return;
-      }
-      const name=key(x,y,z);
-      let members=buckets.get(name);
-      if(!members)buckets.set(name,members=[]);
-      members.push(row);
+      return [x,y,z].every(Number.isSafeInteger)?key(x,y,z):null;
+    }
+    function insert(slot){
+      if(slot.cell===null){outside.add(slot);return;}
+      let members=buckets.get(slot.cell);
+      if(!members)buckets.set(slot.cell,members=new Set());
+      members.add(slot);
+    }
+    function detach(slot){
+      if(slot.cell===null){outside.delete(slot);return;}
+      const members=buckets.get(slot.cell);
+      members.delete(slot);
+      if(!members.size)buckets.delete(slot.cell);
+    }
+    function add(point,row){
+      const slot={row,cell:cellOf(point)};
+      rows.add(slot);
+      insert(slot);
+      return slot;
+    }
+    function move(slot,point){
+      const cell=cellOf(point);
+      if(cell===slot.cell)return;
+      detach(slot);
+      slot.cell=cell;
+      insert(slot);
+    }
+    function remove(slot){
+      if(rows.delete(slot))detach(slot);
     }
     function overlap(min,max,visit){
       const low=min.map(at), high=max.map(at);
       const count=low.reduce((n,v,i)=>n*(high[i]-v+1),1);
-      if(!Number.isFinite(count)||count>Math.min(4096,Math.max(32,rows.length))||
+      if(!Number.isFinite(count)||count>Math.min(4096,Math.max(32,rows.size))||
         ![...low,...high].every(Number.isSafeInteger)){
-        for(const row of rows)visit(row);
+        for(const {row} of rows)visit(row);
         return;
       }
       for(let z=low[2];z<=high[2];z++)for(let y=low[1];y<=high[1];y++)for(let x=low[0];x<=high[0];x++)
-        for(const row of buckets.get(key(x,y,z))??[])visit(row);
-      for(const row of outside)visit(row);
+        for(const {row} of buckets.get(key(x,y,z))??[])visit(row);
+      for(const {row} of outside)visit(row);
     }
-    return {add,overlap};
+    return {add,move,remove,overlap};
   }
   W.spatial = Object.freeze({create,grid});
 })(KIT);

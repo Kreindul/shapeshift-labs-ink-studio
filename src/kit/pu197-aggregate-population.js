@@ -7,7 +7,7 @@
     for(const page of roster.pages)for(const row of page.details)counts[row.species]++;
     return {total:W.agentStorage.count(roster),counts};
   }
-  function cohorts(settings,{profiles,fit,bounds,contacts,validateState,occupants}){
+  function cohorts(settings,{profiles,fit,bounds,contacts,validateState,occupants,blockedCoarse}){
     const S=W.agentStorage, aliases=new WeakMap();
     const {clamp}=W.fields;
     const {model,cell=12,goalCell=cell}=settings;
@@ -31,7 +31,8 @@
         for(const id of members)memberGroup[id]=index;
         groups.push({species,members,origin,position:origin,goal:V.mul(destination,1/members.length),distance:0});
       }
-      return freeze({roster,...(decisions&&{decisions}),...(state.routeWork&&{routeWork:state.routeWork}),groups,memberGroup});
+      return freeze({roster,...(decisions&&{decisions}),...(state.routeWork&&{routeWork:state.routeWork}),
+        ...(state.crowd&&{crowd:state.crowd}),groups,memberGroup});
     }
     function memberPosition(group,position){
       return group.distance?position.map((n,i)=>clamp(n+group.position[i]-group.origin[i],bounds.min[i],bounds.max[i])):position;
@@ -42,7 +43,8 @@
       const position=memberPosition(group,row.position);
       return {...row,position,direction:V.norm(V.sub(group.position,group.origin),row.direction),
         velocity:group.velocity??S.zero,mode:profiles[row.species].mode,route:[],cursor:0,retry:0,limbs:[],
-        ...(row.routing&&{routing:row.routing.request?{...row.routing,status:'waiting'}:W.routeRequests.idle})};
+        ...(row.routing&&{routing:row.routing.request?{...row.routing,status:'waiting'}:W.routeRequests.idle}),
+        ...(row.crowd&&{crowd:W.crowd.clear})};
     }
     function expand(state){
       const roster=S.get(state), draft=S.edit(roster);
@@ -51,7 +53,7 @@
         draft.update(slot,row,individual(state,row));
       }
       return freeze({roster:draft.finish(),contacts:[],...(state.decisions&&{decisions:state.decisions}),
-        ...(state.routeWork&&{routeWork:state.routeWork})});
+        ...(state.routeWork&&{routeWork:state.routeWork}),...(state.crowd&&{crowd:state.crowd})});
     }
     function totals(state,isAggregate){
       if(!isAggregate)return population(S.get(state),species);
@@ -97,8 +99,13 @@
           const fitted=fit(ctx,{radius:.15,maxWade:.14,...profiles[row.species],
             entity:S.select(roster,row.members[0]).entity},point);
           if(!fitted||V.dist(row.position,fitted)<=1e-8)return stopped(row);
-          return {...row,position:fitted,velocity:V.mul(V.sub(fitted,row.position),1/ctx.dt),
+          const next={...row,position:fitted,velocity:V.mul(V.sub(fitted,row.position),1/ctx.dt),
             distance:row.distance+V.dist(row.position,fitted)};
+          if(blockedCoarse&&profiles[row.species].mode==='walk'&&row.members.some(id=>{
+            const member=S.select(roster,id);
+            return blockedCoarse(memberPosition(row,member.position),memberPosition(next,member.position),member.radius);
+          }))return stopped(row);
+          return next;
         });
         return groups.some((row,i)=>row!==state.groups[i])?freeze({...state,groups}):state;
       },

@@ -27,6 +27,9 @@ head for the same destination.
 Use [budgeted route requests](budgeted-route-requests.md) to spread
 replanning after a local obstruction across multiple ticks.
 
+Use [crowds and bottlenecks](crowds-and-bottlenecks.md) for local walker
+separation and directional capacity at crossings.
+
 ## Trace a changing crossing
 
 The [ford example](../examples/world-tiled-ford.json) transfers water into
