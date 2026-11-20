@@ -848,7 +848,7 @@ const CMD = {
         '  curve <family.json> [--distance n] [--text INK] [--out file.json]   sample reusable curve families',
         '  ornament <pattern.json> [--format pigment|relief|tiles] [--out file]   export a wallpaper or frieze pattern',
         '  palette plot <plot.json> [--space rgb|oklab] [--orbit degrees] [--format png|data]   render a palette in 3D',
-        '  palette field <field.json> [--saturation 0–1] [--w 192 --h 96]   render a rectangular, polar or coverage field',
+        '  palette field <field.json> [--saturation 0–1] [--w 192 --h 96]   render a palette field or ramp',
         '  palette <recipe.json> [--t seconds] [--out palette.json]   sample palette recipes, paths and animation',
         '  inspect <scene|run>         discover fields, actions, ports and entities',
         '  environment inspect <scene|run> --at x,y,z [--t seconds] [--out report.json]   explain sky and local weather',
@@ -1021,7 +1021,9 @@ const CMD = {
       const input = JSON.parse(fs.readFileSync(path.resolve(pos[1]), 'utf8'));
       if (!input || Array.isArray(input) || typeof input !== 'object') die('A palette field needs a JSON object');
       const { type = 'hue-brightness', ...definition } = input;
-      if (!['hue-brightness', 'polar', 'coverage'].includes(type)) die('Palette field type must be hue-brightness, polar or coverage');
+      const ramp = type === 'spectrum' || type === 'primary';
+      if (!ramp && !['hue-brightness','polar','coverage'].includes(type))
+        die('Palette field type must be hue-brightness, polar, coverage, spectrum or primary');
       if (opt.view !== undefined) {
         if (type !== 'coverage') die('--view applies to coverage fields');
         definition.view = opt.view;
@@ -1029,9 +1031,10 @@ const CMD = {
       if (opt.saturation !== undefined) definition.saturation = num('saturation');
       const polar = type === 'polar', api = lib().KIT.palette;
       const compile = type === 'hue-brightness' ? api.hueBrightness : api[type];
-      const field = compile(definition);
-      const image = field.raster(num('w', polar ? 128 : 192), num('h', polar ? 128 : 96));
-      save(polar ? 'polar-colour.png' : type === 'coverage' ? 'palette-coverage.png' : 'hue-brightness.png', image, image.alpha);
+      const field = ramp ? api.ramp({type,...definition}) : compile(definition);
+      const image = field.raster(num('w', polar ? 128 : 192), num('h', polar ? 128 : ramp ? 32 : 96));
+      const name = ramp ? type+'-ramp' : polar ? 'polar-colour' : type === 'coverage' ? 'palette-coverage' : 'hue-brightness';
+      save(name+'.png',image,image.alpha);
       return;
     }
     if (!pos[0]) die('palette needs a recipe, path or animation JSON file');

@@ -19,6 +19,14 @@ const PaletteFields = (() => {
     return value * (1 - saturation * Math.max(0, Math.min(k, 4 - k, 1)));
   };
 
+  function hsv(hue, saturation, value, out) {
+    const h = wrap(hue)*6;
+    out[0] = channel(5,h,saturation,value);
+    out[1] = channel(3,h,saturation,value);
+    out[2] = channel(1,h,saturation,value);
+    return out;
+  }
+
   function swatch(value) {
     if (typeof value === 'string' && /^#[\da-f]{6}$/i.test(value)) {
       const packed = parseInt(value.slice(1), 16);
@@ -89,13 +97,7 @@ const PaletteFields = (() => {
   function field(palette, resolveColor, sampler, disk = false) {
     const swatches = readSwatches(palette, resolveColor);
     const rgb = [0, 0, 0];
-    const pick = sampler((hue, saturation, value) => {
-      const h = wrap(hue) * 6;
-      rgb[0] = channel(5, h, saturation, value);
-      rgb[1] = channel(3, h, saturation, value);
-      rgb[2] = channel(1, h, saturation, value);
-      return pixels.nearest(rgb, swatches);
-    });
+    const pick = sampler((hue, saturation, value) => pixels.nearest(hsv(hue,saturation,value,rgb),swatches));
     function index(u, v) {
       checkCoordinates(u, v);
       return pick(u, v);
@@ -230,6 +232,79 @@ const PaletteFields = (() => {
     return Object.freeze({palette:swatches,outputPalette,index,sample,measure,raster});
   }
 
-  return Object.freeze({ hueBrightness, polar, coverage });
+  function ramp(definition, resolveColor = swatch) {
+    if (!record(definition)) throw new TypeError('A palette ramp needs a spectrum or primary definition');
+    const { type, steps, palette } = definition;
+    const fields = type === 'spectrum' ? ['hue','saturation','brightness'] :
+      type === 'primary' ? ['accent','accentAt','shadow','highlight'] : null;
+    if (!fields || Object.keys(definition).some(key => !['type','steps','palette',...fields].includes(key)))
+      throw new TypeError('A palette ramp needs spectrum or primary controls');
+    if (steps !== undefined && (!Number.isSafeInteger(steps) || steps < 2 || steps > 48))
+      throw new RangeError('Palette ramp steps must be an integer from 2 to 48');
+
+    let paint, fullTurn = false, accentStop;
+    if (type === 'spectrum') {
+      const { hue = [0, 1], saturation = 1, brightness = 1 } = definition;
+      if (!pair(hue) || Math.abs(hue[1]-hue[0]) > 1 || !fraction(saturation) || !fraction(brightness))
+        throw new RangeError('Spectrum ramps need a hue span of at most one turn and saturation and brightness in [0, 1]');
+      const start = wrap(hue[0]), span = hue[1]-hue[0];
+      fullTurn = Math.abs(span) === 1;
+      paint = (t,out) => hsv(start+span*t,saturation,brightness,out);
+    } else {
+      const { accent, accentAt = .5, shadow = '#000000', highlight = '#ffffff' } = definition;
+      if (!Number.isFinite(accentAt) || accentAt <= 0 || accentAt >= 1)
+        throw new RangeError('Primary accent position must be between 0 and 1');
+      accentStop = accentAt;
+      const stops = readSwatches([shadow,accent,highlight],resolveColor);
+      const lab = stops.map(spaces.toOKLab), value = [0,0,0];
+      paint = (t,out) => {
+        let paint;
+        if (t === 0) paint = stops[0];
+        else if (t === accentAt) paint = stops[1];
+        else if (t === 1) paint = stops[2];
+        else {
+          const low = t < accentAt ? 0 : 1;
+          const u = low ? (t-accentAt)/(1-accentAt) : t/accentAt;
+          for (let i=0;i<3;i++) value[i] = lab[low][i]+u*(lab[low+1][i]-lab[low][i]);
+          paint = spaces.fromOKLab(value);
+        }
+        for (let i=0;i<3;i++) out[i] = paint[i];
+        return out;
+      };
+    }
+
+    const swatches = palette === undefined ? undefined : readSwatches(palette,resolveColor);
+    const scratch = [0,0,0];
+    const accentStep = steps >= 3 && accentStop !== undefined
+      ? Math.max(1,Math.min(steps-2,Math.floor(accentStop*steps))) : -1;
+    const stepColors = steps && Object.freeze(Array.from({length:steps},(_,i) => {
+      const t = i === accentStep ? accentStop : i/(fullTurn ? steps : steps-1);
+      const rgb = paint(t,[0,0,0]);
+      return swatches ? swatches[pixels.nearest(rgb,swatches)] : Object.freeze(rgb);
+    }));
+    const outputPalette = stepColors || swatches;
+    function sample(t, out=[0,0,0]) {
+      if (!Number.isFinite(t)) throw new TypeError('Palette ramp coordinate must be finite');
+      const u = coord(t);
+      if (!outputPalette) return paint(u,out);
+      const color = stepColors ? stepColors[Math.min(steps-1,Math.floor(u*steps))] :
+        swatches[pixels.nearest(paint(u,scratch),swatches)];
+      for (let i=0;i<3;i++) out[i] = color[i];
+      return out;
+    }
+    function raster(w,h) {
+      rasterSize(w,h);
+      const rgb = new Uint8Array(w*h*3), row = new Uint8Array(w*3), color = [0,0,0];
+      for (let x=0;x<w;x++) {
+        sample((x+.5)/w,color);
+        for (let i=0;i<3;i++) row[x*3+i] = Math.round(color[i]*255);
+      }
+      for (let y=0;y<h;y++) rgb.set(row,y*row.length);
+      return {w,h,rgb,outputPalette};
+    }
+    return Object.freeze({type,outputPalette,sample,raster});
+  }
+
+  return Object.freeze({ hueBrightness, polar, coverage, ramp });
 })();
 if (typeof module !== 'undefined') module.exports = PaletteFields;

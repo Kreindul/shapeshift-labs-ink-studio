@@ -239,3 +239,34 @@ ink-studio palette field examples/palette-coverage-field.json --view boundary --
 ```
 
 Use `"type": "coverage"` in a CLI field JSON file. The [spectrum chapel](../examples/palette-coverage.js) uses the same OKLab slice as [projected leaded glass](projected-effects.md#palette-coverage-fields).
+
+## Spectrum and primary ramps
+
+`K.palette.ramp(definition)` compiles either ramp into a normalized `sample(t)` and a horizontal `raster(width, height)`. Samples outside `[0,1]` use the nearest endpoint. The RGB result is normalized sRGB.
+
+- A `spectrum` ramp sweeps between two hue values in turns. Use `hue: [0, 1]` for a full wheel or choose a shorter, reversed, or seam-crossing sweep. `saturation` and `brightness` hold their values across the strip and each default to 1.
+- A `primary` ramp interpolates through its required `accent` in OKLab. `shadow` and `highlight` default to black and white. `accentAt` places the accent along the strip and defaults to `0.5`.
+- Either ramp can use `steps` from 2 through 48 for equal-width bands. Primary ramps with at least three bands keep a band for the accent. An optional `palette` maps each result to the nearest swatch using Ink’s RGB weights.
+
+```sh
+ink-studio palette field examples/spectrum-ramp.json --out spectrum.png
+ink-studio palette field examples/primary-ramp.json --out primary.png
+ink-studio render examples/spectrum-ramps.js --w 288 --h 152 --px 1 --raw --out signal-station.png
+```
+
+Use the same ramp definitions in [projected materials](projected-effects.md#palette-ramps), or set `skyEnvironment.sky.paletteRamp` for a directional sky. The [signal station example](../examples/spectrum-ramps.js) uses a short spectrum sweep for dusk and a stepped primary ramp on the painted sign.
+
+```json
+{
+  "sky": {
+    "paletteRamp": {
+      "axis": "elevation",
+      "domain": [0, 0.45],
+      "strength": 0.7,
+      "ramp": {"type": "spectrum", "hue": [0.09, -0.32], "saturation": 0.57, "steps": 14}
+    }
+  }
+}
+```
+
+Sky axes use radians. Elevation starts at the horizon and defaults to the full upper hemisphere. Azimuth starts at world +Z, increases toward +X, and defaults to one turn. The sky blends the ramp above the horizon before drawing the sun. Overcast reduces the blend, and an optional `gain` can bind `strength` to a nonnegative numeric profile channel. Scene reflections that sample the sky see the same ramp.

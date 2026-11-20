@@ -279,6 +279,19 @@ Use `pattern: 'palette-coverage'` and pass the [coverage field definition](palet
 
 The layer can also show the error or boundary view. Its output palette defaults to the colours actually used by that view, including leading when present. The normal projection, mask, strength, and blending settings apply. The layer runs in headless exports and through the shared `SurfaceLook` sampler.
 
+### Palette ramps
+
+Use `pattern: 'palette-ramp'` to project a [spectrum or primary ramp](palette-recipes.md#spectrum-and-primary-ramps) onto a surface. Put the ramp definition inside `paletteRamp`, use `axis: 'along'` for the first projection axis or `axis: 'across'` for the second, and set `size: [width, height]` in projection units. The layer affects that rectangle unless `wrap: true` repeats it. Finite bands or palette-constrained ramps supply their output swatches to the existing surface finish.
+
+```json
+{
+  "type": "projected",
+  "pattern": "palette-ramp",
+  "projection": {"origin": [-1, 0, 0], "along": [1, 0, 0], "across": [0, 1, 0]},
+  "paletteRamp": {"type": "primary", "accent": "#28a796", "steps": 12, "axis": "across", "size": [2, 1]}
+}
+```
+
 ### Author a shader in JavaScript
 
 A layer can name a shader from `surfaceEffects.shaders` or use a function as
