@@ -449,6 +449,7 @@ for a specified wetness. Most numeric properties accept a constant or
 | `fatigue.endurance`, `fatigue.life`, `fatigue.exponent` | Stress amplitude threshold, reference life in cycles and the stress-to-life exponent for structural bodies and worn joints. |
 | `plastic.yield`, `plastic.creep`, `plastic.limit` | Yield stress, creep rate above yield and a cap on permanent curvature over the normalized beam span. |
 | `sounds` | Names the `step`, `roll`, `impact` and `fracture` cues. Foot and wheel contacts carry cue IDs. Impacts and fractures expose their cues in the event record for a host to play. |
+| `contactEffects` | Scales ruts, spray, positional sound and camera shake from one measured [material contact](contact-effects.md). |
 | `appearance.dry`, `appearance.wet` | Equal-length hex color ramps mapped to the scene palette. The ground renderer interpolates them from the same moisture field. |
 
 Bind `materialAsset` and optional `materialWetness` to an entity or

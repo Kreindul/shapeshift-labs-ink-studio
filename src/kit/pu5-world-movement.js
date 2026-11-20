@@ -18,13 +18,13 @@
     const hit=read(ctx,config.water,point);
     return hit?.status==='ok'&&hit.value.depth>0?hit.value:null;
   }
-  function supports(ctx,config,x,z,low,high) {
-    const output=read(ctx,config.support,[x,(low+high)*.5,z],{low,high});
+  function supports(ctx,config,x,z,low,high,includeMaterial=false) {
+    const output=read(ctx,config.support,[x,(low+high)*.5,z],{low,high,...(includeMaterial&&{includeMaterial})});
     if(output?.status==='ok'&&Array.isArray(output.value))return output.value;
     const y=heightAt(ctx,config,x,z);
     if(y<low||y>high)return [];
     const surface=W.materials.probe(ctx.query,config.surface,[x,y,z]);
-    return [{y,normal:up,id:'ground',material:surface?.id??'ground'}];
+    return [{y,normal:up,id:'ground',material:surface?.id??'ground',...(includeMaterial&&surface&&{surface})}];
   }
   function groundPlan(ctx,config,from,to,{radius=.13,maxWade=.16,maxSlope=.9,exclude}={}) {
     const region=config.bounds;
@@ -176,7 +176,9 @@
     return {initial:()=>null,fields:{suitability:{type:'record',read:suitability}}};
   }
   function agents(config,{catalog}) {
-    check(config.contactEvents===undefined||typeof config.contactEvents==='boolean','contactEvents must be boolean');
+    const materialContacts=config.contactEvents==='material';
+    check(config.contactEvents===undefined||typeof config.contactEvents==='boolean'||materialContacts,
+      'contactEvents must be boolean or material');
     bounds(config.bounds);
     const initial={}, profiles=config.species??{}, source=config.agents??{}, poseCache=new WeakMap();
     check(record(profiles)&&record(source)&&Object.keys(source).length<=512,'Invalid creature catalog');
@@ -189,6 +191,7 @@
         Number.isFinite(spec.seekRange??3)&&(spec.seekRange??3)>0&&
         Number.isFinite(spec.maxWade??.14)&&(spec.maxWade??.14)>=0&&
         Number.isFinite(spec.stride??.38)&&(spec.stride??.38)>0&&
+        (spec.contactLoad===undefined||Number.isFinite(spec.contactLoad)&&spec.contactLoad>=0&&spec.contactLoad<=1e12)&&
         Array.isArray(spec.limbs??[])&&(spec.limbs??[]).length<=16&&(spec.limbs??[]).every(p=>vector(p)),
         'Invalid movement profile '+key);
     }
@@ -280,7 +283,7 @@
         const stepUp=Math.min(requested,bodyHeight-profile.radius*2-.025);
         const body=P.traversal.create({radius:profile.radius,height:bodyHeight,
           stepUp,stepDown:profile.drop??.5,
-          supports:(x,z,low,high)=>supports(ctx,config,x,z,low,high).filter(s=>{
+          supports:(x,z,low,high)=>supports(ctx,config,x,z,low,high,materialContacts).filter(s=>{
             const liquid=wet(ctx,config,[x,s.y,z]);
             return !liquid||liquid.surface-s.y<=profile.maxWade;
           }),
@@ -302,9 +305,14 @@
             const accumulated=travel+stepDistance,count=Math.floor(accumulated/stride);
             for(let n=0;n<count;n++){
               const at=V.lerp(foot,sample.foot,W.fields.clamp((stride-travel+n*stride)/stepDistance,0,1));
-              const cue=catalog?.getMaterial(sample.material)?.material.sounds?.step;
-              contacts.push({entity:agent.entity,point:at,support:sample.support,material:sample.material??null,weight:profile.weight??1,
-                ...(cue&&{cue})});
+              const entry=catalog?.getMaterial(sample.material), cue=entry?.material.sounds?.step;
+              const row={entity:agent.entity,point:at,support:sample.support,material:sample.material??null,weight:profile.weight??1,
+                ...(cue&&{cue})};
+              if(materialContacts){
+                const surface=sample.surface??(entry&&W.materials.profile(entry));
+                contacts.push(W.contactEffects.capture(ctx,row,contacts.length,'step',{speed:movedBy/ctx.dt,
+                  load:profile.contactLoad??10,travel:stride,normal:sample.normal,heading:direction,profile:surface}));
+              }else contacts.push(row);
               footprints++;
             }
             travel=accumulated-count*stride;
