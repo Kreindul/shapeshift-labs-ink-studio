@@ -51,6 +51,7 @@ function makeSculpt(B, rest) {
   const S = {
     res: 0.09,
     adaptiveSampling: false,
+    keepRenderSdf: false,
     sun: norm([-0.5, 0.8, 0.45]),
     amb: 0.14,
     sky: 0.26,
@@ -1603,6 +1604,23 @@ function makeSculpt(B, rest) {
     if (field) field.ready();
     return { field, parts, noise: n3 };
   };
+  S.renderSurface = (x,y,z) => {
+    fieldAll(x,y,z);
+    return {body:own, owner:ownNeg?.mat?.r ? ownNeg : own};
+  };
+  let renderSdf;
+  function captureRenderSdf() {
+    const positive = pos.filter(p => !p.whole && Number.isFinite(p.br) && p.br < 1e8 && SdfAssist.opaque(p.mat));
+    if (!positive.length) return null;
+    const field = makeSculpt(B,{positive,negative:neg.slice()});
+    const bounds = field.modelBounds(.05);
+    field.ready();
+    const rows = new Map();
+    const owners = new Set([...positive,...neg.filter(p=>SdfAssist.opaque(p.mat))]);
+    const {pre,clip} = S;
+    const accepts = (pre || clip) && ((x,y,z)=>(!pre || pre(x,y,z)) && (!clip || clip(x,y,z)));
+    return { bounds, distance:field.sdf, locate:field.renderSurface, rows, owners, accepts };
+  }
   S.solidCount = () => pos.length + neg.length;
   S.add = add;
   S.psd = psd; // the finished field (distance to the nearest surface), for whatever comes after the bake
@@ -1709,7 +1727,7 @@ function makeSculpt(B, rest) {
     const capture = B.describeAlbedo && (preview || S.captureAlbedo || stagedAlbedo(material.surface) || stagedAlbedo(material.top?.surface));
     const fine = owner?.detailBudget?.fine;
     const collectStyle = B.describePixelStyle && (material.pixelStyle || material.top?.pixelStyle);
-    if (!capture && !B.describeSplats && !collectStyle && !material.optical && !material.top?.optical) return light(material, ...sample, undefined, fine);
+    if (!renderSdf && !capture && !B.describeSplats && !collectStyle && !material.optical && !material.top?.optical) return light(material, ...sample, undefined, fine);
     const first = B.count();
     let effective = material, style, pair;
     if (material.top || collectStyle) light(material, ...sample, (used, settings, shades) => {
@@ -1719,6 +1737,12 @@ function makeSculpt(B, rest) {
     }, fine);
     else light(material, ...sample, undefined, fine);
     const end = B.count();
+    if (first < end && renderSdf?.owners.has(owner) && SdfAssist.opaque(effective)) {
+      if (!renderSdf.rows.has(owner)) renderSdf.rows.set(owner,[]);
+      const ranges = renderSdf.rows.get(owner);
+      if (ranges.at(-1)?.[1] === first) ranges.at(-1)[1] = end;
+      else ranges.push([first,end]);
+    }
     if (effective.optical !== undefined) B.describeOptical?.(first, end, effective.optical);
     if (style) B.describePixelStyle?.(first, end, style, pair);
     const surfaceId = effective.surfaceId ?? (effective === material ? undefined : effective.surface?.id) ?? material.surfaceId;
@@ -1860,6 +1884,8 @@ function makeSculpt(B, rest) {
   S.bake = () => {
     const override = typeof globalThis !== 'undefined' ? globalThis.INK_ADAPTIVE_SAMPLING : undefined;
     const sampling = !S.capture && SculptSampling.prepare(override ?? S.adaptiveSampling);
+    const keepSdf = S.keepRenderSdf || (typeof globalThis !== 'undefined' && globalThis.INK_RETAIN_RENDER_SDF);
+    renderSdf = keepSdf && !S.capture && B.keepRenderSdf ? captureRenderSdf() : null;
     buildGrid();
     L = S.sun;
     for (const p of pos.concat(neg)) {
@@ -1915,6 +1941,11 @@ function makeSculpt(B, rest) {
         } else shadeOwned(p, p.mat, res, x, y, z, nx, ny, nz, !!S.ghostLit);
       });
     }
+    if (renderSdf?.rows.size) {
+      const {owners, ...source} = renderSdf;
+      B.keepRenderSdf(source);
+    }
+    renderSdf = null;
     layInstances();
     B.born(null);
     B.wet(null);

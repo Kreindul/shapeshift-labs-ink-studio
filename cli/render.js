@@ -26,6 +26,8 @@ const EffectPalettes = require('../src/effect-palettes.js');
 const ArtEffects = require('../src/art-effects.js');
 const ArtStability = require('../src/art-stability.js');
 const StableDetail = require('../src/stable-detail.js');
+const SdfAssist = require('../src/sdf-assist.js');
+const SdfRaster = require('./sdf-assist.js');
 const { footprint, sampledDepth } = require('./splat-sampling.js');
 const { createMaskResolve, applyMasks } = require('./look-mask-resolve.js');
 const { createLookPass } = require('./look-pass.js');
@@ -225,11 +227,13 @@ function renderFrame(world, o, preparedPalettes) {
   const stableDetail = StableDetail.prepare(o.stableDetail ?? look.stableDetail);
   const coverageMode = ContributionRules.coverageMode(o.splatCoverage ?? look.splatCoverage);
   const orderMode = o.splatOrder ?? look.splatOrder ?? 'center';
+  const sdfSettings = SdfAssist.prepare(o.sdfAssist ?? look.sdfAssist);
+  const useSdf = sdfSettings && world.renderSdfs?.length && !o.reflectionPlane?.select;
   const sortedSurfaces = orderMode === 'surface';
   const transparency = SplatOrder.transparency(o.stableTransparency ?? look.stableTransparency);
   const fragmentBudget = o.fragmentBudget ?? 500000;
   if (!['center', 'surface'].includes(orderMode) ||
-      (sortedSurfaces && (!Number.isSafeInteger(fragmentBudget) || fragmentBudget < 1 || fragmentBudget > 2e6)))
+      ((sortedSurfaces || useSdf) && (!Number.isSafeInteger(fragmentBudget) || fragmentBudget < 1 || fragmentBudget > 2e6)))
     throw new RangeError('Invalid splat order or fragment budget');
   const probe = typeof o.fragmentProbe === 'function' ? o.fragmentProbe : null;
   const styled = !o.raw && !o.samples && !o.captureCoverage;
@@ -488,10 +492,12 @@ function renderFrame(world, o, preparedPalettes) {
     SkyEnvironment.aerial(world.aerialPerspective, o.aerialPerspective, environment?.parameters) : null;
   const cloudShadow = clouds?.shadow;
   const spriteAtlases=AtlasSprites.placements(world.spriteAtlases,o.spriteAtlases);
-  const surfaceFragments=o.spriteSurfaces===false?[]:SurfaceRaster.rasterize(world.spriteSurfaces,{V,W,H,focal,ortho,near,
-    clip:reflectionPlane && (p=>SceneOptics.planeDistance(reflectionPlane,...p)>reflectionPlane.bias)});
+  const planeClip = reflectionPlane && (p=>SceneOptics.planeDistance(reflectionPlane,...p)>reflectionPlane.bias);
+  const surfaceFragments=o.spriteSurfaces===false?[]:SurfaceRaster.rasterize(world.spriteSurfaces,{V,W,H,focal,ortho,near,clip:planeClip});
+  const sdf = useSdf ? SdfRaster.rasterize(world,d,sdfSettings,{w:W,h:H,rayAt,near,clip:planeClip}) : null;
+  for (const sample of sdf?.samples ?? []) surfaceFragments.push(sample);
   const surfaceDepth=surfaceFragments.length?new Float32Array(W*H).fill(Infinity):null;
-  for(const sample of surfaceFragments)surfaceDepth[sample.p]=sample.z;
+  for(const sample of surfaceFragments)surfaceDepth[sample.p]=Math.min(surfaceDepth[sample.p],sample.z);
   const sprites=AtlasRaster.rasterize(spriteAtlases,{
     eye,V,W,H,focal,ortho,near,rayAt,time:t,override:o.spriteAtlasMode,sun,
     objectDither: anchoring && stable.anchorSpaces.has('object'),
@@ -499,7 +505,7 @@ function renderFrame(world, o, preparedPalettes) {
     visibility:(position)=>(cloudShadow?.(...position)??1)*(exposure?.light?.(...position)??1),
     clip:reflectionPlane && (position=>SceneOptics.planeDistance(reflectionPlane,...position)>reflectionPlane.bias)
   });
-  for(const sample of surfaceFragments)sprites.push(sample);
+  for(const sample of surfaceFragments)if(!sample.sdf)sprites.push(sample);
   sprites.sort((a,b)=>b.z-a.z);
   const cloudEye = ortho ? eye.map((value, i) => value - (eyeD - dist) * V[2 + i * 4]) : eye;
   const cloudView = clouds?.view?.(cloudEye, ortho ? [V[2],V[6],V[10]] : null);
@@ -575,7 +581,7 @@ function renderFrame(world, o, preparedPalettes) {
     return { ...quality, time: t, cloudShadow, flash, media, exposure, cutouts, cloud:cloudView, effectCoverage: trackMedia,
       cloudStart:cloudView && eyeD-dist, fogTransmittance:!!fogPass, bands:direction?.bands, counters:counters?.volume };
   };
-  const geometrySample = probe || sortedSurfaces || aerial || cloudShadow || flash || cloudView ? sampleFrames(world, t) : null;
+  const geometrySample = probe || sortedSurfaces || sdf || aerial || cloudShadow || flash || cloudView ? sampleFrames(world, t) : null;
   const captured = o.captureCoverage || transparent ? new Float32Array(W * H) : null;
   // The reflected pass uses the same projection and reads only the plane's front side.
   const reflectionTint = effects?.reflection || o.reflectionTint;
@@ -903,7 +909,7 @@ function renderFrame(world, o, preparedPalettes) {
   const FN =
       (defaultFine || detailBudget?.fineOn) && world.fine && world.fine.length >= baseCount * 12 ? world.fine : null,
     FPAL = FN ? world.pal.map((h, i) => hex(i)) : null;
-  let deferred = sortedSurfaces ? new Map() : null, deferredCount = 0, orderFallback = false;
+  let deferred = sortedSurfaces || sdf ? new Map() : null, deferredCount = 0, orderFallback = false;
   const foreground = direction?.foreground;
   const contrastColor = (foreground || protection) && [0,0,0];
   const targetFog = (amount, rule) => rule && rule.fogScale !== 1 ? clamp(amount*rule.fogScale,0,1) : amount;
@@ -913,7 +919,7 @@ function renderFrame(world, o, preparedPalettes) {
   const foregroundDepth = z => z - (eyeD-dist);
   function composite(p, i, z, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, mark,
     opticalDepth = z, sprite, haze = 0, rule, reflected) {
-    if(surfaceDepth&&!sprite?.surface&&opticalDepth>surfaceDepth[p]+1e-5)return;
+    if (surfaceDepth && (!sprite?.surface || sdf) && opticalDepth > surfaceDepth[p]+1e-5) return;
     const p3 = p * 3, ia = 1 - a;
     if (counters) {
       counters.fragments++;
@@ -970,30 +976,51 @@ function renderFrame(world, o, preparedPalettes) {
   let spriteIndex=0;
   const normalizedDepth=z=>clamp((z-(eyeD-R))/(2*R),0,1);
   function spriteSample(sprite) {
-    const {z,alpha,color,protection:rule}=sprite;
+    const {z,alpha,position,protection} = sprite, i = sprite.sdf ? sprite.row.i : -1;
+    const rule = i<0 ? protection : subject?.(i);
     const dn=normalizedDepth(z), fogMix=world.fog.max>0&&world.fog.start<1 ?
-      targetFog(sstep(world.fog.start,1,dn)*world.fog.max*(exposure?.fog?.(...sprite.position)??1),rule) : 0;
+      targetFog(sstep(world.fog.start,1,dn)*world.fog.max*(exposure?.fog?.(...position)??1),rule) : 0;
+    let color=sprite.color, highlight=0, paletteId=0, reflected;
+    if (i>=0) {
+      const packed=d[i*16+7];
+      color=live?.albedo(i) ?? [(packed&255)/255, (packed>>8&255)/255, (packed>>16)/255];
+      const staged=stages && stages.at(i);
+      const sample=(staged?.material || staged?.lit) && (stageMasks ? stageSample(i,position) : undefined);
+      if (staged?.material) color=stagedMaterial(i,staged.material,color,sample);
+      if (live?.normal(i)) {
+        live.gains(i,...position,sunGains);
+        color=color.map((v,k)=>v*sunGains[k]);
+      }
+      if (surface?.has(i) && !PIX?.[i*8]) {
+        const value=surface.shade(i,...position,X[i],Y[i],Z[i],...color,sprite.p%W+.5,Math.floor(sprite.p/W)+.5,
+          undefined,fragmentReflection);
+        color=value.slice(0,3);
+        highlight=value[4]; paletteId=value[5];
+        reflected=fragmentReflection?.slice();
+      }
+      if (staged?.lit) color=RenderStages.apply(staged.lit,color,sample);
+    }
     const rgb=color.map((value,c)=>value+(fog[c]-value)*fogMix);
-    return [-1,z,dn,alpha,...rgb,alpha>=.5,false,0,0,false,false,alpha<.5,false,undefined,z,sprite,fogMix,rule];
+    return [i,z,dn,alpha,...rgb,alpha>=.5,false,highlight,paletteId,false,false,alpha<.5,false,undefined,z,sprite,fogMix,rule,reflected];
   }
   function playSprites(through,queued) {
     while (spriteIndex<sprites.length && sprites[spriteIndex].z>=through) {
       const sprite=sprites[spriteIndex++], sample=spriteSample(sprite);
-      if (queued) {
+      if (deferred && (queued || sdf?.hits[sprite.p])) {
         if (!deferred.has(sprite.p)) deferred.set(sprite.p,[]);
         deferred.get(sprite.p).push({ sort:sprite.z,index:spriteIndex-sprites.length-1,center:sprite.z,sample });
       } else composite(sprite.p,...sample);
     }
   }
   function playFragments(sort,through=-Infinity) {
-    if (sprites.length) playSprites(through,true);
+    if (sprites.length) playSprites(through,sortedSurfaces);
     if (counters && deferred.size) counters.deferredFlushes++;
     for (const [p, layers] of deferred) {
       if (sort) {
         layers.sort((a, b) => b.sort - a.sort || a.index - b.index);
         if (transparency) SplatOrder.stabilize(layers, transparency.depthTolerance, entry => -entry.sort,
           entry => entry.transparent, entry => entry.index);
-      } else if (sprites.length) {
+      } else if (sprites.length || sdf) {
         layers.sort((a,b)=>b.center-a.center || a.index-b.index);
         if (transparency) SplatOrder.stabilize(layers, transparency.depthTolerance, entry => -entry.center,
           entry => entry.transparent, entry => entry.index);
@@ -1009,9 +1036,14 @@ function renderFrame(world, o, preparedPalettes) {
     }
     deferred = null;
   }
+  // Carriers are below the original color fragments at the same traced depth.
+  for (const sample of sdf?.samples ?? []) {
+    if (sample.z > surfaceDepth[sample.p]+1e-5) continue;
+    deferred.set(sample.p,[{sort:sample.z,center:sample.z,index:-1e9,transparent:false,sample:spriteSample(sample)}]);
+  }
   for (let n = 0; n < N; n++) {
     const i = order[n];
-    if (!deferred && spriteIndex<sprites.length) playSprites(-depth[i],false);
+    if ((!sortedSurfaces || !deferred) && spriteIndex<sprites.length) playSprites(-depth[i],false);
     const q = i * 16,
       al = AL[i],
       x = X[i],
@@ -1223,7 +1255,7 @@ function renderFrame(world, o, preparedPalettes) {
     const shadeFraction = (styleKey - Math.floor(styleKey)) * 2;
     const shadeRaster = (fi < 0 || fineWeight < 1) && (styleKey & MaterialPixelStyle.PAIR) && !pixelSurface &&
       !liveNormal && !staged?.material && !add[i] && !wet[i] && pk === (shadeFraction >= .5 ? highStyle : lowStyle);
-    const wantsDepth = probe || deferred || aerial || cloudView;
+    const wantsDepth = probe || deferred || aerial || cloudView || sdf;
     const probeNormal = !fieldParticle && (wantsDepth || bakedCloud) ? geometrySample(i).normal : null;
     const probeCenter = wantsDepth && [x, y, z];
     const probeReach = wantsDepth ? 3 * Math.sqrt(c00 + c11 + c22) : 0;
@@ -1238,6 +1270,9 @@ function renderFrame(world, o, preparedPalettes) {
         else a = ContributionRules.alpha(pw, al, solid && !softCoverage, edgeStyle, continuousCoverage);
         a *= geometryWeight;
         if (a < ContributionRules.minimum) continue;
+        const p = iy*W+ix, sdfRow = sdf?.rows[i], sdfHit = sdf?.hits[p];
+        const exact = sdfRow && sdf.fragment(sdfRow,p,rayAt(ix+.5,iy+.5),-cz);
+        if (exact === false || exact && pixelSurface && PIX[exact.row.i*8]) continue;
         lookPass?.begin(centerMark);
         let pr = r,
           pg = g,
@@ -1269,7 +1304,7 @@ function renderFrame(world, o, preparedPalettes) {
           }
         }
         if (liveNormal) {
-          const point = surfacePoint(rayAt(ix + .5, iy + .5), liveNormal, x, y, z, -cz, R);
+          const point = exact?.position ?? surfacePoint(rayAt(ix + .5, iy + .5), liveNormal, x, y, z, -cz, R);
           live.gains(i, ...point, sunGains);
           pr *= sunGains[0];
           pg *= sunGains[1];
@@ -1289,7 +1324,7 @@ function renderFrame(world, o, preparedPalettes) {
         }
         let hit, reflected = centered ? centerReflection : undefined;
         if (fragmentSurface) {
-          hit = surfacePoint(rayAt(ix + 0.5, iy + 0.5), normal, x, y, z, -cz, R);
+          hit = exact?.position ?? surfacePoint(rayAt(ix + 0.5, iy + 0.5), normal, x, y, z, -cz, R);
           [pr, pg, pb, alpha, highlight, paletteId] = surface.shade(i, ...hit, x, y, z, pr, pg, pb, ix + 0.5, iy + 0.5,
             lookPass?.surface, fragmentReflection);
           reflected = fragmentReflection;
@@ -1344,26 +1379,28 @@ function renderFrame(world, o, preparedPalettes) {
         }
         a *= alpha;
         if (a < 0.004) continue;
-        const p = iy * W + ix, wd = writesDepth && alpha === 1;
-        const surfaceZ = wantsDepth ?
-          sampledDepth(rayAt(ix + .5, iy + .5), probeNormal, probeCenter, -cz, probeReach) : -cz;
+        const wd = writesDepth && alpha === 1 && !exact;
+        const surfaceZ = exact?.z ?? (wantsDepth ?
+          sampledDepth(rayAt(ix + .5, iy + .5), probeNormal, probeCenter, -cz, probeReach) : -cz);
+        if (sdfHit && surfaceDepth && surfaceZ>surfaceDepth[p]+1e-5) continue;
         if (probe) probe(p, i, -cz, surfaceZ, pr, pg, pb, a);
         if (deferred && deferredCount >= fragmentBudget) {
           playFragments(false,-cz);
           orderFallback = true;
         }
-        if (deferred) {
-          const entry = { sort: flags & 4 ? Infinity : surfaceZ, index: n, center: -cz,
-            transparent: !wd && !(flags & 4),
-            sample: [i, surfaceZ, clamp((surfaceZ - (eyeD - R)) / (2 * R), 0, 1), a, pr, pg, pb,
+        const opticalDepth = aerial || cloudView || sdfHit ? surfaceZ : undefined;
+        if (deferred && (sortedSurfaces || sdfHit)) {
+          const entry = { sort: flags & 4 ? Infinity : surfaceZ, index: n, center: exact?.z ?? -cz,
+            transparent: !wd && !exact && !(flags & 4),
+            sample: [i, surfaceZ, normalizedDepth(surfaceZ), a, pr, pg, pb,
               wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, lookPass && { ...lookPass.mark },
-              aerial || cloudView ? surfaceZ : undefined, undefined, fogMix, rule, reflected?.slice()] };
+              opticalDepth, undefined, fogMix, rule, reflected?.slice()] };
           if (!deferred.has(p)) deferred.set(p, []);
           deferred.get(p).push(entry);
           deferredCount++;
           if (counters) counters.peakDeferredFragments = Math.max(counters.peakDeferredFragments,deferredCount);
-        } else composite(p, i, -cz, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass,
-          lookPass?.mark, aerial || cloudView ? surfaceZ : undefined, undefined, fogMix, rule, reflected);
+        } else composite(p, i, exact?.z ?? -cz, exact ? normalizedDepth(exact.z) : dn, a, pr, pg, pb, wd, emits, highlight,
+          paletteId, detailParticle, projected, coat, glass, lookPass?.mark, opticalDepth, undefined, fogMix, rule, reflected);
       }
     }
   }
@@ -1480,9 +1517,10 @@ function renderFrame(world, o, preparedPalettes) {
           dzw = ortho ? -R22 : R02 * vx + R12 * vy - R22,
           den = nx * dxw + ny * dyw + nz * dzw,
           sd = Math.abs(den) > 1e-6 ? (nx * (X[i] - ox0) + ny * (Y[i] - oy0) + nz * (Z[i] - oz0)) / den : 0,
-          px = sd ? ox0 + dxw * sd : X[i],
-          py = sd ? oy0 + dyw * sd : Y[i],
-          pz = sd ? oz0 + dzw * sd : Z[i],
+          exact = sdf?.hits[p]?.row.i===i ? sdf.hits[p].position : null,
+          px = exact ? exact[0] : sd ? ox0 + dxw * sd : X[i],
+          py = exact ? exact[1] : sd ? oy0 + dyw * sd : Y[i],
+          pz = exact ? exact[2] : sd ? oz0 + dzw * sd : Z[i],
           pat = PIX[f + 2],
           ev = pat ? PT[pat - 1] : null,
           /* (how big a screen pixel is, for the patterns' detail: one for the whole picture, from the camera's distance alone, as on the

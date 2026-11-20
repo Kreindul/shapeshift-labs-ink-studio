@@ -265,6 +265,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     surfaceData = null,
     surfacePending = false,
     shadowLod;
+  const renderSdfs = [];
   const surfaces = [],
     surfaceIds = new Map(),
     surfaceRow = new Float32Array(SurfaceLook.STRIDE);
@@ -1051,6 +1052,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
         ...(paintDecals.length && { paintDecals }),
         ...(correctionRows.length && { paintCorrections: PaintCorrections.bind(correctionRows) }),
         renderMetadata: renderRows(),
+        ...(renderSdfs.length && {renderSdfs:renderSdfs.slice()}),
         ...(precipitationRanges.length && { precipitationRanges: precipitationRanges.slice() }),
         ...(fallingSnowRanges.length && { fallingSnowRanges: fallingSnowRanges.slice() }),
         ...(materialAlbedo && { materialAlbedo: materialAlbedo.slice(0, n) }),
@@ -1118,6 +1120,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     surfacePending = false;
     shadowLod = undefined;
     surfaces.length = 0;
+    renderSdfs.length = 0;
     surfaceIds.clear();
     bounced = 0;
     cidx.length = 0;
@@ -1161,6 +1164,14 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     shadowNext,
     count: () => n,
     describeOptical,
+    keepRenderSdf(source) {
+      for (const ranges of source.rows.values()) for (const range of ranges) {
+        const [start,end] = range, points = new Float32Array((end-start)*3);
+        for (let i=start;i<end;i++) points.set(data.subarray(i*16,i*16+3),(i-start)*3);
+        range.push(points);
+      }
+      renderSdfs.push(source);
+    },
     describeSplats: renderMetadata ? describeSplats : undefined,
     describeAlbedo,
     describePixelStyle,

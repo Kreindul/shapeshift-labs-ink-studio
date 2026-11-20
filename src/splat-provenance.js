@@ -139,6 +139,8 @@ const SplatProvenance = (() => {
     if (indices.some(i => !Number.isSafeInteger(i) || i < 0 || i >= world.count) || new Set(indices).size !== indices.length)
       throw new RangeError('A splat subset needs distinct indices from the world');
     const result = { ...world, count: indices.length };
+    if (result.renderSdfs && (indices.length !== world.count || indices.some((index,i)=>index !== i)))
+      delete result.renderSdfs;
     const remap = new Map(indices.map((source, i) => [source, i]));
     function take(source, stride, Type) {
       const out = new Type(indices.length * stride);

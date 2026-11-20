@@ -40,13 +40,13 @@
         upper: build(ids.slice(middle + 1), depth + 1) };
     }
     const root = build(points.map((_, i) => i));
-    return { sample(p) {
+    return { sample(p, accept) {
       if (!point(p)) throw new TypeError('Attribute queries need a finite XYZ point');
       let distance = Infinity, index = -1;
       function visit(node) {
         if (!node) return;
         const at = points[node.index], candidate = V.dist(at, p), split = p[node.axis] - at[node.axis];
-        if (candidate < distance || (candidate === distance && node.index < index)) {
+        if ((candidate < distance || (candidate === distance && node.index < index)) && (!accept || accept(node.index))) {
           index = node.index;
           distance = candidate;
         }

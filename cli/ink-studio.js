@@ -166,6 +166,7 @@ function build(id, seedOverride, { paint = true } = {}) {
     else globalThis.INK_ADAPTIVE_SAMPLING = JSON.parse(fs.readFileSync(path.resolve(sampling), 'utf8'));
     require('../src/sculpt-sampling.js').prepare(globalThis.INK_ADAPTIVE_SAMPLING);
   }
+  if (opt['sdf-assist'] !== undefined) globalThis.INK_RETAIN_RENDER_SDF = Boolean(sdfAssistOption());
   const s = scene(id);
   // Load paint by scene ID so rendering the same file from another path finds its decals.
   const decalFile = path.join(paintDirectory(s.id), 'decals.json');
@@ -558,6 +559,15 @@ function cameraOptions() {
   return { cameraShot, ortho: onOffOption('ortho') };
 }
 
+let sdfAssistOverride;
+function sdfAssistOption() {
+  const value = opt['sdf-assist'];
+  if (value === undefined) return undefined;
+  if (value === true || value === 'on') return true;
+  if (value === 'off') return false;
+  return sdfAssistOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
+}
+
 const view = extra =>
   Object.assign(
     {
@@ -592,6 +602,7 @@ const view = extra =>
       colored: !!opt.colored,
       splatOrder: opt['splat-order'],
       splatCoverage: opt['splat-coverage'],
+      sdfAssist: sdfAssistOption(),
       stableTransparency: onOffOption('stable-transparency'),
       inspection: opt.inspection === 'off' ? false : opt.inspection === undefined ? undefined :
         (inspectionOverride ??= JSON.parse(fs.readFileSync(path.resolve(opt.inspection), 'utf8'))),
@@ -828,7 +839,7 @@ const CMD = {
         'layered horizon: --horizon-bands on|off|file.json',
         'art direction: --art-direction on|off|painted-pixel|storm-silhouette|soft-dawn|file.json',
         'effect palette options: --effect-palettes on|off|file.json',
-        'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable on|off|file.json --stable-detail on|off|file.json --snap on|off --dither-space screen|world|object --dither-spacing n --dither-origin x,y,z --resolve native|coverage|clusters --splat-order center|surface --splat-coverage legacy|continuous|soft --stable-transparency on|off --inspection file.json|off --inspection-focus id --composite file.json|off --render-graph file.json|off --afterimages file.json|off --reconstruction file.json|off --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
+        'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable on|off|file.json --stable-detail on|off|file.json --snap on|off --dither-space screen|world|object --dither-spacing n --dither-origin x,y,z --resolve native|coverage|clusters --splat-order center|surface --splat-coverage legacy|continuous|soft --sdf-assist on|off|file.json --stable-transparency on|off --inspection file.json|off --inspection-focus id --composite file.json|off --render-graph file.json|off --afterimages file.json|off --reconstruction file.json|off --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
       ].join('\n')
     );
   },
