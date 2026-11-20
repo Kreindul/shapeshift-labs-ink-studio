@@ -4,7 +4,8 @@
 const fs = require('fs'),
   path = require('path'),
   R = require('./render.js'),
-  PNG = require('./png.js');
+  PNG = require('./png.js'),
+  ArtDirection = require('../src/art-direction.js');
 const CWD = process.cwd();
 let cfg = {};
 try {
@@ -196,6 +197,7 @@ function tap(w, t0, t1) {
 // put the world at time t. A diorama that says it remembers the past (anim.stateful) is walked there a sixtieth of a second at a time
 function pose(w, t) {
   if (!w.anim) return;
+  t = ArtDirection.time(ArtDirection.prepare(w.look?.artDirection,artDirectionOption()),t);
   if (w.anim.stateful) {
     if (t < w.clock) die('this diorama cannot be run backwards: ask for times in order');
     while (w.clock < t - 1e-9) {
@@ -226,7 +228,7 @@ function pose(w, t) {
 const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
 if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
   die('--px needs a positive integer');
-let stableOverride, lutOverride, stackOverride, effectPalettesOverride, constraintsOverride, skyOverride, skyProfiles, celestialOverride, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, splatFieldsOverride, atmosphereEmittersOverride, inputSpriteAtlas;
+let artDirectionOverride, stableOverride, lutOverride, stackOverride, effectPalettesOverride, constraintsOverride, skyOverride, skyProfiles, celestialOverride, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, splatFieldsOverride, atmosphereEmittersOverride, inputSpriteAtlas;
 function skyProfileOverrides(value) {
   if (typeof value !== 'string') die('--sky-profile expects track=profile pairs');
   const pairs = value.split(',').map(entry => entry.split('=').map(part => part.trim()));
@@ -413,6 +415,15 @@ function onOffOption(flag) {
   die('--' + flag + ' expects on or off');
 }
 
+function artDirectionOption() {
+  const value = opt['art-direction'];
+  if (value === undefined) return;
+  if (value === 'off') return false;
+  if (value === 'on' || value === true) return true;
+  if (/\.json$/i.test(value)) return artDirectionOverride ??= JSON.parse(fs.readFileSync(path.resolve(value),'utf8'));
+  return value;
+}
+
 function stabilityOption() {
   const value = opt.stable;
   if (value === 'off') return false;
@@ -457,6 +468,7 @@ const view = extra =>
       h: num('h', 620),
       px: artPixelSize,
       stable: stabilityOption(),
+      artDirection: artDirectionOption(),
       effectPalettes: effectPalettesOption(),
       artEffects: opt.effects === 'off' ? false : opt.effects,
       ink: opt.ink === 'off' ? false : opt.ink,
@@ -552,7 +564,7 @@ function die(m) {
   console.error(m);
   process.exit(1);
 }
-const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,atmosphereEmittersOption,effectPalettesOption,stabilityOption});
+const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,atmosphereEmittersOption,effectPalettesOption,stabilityOption,artDirectionOption});
 const worldCommands = new Set(['inspect','probe','trace','field','scene','sim']);
 const CMD = {
   help() {
@@ -659,6 +671,7 @@ const CMD = {
         'sprite options: --sprite-atlas on|off|atlas.json --sprite-at x,y,z --sprite-scale n --sprite-atlas-mode card|impostor',
         'shaped fog options: --shaped-atmosphere on|off|file.json --volume-cutouts on|off|file.json',
         'fog lighting options: --volume-local-lights on|off --volume-local-shadows on|off',
+        'art direction: --art-direction on|off|painted-pixel|storm-silhouette|soft-dawn|file.json',
         'effect palette options: --effect-palettes on|off|file.json',
         'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable on|off|file.json --snap on|off --dither-space screen|world|object --dither-spacing n --dither-origin x,y,z --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
       ].join('\n')

@@ -244,7 +244,8 @@ const SkyEnvironment = (() => {
 
   function atmosphere(sky, ray, output, diskVisible) {
     const height = ray[1], horizon = height > 0 ? sky.zenith : sky.ground;
-    const fade = height > 0 ? Math.sqrt(height) : clamp(-height * 3);
+    const gradient = height > 0 ? Math.sqrt(height) : clamp(-height * 3);
+    const fade = sky.bands ? sky.bands(gradient) : gradient;
     const angle = dot(ray, sky.sun);
     const disk = diskVisible && !sky.celestial?.replacesSun && height >= 0 ? .92 * clamp((angle - sky.sunEdge) / (sky.sunCore - sky.sunEdge)) : 0;
     const glow = angle > 0 && height >= 0 ? .22 * Math.exp(-19 * (1 - angle)) : 0;

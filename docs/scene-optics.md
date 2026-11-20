@@ -21,6 +21,8 @@ Use [Atmosphere emitters](atmosphere-emitters.md) to release smoke, steam, spray
 
 Use [Effect palette ramps](effect-palettes.md) to reserve tone steps for fog, clouds, night skies, and emissive details.
 
+Use [Art direction](art-direction.md) to control cloud edges, atmospheric bands, foreground contrast, and held motion.
+
 ## Planar reflections
 
 ```js

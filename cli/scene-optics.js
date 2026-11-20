@@ -1,5 +1,6 @@
 const SceneOptics = require('../src/scene-optics.js');
 const CloudField = require('../src/cloud-field.js');
+const ArtDirection = require('../src/art-direction.js');
 const { airTransmission } = require('../src/sky-environment.js');
 
 function cameraRays(view, eye, W, H, focal, ortho) {
@@ -123,6 +124,7 @@ function traceMedia(volumes, segments, origin, direction, stop, result, sample, 
     if (end <= cursor) return;
     if (volumes.length) {
       SceneOptics.trace(volumes, origin, direction, end, sample, { ...options, start: cursor });
+      if (options?.bands) ArtDirection.remapOpacity(sample, options.bands);
       composite(6);
     }
     if (options?.cloud) {
@@ -132,7 +134,8 @@ function traceMedia(volumes, segments, origin, direction, stop, result, sample, 
     if (!aerial || end <= aerial.start || aerialThrough === 0) return;
     const from = Math.max(cursor, aerial.start);
     dryDistance += options?.exposure?.fogDistance?.(origin,direction,from,end) ?? end-from;
-    const through = airTransmission(aerial, dryDistance), ratio = through / aerialThrough;
+    const raw = airTransmission(aerial, dryDistance);
+    const through = options?.bands ? 1-options.bands(1-raw) : raw, ratio = through / aerialThrough;
     if (trackCoverage) result[6] += remaining() * (1-ratio);
     for (let channel = 0; channel < 3; channel++) {
       result[channel] += result[channel + 3] * (1 - ratio) * aerial.color[channel];
@@ -194,7 +197,8 @@ function mediaSampler(volumes, water, rayAt, width, horizon, options, aerial) {
       ray.aerial = { ...aerial, color: aerial.color(pixel, ray.direction) };
     }
     if (useAerial && !ray.segments.length && !volumes.length && !options.cloud) {
-      const remaining = airTransmission(aerial, stop - aerial.start);
+      const raw = airTransmission(aerial, stop - aerial.start);
+      const remaining = options.bands ? 1-options.bands(1-raw) : raw;
       opacity = fogCoverage = 1 - remaining;
       return [0, 1, 2].map(i => remaining * rgb[i] + opacity * ray.aerial.color[i]);
     }
@@ -288,6 +292,7 @@ function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon, quality, ti
     }
     if (accumulation) accumulation.set(light, i * 4);
     else {
+      if (quality.bands) ArtDirection.remapOpacity(light, quality.bands);
       for (let c = 0; c < 3; c++) col[p + c] = light[c] + light[3] * col[p + c];
       if (fog) fog[(H - 1 - y) * W + x] = 1 - light[3];
     }
@@ -295,8 +300,11 @@ function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon, quality, ti
   if (accumulation) {
     history.filter(accumulation, depths, time, viewKey);
     for (let i = 0; i < W * H; i++) {
-      const transmittance = accumulation[i * 4 + 3];
-      for (let c = 0; c < 3; c++) col[i * 3 + c] = accumulation[i * 4 + c] + transmittance * col[i * 3 + c];
+      const rgba = i*4;
+      const opacity = 1-accumulation[rgba+3], styled = quality.bands ? quality.bands(opacity) : opacity;
+      const gain = quality.bands && opacity > 0 ? styled/opacity : 1;
+      const transmittance = quality.bands ? 1-styled : accumulation[rgba+3];
+      for (let c = 0; c < 3; c++) col[i * 3 + c] = accumulation[rgba+c]*gain + transmittance * col[i * 3 + c];
       if (fog) fog[(H - 1 - Math.floor(i / W)) * W + i % W] = 1 - transmittance;
     }
   }

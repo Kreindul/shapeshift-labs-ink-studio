@@ -5,6 +5,7 @@ const CloudField = (() => {
   const recipes = typeof CloudRecipes === 'undefined' ? require('./cloud-recipes.js') : CloudRecipes;
   const shapes = typeof GeometryDensity === 'undefined' ? require('./geometry-density.js') : GeometryDensity;
   const volume = typeof VolumeField === 'undefined' ? require('./volume-field.js') : VolumeField;
+  const art = typeof ArtDirection === 'undefined' ? require('./art-direction.js') : ArtDirection;
   const detail = typeof CloudDetail === 'undefined' ? require('./cloud-detail.js') : CloudDetail;
   const clamp = n => Math.max(0,Math.min(1,n));
   const smooth = (lo,hi,n) => {
@@ -181,7 +182,7 @@ const CloudField = (() => {
       }
       return cache.get(softness);
     }
-    function frame(time, shadows, light = [-.52, .64, .57], displacement, representation, flashAt, cutouts) {
+    function frame(time, shadows, light = [-.52, .64, .57], displacement, representation, flashAt, cutouts, edge) {
       const mode=representation ?? (lod || (geometry && lod!==false) ? 'auto' : 'off');
       if (!detail.modes.includes(mode)) throw new RangeError('Unknown cloud representation: ' + mode);
       const useDetail=mode!=='off';
@@ -230,8 +231,16 @@ const CloudField = (() => {
         const flash=flashAt?.(x,y,z);
         for (let c=0;c<3;c++) out[c]=Math.min(1,(style?mix(rgb[c],style.rgb[c],brightness):rgb[c])+(flash?.[c]??0));
       };
-      const view=useDetail && rendered ? (eye,parallel) => asset.view(eye,parallel,mode,shift,shade,opacity,cutouts) : null;
-      const reflections=(useDetail || geometry) && rendered ? asset.view([0,0,0],null,'volume',shift,shade,opacity,cutouts) : null;
+      function shapedView(source) {
+        if (!edge) return source;
+        return { ...source, trace(origin, ray, start, stop, out) {
+          const sample = source.trace(origin,ray,start,stop,out), amount = 1-sample[3];
+          if (amount > 0) art.remapOpacity(sample,a=>opacity*edge(Math.min(1,a/opacity)));
+          return sample;
+        } };
+      }
+      const view=useDetail && rendered ? (eye,parallel) => shapedView(asset.view(eye,parallel,mode,shift,shade,opacity,cutouts)) : null;
+      const reflections=(useDetail || geometry) && rendered ? shapedView(asset.view([0,0,0],null,'volume',shift,shade,opacity,cutouts)) : null;
       const reflectionSample=[0,0,0,1];
       function paintVolume(origin, ray, out, flashAt, signal) {
         const range = [0,horizon];
@@ -264,9 +273,10 @@ const CloudField = (() => {
             lightSum[c]+=weight*Math.min(1,(style?mix(rgb[c],style.rgb[c],brightness):rgb[c])+(flash?.[c]??0));
           through-=weight;
         }
-        const amount = opacity*(1-through);
+        const a=1-through, amount=opacity*(edge ? edge(a) : a);
+        const gain=edge && a>0 ? amount/a : opacity;
         if (signal) signal[0] = amount;
-        for (let c=0;c<3;c++) out[c]=out[c]*(1-amount)+opacity*lightSum[c];
+        for (let c=0;c<3;c++) out[c]=out[c]*(1-amount)+gain*lightSum[c];
         return out;
       }
       function paint(origin, direction, out, light, signal) {
@@ -283,7 +293,7 @@ const CloudField = (() => {
         const distance=(height-origin[1])/direction[1];
         if (distance <= 0) return out;
         const x = origin[0] + distance * direction[0], z = origin[2] + distance * direction[2];
-        const coverage = sample(cells,x,z), amount = opacity*coverage*(cutouts?.gain(x,height,z)??1);
+        const coverage = sample(cells,x,z), amount = opacity*(edge ? edge(coverage) : coverage)*(cutouts?.gain(x,height,z)??1);
         if (!(amount>0)) return out;
         if (signal) signal[0] = amount;
         const flash = light?.(x,height,z);
