@@ -98,6 +98,11 @@ function dataScene(file, override, { installedPacks = false } = {}) {
     spec.finish = { ...spec.finish, look: { ...K.diorama.sceneLook(spec), shadowArt: shadowArtOption() } };
   if (!installedPacks && opt['asset-pack'] !== undefined)
     spec.assetPacks = require('./asset-pack.js').install(K.authoring.assetPacks, spec.assetPacks, opt['asset-pack']);
+  const preset = opt['environment-preset'];
+  if (preset !== undefined) {
+    if (typeof preset !== 'string') die('--environment-preset expects a pack/preset ID or off');
+    spec.environmentPreset = preset === 'off' ? false : preset;
+  }
   let prefabs, expanded;
   try {
     if (spec.prefabLibrary !== undefined) {
@@ -142,6 +147,8 @@ function dataScene(file, override, { installedPacks = false } = {}) {
 }
 function scene(id) {
   if (!id) die('which diorama? try: ink-studio scenes');
+  if (opt['environment-preset'] !== undefined && !id.endsWith('.json'))
+    die('--environment-preset selects a preset for a JSON diorama');
   if (/\.(obj|gltf|glb)$/i.test(id)) return meshScene(id);
   if (id.endsWith('.json')) return dataScene(id);
   if (id.endsWith('.js')) return require(path.resolve(id))(lib());
@@ -831,7 +838,7 @@ const CMD = {
         '  render <id> --look-masks off   bypass masked look bindings',
         '  render, clip, transition-review, sim render: --recipe <shot.json>   save reproducible review inputs',
         '  shot replay <shot.json> --out <image.png> [--root project]   verify and recreate the review render',
-        '  render <scene.json> --asset-pack <pack-or-bundle.json>   install look assets for this invocation',
+        '  render <scene.json> --asset-pack <pack-or-bundle.json> [--environment-preset pack/preset]   install and select a reusable look',
         '  ramps <id> [--n 12]         the ramps it is shaded on, and which only get darker without turning; a turning one is offered from the same palette',
         '  values <id> [--t 1.5]       the value check: the picture sorted into dark, middle and light, and whether it reads in three tones',
         '  sheet <id> [--from 0 --to 6 --n 12 | --t 0,1,2]   the same view at several moments, on one sheet',
