@@ -143,6 +143,8 @@ and worn stone under a shared key light.
 node cli/ink-studio.js render examples/material-lighting-ramps.js --w 288 --h 128 --px 1 --t 0.75
 ```
 
+To choose swatches from an existing palette, [generate and approve an editable lighting draft](palette-recipes.md#suggest-editable-lighting-ramps). The approved five-stop role and positions plug into the same diffuse layer, and named bounce and neutralizer swatches can also tint other finishes.
+
 ## Bevel highlights
 
 Add a `bevel` finish layer to catch light along features in a native sculpt.

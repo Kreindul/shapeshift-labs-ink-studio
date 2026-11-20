@@ -863,6 +863,7 @@ const CMD = {
         '  ornament <pattern.json> [--format pigment|relief|tiles] [--out file]   export a wallpaper or frieze pattern',
         '  palette plot <plot.json> [--space rgb|oklab] [--orbit degrees] [--format png|data]   render a palette in 3D',
         '  palette chart <chart.json> [--type chart] [--format png|data]   export an indexed swatch, bar or pair chart',
+        '  palette lighting <source-or-draft.json> [--approve] [--out file.json]   suggest or save named lighting ramps',
         '  palette field <field.json> [--w width --h height] [--format png|data]   render a palette field or report grayscale bands',
         '  palette <recipe.json> [--t seconds] [--out palette.json]   sample palette recipes, paths and animation',
         '  inspect <scene|run>         discover fields, actions, ports and entities',
@@ -1035,6 +1036,19 @@ const CMD = {
   palette() {
     if (pos[0] === 'plot') return require('./palette-plot.js')(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'chart') return require('./palette-chart.js')(pos.slice(1), opt, lib(), outputFile);
+    if (pos[0] === 'lighting') {
+      if (pos.length !== 2 || (opt.approve !== undefined && opt.approve !== true) || opt.out === true)
+        die('Use palette lighting <source-or-draft.json> [--approve] [--out file.json]');
+      const input = JSON.parse(fs.readFileSync(path.resolve(pos[1]), 'utf8'));
+      const api = lib().KIT.palette.lightingRamps;
+      const data = opt.approve ? api.approve(input) : api.suggest(input);
+      const json = JSON.stringify(data,null,2)+'\n';
+      if (!opt.out) return process.stdout.write(json);
+      const file = outputFile(opt.approve ? 'lighting-roles.json' : 'lighting-draft.json');
+      fs.mkdirSync(path.dirname(file),{recursive:true});
+      fs.writeFileSync(file,json);
+      return;
+    }
     if (pos[0] === 'field') {
       if (pos.length !== 2 || ['w', 'h', 'saturation', 'view', 'out', 'format'].some(key => opt[key] === true))
         die('Use palette field <field.json> [--saturation 0–1] [--view nearest|error|boundary] [--format png|data] [--w width --h height --out file]');

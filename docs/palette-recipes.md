@@ -329,3 +329,22 @@ ink-studio render examples/palette-chart-archive.js --w 382 --h 168 --px 1 --raw
 ```
 
 PNG files carry the palette in their indexed colour table and preserve transparent gaps. `chart.raster()` also exposes RGB, alpha and the original swatch indices as typed arrays. The JSON export includes the cell bounds and measurements plus a self-contained `raster` for an [indexed projected material](projected-effects.md#indexed-palette-charts). The [pigment archive](../examples/palette-chart-archive.js) mounts charts on sculpted display boards.
+
+
+## Suggest editable lighting ramps
+
+Use `K.palette.lightingRamps.suggest({ palette, roles, materials })` to choose lighting swatches from an existing palette. `roles` can carry the scene's current named roles. Each material needs a `base` palette index or a hex/RGB target. An index pins the exact swatch. A target uses the nearest allowed swatch as the base.
+
+Choose `preset: 'cloth' | 'iron' | 'stone' | 'skin'` per material. A matching material name selects its preset automatically. Other names default to stone. Optional `bounce` supplies an index or a colour hint for reflected light. Optional `candidates` limits suggestions to the listed palette indices. A candidate list must include a pinned base.
+
+The draft holds six indices per material. The five diffuse stops run from shadow through bounce, half-shade and base to highlight in order of increasing lightness. The neutralizer is a suggested low-chroma swatch near the base lightness. The generator may repeat a swatch in a limited palette. Review and edit the indices, the five `positions`, and `interpolation` before approval.
+
+```sh
+ink-studio palette lighting examples/lighting-ramp-palette.json --out lighting-draft.json
+ink-studio palette lighting lighting-draft.json --approve --out lighting-roles.json
+ink-studio render examples/authored-lighting-ramps.js --w 368 --h 158 --px 1 --t 0.75 --out lighting-bench.png
+```
+
+Approval validates the draft and saves the chosen indices as written. It returns the original packed `palette`, updated `roles`, and `ramps` ready for `lightingRamp` bindings. For example, `roles.cloth` contains the five diffuse indices, `roles['cloth.bounce']` contains the selected bounce swatch, and `roles['cloth.neutralizer']` contains the companion neutralizer. The output also includes a one-swatch role for each of the other named tones. Existing roles are carried forward, with matching names updated by approval.
+
+Use `paletteRoles: approved.roles` in `B.finish()`. In a JSON diorama, use the approved `palette` and `roles` and copy the matching `ramps` entry to the finish's `lightingRamp`. The [lighting bench](../examples/authored-lighting-ramps.js) shows cloth, iron, stone, and skin, with an artist-edited stone highlight. [Material lighting ramps](surface-materials.md#material-lighting-ramps)
