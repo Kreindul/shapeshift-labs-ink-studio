@@ -23,6 +23,8 @@ Use [Effect palette ramps](effect-palettes.md) to reserve tone steps for fog, cl
 
 Use [Art direction](art-direction.md) to control cloud edges, atmospheric bands, foreground contrast, and held motion.
 
+Use [Silhouette protection](silhouette-protection.md) to tune fog and contrast on a selected subject and review it across the export directions.
+
 ## Planar reflections
 
 ```js

@@ -49,15 +49,18 @@ const ArtDirection = (() => {
     const bands = count ? value => Math.round(clamp(value)*steps)/steps : null;
     function foreground(depth, r, g, b, out) {
       const w = clamp((far-depth)/(far-near)), amount = (contrast-1)*w*w*(3-2*w);
-      const luminance = .30*r + .55*g + .15*b;
-      const offset = (luminance-pivot)*amount;
-      out[0] = amount ? clamp(r+offset) : r;
-      out[1] = amount ? clamp(g+offset) : g;
-      out[2] = amount ? clamp(b+offset) : b;
-      return out;
+      return gradeContrast(r,g,b,amount,pivot,out);
     }
     return Object.freeze({ cloudEdge, bands, foreground: contrast === 1 ? null : foreground,
       cadence: Object.freeze({ scene, environment }) });
+  }
+
+  function gradeContrast(r,g,b,amount,pivot,out) {
+    const offset = (.30*r+.55*g+.15*b-pivot)*amount;
+    out[0] = amount ? clamp(r+offset) : r;
+    out[1] = amount ? clamp(g+offset) : g;
+    out[2] = amount ? clamp(b+offset) : b;
+    return out;
   }
 
   function time(settings, seconds, channel = 'scene') {
@@ -74,6 +77,6 @@ const ArtDirection = (() => {
     return sample;
   }
 
-  return Object.freeze({ presets:names, prepare, time, remapOpacity });
+  return Object.freeze({ presets:names, prepare, time, remapOpacity, gradeContrast });
 })();
 if (typeof module !== 'undefined') module.exports = ArtDirection;

@@ -193,6 +193,12 @@ const SceneOptics = (() => {
 
   // Integrate overlapping constant-density media in front-to-back depth order.
   function trace(volumes, origin, direction, stop, result = [0, 0, 0, 1], options) {
+    const scale = options?.fogScale ?? 1;
+    if (scale === 0) {
+      result[0] = result[1] = result[2] = 0;
+      result[3] = 1;
+      return result;
+    }
     const hits = [];
     for (const volume of volumes) {
       const range = interval(volume, origin, direction, stop, options?.start ?? 0);
@@ -208,7 +214,7 @@ const SceneOptics = (() => {
       last = 0;
     for (const [t, volume, sign] of hits) {
       if (density > 1e-10 && t > last) {
-        const alpha = -Math.expm1(-density * (t - last));
+        const alpha = -Math.expm1(-density * (t - last) * scale);
         for (let i = 0; i < 3; i++) result[i] += (result[3] * alpha * rgb[i]) / density;
         result[3] *= 1 - alpha;
       }

@@ -136,7 +136,7 @@ const VolumeLight = (() => {
       origin[2] + t * direction[2]);
     function blend(density, length, gain = 1) {
       if (density <= 0) return;
-      const alpha = -Math.expm1(-density * length);
+      const alpha = -Math.expm1(-density * length * (options?.fogScale ?? 1));
       const contribution = result[3] * alpha / density;
       for (let k = 0; k < 3; k++) result[k] += contribution * rgb[k] * gain;
       result[3] *= 1 - alpha;

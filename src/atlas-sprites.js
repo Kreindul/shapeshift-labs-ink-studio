@@ -97,15 +97,20 @@ const AtlasSprites = (() => {
 
   function place(value) {
     if (value?.[placedBrand]) return value;
-    const { atlas,at,mode='impostor',yaw=0,scale=1,opacity=1,frame,depth=true,lighting=true,emission=true }=value??{};
+    const { atlas,at,mode='impostor',yaw=0,scale=1,opacity=1,frame,depth=true,lighting=true,emission=true,objectId,materialId }=value??{};
     if (!['card','impostor'].includes(mode)||!Number.isFinite(opacity)||opacity<0||opacity>1||
         [depth,lighting,emission].some(value=>typeof value!=='boolean')||
         (frame!==undefined&&typeof frame!=='function'&&!integer(frame,0,32767)))
       throw new RangeError('Invalid sprite atlas placement');
+    if (objectId!==undefined || materialId!==undefined) {
+      const selectors = typeof TargetSelectors === 'undefined' ? require('./target-selectors.js') : TargetSelectors;
+      if (objectId!==undefined) selectors.prepare({object:objectId});
+      if (materialId!==undefined) selectors.prepare({material:materialId});
+    }
     const anchor=typeof at==='function'?at:Object.freeze(vector(at,'Sprite atlas anchor'));
     return Object.freeze({[placedBrand]:true, atlas:compile(atlas), at:anchor, mode,
       yaw:finite(yaw,'Sprite placement yaw'), scale:positive(scale,'Sprite placement scale'),
-      opacity,frame,depth,lighting,emission });
+      opacity,frame,depth,lighting,emission,...(objectId!==undefined&&{objectId}),...(materialId!==undefined&&{materialId}) });
   }
   function placements(authored,override) {
     const source=override===true?authored:override??authored;

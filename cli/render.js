@@ -10,6 +10,7 @@ const { createArtPasses, sampleFrames } = require('./art-passes.js');
 const ArtPasses = require('../src/art-passes.js');
 const ArtInk = require('../src/art-ink.js');
 const ArtDirection = require('../src/art-direction.js');
+const SilhouetteProtection = require('../src/silhouette-protection.js');
 const EffectPalettes = require('../src/effect-palettes.js');
 const ArtEffects = require('../src/art-effects.js');
 const ArtStability = require('../src/art-stability.js');
@@ -101,6 +102,8 @@ function render(world, o, preparedPalettes) {
   const tangent = Math.tan(FOV / 2) / lensScale;
   const look = world.look || {};
   const direction = ArtDirection.prepare(look.artDirection,o.artDirection);
+  const protection = SilhouetteProtection.prepare(look.silhouetteProtection,o.silhouetteProtection);
+  const subject = protection?.bind(world);
   const c = world.cam,
     sceneTime = o.t ?? world.lookSnapshot?.time ?? 0,
     t = ArtDirection.time(direction,sceneTime),
@@ -267,6 +270,7 @@ function render(world, o, preparedPalettes) {
       evaluatedPalette && !local && { palette: evaluatedPalette },
       !specializedResolve && native.detail && { detail: native.detail },
       native.motionReference && { motionReference: native.motionReference },
+      native.silhouetteMask && { silhouetteMask:native.silhouetteMask },
       native.alpha && { alpha: native.alpha },
       (native.orderFallback || samples.orderFallback) && { orderFallback: true },
       native.volumeStats && { volumeStats: native.volumeStats },
@@ -385,12 +389,19 @@ function render(world, o, preparedPalettes) {
   const sprites=AtlasRaster.rasterize(spriteAtlases,{
     eye,V,W,H,focal,ortho,near,rayAt,time:t,override:o.spriteAtlasMode,sun,
     objectDither: anchoring && stable.anchorSpaces.has('object'),
+    subject: protection?.match,
     visibility:(position)=>(cloudShadow?.(...position)??1)*(exposure?.light?.(...position)??1),
     clip:reflectionPlane && (position=>SceneOptics.planeDistance(reflectionPlane,...position)>reflectionPlane.bias)
   });
   const cloudEye = ortho ? eye.map((value, i) => value - (eyeD - dist) * V[2 + i * 4]) : eye;
   const cloudView = clouds?.view?.(cloudEye, ortho ? [V[2],V[6],V[10]] : null);
   const axialDepth = volumes.length || water || aerial || cloudView ? new Float32Array(W * H).fill(Infinity) : null;
+  const fogScales = protection?.affectsFog && axialDepth ? new Float64Array(W*H).fill(1) : null;
+  const silhouetteMask = protection && o.captureSilhouetteProtection ? new Uint16Array(W*H) : null;
+  function subjectPixel(pixel, rule) {
+    if (fogScales) fogScales[pixel] = rule?.fogScale ?? 1;
+    if (silhouetteMask) silhouetteMask[(H-1-Math.floor(pixel/W))*W+pixel%W] = rule?.slot ?? 0;
+  }
   const backdropClouds = clouds?.visible && !cloudView;
   const skyBase = backdropClouds && !sky ? hex(0) : bg;
   const skyOverlay = (flash || cloudView) && !sky && !backdropClouds;
@@ -729,14 +740,20 @@ function render(world, o, preparedPalettes) {
     FPAL = FN ? world.pal.map((h, i) => hex(i)) : null;
   let deferred = sortedSurfaces ? new Map() : null, deferredCount = 0, orderFallback = false;
   const foreground = direction?.foreground;
-  const contrastColor = foreground && [0,0,0];
+  const contrastColor = (foreground || protection) && [0,0,0];
+  const targetFog = (amount, rule) => rule && rule.fogScale !== 1 ? clamp(amount*rule.fogScale,0,1) : amount;
+  function subjectColor(rule, r, g, b) {
+    return ArtDirection.gradeContrast(r,g,b,rule.contrast-1,rule.pivot,contrastColor);
+  }
   const foregroundDepth = z => z - (eyeD-dist);
   function composite(p, i, z, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, mark,
-    opticalDepth = z, sprite, haze = 0) {
+    opticalDepth = z, sprite, haze = 0, rule) {
     const p3 = p * 3, ia = 1 - a;
     if (foreground && wd && (i < 0 ? !sprite?.emission : !(d[i*16+11] & 32)))
       [pr,pg,pb] = foreground(foregroundDepth(opticalDepth),pr,pg,pb,contrastColor);
-    if (rayMedia) [pr, pg, pb] = rayMedia.shade(p, opticalDepth, [pr, pg, pb]);
+    if (rule && rule.contrast !== 1 && (i < 0 ? !sprite?.emission : !(d[i*16+11] & 32)))
+      [pr,pg,pb] = subjectColor(rule,pr,pg,pb);
+    if (rayMedia) [pr, pg, pb] = rayMedia.shade(p, opticalDepth, [pr, pg, pb], true, rule?.fogScale);
     if (retainLayers && glass && bend && !contributions) contributions = contributionLayers(col, captured, W, H, false, bend);
     if (contributions) contributions.before(p, pr, pg, pb, a, wd && a > .5, glass && !wd, dn);
     col[p3] = pr * a + col[p3] * ia;
@@ -772,6 +789,7 @@ function render(world, o, preparedPalettes) {
       if (a > 0.5) {
         if (win) win[p] = surface?.reveals(i) ? -1 : i;
         if (axialDepth) axialDepth[p] = opticalDepth;
+        if (fogScales || silhouetteMask) subjectPixel(p,rule);
       }
     } else if (glass) gls[p] = Math.min(1, gls[p] + a * 0.5);
     else if (win && !retainLayers && !coat && a > 0.5) win[p] = -1;
@@ -780,11 +798,11 @@ function render(world, o, preparedPalettes) {
   let spriteIndex=0;
   const normalizedDepth=z=>clamp((z-(eyeD-R))/(2*R),0,1);
   function spriteSample(sprite) {
-    const {z,alpha,color}=sprite;
+    const {z,alpha,color,protection:rule}=sprite;
     const dn=normalizedDepth(z), fogMix=world.fog.max>0&&world.fog.start<1 ?
-      sstep(world.fog.start,1,dn)*world.fog.max*(exposure?.fog?.(...sprite.position)??1) : 0;
+      targetFog(sstep(world.fog.start,1,dn)*world.fog.max*(exposure?.fog?.(...sprite.position)??1),rule) : 0;
     const rgb=color.map((value,c)=>value+(fog[c]-value)*fogMix);
-    return [-1,z,dn,alpha,...rgb,alpha>=.5,false,0,0,false,false,alpha<.5,false,undefined,z,sprite,fogMix];
+    return [-1,z,dn,alpha,...rgb,alpha>=.5,false,0,0,false,false,alpha<.5,false,undefined,z,sprite,fogMix,rule];
   }
   function playSprites(through,queued) {
     while (spriteIndex<sprites.length && sprites[spriteIndex].z>=through) {
@@ -942,8 +960,9 @@ function render(world, o, preparedPalettes) {
     if (pixelSurface && splatFlash) patternFlashes.set(i, splatFlash);
     const coverGain = !liveNormal && !(flags & 6) && exposure?.light ?
       .24 + .76 * exposure.light(x,y,z) : 1;
+    const rule = subject?.(i);
     const fogMix = !(flags & 2) && world.fog.max > 0 && world.fog.start < 1
-      ? sstep(world.fog.start, 1, dn) * world.fog.max * (exposure?.fog?.(x,y,z) ?? 1) : 0;
+      ? targetFog(sstep(world.fog.start,1,dn)*world.fog.max*(exposure?.fog?.(x,y,z)??1),rule) : 0;
     const reflectInRaster = (planar || reflectedSky) && !pixelSurface;
     const normal = fragmentSurface ? surface.surfaceNormal(i) : null;
     if (fogMix && !reflectInRaster && !staged?.lit && !liveNormal && !splatFlash && coverGain === 1) {
@@ -1110,12 +1129,12 @@ function render(world, o, preparedPalettes) {
           const entry = { sort: flags & 4 ? Infinity : surfaceZ, index: n, center: -cz,
             sample: [i, surfaceZ, clamp((surfaceZ - (eyeD - R)) / (2 * R), 0, 1), a, pr, pg, pb,
               wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, lookPass && { ...lookPass.mark },
-              aerial || cloudView ? surfaceZ : undefined, undefined, fogMix] };
+              aerial || cloudView ? surfaceZ : undefined, undefined, fogMix, rule] };
           if (!deferred.has(p)) deferred.set(p, []);
           deferred.get(p).push(entry);
           deferredCount++;
         } else composite(p, i, -cz, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass,
-          lookPass?.mark, aerial || cloudView ? surfaceZ : undefined, undefined, fogMix);
+          lookPass?.mark, aerial || cloudView ? surfaceZ : undefined, undefined, fogMix, rule);
       }
     }
   }
@@ -1400,13 +1419,16 @@ function render(world, o, preparedPalettes) {
           lit = foreground(foregroundDepth(eyeD-R+dep[p]*2*R),lit[0],lit[1],lit[2],contrastColor);
         if (lookPass) lookPass.fragment(p, retainLayers ? contributions.weight(p) : 1 - (surfaceOverlay?.[p * 4 + 3] || 0),
           lookPass.mark, true);
+        const protectionRule = subject?.(i);
+        if (protectionRule && protectionRule.contrast !== 1 && !(d[i*16+11] & 32))
+          lit = subjectColor(protectionRule,lit[0],lit[1],lit[2]);
         const kf = world.fog.max > 0 && world.fog.start < 1
-          ? sstep(world.fog.start, 1, dep[p]) * world.fog.max * (exposure?.fog?.(HX[p],HY[p],HZ[p]) ?? 1) : 0;
+          ? targetFog(sstep(world.fog.start,1,dep[p])*world.fog.max*(exposure?.fog?.(HX[p],HY[p],HZ[p])??1),protectionRule) : 0;
         if (surfaceGlint) surfaceGlint[p] = c[4] > 0.22;
         if (retainLayers) {
           if (localAt) localAt[p] = localSlot(i, c[5], p);
           const shaded = [0, 1, 2].map(channel => lit[channel] + (fog[channel] - lit[channel]) * kf);
-          contributions.replacePattern(p, rayMedia ? rayMedia.shade(p, axialDepth[p], shaded) : shaded);
+          contributions.replacePattern(p, rayMedia ? rayMedia.shade(p, axialDepth[p], shaded, true, protectionRule?.fogScale) : shaded);
           if (detail && surface?.projected(i) && c[4] > 0.22) detail[(H - 1 - y) * W + x] = 1;
           continue;
         }
@@ -1460,7 +1482,7 @@ function render(world, o, preparedPalettes) {
         A = AN.data,
         sprD = new Float32Array(W * H).fill(9),
         sprC = new Int16Array(W * H).fill(-1),
-        sprOwner = art || foreground ? new Int32Array(W * H) : null;
+        sprOwner = art || foreground || subject ? new Int32Array(W * H) : null;
       for (let a = 0; a < AN.n; a++) {
         const q0 = a * 12,
           ed = EP[A[q0 + 8]];
@@ -1548,7 +1570,11 @@ function render(world, o, preparedPalettes) {
         }
         if (foreground && !(d[sprOwner?.[q]*16+11] & 32))
           c = foreground(foregroundDepth(depth),c[0],c[1],c[2],contrastColor);
-        if (rayMedia) c = rayMedia.shade(q, depth, c);
+        const rule = subject?.(sprOwner[q]);
+        if (rule && rule.contrast !== 1 && !(d[sprOwner[q]*16+11] & 32))
+          c = subjectColor(rule,c[0],c[1],c[2]);
+        if (rayMedia) c = rayMedia.shade(q, depth, c, true, rule?.fogScale);
+        if (fogScales || silhouetteMask) subjectPixel(q,rule);
         col[q * 3] = c[0];
         col[q * 3 + 1] = c[1];
         col[q * 3 + 2] = c[2];
@@ -1574,7 +1600,7 @@ function render(world, o, preparedPalettes) {
     const fog = captureFog && new Float32Array(W * H);
     for (let p = 0; p < W*H; p++) {
       const depth = axialDepth[p], covered = Number.isFinite(depth);
-      rayMedia.shade(p, covered ? depth : horizon, bg, covered);
+      rayMedia.shade(p, covered ? depth : horizon, bg, covered, fogScales?.[p]);
       const q = (H - 1 - Math.floor(p / W)) * W + p % W;
       if (fog) fog[q] = rayMedia.opacity();
       if (effectMedia) rayMedia.contributions(effectMedia, q * 3);
@@ -1584,7 +1610,7 @@ function render(world, o, preparedPalettes) {
     const quality = atmosphereOptions();
     atmosphere = applyAtmosphere(volumes, col, axialDepth, rayAt, W, H, horizon, quality, t, quality.media,
       captureFog || effectMedia || transparent, o.volumeHistory,
-      o.volumeHistory && [W, H, focal, ortho, o.volumeLocalLights, o.volumeLocalShadows, ...V].join('/'));
+      o.volumeHistory && [W, H, focal, ortho, o.volumeLocalLights, o.volumeLocalShadows, ...V].join('/'), fogScales);
     if (effectMedia) for (let p = 0; p < W*H; p++) {
       effectMedia[p*3] = atmosphere.fog[p];
       effectMedia[p*3+2] = 1-atmosphere.fog[p];
@@ -1667,7 +1693,7 @@ function render(world, o, preparedPalettes) {
       w: W, h: H, color: Uint8Array.from(c2, v => Math.round(clamp(v, 0, 1) * 255)), depth: dep, drawn,
       ...(localAt && { localAt, localPalettes, localConstraints }), ...(detail && { detail }), ...(passes && { passes }), ...(motionReference && { motionReference }),
       ...(masks && { masked: masks.output }),
-      ...(atmosphere?.fog && { fog: atmosphere.fog }), ...(effectSignals && { effectSignals }), ...(volumeStats && { volumeStats }), ...(alpha && { alpha }), ...(orderFallback && { orderFallback })
+      ...(atmosphere?.fog && { fog: atmosphere.fog }), ...(silhouetteMask && {silhouetteMask}), ...(effectSignals && { effectSignals }), ...(volumeStats && { volumeStats }), ...(alpha && { alpha }), ...(orderFallback && { orderFallback })
     };
   }
   // the second pass: an outline where the picture steps back sharply, a little ordered noise, then the nearest colour of the palette
@@ -1971,7 +1997,7 @@ function render(world, o, preparedPalettes) {
     w: W, h: H, px, rgb: out, drawn, use,
     ...((localOutput || tone || evaluatedPalette) && { palette: localOutput?.packed || tone?.palette || evaluatedPalette }),
     ...(detail && { detail }), ...(motionReference && { motionReference }),
-    ...(volumeStats && { volumeStats }), ...(o.captureFog && atmosphere?.fog && { fog: atmosphere.fog }),
+    ...(volumeStats && { volumeStats }), ...(silhouetteMask && {silhouetteMask}), ...(o.captureFog && atmosphere?.fog && { fog: atmosphere.fog }),
     ...(alpha && { alpha }), ...(orderFallback && { orderFallback })
   }, passes, atmosphere?.fog, effectSignals, effectColor);
 }

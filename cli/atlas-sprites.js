@@ -13,7 +13,7 @@ function heading(v) {
 
 function rasterize(placements, settings) {
   if (!placements.length) return [];
-  const {eye,V,W,H,focal,ortho,near,rayAt,time,override,sun,visibility,clip,objectDither}=settings;
+  const {eye,V,W,H,focal,ortho,near,rayAt,time,override,sun,visibility,clip,objectDither,subject}=settings;
   if (override!==undefined&&!['card','impostor'].includes(override))
     throw new RangeError('Sprite atlas mode must be card or impostor');
   const results=[];
@@ -28,6 +28,7 @@ function rasterize(placements, settings) {
   const sample={ color:[0,0,0],normal:[0,0,0],emission:[0,0,0] };
   for (const placement of placements) {
     const {atlas,opacity}=placement, mode=override??placement.mode;
+    const protection=subject?.({object:placement.objectId,entity:placement.objectId,material:placement.materialId});
     if (!opacity) continue;
     const at=typeof placement.at==='function'?vector(placement.at(time),'Sprite atlas anchor'):placement.at;
     const direction=ortho?viewForward:unit(eye.map((n,i)=>n-at[i]));
@@ -74,7 +75,7 @@ function rasterize(placements, settings) {
         if (atlas.emissionMode==='add') return clamp(value*gain+glow,0,1);
         return gain===1 ? value : clamp(Math.max(0,value-glow)*gain+glow,0,1);
       });
-      results.push({p:y*W+x,z,alpha:sample.alpha*opacity,color,normal,position,emission,
+      results.push({p:y*W+x,z,alpha:sample.alpha*opacity,color,normal,position,emission,protection,
         objectPosition:local(rotation,position.map((n,i)=>(n-at[i])/placement.scale)),
         ...(objectDither && mode==='card' && { patternPosition:[(uAt-px)*tile.unitsPerPixel,(py-vAt)*tile.unitsPerPixel,0] })});
     }

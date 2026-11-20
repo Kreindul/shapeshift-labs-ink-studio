@@ -134,7 +134,7 @@ function traceMedia(volumes, segments, origin, direction, stop, result, sample, 
     if (!aerial || end <= aerial.start || aerialThrough === 0) return;
     const from = Math.max(cursor, aerial.start);
     dryDistance += options?.exposure?.fogDistance?.(origin,direction,from,end) ?? end-from;
-    const raw = airTransmission(aerial, dryDistance);
+    const raw = airTransmission(aerial, dryDistance * (options?.fogScale ?? 1));
     const through = options?.bands ? 1-options.bands(1-raw) : raw, ratio = through / aerialThrough;
     if (trackCoverage) result[6] += remaining() * (1-ratio);
     for (let channel = 0; channel < 3; channel++) {
@@ -175,7 +175,7 @@ function mediaSampler(volumes, water, rayAt, width, horizon, options, aerial) {
   const query = { ...options, jitter: .5 };
   let opacity = 0, fogCoverage = 0, cloudCoverage = 0;
   const stats = { rays: 0, fallbackRays: 0, depthSamples: 0 };
-  function shade(pixel, depth, rgb, geometry = true) {
+  function shade(pixel, depth, rgb, geometry = true, fogScale = 1) {
     let ray = rays[pixel];
     if (!ray) {
       const x = pixel % width, y = Math.floor(pixel / width);
@@ -197,16 +197,18 @@ function mediaSampler(volumes, water, rayAt, width, horizon, options, aerial) {
       ray.aerial = { ...aerial, color: aerial.color(pixel, ray.direction) };
     }
     if (useAerial && !ray.segments.length && !volumes.length && !options.cloud) {
-      const raw = airTransmission(aerial, stop - aerial.start);
+      const raw = airTransmission(aerial, (stop-aerial.start)*fogScale);
       const remaining = options.bands ? 1-options.bands(1-raw) : raw;
       opacity = fogCoverage = 1 - remaining;
       return [0, 1, 2].map(i => remaining * rgb[i] + opacity * ray.aerial.color[i]);
     }
     const { values } = ray;
     const mode = Boolean(useAerial);
-    if (stop !== ray.stop || mode !== ray.useAerial) {
+    if (stop !== ray.stop || mode !== ray.useAerial || fogScale !== ray.fogScale) {
       ray.stop = stop;
       ray.useAerial = mode;
+      ray.fogScale = fogScale;
+      query.fogScale = fogScale;
       values.fill(0);
       for (let i = 0; i < samples; i++) {
         query.jitter = (i + ray.phase) / samples;
@@ -230,12 +232,12 @@ function mediaSampler(volumes, water, rayAt, width, horizon, options, aerial) {
   return { shade, opacity: () => opacity, contributions, stats };
 }
 
-function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon, quality, time, media, capture, history, viewKey) {
+function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon, quality, time, media, capture, history, viewKey, fogScales) {
   const light = [0, 0, 0, 1], sample = [0, 0, 0, 1];
   const fields = volumes.some(volume => volume.type === 'field' || volume.densityField);
   const query = { ...quality, time, media };
   // Reusing a density history would leave trails on animated lights and clear pockets.
-  const transient = quality.flash || quality.cutouts?.fog;
+  const transient = quality.flash || quality.cutouts?.fog || fogScales;
   if (transient) history?.clear();
   const temporal = fields && !transient && !quality.cloudShadow && !volumes.some(v => v.densityField) && !media?.animatedLocals && quality.jitter === 'spatiotemporal' && history;
   const tile = fields && quality.jitter !== 'off' ? volumeNoise(quality.seed) : null;
@@ -247,6 +249,7 @@ function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon, quality, ti
   const fog = capture ? new Float32Array(W * H) : null;
   function solve(x, y, depth) {
     const { origin, direction, axial } = rayAt(x + .5, y + .5);
+    if (fogScales) query.fogScale = fogScales[y*W+x];
     const stop = (Number.isFinite(depth) ? depth : horizon) / axial;
     const phase = tile ? ((tile.ranks[y % tile.height * tile.width + x % tile.width] + .5) / tile.ranks.length + phaseShift) % 1 : .5;
     light.fill(0);
@@ -261,10 +264,12 @@ function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon, quality, ti
   const { scale, depthTolerance } = quality, cw = Math.ceil(W / scale), ch = Math.ceil(H / scale);
   const low = scale > 1 ? new Float32Array(cw * ch * 4) : null;
   const lowDepth = low ? new Float32Array(cw * ch) : null;
+  const lowFog = low && fogScales ? new Float64Array(cw*ch) : null;
   if (low) for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
     const rx = Math.min(W - 1, x * scale + (scale >> 1)), ry = Math.min(H - 1, y * scale + (scale >> 1));
     const p = y * cw + x;
     lowDepth[p] = depths[ry * W + rx];
+    if (lowFog) lowFog[p] = fogScales[ry*W+rx];
     solve(rx, ry, lowDepth[p]);
     low.set(light, p * 4);
   }
@@ -279,7 +284,7 @@ function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon, quality, ti
         const bx = Math.max(0, Math.min(cw - 1, ix + dx)), by = Math.max(0, Math.min(ch - 1, iy + dy));
         const j = by * cw + bx, guide = lowDepth[j], depth = depths[i];
         const delta = guide === depth ? 0 : Math.abs(guide - depth);
-        if (delta > depthTolerance) continue;
+        if (delta > depthTolerance || lowFog && lowFog[j] !== fogScales[i]) continue;
         const w = (1 - Math.abs(u - (ix + dx))) * (1 - Math.abs(v - (iy + dy))) / (1 + delta * 5);
         for (let c = 0; c < 4; c++) light[c] += low[j * 4 + c] * w;
         weight += w;

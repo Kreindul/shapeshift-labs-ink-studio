@@ -228,7 +228,7 @@ function pose(w, t) {
 const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
 if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
   die('--px needs a positive integer');
-let artDirectionOverride, stableOverride, lutOverride, stackOverride, effectPalettesOverride, constraintsOverride, skyOverride, skyProfiles, celestialOverride, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, splatFieldsOverride, atmosphereEmittersOverride, inputSpriteAtlas;
+let silhouetteOverride, artDirectionOverride, stableOverride, lutOverride, stackOverride, effectPalettesOverride, constraintsOverride, skyOverride, skyProfiles, celestialOverride, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, splatFieldsOverride, atmosphereEmittersOverride, inputSpriteAtlas;
 function skyProfileOverrides(value) {
   if (typeof value !== 'string') die('--sky-profile expects track=profile pairs');
   const pairs = value.split(',').map(entry => entry.split('=').map(part => part.trim()));
@@ -415,6 +415,14 @@ function onOffOption(flag) {
   die('--' + flag + ' expects on or off');
 }
 
+function silhouetteOption() {
+  const value = opt['silhouette-protection'];
+  if (value === undefined) return;
+  if (value === 'off') return false;
+  if (value === true || value === 'on') return true;
+  return silhouetteOverride ??= JSON.parse(fs.readFileSync(path.resolve(value),'utf8'));
+}
+
 function artDirectionOption() {
   const value = opt['art-direction'];
   if (value === undefined) return;
@@ -469,6 +477,7 @@ const view = extra =>
       px: artPixelSize,
       stable: stabilityOption(),
       artDirection: artDirectionOption(),
+      silhouetteProtection: silhouetteOption(),
       effectPalettes: effectPalettesOption(),
       artEffects: opt.effects === 'off' ? false : opt.effects,
       ink: opt.ink === 'off' ? false : opt.ink,
@@ -564,7 +573,7 @@ function die(m) {
   console.error(m);
   process.exit(1);
 }
-const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,atmosphereEmittersOption,effectPalettesOption,stabilityOption,artDirectionOption});
+const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,atmosphereEmittersOption,effectPalettesOption,stabilityOption,artDirectionOption,silhouetteOption});
 const worldCommands = new Set(['inspect','probe','trace','field','scene','sim']);
 const CMD = {
   help() {
@@ -634,6 +643,7 @@ const CMD = {
         '  review <id> [--ref pic --px 2]     a sheet of fixed shots (four sides, top, low, far, near, close), beside the last one',
         '  variants <id> --seeds 3,7,12 [--group silhouette|openness|wear --motion]  render a ranked seed contact sheet',
         '  atlas <id> [--directions 8 --pitches 0,0.7 --w 96 --h 96 --fps 12 --maps depth,normal,emission,silhouette]  export a transparent sprite atlas',
+        '  silhouette-review <scene> --directions 8 --w 96 --h 96   paired export-size views and edge contrast',
         '  pose-review <id> [--directions 8 --w 96 --h 96]  review named poses at sprite resolution',
         '  motion-review <id> [--finding kind-or-id] [--out report.json]  inspect motion findings and focused playback ranges',
         '  clip-sequence <id> [--handoff 0] [--out report.json]  inspect clip instances, retimed cues, and handoffs',
@@ -671,6 +681,7 @@ const CMD = {
         'sprite options: --sprite-atlas on|off|atlas.json --sprite-at x,y,z --sprite-scale n --sprite-atlas-mode card|impostor',
         'shaped fog options: --shaped-atmosphere on|off|file.json --volume-cutouts on|off|file.json',
         'fog lighting options: --volume-local-lights on|off --volume-local-shadows on|off',
+        'silhouette protection: --silhouette-protection on|off|file.json',
         'art direction: --art-direction on|off|painted-pixel|storm-silhouette|soft-dawn|file.json',
         'effect palette options: --effect-palettes on|off|file.json',
         'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable on|off|file.json --snap on|off --dither-space screen|world|object --dither-spacing n --dither-origin x,y,z --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
@@ -944,6 +955,19 @@ const CMD = {
       pitches:opt.pitches===undefined?undefined:list('pitches'),times,fps,pose });
     writeAtlas(directory, atlas);
     console.log('wrote', directory, atlas.metadata.frames.length, 'frames');
+  },
+  'silhouette-review'() {
+    const world=buildPreview(), time=num('t',0);
+    pose(world,time);
+    const {silhouetteReview}=require('./silhouette-review.js');
+    const {image,report}=silhouetteReview(world,{time,width:num('w',96),height:num('h',96),
+      directions:num('directions',8),pitches:opt.pitches===undefined?undefined:list('pitches'),
+      yaw:num('yaw',world.cam.yaw),pivot:opt.pivot ? list('pivot') : world.cam.target,
+      columns:num('cols',4),scale:num('scale',1),view:view()});
+    const file=save(world.id+'-silhouette-review.png',image);
+    const reportFile=file.replace(/\.[^.]+$/,'')+'.json';
+    fs.writeFileSync(reportFile,JSON.stringify(report,null,2)+'\n');
+    console.log('wrote',reportFile);
   },
   'pose-review'() {
     const w = build(pos[0]);
