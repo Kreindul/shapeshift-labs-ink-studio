@@ -7,6 +7,7 @@ const SceneOptics = (() => {
   const densities = typeof VolumeField === 'undefined' ? require('./volume-field.js') : VolumeField;
   const geometry = typeof GeometryDensity === 'undefined' ? require('./geometry-density.js') : GeometryDensity;
   const volumeLight = typeof VolumeLight === 'undefined' ? require('./volume-light.js') : VolumeLight;
+  const fieldBands = typeof FieldBands === 'undefined' ? require('./field-bands.js') : FieldBands;
   const opticalMaterials = typeof OpticalMaterials === 'undefined' ? require('./optical-materials.js') : OpticalMaterials;
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const sub = (a, b) => a.map((v, i) => v - b[i]);
@@ -94,15 +95,16 @@ const SceneOptics = (() => {
   }
 
   function field(options = {}) {
-    const { field, step = .16, lit = true, anisotropy = .15, ramp, emissive = '#000000', emissiveGain = 0 } = options;
+    const { field, step = .16, lit = true, anisotropy = .15, ramp, bands, emissive = '#000000', emissiveGain = 0 } = options;
     if (typeof field?.sample !== 'function') throw new TypeError('Expected a bounded density field');
     const { min, max } = densities.bounds(field.bounds);
     if (!Number.isFinite(step) || step <= 0 || step > 100 || typeof lit !== 'boolean' ||
         !Number.isFinite(anisotropy) || Math.abs(anisotropy) > .85 ||
         !Number.isFinite(emissiveGain) || emissiveGain < 0 || emissiveGain > 64 ||
-        (ramp !== undefined && (!Array.isArray(ramp) || !ramp.length || ramp.length > 32)))
+        (ramp !== undefined && (bands !== undefined || !Array.isArray(ramp) || !ramp.length || ramp.length > 32)))
       throw new RangeError('Invalid density march or optical settings');
-    return { type: 'field', ...common(options), field, min, max, step, lit, anisotropy, ramp, emissive, emissiveGain };
+    return { type: 'field', ...common(options), field, min, max, step, lit, anisotropy, ramp, emissive, emissiveGain,
+      ...(bands !== undefined && { bands: fieldBands.settings(bands) }) };
   }
 
   function shaped(options) {
@@ -146,6 +148,10 @@ const SceneOptics = (() => {
           // An authored field ramp supplies the scattering color at each height.
           volume.ramp = volume.ramp?.map(rgb => opticalMaterials.medium(volume.optical, rgb, true, transform).tint);
         }
+        if (volume.bands) volume.bands = fieldBands.bind(volume.bands, swatch => {
+          const rgb = color(swatch);
+          return volume.optical ? opticalMaterials.medium(volume.optical, rgb, true, transform).tint : rgb;
+        });
         if (volume.type === 'shaft') {
           const span = sub(volume.to, volume.from);
           volume.height = length(span);

@@ -11,6 +11,7 @@ const SplatEffects = (() => {
     stacks = require('./color-stack.js');
   }
   const contribution = typeof ContributionRules === 'undefined' ? require('./contribution-rules.js') : ContributionRules;
+  const fieldBands = typeof FieldBands === 'undefined' ? require('./field-bands.js') : FieldBands;
   const clamp = x => Math.min(1, Math.max(0, x));
   const fract = x => x - Math.floor(x);
   const vector = (value, n) => Array.isArray(value) && value.length === n && Array.from(value).every(Number.isFinite);
@@ -366,12 +367,16 @@ const SplatEffects = (() => {
   function layer(definition, context, resolveColor, roles = {}) {
     const { projection = {}, space = 'rest', field, maskChannel, revealChannel, contourChannel,
       warpChannels, warp = 1, range = [0, 1], scroll = [0, 0], scale = 1, width = 0.16,
-      pattern = 'solid', color, colors, outputPalette, ink = false } = definition;
+      pattern = 'solid', color, colors, outputPalette, ink = false, bandChannel, bands } = definition;
     if (!['rest', 'world'].includes(space) || !vector(scroll, 2) || !vector(range, 2) || !(range[1] > range[0]) ||
         !Number.isFinite(scale) || scale <= 0 || !Number.isFinite(width) || width <= 0 ||
         !Number.isFinite(warp) || (warpChannels && (!Array.isArray(warpChannels) || warpChannels.length !== 2)))
       throw new TypeError('Projected layers need a valid space, scale, range and scroll');
-    const channels = [maskChannel, revealChannel, contourChannel, ...(warpChannels || [])].filter(name => name !== undefined);
+    if (pattern === 'bands' ? typeof bandChannel !== 'string' || colors !== undefined :
+        bands !== undefined || bandChannel !== undefined)
+      throw new TypeError('Projected bands need a bandChannel and their own color stops');
+    const stepped = pattern === 'bands' ? fieldBands.bind(fieldBands.settings(bands), resolveColor) : null;
+    const channels = [maskChannel, revealChannel, contourChannel, bandChannel, ...(warpChannels || [])].filter(name => name !== undefined);
     const lookup = coordinates({ projection, space, field }, channels, context);
     if (pattern === 'contour' && !contourChannel) throw new TypeError('Contours need a contourChannel');
     const indexed = pattern === 'indexed' ? indexedRaster(definition.raster, definition.cycles, resolveColor, roles) : null;
@@ -379,11 +384,11 @@ const SplatEffects = (() => {
     const custom = typeof pattern === 'function' ? pattern :
       Object.hasOwn(context?.shaders || {}, pattern) ? context.shaders[pattern] : null;
     if (custom !== null && typeof custom !== 'function') throw new TypeError('A projected shader must be a function');
-    if (!pixels && !custom && !['solid', 'contour'].includes(pattern) && !Object.hasOwn(motifs, pattern))
+    if (!stepped && !pixels && !custom && !['solid', 'contour'].includes(pattern) && !Object.hasOwn(motifs, pattern))
       throw new RangeError('Unknown projected pattern: ' + pattern);
     if (colors !== undefined && (!Array.isArray(colors) || colors.length < 2 || !Array.from(colors).every(value => value !== undefined)))
       throw new TypeError('Projected color ramps need at least two colors');
-    const palette = outputColors(outputPalette, resolveColor) ?? indexed?.palette;
+    const palette = outputColors(outputPalette, resolveColor) ?? indexed?.palette ?? stepped?.palette;
     const ramp = colors?.map(resolveColor);
     const tint = resolveColor(color);
     const result = new Float64Array(6); // RGB, amount, coverage, glint
@@ -412,7 +417,11 @@ const SplatEffects = (() => {
           const t = value * (ramp.length - 1), low = Math.min(ramp.length - 2, Math.floor(t));
           for (let k = 0; k < 3; k++) result[k] = ramp[low][k] + (ramp[low + 1][k] - ramp[low][k]) * (t - low);
         }
-        if (pixels) amount = pixels(x, y, time, result);
+        if (stepped) {
+          const band = stepped.sample(at(bandChannel));
+          amount = Number(Boolean(band));
+          if (band) result.set(band.rgb, 0);
+        } else if (pixels) amount = pixels(x, y, time, result);
         else if (custom) {
           // Custom JS effects can set RGB, amount, coverage and glint in their sample.
           result[3] = 1;

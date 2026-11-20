@@ -105,6 +105,58 @@ host can supply both `position` and `worldPosition` to `SurfaceLook.shade`.
   before output palette selection. In ordinary color and stipple, dominant
   local palette regions use the same art grid as the rest of the scene.
 
+### Banded pigment
+
+Use `pattern: 'bands'` and `bandChannel` to turn a sampled field into
+distinct areas of color. Stops have increasing thresholds from 0 to 1.
+The highest threshold reached by a sample supplies its color. Below the
+first stop, the layer leaves the material visible. The optional edge paints
+a strip just inside the first threshold. Its width uses field units.
+
+```json
+{
+  "type": "projected",
+  "field": "ink",
+  "pattern": "bands",
+  "bandChannel": "density",
+  "bands": {
+    "stops": [
+      {"at": 0.04, "color": "#714451"},
+      {"at": 0.09, "color": "#a35a56"},
+      {"at": 0.16, "color": "#ce7958"},
+      {"at": 0.27, "color": "#efac68"}
+    ],
+    "edge": {"width": 0.016, "color": "#ffe5a3"}
+  }
+}
+```
+
+Use hex colors or scene palette indices. The band colors supply the
+layer's output palette unless you provide an explicit one. Existing layer
+strength, masks, and blending still apply. The [pigment basin](../examples/banded-pigment.js)
+feeds the layer with a stable-fluid grid sampled at the scene time. Its
+floating emitter supplies dye while the basin walls and central rock shape
+the current.
+
+Use the same `bands` settings on `K.atmosphere.field` for bounded smoke.
+Each band uses its threshold as its local density and its swatch for
+scattering. The edge keeps the first band's density and uses its own color.
+Light and transmittance still accumulate through the volume, so overlapping
+smoke can blend across bands. This option takes the place of the volume's
+`ramp` in the CPU renderer.
+
+```sh
+ink-studio clip examples/banded-pigment.js --w 224 --h 168 --px 1 \
+  --from 0 --to 6 --fps 12 --out basin.png
+ink-studio clip examples/banded-pigment.js --params '{"study":"smoke"}' \
+  --w 224 --h 168 --px 1 --from 0 --to 6 --fps 12 --out censer.png
+```
+
+Use `--params '{"banded":false}'` for the basin's smooth comparison.
+Add `"study":"smoke"` to compare the censer with continuous density.
+
+### Raster paint
+
 To project animated pixel art, use `pattern: 'raster'` and
 `raster: { width, height, frames, fps, channels, repeat, wrap }`. Frames are
 RGB or RGBA byte arrays, in row-major order, with the default of four

@@ -264,10 +264,11 @@ const VolumeLight = (() => {
               }
               if (counters) counters.densitySamples++;
               const value = v.field.sample(x, y, z, time, options);
-              const extinction = value * localDensity;
+              const band = v.bands?.sample(value);
+              const extinction = (v.bands ? band?.at ?? 0 : value) * localDensity;
               if (!extinction) continue;
               density += extinction;
-              const base = mediumColor(v, value);
+              const base = band?.rgb ?? mediumColor(v, value);
               if (v.lit && media) illuminate(v, light, x, y, z, direction, media, visibility * (exposure?.light?.(x,y,z) ?? 1));
               else light.fill(v.lit ? gain : 1);
               for (let k = 0; k < 3; k++)
