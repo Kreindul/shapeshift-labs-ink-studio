@@ -258,6 +258,42 @@ Use `KIT.palette.distributions(image, options)` or
 `KIT.palette.compareDistributions(reference, studio, options)` for
 just the measurements on decoded image data.
 
+## Review quantization error
+
+```sh
+ink-studio palette error examples/render-stages.js --params '{"stage":"palette"}' \
+  --w 760 --h 420 --px 2 --threshold .06 --out palette-error
+```
+
+The command exports `graded.png`, `resolved.png`, and `heatmap.png` on the
+same art grid. The heatmap shows Euclidean OKLab distance per pixel,
+including the selected dither pattern. Its fixed scale runs from dark
+at zero to red at `--heatmap-max` (default 0.20). Larger errors use
+the same red. Fully transparent pixels are skipped and partially
+transparent pixels count once using their stored RGB.
+
+`error.json` carries the heatmap legend, mean, RMS and maximum errors,
+and the same measurements by visible material. The material pass gives
+each pixel one owner. Pixels with no named owner are reported under ID
+`0`. Regions group horizontally or vertically adjacent pixels of the
+same material that reach `--threshold` (default 0.06). The report ranks
+these groups by total distance, with their pixel bounds and worst swatch
+pair. Coordinates start at the top-left art pixel. Use `--region-limit`
+to set how many regions are listed (default 20, maximum 100).
+
+For explicit render stages, the reference keeps frame grading and the
+authored material, lighting, and effect work. The measurement isolates
+the palette policies in the frame and palette stages. Legacy looks
+compare their continuous input to the scene resolver's output, including
+indexed grading, coverage choices, and pixel cleanup. Screen overlays
+are outside the measured pass.
+
+In Node use `ink.reviewQuantizationError(world, options)` for the three
+rasters, report, and a row-major `Float32Array` of distances. For aligned
+RGB8 buffers use `ink.measureQuantizationError({ w, h, graded, resolved, alpha },
+{ passes, threshold, heatmapMax, regionLimit })`. The optional material pass
+uses Ink's `{ w, h, materialId, materials }` format.
+
 ## Measure palette usage at export size
 
 Use the same camera, time, and art resolution as the intended export.

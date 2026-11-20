@@ -889,6 +889,7 @@ const CMD = {
         '  palette pairs <palette.json> [--sort distance|lightness] [--limit 12] [--scale 16] [--out directory]',
         '  palette ramp-review [ramp.json] [--scene scene --role name] [--pixels JSON] [--out report.json]',
         '  palette distributions <reference.png> [--scene scene | --render frame.png] [--out directory]',
+        '  palette error <scene> [--threshold .06] [--heatmap-max .20] [--region-limit 20] [--out directory]',
         '  palette fit <fit.json> [--format png|data] [--tile]   fit two approved swatches and preview at native size',
         '  palette chart <chart.json> [--type chart] [--format png|data]   export an indexed swatch, bar or pair chart',
         '  palette lighting <source-or-draft.json> [--approve] [--out file.json]   suggest or save named lighting ramps',
@@ -1077,6 +1078,27 @@ const CMD = {
     if (pos[0] === 'fit') return require('./palette-fit.js')(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'chart') return require('./palette-chart.js')(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'pairs') return require('./palette-pairs.js')(pos.slice(1),opt,lib(),outputFile);
+    if (pos[0] === 'error') {
+      if (pos.length !== 2 || ['threshold','heatmap-max','region-limit','t','out'].some(key=>opt[key] === true))
+        die('Use palette error <scene> [--threshold .06] [--heatmap-max .20] [--region-limit 20] [--out directory]');
+      const t = num('t',0);
+      if (!Number.isFinite(t)) die('Palette error review time must be finite');
+      const world = buildPreview(pos[1]);
+      pose(world,t);
+      const result = require('./palette-error.js').reviewQuantizationError(world,view({ t,
+        transparent:onOffOption('transparent'), threshold:num('threshold',.06),
+        heatmapMax:num('heatmap-max',.20),regionLimit:num('region-limit',20) }));
+      const directory = outputFile('palette-error');
+      const files = Object.fromEntries(['graded','resolved','heatmap'].map(key=>[key,key+'.png']));
+      fs.mkdirSync(directory,{recursive:true});
+      for (const [key,name] of Object.entries(files)) {
+        const {w,h,rgb,alpha} = result[key];
+        PNG.write(path.join(directory,name),w,h,rgb,alpha);
+      }
+      fs.writeFileSync(path.join(directory,'error.json'),JSON.stringify({...result.report,files},null,2)+'\n');
+      console.log('wrote palette error review to',directory);
+      return;
+    }
     if (pos[0] === 'distributions') {
       const scene=opt.scene, render=opt.render;
       if (pos.length!==2 || Boolean(scene)===Boolean(render) ||

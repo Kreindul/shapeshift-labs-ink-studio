@@ -107,6 +107,8 @@ module.exports = {
   paletteUsage: require('./cli/palette-usage.js').paletteUsage,
   reviewRampShot: require('./cli/ramp-review.js').reviewRampShot,
   comparePaletteDistributions: require('./cli/palette-distributions.js').comparePaletteDistributions,
+  measureQuantizationError: require('./cli/palette-error.js').measureQuantizationError,
+  reviewQuantizationError: require('./cli/palette-error.js').reviewQuantizationError,
   exportLayers: require('./cli/export-layers.js').exportLayers,
   exportScene: require('./cli/scene-export.js').exportScene,
   readSceneReplay: require('./cli/scene-replay.js').readSceneReplay,
