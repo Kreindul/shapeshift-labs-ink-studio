@@ -619,6 +619,11 @@
       bad('finish.look.effectPalettes', error.message);
     }
     try {
+      CameraStaging.prepare(look?.cameraStaging);
+    } catch (error) {
+      bad('finish.look.cameraStaging', error.message);
+    }
+    try {
       ArtInk.prepare(look?.ink, st.palette);
     } catch (error) {
       bad('finish.look.ink', error.message);

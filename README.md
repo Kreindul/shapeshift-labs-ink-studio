@@ -298,7 +298,7 @@ The larger [lab/data-shrine.json](lab/data-shrine.json) demonstrates joins, fold
 
 ## Animation and puppets
 
-Named framing targets, rails, occlusion avoidance, and shot blends work across the CPU and WebGL renderers. [Camera rigs](docs/camera-rigs.md)
+Named framing targets, rails, occlusion avoidance, and shot blends work across the CPU and WebGL renderers. [Camera rigs and staging](docs/camera-rigs.md)
 
 Tables, spatial features, and time series can drive shared parameters and simulation queries with declared types, units, coordinate systems, and missing-value policies. [Typed data inputs](docs/typed-data-inputs.md)
 
@@ -753,6 +753,7 @@ The CLI and Node `render()` use the CPU renderer. Use the [browser renderer](doc
 | `render <scene> --t 1.5` | Render one PNG at a chosen time. |
 | `data-inputs <scene-or-catalog> [dataset] [--sample JSON] [--rows]` | Inspect typed columns, sample values, or export normalized rows and spatial features. |
 | `camera-rig <scene> [--at seconds] [--camera-shot id]` | Inspect the resolved shot, projection, blend, and occlusion clearance. |
+| `camera-review <scene> --from 0 --to 2 --frames 5 --w 160 --h 96` | Check subject framing across a shot at the native export crop. |
 | `passes <scene>` | Save art-pixel coverage, depth, normals, IDs and emission previews. |
 | `atlas <scene> --directions 8` | Export an RGBA atlas with registered pivots and optional relighting maps. |
 | `pose-review <scene> --directions 8` | Render named poses and breakdowns as color and silhouette tiles at sprite resolution. |

@@ -576,10 +576,17 @@ function stableDetailOption() {
   return stableDetailOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
 }
 
+let stagingOverride;
 function cameraOptions() {
   const cameraShot = opt['camera-shot'];
   if (cameraShot !== undefined && !lib().KIT.world.data.id(cameraShot)) die('--camera-shot needs a shot ID');
-  return { cameraShot, ortho: onOffOption('ortho') };
+  const staging = opt['camera-staging'];
+  if (staging !== undefined && typeof staging !== 'string') die('--camera-staging needs a JSON file, on or off');
+  const cameraStaging = staging === 'off' ? false : staging === 'on' ? true : staging === undefined ? undefined :
+    (stagingOverride ??= JSON.parse(fs.readFileSync(path.resolve(staging), 'utf8')));
+  if (opt['focal-length'] === true || opt['sensor-height'] === true) die('Lens options need a value in millimeters');
+  return { cameraShot, ortho: onOffOption('ortho'), cameraStaging, cameraGuides: onOffOption('camera-guides'),
+    focalLength: num('focal-length'), sensorHeight: num('sensor-height'), depthOfField: onOffOption('depth-of-field') };
 }
 
 let sdfAssistOverride;
@@ -907,6 +914,7 @@ const CMD = {
         '  review <id> [--ref pic --px 2]     a sheet of fixed shots (four sides, top, low, far, near, close), beside the last one',
         '  variants <id> --seeds 3,7,12 [--group silhouette|openness|wear --motion]  render a ranked seed contact sheet',
         '  atlas <id> [--directions 8 --pitches 0,0.7 --w 96 --h 96 --fps 12 --maps depth,normal,emission,silhouette]  export a transparent sprite atlas',
+        '  camera-review <scene> --from 0 --to 2 --frames 5 --w 160 --h 96   export-sized frames and framing checks',
         '  silhouette-review <scene> --directions 8 --w 96 --h 96   paired export-size views and edge contrast',
         '  transition-review <scene> [--plan file.json] --w 160 --h 90 [--out sheet.png]',
         '    compare native frames around midnight, weather beats, or cuts [--scale N --fail-on-flags]',
@@ -960,6 +968,7 @@ const CMD = {
         'fog lighting options: --volume-local-lights on|off --volume-local-shadows on|off',
         'silhouette protection: --silhouette-protection on|off|file.json',
         'layered horizon: --horizon-bands on|off|file.json',
+        'staging: --focal-length mm [--sensor-height mm] --camera-staging on|off|file.json --camera-guides [on|off] --depth-of-field [on|off]',
         'art direction: --art-direction on|off|painted-pixel|storm-silhouette|soft-dawn|file.json',
         'effect palette options: --effect-palettes on|off|file.json',
         'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink on|off|file.json --effects off --emissive-finishes off --stable on|off|file.json --stable-detail on|off|file.json --edge-filter on|off|file.json --contact-shadows on|off|file.json --area-lights on|off|file.json --bounce-probes on|off|file.json --snap on|off --dither-space screen|world|object --dither-spacing n --dither-origin x,y,z --resolve native|coverage|clusters --splat-order center|surface --splat-coverage legacy|continuous|soft --sdf-assist on|off|file.json --stable-transparency on|off|blend --fragment-budget N --inspection file.json|off --inspection-focus id --composite file.json|off --cutaway file.json|off --render-graph file.json|off --afterimages file.json|off --reconstruction file.json|off --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
@@ -1340,6 +1349,19 @@ const CMD = {
     fs.writeFileSync(reportFile, JSON.stringify(report,null,2)+'\n');
     console.log('wrote',reportFile, '('+report.flagCount+' flags)');
     shot?.finish(file,{fps:report.fps,suffixes:['.json']});
+    if (opt['fail-on-flags'] && report.flagCount) process.exitCode = 2;
+  },
+  'camera-review'() {
+    const world = buildPreview(), from = num('from', num('t', 0)), to = num('to', from);
+    const { cameraReview } = require('./camera-review.js');
+    const { image, report } = cameraReview(world, {
+      from, to, frames: num('frames', to === from ? 1 : 5), width: num('w',160), height: num('h',96),
+      columns: num('cols',4), scale: num('scale',1), view: view(), pose
+    });
+    const file = save(world.id + '-camera-review.png', image);
+    const reportFile = file.replace(/\.[^.]+$/, '') + '.json';
+    fs.writeFileSync(reportFile, JSON.stringify(report,null,2) + '\n');
+    console.log('wrote', reportFile, '(' + report.flagCount + ' flagged subjects across ' + report.frames.length + ' frames)');
     if (opt['fail-on-flags'] && report.flagCount) process.exitCode = 2;
   },
   'silhouette-review'() {

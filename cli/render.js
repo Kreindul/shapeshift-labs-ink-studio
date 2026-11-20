@@ -21,6 +21,7 @@ const ContactDepth = require('./contact-shadows.js');
 const RenderGraph = require('../src/render-graph.js');
 const runGraph = require('./render-graph.js');
 const FrameComposite = require('../src/frame-composite.js');
+const CameraStaging = require('../src/camera-staging.js');
 const SplatOrder = require('../src/splat-order.js');
 const Cutaway = require('../src/cutaway.js');
 const { blendLayers } = require('./translucent-layers.js');
@@ -139,6 +140,10 @@ function cameraCapture(options, receive) {
 }
 
 function render(world, o, preparedPalettes) {
+  if (o?.cameraGuides && !o.samples && !o.captureCoverage) {
+    const staging = o.cameraStaging ?? world.look?.cameraStaging;
+    return CameraStaging.overlay(render(world, { ...o, cameraGuides: false, cameraStaging: staging || true }, preparedPalettes));
+  }
   const reconstruction = o?.reconstruction ?? world.look?.reconstruction;
   if (reconstruction !== undefined && reconstruction !== false && !o?.[reconstructionSource]) {
     const source = world, time = o?.t ?? world.lookSnapshot?.time ?? 0;
@@ -249,18 +254,27 @@ function renderFrame(world, o, preparedPalettes) {
   const sceneTime = o.t ?? world.lookSnapshot?.time ?? 0;
   const authored = world.cameraRig?.sample(sceneTime, { shot: o.cameraShot }).camera;
   const c = authored ?? world.cam;
-  const fov = o.fov ?? c.fov ?? FOV;
+  const viewStaging = o[probeCamera] ? null : CameraStaging.prepare(o.cameraStaging ?? look.cameraStaging);
+  const framing = o.samples || o.captureCoverage || o.reflectionPlane ? null : viewStaging;
+  const focusBands = o.depthOfField === false ? [] : framing?.depthOfField ?? [];
+  const hasFocus = focusBands.some(band => band.radius > 0);
+  const focalLength = o[probeCamera] ? undefined : o.focalLength;
+  if (!o[probeCamera] && (focalLength !== undefined && o.fov !== undefined ||
+    focalLength === undefined && o.sensorHeight !== undefined))
+    throw new RangeError('A sensor-height override needs a focal-length override, which replaces FOV');
+  const sensorHeight = focalLength === undefined ? c.sensorHeight : o.sensorHeight ?? CameraStaging.defaultSensorHeight;
+  const fov = focalLength === undefined ? o.fov ?? c.fov ?? FOV : CameraStaging.fieldOfView(focalLength, sensorHeight);
   if (!Number.isFinite(fov) || fov <= 0 || fov >= Math.PI) throw new RangeError('Camera field of view must be in (0, π)');
   const tangent = Math.tan(fov / 2) / lensScale;
   const ortho = o.ortho ?? c.ortho ?? (c.projection === 'orthographic');
   const t = ArtDirection.time(direction,sceneTime),
-    yaw = o.yaw === undefined ? c.yaw : o.yaw,
-    pitch = o.pitch === undefined ? c.pitch : o.pitch,
     an = world.anim || {},
     cameraMotion = o.lockCamera ? {} : an,
     dist0 = o.dist || c.dist / (o.zoom || 1),
     /* a diorama's own zoom (a camera punch) moves the eye, not the size of an art pixel */
-    dist = dist0 / (cameraMotion.zoom || 1),
+    { yaw, pitch, dist } = CameraStaging.constrain({
+      yaw: o.yaw ?? c.yaw, pitch: o.pitch ?? c.pitch, dist: dist0 / (cameraMotion.zoom || 1)
+    }, viewStaging?.orbit),
     T0 = o.target || c.target,
     T = cameraMotion.kick ? [T0[0] + cameraMotion.kick[0], T0[1] + cameraMotion.kick[1], T0[2] + cameraMotion.kick[2]] : T0,
     cw = o.w || 900,
@@ -315,6 +329,8 @@ function renderFrame(world, o, preparedPalettes) {
   const requestedPasses = ArtPasses.select(o.passes);
   const passSelection = new Set(requestedPasses);
   let lookPass;
+  if (framing?.subjects.length) passSelection.add('splatId');
+  if (hasFocus) passSelection.add('depth');
   if (styled && stages?.owner) passSelection.add('splatId');
   if (styled && stages?.postMask) {
     for (const channel of ['position', 'objectPosition', 'normal']) passSelection.add(channel);
@@ -354,6 +370,14 @@ function renderFrame(world, o, preparedPalettes) {
       frame = EffectPalettes.apply(frame, passes, effectSignals, source, world.pal, o.captureEffectPalettes, ditherAt);
       if (audit) for (const ramp of effectSignals.rules.ramps.values()) audit.addPalette(ramp.packed);
     }
+    if (hasFocus) frame = CameraStaging.focus(frame, passes.depth, focusBands, depthOffset,
+      styled && (!o.colored || !!tone));
+    if (framing) frame.cameraStaging = {
+      ...CameraStaging.inspect(framing, world, { w: frame.w, h: frame.h, splatId: passes?.splatId }),
+      camera: { yaw, pitch, distance: dist, target: Array.from(T), orthographic: ortho, fov: 2*Math.atan(tangent),
+        ...(sensorHeight !== undefined && { sensorHeight, focalLength: sensorHeight / (2*tangent) }) },
+      focusPixels: frame.focusPixels ?? 0
+    };
     if (audit) {
       frame.lookAudit = audit.report();
     }
