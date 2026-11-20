@@ -48,6 +48,9 @@
         check(id(key) && typeof handler === 'function', 'Invalid action ' + name + '/' + key);
       systems[name] = system;
     }
+    if (world.visual?.volume!==undefined) check(typeof world.visual.volume==='string'&&
+      own(systems,world.visual.volume)&&typeof systems[world.visual.volume].volumeFrame==='function',
+    'Visual volume must name a live volume system');
     const consumers = Object.values(systems).filter(system => system.checkFields);
     if (consumers.length || world.visual?.fields?.surface!==undefined) {
       const query = Q.create({world},systems);

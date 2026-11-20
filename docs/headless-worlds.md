@@ -480,6 +480,54 @@ ink-studio probe yard.run.json --field world/material --args '{"id":"earthworks/
 ink-studio sim render yard.run.json --colored --out clay-yard.png
 ```
 
+## Live cuts, fills, and material layers
+
+A `volume` system defines a bounded editable solid. Set `bounds`, align
+their endpoints to `cell`, and choose a `chunkCells` size. Its `initial`
+array takes the same shape arguments as the live actions, with an
+`op` field for each entry. Entries are applied in order. Material IDs
+can name an inline RGB ramp or a physical material in an installed pack.
+
+| Action | Effect |
+| --- | --- |
+| `quarry/cut` | Removes the part of the solid inside the brush. Newly exposed surfaces take the material from the surviving interior. |
+| `quarry/fill` | Adds solid and assigns the supplied `material` to the new volume. Existing solid retains its material. |
+| `quarry/layer` | Changes the `material` of existing solid inside the brush. Geometry and water topology keep their cached data. |
+
+Every action takes a `shape`. A box uses `at`, `half`, and optional
+`round`. A sphere uses `at` and `radius`. A capsule uses `from`,
+`to`, and `radius`. Brushes can cross chunk seams and are clipped to
+the editable domain. Use a cell size fine enough to represent the
+features you want to see or flood.
+
+`clearance`, `support`, and `height` expose the current collision
+shape. Existing navigation and movement systems can bind those fields.
+`material` samples the surviving solid and `segment` traces a swept
+sphere against the current clearance field. Add `sources` with a
+point and water level to fill connected open spans at a fixed head.
+`medium` and `water` query that occupancy. The fixed-head source supplies
+newly connected passages and stops supplying disconnected ones.
+
+Set `visual.volume` to the system ID to render its retained splats and
+water. Edits rebuild intersecting chunks plus the sampling halo.
+Unaffected chunk payloads keep their identity. `work` reports the last
+edit's rebuilt and reused chunks and the separate water work. Spatial
+dependency reports include water changes beyond the brush where a
+connection opens or closes. Checkpoints save the ordered edits and
+reconstruct the same solid, material and water state on restore.
+
+The [spillway quarry](../examples/world-live-volumes.json) opens a
+copper-lined passage at tick 2, applies a limestone layer at tick 4,
+and closes the passage with a fill at tick 6.
+
+```sh
+ink-studio sim run examples/world-live-volumes.json --ticks 2 --record quarry.run.json
+ink-studio probe quarry.run.json --field quarry/material --at 0,0.4,0
+ink-studio probe quarry.run.json --field quarry/work
+ink-studio trace quarry.run.json quarry/segment --at -3.1,1,0 --args '{"to":[3.1,1,0],"radius":0.12}'
+ink-studio sim render quarry.run.json --colored --out quarry.png
+```
+
 ## Author a world
 
 A manifest has `format: "ink-studio/world"`, `version: 1`, a stable `id`,
@@ -532,6 +580,7 @@ reaches the feeder.
 | --- | --- |
 | `fields` | Typed spatial fields with defaults, grids, regions and a `set` action. |
 | `materials` | Grid of versioned surface materials with local moisture, temperature, coefficients, and appearance. |
+| `volume` | Editable 3D solid with material layers, collision and support queries, fixed-head connected water, and locally retained splats. |
 | `control` | Typed arithmetic, thresholds, selection, binary logic, pulses, latches, timers and hysteresis. |
 | `store` | Bounded numeric, integer, or vector accounts with named resources and units. |
 | `exchange` | Enabled links that request a fixed amount per tick or a rate per second. |

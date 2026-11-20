@@ -69,7 +69,8 @@
   }
 
   function visual({makeBuilder,makeSculpt},view,query) {
-    const config=view.world.visual ?? {}, region=W.fields.bounds(config.bounds ?? {min:[-5,-1,-5],max:[5,5,5]});
+    const config=view.world.visual ?? {}, volume=config.volume&&query.renderVolume(config.volume);
+    const region=W.fields.bounds(config.bounds ?? volume?.bounds ?? {min:[-5,-1,-5],max:[5,5,5]});
     const {min,max}=region, span=Math.max(max[0]-min[0],max[2]-min[2],1), resolution=config.resolution??Math.max(.08,span/100);
     W.data.check(Number.isFinite(resolution)&&resolution>=.02&&resolution<=10&&span/resolution<=256,'Render grid exceeds its sample budget');
     const B=makeBuilder(view.world.seed,config.palette??palette), S=K.sculpt(makeSculpt(B));
@@ -137,7 +138,7 @@
     function groundDistance(x,y,z) {
       return Math.max(y-height(x,z), min[1]-y, min[0]-x, x-max[0], min[2]-z, z-max[2]);
     }
-    S.implicitForm({bounds:{min,max},sd:groundDistance},earth,{res:resolution,target:{surface:'terrain'}});
+    if(!volume)S.implicitForm({bounds:{min,max},sd:groundDistance},earth,{res:resolution,target:{surface:'terrain'}});
     let bodies=[];
     if (fields.bodies) {
       const reading=query.probe(fields.bodies);
@@ -191,7 +192,7 @@
     const waterTarget = TargetSelectors.medium(water, 'water');
     const nativeWater = water && (config.waterOptics || looks.look?.optics?.some(rule => TargetSelectors.matches(rule.select, waterTarget)));
     const waterBodies = K.procedural.waterBodies;
-    const waterScene = nativeWater ? waterBodies.scene([waterBodies.create({
+    const waterScene = volume?.water ?? (nativeWater ? waterBodies.scene([waterBodies.create({
       id: water, bounds: { min: [min[0], min[2]], max: [max[0], max[2]] }, optics: config.waterOptics,
       resolution: [0, 2].map(axis => Math.min(64, Math.ceil((max[axis] - min[axis]) / resolution))),
       sample(x, z) {
@@ -200,8 +201,8 @@
         const { surface, depth, velocity } = read.value;
         return { bed: surface - depth, surface, current: velocity };
       }
-    })]) : undefined;
-    if (water && !nativeWater) {
+    })]) : undefined);
+    if (water && !nativeWater && !volume?.water) {
       const first=B.count();
       const wobble=(x,z)=>((Math.sin(x*9.1+z*13.7)*43758.58)%1+1)%1;
       for (let z=min[2]+resolution/2; z<max[2]; z+=resolution) for (let x=min[0]+resolution/2; x<max[0]; x+=resolution) {
@@ -216,10 +217,11 @@
     }
     const surfaceEffects = (hasSurface || config.surfaceEffects || looks.look?.paletteConstraints || looks.look?.renderStages) &&
       { ...config.surfaceEffects, query };
-    return B.finish({lookSnapshot: { time: view.time ?? view.tick * view.world.dt, tick: view.tick, query }, cam:config.camera??{target:[mid[0],.05,mid[2]],dist:span*1.48,yaw:.62,pitch:.8},
+    const baked=B.finish({lookSnapshot: { time: view.time ?? view.tick * view.world.dt, tick: view.tick, query }, cam:config.camera??{target:[mid[0],.05,mid[2]],dist:span*1.48,yaw:.62,pitch:.8},
       radius:span,detail:30,dither:.22,look:looks.look,paletteRoles:config.paletteRoles,
       ...(waterScene && { water: waterScene }), ...(config.atmosphere && { atmosphere: config.atmosphere }),
       ...(config.reflections && { reflections: config.reflections }), ...(surfaceEffects&&{surfaceEffects})});
+    return volume?SplatProvenance.join([...volume.parts,baked],baked):baked;
   }
   W.visual = visual;
   W.validateLooks = (world, catalog) => visualLooks(world, catalog).validate();
