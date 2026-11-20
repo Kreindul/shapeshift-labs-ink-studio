@@ -320,6 +320,7 @@ const CMD = {
         '  variants <id> --seeds 3,7,12 [--group silhouette|openness|wear --motion]  render a ranked seed contact sheet',
         '  atlas <id> [--directions 8 --w 96 --h 96 --fps 12 --maps depth,normal,emission,silhouette]  export a transparent sprite atlas',
         '  pose-review <id> [--directions 8 --w 96 --h 96]  review named poses at sprite resolution',
+        '  motion-review <id> [--finding kind-or-id] [--out report.json]  inspect motion findings and focused playback ranges',
         '  passes <id> [--channels coverage,depth,normal,objectId,materialId,emission]  save art-pixel render pass previews',
         '  shimmer <id> [--mode orbit|zoom|pan|still --frames 24]  how many pixels flicker over a move, and a GIF of it',
         '  crisp <id ...|all> [--t 2 --map]   how crisp at its own pixel size: stray pixels, specks, flat area, finest frequencies,',
@@ -585,6 +586,22 @@ const CMD = {
     const atEdge = atlas.metadata.frames.filter(frame => frame.silhouette.touchesBorder).length;
     console.log('wrote', directory, blocking.markers.length + ' poses × ' + directions + ' directions');
     if (empty || atEdge) console.log('review:', empty + ' empty, ' + atEdge + ' touching the sprite bounds');
+  },
+  'motion-review'() {
+    const world = build(pos[0]);
+    const review = world.motionReview;
+    if (!review?.findings || !review.focus) die('motion-review needs a scene with a motion review');
+    const findings = review.findings.filter(issue => !opt.finding || opt.finding === issue.kind || opt.finding === issue.id);
+    if (opt.finding && !findings.length) die('no motion finding matches ' + opt.finding);
+    const report = JSON.stringify({ scene: world.id, duration: review.duration,
+      findings: findings.map(issue => ({ ...issue, focus: review.focus(issue.id) })) }, null, 2) + '\n';
+    if (!opt.out) process.stdout.write(report);
+    else {
+      const file = path.resolve(opt.out);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, report);
+      console.log('wrote', file);
+    }
   },
   passes() {
     const w = build(pos[0]), t = num('t', 0);

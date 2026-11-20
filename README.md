@@ -358,6 +358,8 @@ Additional animation APIs include `K.anim.machine`, `K.anim.face`, `K.anim.path`
 
 Use [pose blocking and the pose shelf](docs/pose-blocking.md) to hold named story poses, draft in-betweens, and apply reusable poses to a puppet. The `pose-review` command checks the same landmarks as silhouettes at the size and angles of a directional sprite atlas.
 
+Use [Motion Review](docs/motion-review.md) to inspect loop pops, spacing spikes, arc kinks, and foot drift on solved puppet motion. Audition one beat at a time and apply, mute, or remove corrective layers.
+
 `K.character(B, spec, lane)` creates an input-driven character with movement, running, jumping, dashing, attacks, casting and crouching. Its specification supplies geometry and rig points; it is a toolkit for authoring a character, rather than a bundled cast of character assets. The API is documented at the top of [kk-character.js](src/kit/kk-character.js).
 
 ## Particles and interaction
@@ -647,6 +649,7 @@ The CLI and Node `render()` use the CPU renderer. Use the [browser renderer](doc
 | `passes <scene>` | Save art-pixel coverage, depth, normals, IDs and emission previews. |
 | `atlas <scene> --directions 8` | Export an RGBA atlas with registered pivots and optional relighting maps. |
 | `pose-review <scene> --directions 8` | Render named poses and breakdowns as color and silhouette tiles at sprite resolution. |
+| `motion-review <scene> [--finding kind-or-id]` | Report motion findings, focus ranges, and evidence from a scene that exposes Motion Review. |
 | `variants <scene> --seeds 3,7,12` | Render a ranked seed contact sheet for a scene with variant metrics. |
 | `sheet <scene> --from 0 --to 3 --n 12` | Make a labeled sheet of animation frames. |
 | `turn <scene> --n 8` | Make a sheet from multiple viewing angles. |

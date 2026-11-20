@@ -20,6 +20,7 @@
                                        .sample(t, pose)  .time(t) (the clip's own clock, after freezes and slow motion)  .ghosts(t, o)
      K.anim.influence(item, t, dur)    how much a layer or constraint counts now: start, end, blend, weight (a number or keys), enabled
      K.anim.layers(pose, layers, t, dur, phase)   add pose layers: values, or a source clip masked to some parts; driver; solo
+                                                phase: 'corrective' can also be set without a pose driver
      K.anim.FOLLOW                     subtle, natural, loose: follow-through presets { lagFrames, strength }
      K.anim.blend(a, b, w) / K.anim.add(pose, more, w)
      K.anim.copy(pose, c, w)           copy or limit a channel from one part to another (see K.puppet for look, reach, pin, distance, path)
@@ -441,14 +442,15 @@
     natural: { lagFrames: 3, strength: 0.65 },
     loose: { lagFrames: 5, strength: 0.9 }
   };
-  /* pose layers over a pose. A layer gives values, or samples a source clip (masked to `parts`, at its own speed and offset).
-     phase 'base' takes layers without a driver, 'corrective' those with one (they read the pose as it stood before any correction) */
+  /* A layer gives values or samples a source clip at its own speed and offset.
+     Drivers and explicit corrective layers run in the corrective pass. */
   A.layers = (pose, layers, time, dur, phase) => {
     if (!layers || !layers.length) return pose;
     const solo = layers.some(l => l.solo && l.enabled !== false),
-      before = phase === 'base' ? null : JSON.parse(JSON.stringify(pose));
+      before = phase !== 'base' && layers.some(l => l.driver) ? JSON.parse(JSON.stringify(pose)) : null;
     for (const l of layers) {
-      if ((phase === 'base' && l.driver) || (phase === 'corrective' && !l.driver)) continue;
+      const corrective = l.driver || l.phase === 'corrective';
+      if ((phase === 'base' && corrective) || (phase === 'corrective' && !corrective)) continue;
       if (solo && !l.solo) continue;
       const w = A.influence(l, time, dur) * A.driver(l.driver, before || pose);
       if (!w) continue;
@@ -813,8 +815,8 @@
     c.time = t => wrap(A.animTime(c, t));
     c.sample = (time, pose, o) => {
       pose = pose || {};
-      if (o && o.plain) return plain(wrap(time), pose);
-      const t = c.time(time);
+      if (o?.plain) return plain(o.sourceTime ? clamp(time, 0, dur) : wrap(time), pose);
+      const t = o?.sourceTime ? clamp(time, 0, dur) : c.time(time);
       plain(t, pose);
       A.layers(pose, tools.layers, t, dur, 'base');
       /* follow-through: a part turns by how far its source has turned in the last few frames. Read from the keys at two times, never
