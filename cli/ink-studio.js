@@ -270,7 +270,7 @@ const CMD = {
         '                              [--size 6 --cells 64 --res 0.09 --hues 6 --shades 4 --up z --spin 0.5 --thick 0.1]; a mesh file also works wherever an id does',
         '  validate <file.json>        check a diorama written as data: every mistake listed, with what was probably meant',
         '                              a .json diorama also works wherever an id does; --style slate|moss|ember puts it in another style',
-        '  perf <id> [--secs 5 --fps 60]   what a frame costs: time to work out, bytes sent to the graphics card',
+        '  perf <id> [--secs 5 --fps 60 --json]   animation time and planned texture upload size',
         '  selftest                    every lab module checked in numbers, and the lab dioramas run for a while',
         '  snap <id|all> [--t 0,2]     keep reference pictures',
         '  check [id ...]              draw again and compare with the reference pictures',
@@ -670,49 +670,55 @@ const CMD = {
     console.log('actions (K.acts.clock):', Object.keys(K.acts.ACTION.duration).join(', '));
   },
   perf() {
-    const w = build(pos[0]),
-      a = w.anim,
-      secs = num('secs', 5),
-      fps = num('fps', 60);
-    console.log(w.id + ': ' + w.count.toLocaleString() + ' splats, built in ' + w.buildMs + ' ms');
-    if (!a) {
-      console.log('it does not move: nothing is computed or sent after the first frame');
+    const secs = num('secs', 5), fps = num('fps', 60), uploadGap = num('upload-gap', 0);
+    if (!(secs > 0 && Number.isFinite(secs) && fps > 0 && Number.isFinite(fps)) ||
+      !Number.isSafeInteger(uploadGap) || uploadGap < 0) die('perf needs positive --secs and --fps, and nonnegative integer --upload-gap');
+    const frames = Math.ceil(secs * fps);
+    if (!Number.isSafeInteger(frames) || frames > 36000) die('perf can sample at most 36000 frames');
+    const w = build(pos[0]), a = w.anim;
+    const report = { scene: w.id, splats: w.count, buildMs: w.buildMs, frames: a ? frames : 0,
+      pixelBudget: w.look?.pixelBudget ?? null, meanMs: 0, p95Ms: 0, worstMs: 0, meanBytes: 0, peakBytes: 0, meanUploads: 0 };
+    if (a) {
+      const { uploadRows } = require('../src/frame-budget.js');
+      if (opt['gpu-signal'] && w.signal) a.gpuSignal = true;
+      const timings = [];
+      let bytes = 0, uploads = 0, total = 0;
+      for (let frame = 0; frame < frames; frame++) {
+        const start = process.hrtime.bigint();
+        const changed = a.update(1 / fps, frame / fps);
+        const ms = Number(process.hrtime.bigint() - start) / 1e6;
+        timings.push(ms);
+        total += ms;
+        let frameBytes = 0;
+        if (changed && a.rows) {
+          uploadRows(a.rows, (first, end) => {
+            frameBytes += (end - first) * 32768;
+            uploads++;
+          }, uploadGap);
+        } else if (changed && a.count) {
+          frameBytes += (Math.ceil((a.start + a.count) / 512) - Math.floor(a.start / 512)) * 32768;
+          uploads++;
+        }
+        if (a.bones) frameBytes += Math.ceil(a.bones.length / (768 * 4)) * 768 * 16;
+        bytes += frameBytes;
+        report.peakBytes = Math.max(report.peakBytes, frameBytes);
+      }
+      timings.sort((left, right) => left - right);
+      report.meanMs = total / frames;
+      report.p95Ms = timings[Math.ceil(frames * .95) - 1];
+      report.worstMs = timings[frames - 1];
+      report.meanBytes = bytes / frames;
+      report.meanUploads = uploads / frames;
+    }
+    if (opt.json) {
+      console.log(JSON.stringify(report));
       return;
     }
-    let bytes = 0,
-      frames = 0,
-      worst = 0,
-      total = 0;
-    for (let t = 0; t < secs; t += 1 / fps) {
-      const s = process.hrtime.bigint();
-      a.update(1 / fps, t);
-      const ms = Number(process.hrtime.bigint() - s) / 1e6;
-      worst = Math.max(worst, ms);
-      total += ms;
-      frames++;
-      if (a.rows) {
-        for (let r = 0; r < a.rows.length; r++)
-          if (a.rows[r]) {
-            bytes += 32768;
-            a.rows[r] = 0;
-          }
-      } else if (a.count) bytes += (Math.ceil((a.start + a.count) / 512) - Math.floor(a.start / 512)) * 32768;
-      if (a.bones) bytes += Math.ceil(((a.bones.length / 12) * 3) / 768) * 768 * 16;
-    }
-    const per = bytes / frames;
-    console.log(
-      'each frame, on this machine: ' +
-        (total / frames).toFixed(2) +
-        ' ms to work out (worst ' +
-        worst.toFixed(1) +
-        '), ' +
-        (per > 1e6 ? (per / 1e6).toFixed(1) + ' MB' : Math.round(per / 1e3) + ' KB') +
-        ' sent to the graphics card' +
-        (a.boned ? ' (' + a.boned.length.toLocaleString() + ' splats ride on ' + a.bones.length / 12 + ' bones)' : '')
-    );
-    console.log(
-      "(the page shows the same for a real device, with sort, draw and the card's own time: Esc menu, or __splat.perf)"
-    );
+    console.log(w.id + ': ' + w.count.toLocaleString() + ' splats, built in ' + w.buildMs + ' ms');
+    console.log('Animation: ' + report.meanMs.toFixed(2) + ' ms/frame (' + report.p95Ms.toFixed(2) + ' ms at p95)');
+    console.log('Planned uploads: ' + Math.round(report.meanBytes / 1024) + ' KiB/frame, peak ' +
+      Math.round(report.peakBytes / 1024) + ' KiB, ' + report.meanUploads.toFixed(1) + ' splat uploads/frame');
+    console.log('The browser measures drawing and GPU time separately.');
   },
   validate() {
     if (!pos[0]) die('validate which file?');

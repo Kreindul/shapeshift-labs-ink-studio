@@ -1,3 +1,4 @@
+const frameBudget = require('../src/frame-budget.js');
 // Draws a world without a browser: motion kinds, projection of each splat's covariance to a screen ellipse,
 // blending from far to near, low-resolution sampling, dithering and palette quantization.
 const FOV = (38 * Math.PI) / 180;
@@ -85,7 +86,8 @@ function render(world, o) {
   const tone = o.raw || o.samples || o.captureCoverage ? null : toneFor(world, o.tone ?? look.tone);
   const rel = c.dist / dist0,
     rho = world.detail * Math.pow(rel, rel > 1 ? 0.5 : 0.25),
-    px = o.px || look.pixelSize || clamp(Math.round(ch / (2 * Math.tan(FOV / 2) * rho * dist0)), 1, 18),
+    preferred = look.pixelSize || clamp(Math.round(ch / (2 * Math.tan(FOV / 2) * rho * dist0)), 1, 18),
+    px = o.px || frameBudget.artScale(cw, ch, preferred, o.raw || o.samples || o.captureCoverage ? null : look.pixelBudget),
     W = Math.ceil(cw / px),
     H = Math.ceil(ch / px);
   if (o.colored && !o.raw && !tone && !o.samples && !o.captureCoverage) {

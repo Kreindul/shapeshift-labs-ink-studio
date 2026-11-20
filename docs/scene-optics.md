@@ -72,3 +72,29 @@ const world = B.finish({
 Fog can occupy a height slab with `bottom` and `top`, or cover the whole view. Sphere and box volumes let mist stay around an object or in a defined region. A shaft is a capped cylinder of tinted atmosphere. Combine volumes freely. Integration accounts for overlaps in camera-depth order and stops at the nearest opaque surface. Use `near` or `far` to bound a volume by camera ray distance. Colours accept a palette index, a hex string, or 0–1 RGB.
 
 Hosts can use `K.atmosphere.prepare(world.atmosphere, world.pal)` and `K.atmosphere.trace(volumes, eye, unitDirection, distance)`. Trace returns premultiplied RGB and remaining transmittance `[r, g, b, t]`, so the final colour is the returned RGB plus `t` times the scene RGB.
+
+## Pixel budgets and upload profiling
+
+Give a scene a soft internal raster budget through `look.pixelBudget`.
+The headless renderer chooses an integer scale that fits the budget before
+upscaling. An explicit `--px` controls the scale for an individual render.
+Ordinary scenes that omit the budget use their existing scale. Browser hosts
+can apply the same limit with `FrameBudget.artScale` from the studio bundle.
+
+`FrameBudget.uploadRows(rows, upload, gap)` visits half-open dirty row runs and
+clears rows after a successful upload. A gap of one can batch two small
+transfers together. The visitor receives the first row and the exclusive end
+row and can transfer directly from the original typed array.
+
+Use `ink-studio perf <scene> --secs 10 --fps 60 --json` to compare animation
+step time, p95, peak upload bytes and planned upload calls. Use
+`--upload-gap 1` for a browser host that batches adjacent ranges across a
+single clean row. These are animation and transfer measurements. Measure
+compositor time and frame rate in the browser at the intended viewport.
+
+For densely sculpted dioramas, `FrameBudget.staticGroups` builds conservative
+boxes for consecutive splat ranges. Pass the ranges that the host or an
+animation can move as `mutable`. Mark shader-driven translations that the
+planner cannot infer as mutable too. `visibleIndices` writes the original
+indices for each retained group using a column-major view-projection matrix.
+Use its returned count as the instance count for color, ID and mask passes.
