@@ -131,7 +131,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     cidx = [],
     nrms = [];
   let curN = null;
-  let ownerRows, materialRows, targetRows, muteEmission;
+  let ownerRows, materialRows, targetRows, muteEmission, materialAlbedo;
   let unnamedOwners = new WeakMap(), unnamedMaterials = new WeakMap();
   const ownerIds = new Map(), materialIds = new Map();
   const ownerNames = [null], materialNames = [null];
@@ -148,6 +148,18 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
       names.push(hasLabel ? value : null);
     }
     return id;
+  }
+  function describeAlbedo(first, end, color) {
+    if (!Number.isSafeInteger(first) || !Number.isSafeInteger(end) || first < 0 || end < first || end > n)
+      throw new RangeError('Albedo range must belong to the builder');
+    if (first === end) return;
+    const rgb = RenderStages.albedo(color, hex || PAL_HEX);
+    if (!materialAlbedo || materialAlbedo.length < cap) {
+      const next = new Uint32Array(cap);
+      if (materialAlbedo) next.set(materialAlbedo);
+      materialAlbedo = next;
+    }
+    materialAlbedo.fill(rgb + 1, first, end);
   }
   // Labels can be shared across several solids or supplied for splats built directly.
   function describeSplats(first, end, { object, material, target } = {}) {
@@ -960,6 +972,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
         data: data.subarray(0, n * 16),
         count: n,
         renderMetadata: renderRows(),
+        ...(materialAlbedo && { materialAlbedo: materialAlbedo.slice(0, n) }),
         attr: attr ? Float32Array.from({ length: n * 4 }, (_, i) => attr[i] || 0) : undefined,
         pix: pix ? Float32Array.from({ length: n * 8 }, (_, i) => pix[i] || 0) : undefined,
         ramps: pix ? ramps.map(r => r.slice()) : undefined,
@@ -1007,7 +1020,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     bounced = 0;
     cidx.length = 0;
     nrms.length = 0;
-    ownerRows = materialRows = muteEmission = undefined;
+    ownerRows = materialRows = muteEmission = materialAlbedo = undefined;
     unnamedOwners = new WeakMap();
     unnamedMaterials = new WeakMap();
     ownerIds.clear();
@@ -1042,6 +1055,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
   return {
     count: () => n,
     describeSplats: renderMetadata ? describeSplats : undefined,
+    describeAlbedo,
     born: v => (bornV = v === undefined || v === null || !isFinite(v) ? null : v),
     wet: v => (wetV = v === undefined || v === null || !isFinite(v) ? null : v),
     fineTile,

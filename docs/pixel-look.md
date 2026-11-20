@@ -552,3 +552,87 @@ The CLI resolves masked bindings on splats at their sampled surface
 positions. JavaScript renderer hosts can evaluate the same masks with
 `KIT.splatEffects.prepareMask(settings, context)`. Standard WebGL
 currently evaluates unmasked look rules.
+
+## Explicit render stages
+
+Set `finish.look.renderStages` on a diorama, `visual.look.renderStages`
+on a simulation world, or `look.renderStages` on a built JavaScript scene.
+Use a color stack at `material`, `lit`, or `frame`, and a palette policy
+at `palette`. The headless renderer runs these stages in fixed order.
+
+| Stage | Input |
+| --- | --- |
+| `material` | Base paint before lighting. Sculpt materials use `albedo` (a palette index, hex swatch, or normalized RGB triple) or the last swatch in their authored ramp. The renderer carries the baked ramp's light response onto the new paint and then adds runtime surface lighting. |
+| `lit` | The shaded splat or surface fragment, including its highlights, before it blends into the scene. |
+| `frame` | The resolved frame after compositing, including the background, ink, and art effects. |
+| `palette` | The graded frame. The palette policy picks the final swatches, with optional dithering and reserved colors. |
+
+```json
+{
+  "renderStages": [
+    {
+      "stage": "material",
+      "select": { "material": "steel" },
+      "stack": {
+        "name": "Cobalt",
+        "steps": [{
+          "type": "channelMix",
+          "matrix": [[0.52, 0.05, 0], [0.12, 0.67, 0], [0.25, 0.18, 0.66]],
+          "offset": [0.025, 0.075, 0.22]
+        }]
+      }
+    },
+    {
+      "stage": "palette",
+      "palette": {
+        "palette": ["#131d33", "#38537d", "#77a6c6", "#dce9df"],
+        "dither": { "pattern": "bayer", "strength": 0.65 }
+      }
+    }
+  ]
+}
+```
+
+A versioned look asset can declare a default `stage`. A binding or a
+`look.targets` entry can override it. If the asset contains a stack and a
+palette, the stack runs at its assigned stage and the palette runs at
+`palette`. Assigning `palette` directly uses just the asset's palette.
+Within each stage the scene's matching rules run in declaration order,
+followed by any matching material-bound rules.
+
+The stages share [look selectors](#shared-look-selectors) and
+[spatial masks](#spatial-and-field-masks). Material masks use the splat
+center, or the surface hit when a per-pixel pattern is resolved. Lit
+masks follow the fragment hit when a normal is available. Scoped frame
+and palette rules use the visible splat owner's metadata. Unscoped,
+unmasked frame rules also reach pixels without an owner. Palette masks
+gate quantization at 50% coverage, so affected pixels remain exact
+swatches. The `look/output` probe reports matched stage rules. To sample
+one stage, supply `stage` and the RGB entering that stage in `--args`.
+
+JavaScript sculpt builds can set `S.captureAlbedo = true` before baking
+if a scene-level material rule will be applied. JSON dioramas and
+simulation views capture it automatically. Use
+`B.describeAlbedo(first, end, color)` for a baked range of custom splats.
+For direct splats without a separate albedo, their packed RGB is treated
+as the base paint. The plain JavaScript bundle exposes `RenderStages`
+for custom hosts. The standard WebGL renderer still uses its existing
+palette path.
+
+Explicit rules opt the CLI and software renderer into continuous RGB
+through frame grading, followed by quantization only when a palette
+stage is present. Use staged bindings for any scene stack and palette
+you want in this pipeline. Indexed remaps and the legacy tone and
+coverage palette resolves use the legacy pipeline. `--raw` bypasses
+authored stages. `--look-masks off` bypasses masked rules.
+
+```sh
+node cli/ink-studio.js render examples/render-stages.js --ortho \
+  --params '{"stage":"material"}' --out material.png
+node cli/ink-studio.js render examples/render-stages.js --ortho \
+  --params '{"stage":"lit"}' --out lit.png
+node cli/ink-studio.js render examples/render-stages.js --ortho \
+  --params '{"stage":"frame"}' --out frame.png
+node cli/ink-studio.js render examples/render-stages.js --ortho \
+  --params '{"stage":"palette"}' --out palette.png
+```

@@ -298,6 +298,10 @@ const SurfaceLook = (() => {
     { colorCurves = true, colorLut = true, colorStack = true, paletteConstraints = true, paletteRoles, blueNoise,
       validateOnly = false } = {}) {
     if (!isRecord(settings)) throw new TypeError('Surface settings must be an object');
+    if (validateOnly && settings.renderStages !== undefined) {
+      const stages = typeof RenderStages === 'undefined' ? require('./render-stages.js') : RenderStages;
+      stages.prepare(settings.renderStages, { palette, roles: paletteRoles, blueNoise, context, validateOnly });
+    }
     numeric(settings, ['scale', 'seed', 'steps'], 'surface');
     if (settings.layers !== undefined && !isRecord(settings.layers))
       throw new TypeError('Surface layers must be named in an object');

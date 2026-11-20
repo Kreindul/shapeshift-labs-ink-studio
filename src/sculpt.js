@@ -1561,14 +1561,18 @@ function makeSculpt(B, rest) {
     return open / dirs.length;
   };
   function shadeOwned(owner, material, ...sample) {
-    if (!B.describeSplats) return light(material, ...sample);
+    const capture = B.describeAlbedo && (S.captureAlbedo || material.surface?.renderStages?.some(rule => rule.stage === 'material'));
+    if (!capture && !B.describeSplats) return light(material, ...sample);
     const first = B.count();
     light(material, ...sample);
-    B.describeSplats(first, B.count(), {
+    const end = B.count();
+    B.describeSplats?.(first, end, {
       object: owner?.renderOwner ?? owner,
       material: material.materialId ?? material,
       target: owner?.renderTarget
     });
+    const albedo = material.albedo ?? material.r?.at(-1);
+    if (capture && albedo !== undefined) B.describeAlbedo(first, end, albedo);
   }
   S.bake = () => {
     buildGrid();

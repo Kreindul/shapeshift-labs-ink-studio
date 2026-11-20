@@ -33,12 +33,14 @@
   }
 
   function definition(value, packId) {
-    if (!fields(value, ['id', 'label', 'params', 'stack', 'palette', 'mask']) || typeof value.id !== 'string' ||
+    if (!fields(value, ['id', 'label', 'params', 'stack', 'palette', 'mask', 'stage']) || typeof value.id !== 'string' ||
         !assetId.test(value.id) || !value.id.startsWith(packId + '/') ||
         typeof value.label !== 'string' || !value.label.trim() || value.label.length > 100 ||
         (value.stack === undefined && value.palette === undefined))
       throw Error('A look needs a namespaced ID, label and color stack or palette');
-    const { id, label, params = {}, stack, palette, mask } = value;
+    const { id, label, params = {}, stack, palette, mask, stage } = value;
+    if (stage !== undefined) RenderStages.stage(stage);
+    if (stage === 'palette' && palette === undefined) throw Error('A palette stage needs a look palette');
     if (!record(params) || Object.keys(params).length > 64 || !Object.keys(params).every(name => parameter.test(name)))
       throw Error('Look parameters need named JSON defaults');
     if (stack !== undefined) {
@@ -50,13 +52,13 @@
       throw Error('A look palette needs palette constraint settings');
     SplatEffects.prepareMask(substitute(mask, params), undefined, { validateOnly: true });
     return freeze({ id, label: label.trim(), params, ...(stack !== undefined && { stack }),
-      ...(palette !== undefined && { palette }), ...(mask !== undefined && { mask }) });
+      ...(palette !== undefined && { palette }), ...(mask !== undefined && { mask }), ...(stage && { stage }) });
   }
 
   function bind(binding, catalog) {
     if (binding === undefined || binding === false) return null;
     const value = typeof binding === 'string' ? { asset: binding } : binding;
-    if (!fields(value, ['asset', 'revision', 'strength', 'palette', 'params', 'mask']) || typeof value.asset !== 'string' ||
+    if (!fields(value, ['asset', 'revision', 'strength', 'palette', 'params', 'mask', 'stage']) || typeof value.asset !== 'string' ||
         !assetId.test(value.asset) || (value.revision !== undefined &&
           (!Number.isSafeInteger(value.revision) || value.revision < 1)))
       throw Error('Expected a look asset ID and optional positive pack revision');
@@ -65,7 +67,8 @@
     const { look, revision } = entry;
     if (value.revision !== undefined && revision !== value.revision)
       throw Error('Look asset ' + value.asset + ' requires pack revision ' + value.revision + ', installed ' + revision);
-    const { strength = 1, params = {}, palette } = value;
+    const { strength = 1, params = {}, palette, stage = look.stage } = value;
+    if (stage !== undefined) RenderStages.stage(stage);
     if (!fraction(strength) || !record(params) || (palette !== undefined && palette !== false && !Array.isArray(palette)))
       throw Error('Look overrides need strength in [0, 1], a palette swatch list or false, and named parameters');
     for (const [name, item] of Object.entries(params)) {
@@ -78,7 +81,8 @@
       ? { ...substitute(look.palette, values), ...(palette !== undefined && { palette: clone(palette) }) } : undefined;
     const mask = value.mask === undefined ? substitute(look.mask, values) : clone(value.mask);
     SplatEffects.prepareMask(mask, undefined, { validateOnly: true });
-    return freeze({ id: look.id, revision, strength,
+    if (stage === 'palette' && !policy) throw Error('A palette stage needs a look palette');
+    return freeze({ id: look.id, revision, strength, ...(stage && { stage }),
       ...(stack && { stack: { ...stack, amount: strength * (stack.amount ?? 1) } }),
       ...(policy && { palette: policy }), ...(mask && { mask }) });
   }
@@ -93,27 +97,41 @@
       { params: { ...prior.params, ...changes.params } }) };
   }
 
+  function stageRules(bound, select, stage = bound?.stage) {
+    if (stage === undefined) return [];
+    RenderStages.stage(stage);
+    if (!bound?.strength) return [];
+    if (stage === 'palette' && !bound.palette) throw Error('A palette stage needs a look palette');
+    const scope = { assetId: bound.id, ...(select && { select }), ...(bound.mask && { mask: bound.mask }) };
+    const rules = [];
+    if (stage !== 'palette' && bound.stack) rules.push({ ...scope, stage, stack: bound.stack });
+    if (bound.palette) rules.push({ ...scope, stage: 'palette', palette: bound.palette });
+    return rules;
+  }
+
   function scene(look, catalog) {
     if (!look || (!Object.hasOwn(look, 'asset') && !Object.hasOwn(look, 'targets'))) return look;
     const { asset, targets = [], ...inline } = look, bound = bind(asset, catalog);
     if (inline.paletteConstraints !== undefined && inline.paletteConstraints !== false && !record(inline.paletteConstraints))
       throw Error('Scene palette constraints must be an object or false');
     if (!Array.isArray(targets) || targets.length > 63) throw Error('Expected up to 63 look targets');
-    const rules = [];
+    const rules = [], staged = stageRules(bound);
     for (const rule of targets) {
-      if (!fields(rule, ['select', 'asset', 'mask']) || !Object.hasOwn(rule, 'asset')) throw Error('A look target needs select and asset');
+      if (!fields(rule, ['select', 'asset', 'mask', 'stage']) || !Object.hasOwn(rule, 'asset')) throw Error('A look target needs select and asset');
       const binding = rule.mask === undefined || rule.asset === false ? rule.asset : override(rule.asset, { mask: rule.mask });
       const select = TargetSelectors.prepare(rule.select), target = bind(binding, catalog);
-      if (target?.strength && (target.stack || target.palette))
+      if (rule.stage !== undefined || target?.stage) staged.push(...stageRules(target, select, rule.stage));
+      else if (target?.strength && (target.stack || target.palette))
         rules.push({ ...target.palette, select, stack: target.stack, assetId: target.id, ...(target.mask && { mask: target.mask }) });
     }
     const constraints = inline.paletteConstraints;
-    const fallback = bound?.strength && (bound.palette || bound.mask) && !Object.hasOwn(constraints || {}, 'default')
+    const fallback = bound?.strength && !bound.stage && (bound.palette || bound.mask) && !Object.hasOwn(constraints || {}, 'default')
       ? { default: bound.mask ? { ...bound.palette, stack: bound.stack, mask: bound.mask, assetId: bound.id } :
         bound.stack ? { ...bound.palette, source: 'graded' } : bound.palette } : {};
     return {
-      ...(bound?.strength && bound.stack && !bound.mask && { colorStack: bound.stack }),
+      ...(bound?.strength && bound.stack && !bound.stage && !bound.mask && { colorStack: bound.stack }),
       ...inline,
+      ...(staged.length && { renderStages: [...(inline.renderStages || []), ...staged] }),
       ...(constraints !== false && (rules.length || fallback.default) && {
         paletteConstraints: { ...constraints, ...fallback, ...(rules.length && { targets: [...(constraints?.targets ?? []), ...rules] }) }
       })
@@ -123,6 +141,10 @@
   function material(base, binding, catalog) {
     const bound = bind(binding, catalog);
     if (!bound?.strength || (!bound.stack && !bound.palette)) return base;
+    if (bound.stage) return SurfaceLook.material(base, {
+      lookAssetId: bound.id,
+      renderStages: [...(base?.surface?.renderStages || []), ...stageRules(bound)]
+    });
     return SurfaceLook.material(base, {
       lookAssetId: bound.id,
       ...(bound.stack && !bound.mask && { layers: { lookAsset: { type: 'colorStack', stack: bound.stack } } }),

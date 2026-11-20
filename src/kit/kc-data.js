@@ -382,6 +382,14 @@
     } catch (error) {
       bad('finish.look.paletteConstraints', error.message);
     }
+    try {
+      RenderStages.prepare(look?.renderStages, {
+        palette: pal, roles: st.roles, blueNoise: K.procedural.materials.blueNoise,
+        context: surfaceEffects, validateOnly: true
+      });
+    } catch (error) {
+      bad('finish.look.renderStages', error.message);
+    }
     const roleNames = Object.keys(st.roles),
       ids = new Set(),
       parts = new Set(),
@@ -391,7 +399,11 @@
       if (m === undefined) return;
       const role = typeof m === 'string' ? m : m && m.role;
       if (m && typeof m === 'object') {
-        keys(m, path, { role: 1, ramp: 1, noise: 1, scale: 1, glow: 1, over: 1, surface: 1, model: 1, lookAsset: 1 });
+        keys(m, path, { role: 1, ramp: 1, noise: 1, scale: 1, glow: 1, over: 1, surface: 1, model: 1, lookAsset: 1, albedo: 1 });
+        if (m.albedo !== undefined) {
+          try { RenderStages.albedo(m.albedo, pal); }
+          catch (error) { bad(path + '.albedo', error.message); }
+        }
         if (m.model !== undefined) {
           const q = m.model, at = path + '.model', channels = { color: 1, emission: 1, roughness: 1, metallic: 1 };
           if (!q || typeof q !== 'object' || Array.isArray(q)) bad(at, 'model material channels need an object');
@@ -741,6 +753,8 @@
       S = K.sculpt((env.makeSculpt || makeSculpt)(B));
       S.sun = B.norm(st0.sun);
       if (st0.finish.look?.pixel) S.pixel = true;
+      S.captureAlbedo = Array.isArray(st0.finish.look?.renderStages) &&
+        st0.finish.look.renderStages.some(rule => rule.stage === 'material');
       if (st0.amb !== undefined) S.amb = st0.amb;
       if (st0.sky !== undefined) S.sky = st0.sky;
       if (st0.finish.res) S.res = st0.finish.res;
@@ -760,6 +774,7 @@
           if (m.noise) out.mod = (x, y, z) => m.noise * (B.n3(x * sc, y * sc, z * sc) - 0.5);
           if (m.glow) out.em = true;
           if (m.model) out.model = m.model;
+          if (m.albedo !== undefined) out.albedo = m.albedo;
           if (m.over) {
             const r2 = ramp(m.over.role),
               above = m.over.above === undefined ? 0.55 : m.over.above,

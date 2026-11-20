@@ -3,6 +3,7 @@ const frameBudget = require('../src/frame-budget.js');
 // blending from far to near, low-resolution sampling, dithering and palette quantization.
 const FOV = (38 * Math.PI) / 180;
 const PixelLook = require('../src/pixel-look.js');
+const RenderStages = require('../src/render-stages.js');
 const TargetSelectors = require('../src/target-selectors.js');
 const { createArtPasses, sampleFrames } = require('./art-passes.js');
 const ArtPasses = require('../src/art-passes.js');
@@ -101,13 +102,21 @@ function render(world, o, preparedPalettes) {
     throw new RangeError('Invalid splat order or fragment budget');
   const probe = typeof o.fragmentProbe === 'function' ? o.fragmentProbe : null;
   const styled = !o.raw && !o.samples && !o.captureCoverage;
+  const stages = !o.raw && RenderStages.plan(world, {
+    blueNoise: settings => blueNoise(world, settings), skipMasks: o.lookMasks === false
+  });
+  const legacyLook = styled && !stages;
   const ink = styled ? ArtInk.prepare(o.ink ?? look.ink, world.pal) : null;
   const effects = styled ? ArtEffects.prepare(o.artEffects ?? look.effects, world.pal) : null;
   const stable = ArtStability.prepare(o.stable ?? look.stable);
-  const specializedResolve = styled && stable && stable.resolve !== 'native';
-  const anchoring = styled && stable && stable.dither !== 'screen';
+  const specializedResolve = legacyLook && stable && stable.resolve !== 'native';
+  const anchoring = legacyLook && stable && stable.dither !== 'screen';
   const requestedPasses = ArtPasses.select(o.passes);
   const passSelection = new Set(requestedPasses);
+  if (styled && stages?.owner) passSelection.add('splatId');
+  if (styled && stages?.postMask) {
+    for (const channel of ['position', 'objectPosition', 'normal']) passSelection.add(channel);
+  }
   if (effects) for (const channel of ArtEffects.channels) passSelection.add(channel);
   if (effects?.smear && o.artHistory) passSelection.add('emissionMotion');
   if (ink) for (const channel of ArtInk.channels) passSelection.add(channel);
@@ -115,7 +124,7 @@ function render(world, o, preparedPalettes) {
     passSelection.add('splatId');
     passSelection.add(stable.dither === 'world' ? 'position' : 'objectPosition');
   }
-  if (specializedResolve || (styled && stable?.protect.size)) {
+  if (specializedResolve || (legacyLook && stable?.protect.size)) {
     for (const channel of ['objectId', 'materialId', 'emission', 'protected']) passSelection.add(channel);
   }
   const finishLook = (frame, passes, fog) => {
@@ -123,18 +132,19 @@ function render(world, o, preparedPalettes) {
     if (effects) frame = ArtEffects.apply(frame, passes, effects, t, {
       history: o.artHistory, world, palette: world.pal, motionReference: frame.motionReference
     });
+    if (styled && stages?.post) RenderStages.finish(frame, stages, passes, t);
     if (!o.captureMotion) delete frame.motionReference;
     if (requestedPasses.length) frame.passes = ArtPasses.subset(passes, requestedPasses);
     return frame;
   };
   if (look.pixelSize !== undefined && (!Number.isSafeInteger(look.pixelSize) || look.pixelSize < 1))
     throw new RangeError('look.pixelSize must be a positive integer');
-  const tone = styled ? PixelLook.prepareTone(o.tone ?? look.tone, settings => blueNoise(world, settings)) : null;
-  const paletteRules = styled ? PixelLook.preparePaletteConstraints(o.paletteConstraints ?? look.paletteConstraints, {
+  const tone = legacyLook ? PixelLook.prepareTone(o.tone ?? look.tone, settings => blueNoise(world, settings)) : null;
+  const paletteRules = legacyLook ? PixelLook.preparePaletteConstraints(o.paletteConstraints ?? look.paletteConstraints, {
     palette: world.pal, roles: world.paletteRoles, blueNoise: settings => blueNoise(world, settings),
     context: world.surfaceEffects, skipMasks: o.lookMasks === false, skipMaskedStacks: o.colorStack === false
   }) : preparedPalettes;
-  const colorGrade = styled && !tone && PixelLook.colorGrade(world.pal, world.paletteRoles, an.grade,
+  const colorGrade = legacyLook && !tone && PixelLook.colorGrade(world.pal, world.paletteRoles, an.grade,
     o.paletteRemap ?? look.paletteRemap, o.colorCurves ?? look.colorCurves, o.colorLut ?? look.colorLut,
     o.colorStack ?? look.colorStack);
   const grade = colorGrade || an.grade;
@@ -149,7 +159,7 @@ function render(world, o, preparedPalettes) {
   const motionFrame = historyFrames[Math.max(0, historyFrames.length - (effects?.smear?.frames || 1))];
   const motionFrom = o.motionFrom ?? motionFrame?.motionReference;
   const captureMotion = !!o.captureMotion || passSelection.has('motion') || passSelection.has('emissionMotion');
-  if (styled && (specializedResolve || (o.colored && !tone))) {
+  if (legacyLook && (specializedResolve || (o.colored && !tone))) {
     const native = render(world, Object.assign({}, o, { colored: false, samples: true, worked: true, px, passes: [...passSelection], artInkActive: !!ink,
       captureMotion, motionFrom, maskGrade: !tone && grade, reflectionTint: effects?.reflection,
       captureFog: o.captureFog || ink?.ramps.has('fog') }), paletteRules);
@@ -264,7 +274,7 @@ function render(world, o, preparedPalettes) {
           o.reflectionScale ?? 1
         )
       : null;
-  const surface = surfaceShading(world, o, {
+  const surface = surfaceShading(world, stages ? { ...o, paletteConstraints: false } : o, {
     eye,
     forward: [V[2], V[6], V[10]],
     reflection,
@@ -431,6 +441,21 @@ function render(world, o, preparedPalettes) {
     win = PIX ? new Int32Array(W * H).fill(-1) : null;
   // Keep later translucent coats when the opaque receiver is recoloured per pixel.
   let surfaceOverlay = null;
+  const stagedFrames = stages?.surfaceMask ? sampleFrames(world, t) : null;
+  const maskFrames = stagedFrames && new Map();
+  function stageFrame(i) {
+    if (!maskFrames.has(i)) maskFrames.set(i, stagedFrames(i));
+    return maskFrames.get(i);
+  }
+  function stageSample(i, point) {
+    const { rest, normal, localOffset } = stageFrame(i);
+    const offset = localOffset(point[0] - X[i], point[1] - Y[i], point[2] - Z[i]);
+    return { position: Array.from(rest, (n, k) => n + offset[k]), worldPosition: point, normal, time: t };
+  }
+  function stagedMaterial(i, rules, rgb, sample) {
+    const reference = world.materialAlbedo?.[i];
+    return RenderStages.material(rules, rgb, reference ? reference - 1 : undefined, sample);
+  }
   let pixed = null,
     sprM = null;
   const FN =
@@ -509,9 +534,17 @@ function render(world, o, preparedPalettes) {
       flags = Math.floor(kraw / 16),
       s2 = SC[i] * SC[i],
       pk = d[q + 7];
-    let r = (pk % 256) / 255 + add[i],
-      g = (Math.floor(pk / 256) % 256) / 255 + add[i],
-      b = Math.floor(pk / 65536) / 255 + add[i];
+    const staged = stages ? stages.at(i) : null;
+    const materialSample = staged?.material?.some(rule => rule.mask) ? stageSample(i, [x, y, z]) : undefined;
+    const litMask = staged?.lit?.some(rule => rule.mask);
+    const litNormal = litMask ? stageFrame(i).normal : null;
+    let r = (pk % 256) / 255,
+      g = (Math.floor(pk / 256) % 256) / 255,
+      b = Math.floor(pk / 65536) / 255;
+    if (staged?.material) [r, g, b] = stagedMaterial(i, staged.material, [r, g, b], materialSample);
+    r += add[i];
+    g += add[i];
+    b += add[i];
     if (wet[i]) {
       // wet: darker, and a little bluer, as the page does it
       r *= 1 - 0.42 * wet[i];
@@ -584,7 +617,7 @@ function render(world, o, preparedPalettes) {
       !(flags & 2) && world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dn) * world.fog.max : 0;
     const reflectInRaster = planar && !pixelSurface;
     const normal = fragmentSurface ? surface.surfaceNormal(i) : null;
-    if (fogMix && !reflectInRaster) {
+    if (fogMix && !reflectInRaster && !staged?.lit) {
       r += (fog[0] - r) * fogMix;
       g += (fog[1] - g) * fogMix;
       b += (fog[2] - b) * fogMix;
@@ -655,7 +688,8 @@ function render(world, o, preparedPalettes) {
             pr = c[0];
             pg = c[1];
             pb = c[2];
-            if (!reflectInRaster) {
+            if (staged?.material) [pr, pg, pb] = stagedMaterial(i, staged.material, [pr, pg, pb], materialSample);
+            if (!reflectInRaster && !staged?.lit) {
               pr += (fog[0] - pr) * fogMix;
               pg += (fog[1] - pg) * fogMix;
               pb += (fog[2] - pb) * fogMix;
@@ -669,14 +703,20 @@ function render(world, o, preparedPalettes) {
           pg = Math.min(1, pg * exposure + (tint?.[1] ?? 0));
           pb = Math.min(1, pb * exposure + (tint?.[2] ?? 0));
         }
+        let hit;
         if (fragmentSurface) {
-          const hit = surfacePoint(rayAt(ix + 0.5, iy + 0.5), normal, x, y, z, -cz, R);
+          hit = surfacePoint(rayAt(ix + 0.5, iy + 0.5), normal, x, y, z, -cz, R);
           [pr, pg, pb, alpha, highlight, paletteId] = surface.shade(i, ...hit, x, y, z, pr, pg, pb, ix + 0.5, iy + 0.5);
-          if (reflectInRaster) {
-            pr += (fog[0] - pr) * fogMix;
-            pg += (fog[1] - pg) * fogMix;
-            pb += (fog[2] - pb) * fogMix;
-          }
+        }
+        if (staged?.lit) {
+          const sample = litMask ? stageSample(i, hit ?? (litNormal ?
+            surfacePoint(rayAt(ix + .5, iy + .5), litNormal, x, y, z, -cz, R) : [x, y, z])) : undefined;
+          [pr, pg, pb] = RenderStages.apply(staged.lit, [pr, pg, pb], sample);
+        }
+        if (staged?.lit || (fragmentSurface && reflectInRaster)) {
+          pr += (fog[0] - pr) * fogMix;
+          pg += (fog[1] - pg) * fogMix;
+          pb += (fog[2] - pb) * fogMix;
         }
         a *= alpha;
         if (a < 0.004) continue;
@@ -941,19 +981,21 @@ function render(world, o, preparedPalettes) {
           pixed[p] = 1;
         }
         if (!PALC[ci]) continue;
-        const base = PALC[ci],
-          c = surface?.has(i)
-            ? surface.shade(i, HX[p], HY[p], HZ[p], X[i], Y[i], Z[i], ...base, x + 0.5, y + 0.5)
-            : base,
-          kf = world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dep[p]) * world.fog.max : 0;
+        const staged = stages ? stages.at(i) : null;
+        const masked = staged?.material?.some(rule => rule.mask) || staged?.lit?.some(rule => rule.mask);
+        const sample = masked ? stageSample(i, [HX[p], HY[p], HZ[p]]) : undefined;
+        const base = staged?.material ? stagedMaterial(i, staged.material, PALC[ci], sample) : PALC[ci];
+        const c = surface?.has(i) ? surface.shade(i, HX[p], HY[p], HZ[p], X[i], Y[i], Z[i], ...base, x + 0.5, y + 0.5) : base;
+        const lit = staged?.lit ? RenderStages.apply(staged.lit, c, sample) : c;
+        const kf = world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dep[p]) * world.fog.max : 0;
         if (surfaceGlint) surfaceGlint[p] = c[4] > 0.22;
         if ((surfaceOverlay?.[p * 4 + 3] || 0) < 0.5) {
           if (localAt) localAt[p] = localSlot(i, c[5], p);
           if (detail && surface?.projected(i) && c[4] > 0.22) detail[(H - 1 - y) * W + x] = 1;
         }
-        col[p * 3] = c[0] + (fog[0] - c[0]) * kf;
-        col[p * 3 + 1] = c[1] + (fog[1] - c[1]) * kf;
-        col[p * 3 + 2] = c[2] + (fog[2] - c[2]) * kf;
+        col[p * 3] = lit[0] + (fog[0] - lit[0]) * kf;
+        col[p * 3 + 1] = lit[1] + (fog[1] - lit[1]) * kf;
+        col[p * 3 + 2] = lit[2] + (fog[2] - lit[2]) * kf;
         if (captured) {
           const coat = surfaceOverlay?.[p * 4 + 3] || 0;
           const baseAlpha = (captured[p] - coat) / Math.max(1e-6, 1 - coat);
@@ -1175,7 +1217,7 @@ function render(world, o, preparedPalettes) {
     dith = (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither,
     localOutput = localAt && PixelLook.outputPalettes(tone?.palette || evaluatedPalette || world.pal, localPalettes),
     local = localAt && { constraints: localConstraints, palettes: localPalettes, output: localOutput, scene: pal, grade: !tone && grade },
-    use = new Uint32Array(localOutput?.packed.length ?? (tone ? tone.palette.length : np)),
+    use = new Uint32Array(stages ? 0 : localOutput?.packed.length ?? (tone ? tone.palette.length : np)),
     ln = look.lines ? (look.lines === true ? {} : look.lines) : null,
     lines = !ink && !!ln,
     lineGap = ln ? (ln.gap || 0.3) / (2 * R) : 1,
@@ -1257,6 +1299,12 @@ function render(world, o, preparedPalettes) {
         r = line[0];
         g = line[1];
         b = line[2];
+      }
+      if (stages) {
+        out[q] = Math.round(clamp(r, 0, 1) * 255);
+        out[q + 1] = Math.round(clamp(g, 0, 1) * 255);
+        out[q + 2] = Math.round(clamp(b, 0, 1) * 255);
+        continue;
       }
       const localId = outlined ? 0 : localAt?.[p];
       let ditherX = x, ditherY = y;

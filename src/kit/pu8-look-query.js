@@ -3,7 +3,7 @@
   const W = K.world, { check } = W.data;
   const rgb = packed => [packed >> 16, packed >> 8 & 255, packed & 255].map(n => n / 255);
   W.lookQuery = function (visual, time = 0) {
-    let world, index, media, plan;
+    let world, index, media, plan, stages;
     const blueNoise = K.procedural.materials.blueNoise, surfacePalettes = new Map();
     function setup() {
       if (world) return;
@@ -22,7 +22,8 @@
     }
     function output(spec, args = {}) {
       const selector = spec === undefined ? undefined : TargetSelectors.prepare(spec);
-      const { rgb: input, at, rest, base, pixel = [0, 0], limit = 256 } = args;
+      const { rgb: input, at, rest, base, stage, pixel = [0, 0], limit = 256 } = args;
+      if (stage !== undefined) RenderStages.stage(stage);
       check(input === undefined || Array.isArray(input) && input.length === 3 && input.every(n => Number.isFinite(n) && n >= 0 && n <= 1),
         'A look sample needs normalized RGB');
       check((at === undefined || W.data.vector(at)) && (rest === undefined || W.data.vector(rest)),
@@ -32,6 +33,24 @@
         Number.isSafeInteger(limit) && limit >= 1 && limit <= 4096, 'Expected an integer art pixel and a bounded result limit');
       const selected = groups(selector);
       if (!selected.length) return W.query.missing('no render target matches the selector','missing');
+      stages ??= RenderStages.plan(world, { blueNoise }) ?? false;
+      if (stages) {
+        const sample = at || rest ? { position: rest, worldPosition: at, time } : null;
+        const rows = selected.slice(0, limit).map(({ target, count, first }) => {
+          const rules = first === undefined ? {} : stages.at(first);
+          const stagesForTarget = Object.fromEntries(RenderStages.names.filter(name => rules[name]).map(name =>
+            [name, rules[name].map(rule => ({
+              asset: rule.assetId ?? null, select: rule.select,
+              ...(rule.mask && { maskWeight: sample ? rule.mask(sample) : null }),
+              ...(rule.palette && { palette: rule.palette.packed })
+            }))]));
+          const active = stage && rules[stage];
+          const sampled = stage && input && (stage === 'palette' ? RenderStages.quantize(active, input, ...pixel, sample) :
+            RenderStages.apply(active, input, sample));
+          return { target, count, stages: stagesForTarget, ...(sampled && { rgb: sampled }) };
+        });
+        return W.query.ok({ matched: selected.length, targets: rows });
+      }
       const options = { palette: world.pal, roles: world.paletteRoles, blueNoise, context: world.surfaceEffects };
       plan ??= PixelLook.preparePaletteConstraints(world.look?.paletteConstraints, options) ?? false;
       const { paletteRemap, colorCurves, colorLut, colorStack, tone } = world.look ?? {};

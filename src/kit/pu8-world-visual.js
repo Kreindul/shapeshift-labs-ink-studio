@@ -44,6 +44,7 @@
       return binding;
     }
     function validate() {
+      RenderStages.prepare(look?.renderStages, paletteOptions);
       if (look?.paletteConstraints || Object.hasOwn(config.look ?? {}, 'asset') || Object.hasOwn(config.look ?? {}, 'targets')) {
         PixelLook.prepareColorStack(look.colorStack, paletteOptions.palette, paletteOptions.roles);
         PixelLook.preparePaletteConstraints(look.paletteConstraints, paletteOptions);
@@ -87,6 +88,8 @@
       return target;
     }
     if(looks.look?.pixel)S.pixel=true;
+    S.captureAlbedo = Array.isArray(looks.look?.renderStages) &&
+      looks.look.renderStages.some(rule => rule.stage === 'material');
     const mid=min.map((n,i)=>(n+max[i])/2);
     const fields=config.fields??{}, terrain=fields.bed, water=fields.water, wear=fields.wear;
     const earth=looks.material({r:[7,8,9,10,11],materialId:'terrain',surface:config.terrainSurface,rf(x,y,z,ny) {
@@ -123,7 +126,7 @@
       const pose=query.target({entity:id}), point=pose?.point;
       if (!point) continue;
       const {half,ramp,surface}=entity.visual;
-      const finish=looks.material({r:ramp??[19,20,21,22,23],surface,materialId:entity.visual.material??'entity'},looks.forEntity(id));
+      const finish=looks.material({r:ramp??[19,20,21,22,23],surface,albedo:entity.visual.albedo,materialId:entity.visual.material??'entity'},looks.forEntity(id));
       hasSurface ||= Boolean(finish.surface);
       S.box(point,half,finish,{res:resolution*.72,tag:id,target:targetFor(id)});
     }
@@ -161,7 +164,7 @@
       }
       B.describeSplats?.(first,B.count(),{material:'water',target:{medium:water,mediumKind:'water',surface:'water'}});
     }
-    const surfaceEffects = (hasSurface || config.surfaceEffects || looks.look?.paletteConstraints) &&
+    const surfaceEffects = (hasSurface || config.surfaceEffects || looks.look?.paletteConstraints || looks.look?.renderStages) &&
       { ...config.surfaceEffects, query };
     return B.finish({cam:config.camera??{target:[mid[0],.05,mid[2]],dist:span*1.48,yaw:.62,pitch:.8},
       radius:span,detail:30,dither:.22,look:looks.look,paletteRoles:config.paletteRoles,
