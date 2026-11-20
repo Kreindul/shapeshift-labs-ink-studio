@@ -11,7 +11,7 @@ const KIT_DIR = path.join(__dirname, 'src', 'kit'),
 const files = () =>
   [
     'src/frame-budget.js', 'src/target-inspection.js', 'src/frame-composite.js', 'src/ink-veil.js', 'src/textured-surface.js', 'src/sprite-surface.js', 'src/atlas-sprites.js', 'src/target-selectors.js', 'src/splat-provenance.js',
-    'src/art-passes.js', 'src/art-direction.js', 'src/art-ink.js', 'src/art-effects.js', 'src/art-stability.js', 'src/stable-detail.js', 'src/material-pixel-style.js',
+    'src/art-passes.js', 'src/art-direction.js', 'src/art-ink.js', 'src/art-effects.js', 'src/art-stability.js', 'src/stable-detail.js', 'src/edge-filter.js', 'src/material-pixel-style.js',
     'src/color-space.js', 'src/paint-corrections.js', 'src/color-curves.js', 'src/color-lut.js', 'src/color-stack.js', 'src/pixel-look.js', 'src/reflection-plane.js', 'src/airflow.js', 'src/wind-field.js', 'src/light-schedule.js',
     'src/route-visibility.js', 'src/sample-coverage.js', 'src/contribution-rules.js', 'src/sample-visibility.js', 'src/swept-disc.js', 'src/splat-order.js', 'src/splat-codec.js', 'src/ripple-field.js',
     'src/volume-field.js', 'src/geometry-density.js', 'src/volume-cutouts.js', 'src/cloud-recipes.js', 'src/cloud-detail.js', 'src/cloud-field.js', 'src/lightning.js', 'src/volume-light.js', 'src/celestial-tracks.js', 'src/sky-environment.js', 'src/environment-frame.js', 'src/weather-front.js', 'src/weather-binding.js', 'src/optical-materials.js', 'src/scene-optics.js', 'src/scene-exposure.js', 'src/splat-effects.js',
@@ -28,7 +28,7 @@ const files = () =>
 const demoFiles = () => [path.join(__dirname, 'demos', 'labscenes.js')];
 // the names the bundle defines at top level (add them to your own module.exports)
 const EXPORTS =
-  'makeBuilder, makeSculpt, basis, flame, motes, pondMat, lilies, courses, PALETTES, PAL_HEX, KIT, FrameBudget, InkVeil, TexturedSurface, SpriteSurface, TargetSelectors, SplatProvenance, ColorSpace, PaintCorrections, ColorCurves, ColorLUT, ColorStack, PixelLook, LookInputs, RenderStages, ContributionRules, SurfaceLook, SceneOptics, SceneExposure, SkyEnvironment, EnvironmentFrame, CelestialTracks, CloudField, Lightning, VOX, SplatEffects, ArtPasses, ArtDirection, ArtInk, EffectPalettes, SilhouetteProtection, DetailBudgets, HorizonBands, ArtStability, StableDetail, ArtEffects, VolumeField, VolumeLight';
+  'makeBuilder, makeSculpt, basis, flame, motes, pondMat, lilies, courses, PALETTES, PAL_HEX, KIT, FrameBudget, InkVeil, TexturedSurface, SpriteSurface, TargetSelectors, SplatProvenance, ColorSpace, PaintCorrections, ColorCurves, ColorLUT, ColorStack, PixelLook, LookInputs, RenderStages, ContributionRules, SurfaceLook, SceneOptics, SceneExposure, SkyEnvironment, EnvironmentFrame, CelestialTracks, CloudField, Lightning, VOX, SplatEffects, ArtPasses, ArtDirection, ArtInk, EffectPalettes, SilhouetteProtection, DetailBudgets, HorizonBands, ArtStability, StableDetail, EdgeFilter, ArtEffects, VolumeField, VolumeLight';
 module.exports = {
   files,
   demoFiles,

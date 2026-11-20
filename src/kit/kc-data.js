@@ -544,6 +544,11 @@
       bad('finish.look.stableDetail', error.message);
     }
     try {
+      EdgeFilter.prepare(look?.edgeFilter);
+    } catch (error) {
+      bad('finish.look.edgeFilter', error.message);
+    }
+    try {
       ContributionRules.coverageMode(look?.splatCoverage);
     } catch (error) {
       bad('finish.look.splatCoverage', error.message);

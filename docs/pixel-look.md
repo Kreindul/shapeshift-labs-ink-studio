@@ -4,6 +4,8 @@ Use [continuous splat coverage](continuous-splat-coverage.md) to reduce gaps in 
 
 Use [stable detail levels](stable-detail.md) to fade small texture, geometry, and highlight details at export resolution.
 
+Use [selective edge filtering](edge-filter.md) to antialias named objects or materials at the native art grid.
+
 The stipple look maps the lit frame to a small palette on a fixed screen grid.
 Try it with the [polished seal](../examples/stipple.json).
 
