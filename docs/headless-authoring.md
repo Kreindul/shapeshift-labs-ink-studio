@@ -711,6 +711,82 @@ node examples/procedural-generation.cjs procedural-review
 ink-studio graph run procedural-review/storm-relay.json --at 1.22 --out procedural-review/graph
 ```
 
+## Animation and raster simulation
+
+`KIT.procedural.animationGraph` provides the same time mapping as the
+headless graph. Angles use radians and clocks use seconds. A delay holds
+the first playback sample until the local clock starts. Use the `active`
+port to hide a layer during that hold.
+
+| Operation | Inputs and outputs |
+| --- | --- |
+| `anim.keyframes` | Sample named `channels` from `keys`. A key has `time`, a named `value` for each channel, and optional `ease`. Uses Ink’s scalar, vector, angle, positive, quaternion and orientation interpolation. Returns the channel record and track duration. |
+| `anim.clock` | Map the project clock to `options.range`, with `delay`, `rate`, `reverse` and `mode` of `hold`, `loop` or `pingpong`. Returns mapped time, progress, playback direction and activity. |
+| `anim.stagger` | Sample several clocks with `count`, `options.interval` and `offset`. `reverseOrder` switches which item starts first. Returns mapped times and per-item clock records. |
+| `anim.frame` | Select from raster `frames` with `fps` and a half-open interval from `first` to `end` in frame indices. Accepts the same delay, rate, reverse and looping controls. |
+| `anim.retime` | Sample a reusable graph named by `group` at the time mapped by its `timing` input. The group retains its inputs and outputs and owns its independent simulation caches. Pass `timing.time` to feed an explicit time, such as an item from `anim.stagger`. |
+| `anim.feedback` | Evolve an input array of raster `frames` at a fixed simulation `dt`. Set source `fps` and playback `mode`, signal `halfLife`, `gain`, optional `threshold`, `warp`, `filter`, and timed reset `cuts`. Returns an isolated RGBA signal to composite using existing raster nodes. |
+
+### Planar simulation recipes
+
+`sim.define` takes `kind`, solver `settings`, and a `clock` with optional
+`seed`, fixed `dt` and `maxTicks`. `sim.run` samples that recipe on the graph
+clock. Set `options.time` to sample a specific time, `every` for the
+checkpoint interval in ticks and `cache` for the count of retained intermediate
+checkpoints. Raster coordinates start at the upper left. Positive Y is down.
+Cloth and strands also accept Z and a two-axis `projection` offset per Z unit.
+
+| Kind | Main settings |
+| --- | --- |
+| `particles` | Seeded `emitters` with positions, rates, start/end, size, velocity, spread, lifetime ranges, trails and colors. The particle step applies gravity, damping and obstacle bounce. |
+| `cloth` | Native XPBD rectangular grid defined by `at`, `u`, `v`, `columns` and `rows`. Pin an edge or specify indices and keyed pin positions. Set wind, stretch, shear, bend and optional tear ratio. |
+| `strand` | Multiple point chains using Ink’s XPBD rope constraints. Roots are pinned by default. Explicit `pins` replace the default attachment set. A pin can be an index or `{index, at}` or `{index, keys}` attaching a vector keyframe track. Set bend, gravity, wind, drag and raster stroke width. |
+| `smoke` | Native staggered-grid flow with `emitters` that inject density and velocity over a radius and time range. Controls cover buoyancy, wind, viscosity, diffusion, dissipation and pressure iterations. Density maps to a palette and opacity. |
+| `grain` | A falling-cell material solver with seeded emitters, diagonal settling, optional initial rectangular fills and a grain palette. |
+| `rigid` | Ink’s native rigid-body mechanics rasterized from an XY camera. Author boxes, fixed colliders, gravity, floor and tick-indexed `impulses`. A body specifies `id`, pixel `at`, pixel `size` and optional `velocity`, `spin`, `mass` and `fixed`. |
+| `flip` | Planar free-surface liquid with raster `fill` regions, gravity, particle density, pressure iterations and optional baffles. `flip: 0` gathers PIC velocities, `flip: 1` applies FLIP velocity increments, and intermediate values blend the two. |
+| `feedback` | The equivalent recipe for `anim.feedback`, with the input frame array in `settings.frames`. |
+
+Particles, smoke, grain and liquid accept `walls` as
+`[x, y, width, height]` rectangles or an aligned raster `mask`. Solid pixels
+are selected by `maskChannel` and `maskThreshold` (alpha at least 128 by
+default). Cloth and strands accept spherical 3D colliders by `at` and `r`.
+Settings are captured in each recipe. Changes to a recipe start a new solve.
+
+Every workflow returns transparent RGBA `value`, a numeric `field`,
+`points`, `report` and a portable `checkpoint`. The field reports smoke or
+liquid density, grain occupancy, or alpha coverage for the other workflows.
+Point records expose positions and available velocities or pin state. The
+report records the sampled tick, checkpoint used, and replayed steps. The
+liquid report also includes divergence before and after pressure projection.
+
+### Replay from a saved checkpoint
+
+Export `sim.run.checkpoint` as JSON, then connect it to another
+`sim.run.checkpoint` input through a `jsonAsset`. With no explicit recipe,
+the receiving node reads it from the checkpoint. Rewinding before the
+imported tick rebuilds from the recipe origin. A recipe and checkpoint can
+also be used with the shared block store in Node.
+
+```js
+const ink = require('@shapeshift-labs/ink-studio')
+const { rasterSimulation } = ink.load().KIT.procedural
+const recipe = rasterSimulation.define('grain', { width: 96, height: 64 }, { seed: 17 })
+const first = rasterSimulation.session(recipe)
+const { checkpoint } = first.seek(0.75)
+const branch = rasterSimulation.session(undefined, { checkpoint })
+const frame = branch.seek(1.25)
+```
+
+The Tideworks review renders all eight workflows. A second CLI run restores
+three checkpoints and verifies that their PNGs match the original graph
+byte for byte.
+
+```sh
+node examples/raster-simulations.cjs tideworks-review
+ink-studio graph run tideworks-review/resume-tideworks.json --out tideworks-review/branch
+```
+
 ## 3D scenes, signed fields and sprite rigs
 
 These operations run in the CLI graph and the Node library. The geometry,

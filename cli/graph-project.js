@@ -223,7 +223,8 @@ function cacheReport(frame) {
 
 function createGraphProject(source, { kit=require('../index.js').load(), baseDir=process.cwd(), operations={}, sourceFile }={}) {
   const {graph,data}=kit.KIT.procedural;
-  const {groupOperators,broadcast}=graph.arrays;
+  const {broadcast}=graph.arrays;
+  const groupOperators=[...graph.arrays.groupOperators,...kit.KIT.procedural.animationGraph.groupOperators];
   const project=data.freeze(data.clone(source));
   const {format:kind,version:revision,groups:definitions={},assets:assetDefinitions={},exports:exportsSpec={},
     assertions:assertionSpecs=[],time=0,seed=0,...root}=fields(project,
