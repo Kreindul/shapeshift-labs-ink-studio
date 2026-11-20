@@ -605,6 +605,9 @@ const CMD = {
         '  trace <scene|run> <name>    trace a route, signal or other exposed query',
         '    trace <scene|run> world/cause --args JSON   follow recorded decisions, inputs and events',
         '  field <scene|run> <name> --spec file.json [--explain]  export a line, grid or time series',
+        '  authoring inspect <scene> [--authoring snapshot.json] [--part id]   inspect retained parts',
+        '  authoring preview <scene> <edits.json> [--authoring snapshot.json] [--image preview.png]   stage and validate edits',
+        '  authoring apply <scene> <edits.json> [--authoring snapshot.json] --out snapshot.json   save validated edits',
         '  scene apply|stamp|remix|capture|history|promote <world> ...  edit or derive a world manifest',
         '    scene apply <scene> <edits.json> --dry-run   preview edited paths and look targets',
         '  sim run|resume|fork|reset|replay|diff|sweep|render ...  run or compare fixed-tick simulations',
@@ -707,6 +710,16 @@ const CMD = {
         'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable on|off|file.json --snap on|off --dither-space screen|world|object --dither-spacing n --dither-origin x,y,z --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
       ].join('\n')
     );
+  },
+  authoring() {
+    return require('./authoring.js')(pos, opt, {
+      scene,
+      render(world) {
+        const shot = R.render(world, view({ t: 0 }));
+        const image = R.upscale(shot, opt.px1 ? 1 : shot.px);
+        return PNG.encode(image.w, image.h, image.rgb);
+      }
+    });
   },
   look() {
     const io = require('./look.js');
