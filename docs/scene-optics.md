@@ -172,6 +172,10 @@ Use `--stable-transparency blend` to turn on blending with the default 0.04 spac
 for a scene without an authored setting. The tide gauge scene provides a colored
 pane that moves through bounded mist, world-space rain, and a reflective basin.
 
+## Shaped area lights
+
+[Set up shaped emitters](area-lights.md) to give windows and lanterns a world-space size, soft or stepped shadows, and a visible silhouette in planar reflections.
+
 ## Local contact shadows
 
 [Use contact shadows](contact-shadows.md) to ground feet, crates, railing posts, and foliage with a short world-space reach. Configure strength and cast or receive masks independently of the directional lights.

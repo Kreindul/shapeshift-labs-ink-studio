@@ -92,6 +92,8 @@ function dataScene(file, override, { installedPacks = false } = {}) {
   if (spec.dataInputs !== undefined)
     spec.dataInputs = require('./data-inputs.js').embed(K.dataInputs, spec.dataInputs, file, shot?.dependency);
   if (opt.style) spec.style = opt.style;
+  const area = areaLightsOption();
+  if (Array.isArray(area)) spec.finish = { ...spec.finish, areaLights:area };
   if (opt['shadow-art'] !== undefined)
     spec.finish = { ...spec.finish, look: { ...K.diorama.sceneLook(spec), shadowArt: shadowArtOption() } };
   if (!installedPacks && opt['asset-pack'] !== undefined)
@@ -595,6 +597,17 @@ function contactShadowsOption() {
   return contactShadowsOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
 }
 
+let areaLightsOverride;
+function areaLightsOption() {
+  const value = opt['area-lights'];
+  if (value === undefined) return undefined;
+  if (value === 'off') return false;
+  if (value === true || value === 'on') return true;
+  areaLightsOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
+  if (!Array.isArray(areaLightsOverride)) die('--area-lights settings file needs an emitter array');
+  return areaLightsOverride;
+}
+
 const view = extra =>
   Object.assign(
     {
@@ -666,6 +679,7 @@ const view = extra =>
       rainImpacts: rainImpactOption(),
       skyTransitions: skyTransitionsOption(),
       liveSun: liveSunOption(),
+      areaLights: areaLightsOption(),
       relighting: relightingOption(),
       shadowArt: shadowArtOption(),
       contactShadows: contactShadowsOption(),
@@ -869,7 +883,7 @@ const CMD = {
         'layered horizon: --horizon-bands on|off|file.json',
         'art direction: --art-direction on|off|painted-pixel|storm-silhouette|soft-dawn|file.json',
         'effect palette options: --effect-palettes on|off|file.json',
-        'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable on|off|file.json --stable-detail on|off|file.json --edge-filter on|off|file.json --contact-shadows on|off|file.json --snap on|off --dither-space screen|world|object --dither-spacing n --dither-origin x,y,z --resolve native|coverage|clusters --splat-order center|surface --splat-coverage legacy|continuous|soft --sdf-assist on|off|file.json --stable-transparency on|off|blend --fragment-budget N --inspection file.json|off --inspection-focus id --composite file.json|off --render-graph file.json|off --afterimages file.json|off --reconstruction file.json|off --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
+        'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable on|off|file.json --stable-detail on|off|file.json --edge-filter on|off|file.json --contact-shadows on|off|file.json --area-lights on|off|file.json --snap on|off --dither-space screen|world|object --dither-spacing n --dither-origin x,y,z --resolve native|coverage|clusters --splat-order center|surface --splat-coverage legacy|continuous|soft --sdf-assist on|off|file.json --stable-transparency on|off|blend --fragment-budget N --inspection file.json|off --inspection-focus id --composite file.json|off --render-graph file.json|off --afterimages file.json|off --reconstruction file.json|off --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
       ].join('\n')
     );
   },
