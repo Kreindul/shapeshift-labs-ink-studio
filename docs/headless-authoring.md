@@ -597,6 +597,77 @@ node examples/pixel-effects.cjs pixel-effects-review
 ink-studio graph run pixel-effects-review/pixel-effects.json --out pixel-effects-review/graph
 ```
 
+## Raster warps and 3D projection
+
+The graph operations are also available under
+`ink.load().KIT.procedural.rasterWarp`. Rasters and UVs use top-left
+coordinates. A UV field is a numeric raster with two channels for U and
+V, and an optional 0–1 coverage channel. U and V span the image edges
+from zero to one. Each output pixel reads its source coordinate from
+the field. Build custom fields by joining numeric planes with
+`raster.channels`.
+
+`warp.field` makes an affine inverse field from `width`, `height`, and
+an optional two-row matrix. `warp.sample` applies any field to a
+`source` raster. Set `options.filter` to `nearest` for exact texels or
+`linear` for premultiplied-alpha interpolation. Address outside the
+source with `edge: "clamp" | "transparent" | "wrap" | "mirror"`. Override
+either axis with `edgeU` or `edgeV`.
+
+| Node | Authoring |
+| --- | --- |
+| `warp.mesh` | Set `control.from` and `control.to` to corresponding normalized 2D landmarks. Supply `triangles` as triples of indices or a flat index buffer. Each destination triangle pulls pixels from its source triangle. Later triangles win overlaps. Uncovered pixels are transparent. |
+| `warp.grid` | Set `control.columns`, `rows`, and row-major `points` for the destination lattice. The source is a regular grid. |
+| `warp.polar` | Set `mode: "fromPolar"` to wrap a strip into a disc or annulus. Set `"toPolar"` to unwrap one. Strip X is angle and strip Y is radius. Set `center`, `radii` as fractions of the shorter disc dimension, `angle` in turns, and `clockwise`. |
+| `warp.displace` | Supply a numeric `map` of one channel or an X/Y pair. Subtract `center` and multiply by the two `scale` values in `pixels` or `normalized` units. A positive displacement moves the image toward positive coordinates. |
+| `warp.refract` | Supply a height raster in `map`. Choose its `channel`, `heightScale`, refractive `index`, and ray `depth` in pixels. Local height gradients bend the sampling ray. |
+| `warp.morph` | Supply rasters `a` and `b` and a mesh `control` with landmarks for both. `amount` moves the landmarks and blends the aligned images. Use a named parameter or keyframed value to animate it. |
+
+Mesh, grid, polar, displacement, and refraction nodes expose their
+`field` alongside the rendered `value`. Reuse the field on another
+raster, or export it as JSON. For mesh, grid, polar, and morph set
+`options.width` and `height` to change output dimensions. Displacement
+and refraction use the map's dimensions.
+
+### Per-pixel time
+
+`warp.timeRemap` samples an array of same-sized rasters at a separate
+time for each pixel. Use `warp.frames` to read a named `tag` from an Ink
+layered raster, optionally selecting `layers`. Its other outputs include
+`fps`, the sample `times`, and whether the tag loops.
+
+Set the remap's `options.fps` for evenly spaced frames or supply
+increasing `times` that start at zero. The `map` selects a time in
+seconds using `channel`, `scale`, and `bias`. `mode: "offset"` adds that
+value to the graph clock. `mode: "absolute"` uses the value directly.
+Choose `interpolation: "step" | "nearest" | "linear"` and
+`playback: "hold" | "loop" | "pingpong"`. Looping can use an explicit
+`duration` after the last frame, with a final interval back to the
+first frame.
+
+### Project on 3D surfaces
+
+- `warp.surface` turns the raster into a native `SpriteSurface` batch
+  using a triangle `mesh` with normalized UVs. Supply XYZ vertices, UV
+  pairs and triangle indices. `options.alphaThreshold` controls the
+  binary cutout. The Node graph output can go straight into
+  `B.finish({spriteSurfaces: output})`. The mesh depth-tests with
+  geometry and splats in the existing renderers.
+- `warp.project` produces a projected raster material layer. Set
+  `options.projection` to Ink's `plane`, `cylinder`, or `ribbon`
+  projection and choose `space: "rest" | "world"`, `scale`, `wrap`,
+  `strength`, and `stage: "material" | "lit"`. Export the layer as JSON
+  or pass the native graph output to `KIT.surface.material`.
+
+The [Ashlight Survey example](../examples/raster-warps.cjs) generates
+the graph outputs, renders the same art on a curved mesh and a
+projected splat cylinder, and saves a looping animated PNG.
+
+```sh
+node examples/raster-warps.cjs raster-warps-review
+ink-studio graph run raster-warps-review/raster-warps.json --out raster-warps-review/graph
+```
+
 ## Geometry and attributes
 
 `geometry.meshPaths(mesh, { sources, edgeCost, maxCost })` supports native and imported indexed meshes. It returns per-vertex distances and predecessors, plus `path(vertex)`, `curves(vertices)` and a sampled `distanceAt(point)` field. The cost function receives positions, vertex IDs, length and adjacent faces. Return infinity to block an edge.
