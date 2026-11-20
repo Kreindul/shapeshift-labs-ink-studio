@@ -225,18 +225,20 @@ const SurfaceLook = (() => {
     },
     reflection(layer, q, col) {
       const source = q.skyReflectionSource ?? layer.source;
-      if (source === 'scene' && q.sky) {
+      const scene = source === 'scene' && q.sky;
+      if (!scene || q.skyOverlay) {
+        // A compact three-colour environment reflected in the sample normal.
+        const up = q.n[1] * 2 * q.nv - q.v[1];
+        const tint = up < 0 ? layer.ground : layer.sky;
+        const blend = smooth(0, 0.8, Math.abs(up));
+        for (let i = 0; i < 3; i++) col[i] = mix(layer.horizon[i], tint[i], blend);
+      }
+      if (scene) {
         const normal = q.skyNormal ? unit(q.skyNormal(q.n), q.n) : q.n;
         const view = q.skyView ? unit(q.skyView, normal) : q.v;
         const twice = 2 * dot(normal, view);
         q.sky(normal.map((v, i) => twice * v - view[i]), col);
-        return fresnel(q.nv, layer.f0 ?? 0.04, layer.power ?? 5);
       }
-      // A compact three-colour environment reflected in the sample normal.
-      const up = q.n[1] * 2 * q.nv - q.v[1];
-      const tint = up < 0 ? layer.ground : layer.sky;
-      const blend = smooth(0, 0.8, Math.abs(up));
-      for (let i = 0; i < 3; i++) col[i] = mix(layer.horizon[i], tint[i], blend);
       return fresnel(q.nv, layer.f0 ?? 0.04, layer.power ?? 5);
     },
     planarReflection(layer, q, col) {
@@ -521,7 +523,7 @@ const SurfaceLook = (() => {
       seed,
       geometricNormal,
       reflection: sample.reflection,
-      sky: sample.sky, skyReflectionSource: sample.skyReflectionSource,
+      sky: sample.sky, skyOverlay: sample.skyOverlay, skyReflectionSource: sample.skyReflectionSource,
       skyNormal: sample.skyNormal, skyView: sample.skyView,
       nt: dot(n, half),
       nl: dot(n, sun),

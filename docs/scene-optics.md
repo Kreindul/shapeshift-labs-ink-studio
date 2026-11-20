@@ -11,7 +11,7 @@ Use `--reflections off` or `--atmosphere off` to inspect each effect separately.
 
 The [WebGL canvas renderer](browser-renderer.md) supports the shared glass-beam pass. Planar capture, ripple-driven reflection, and volume integration in this guide use the CPU renderer unless a host implements those passes explicitly.
 
-For moving directional light and cast shadows on solid geometry, see [Live sun lighting](live-sun.md). See [Moving cloud shadows](cloud-shadows.md) for a shared coverage grid that shades the terrain, fog, and water.
+For moving directional light and cast shadows on solid geometry, see [Live sun lighting](live-sun.md). See [Moving cloud shadows](cloud-shadows.md) for a shared coverage grid that shades the terrain, fog, and water. Use [Authored lightning](lightning.md) to time flashes that light clouds, appear in water reflections, and reveal nearby geometry.
 
 ## Planar reflections
 

@@ -108,12 +108,14 @@ const CloudField = (() => {
             x + (height-y)*slopeX, z + (height-y)*slopeZ);
         }
       }
-      function paint(origin, direction, out) {
+      function paint(origin, direction, out, light) {
         if (!visible || !opacity || Math.abs(direction[1]) < 1e-8) return out;
         const distance=(height-origin[1])/direction[1];
         if (distance <= 0) return out;
-        const amount=opacity*sample(cells,origin[0]+distance*direction[0],origin[2]+distance*direction[2]);
-        for (let i=0;i<3;i++) out[i]=mix(out[i],rgb[i],amount);
+        const x = origin[0] + distance * direction[0], z = origin[2] + distance * direction[2];
+        const amount = opacity * sample(cells, x, z);
+        const flash = amount > 0 ? light?.(x, height, z) : null;
+        for (let i = 0; i < 3; i++) out[i] = mix(out[i], Math.min(1, rgb[i] + (flash?.[i] ?? 0)), amount);
         return out;
       }
       return { visible: visible && opacity > 0, coverage:(x,z)=>sample(cells,x,z), paint, shadow };

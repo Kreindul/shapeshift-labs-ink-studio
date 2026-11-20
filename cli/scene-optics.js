@@ -207,7 +207,8 @@ function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon, quality, ti
   const fields = volumes.some(volume => volume.type === 'field' || volume.densityField);
   const query = { ...quality, time, media };
   // Density history cannot track moving illumination.
-  const temporal = fields && !quality.cloudShadow && !volumes.some(v => v.densityField) && !media?.animatedLocals && quality.jitter === 'spatiotemporal' && history;
+  if (quality.flash) history?.clear();
+  const temporal = fields && !quality.flash && !quality.cloudShadow && !volumes.some(v => v.densityField) && !media?.animatedLocals && quality.jitter === 'spatiotemporal' && history;
   const tile = fields && quality.jitter !== 'off' ? volumeNoise(quality.seed) : null;
   const accumulation = temporal ? new Float32Array(W * H * 4) : null;
   const frame = temporal ? Math.floor(time * 60) : 0;

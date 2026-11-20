@@ -26,6 +26,7 @@
   };
 
   K.weather = {
+    lightning: Lightning.compile,
     bind(environment, descriptor = true, { profiles } = {}) {
       return WeatherBinding.bind(SkyEnvironment.compile(environment), WeatherBinding.settings(descriptor),
         { profiles, createSurface: K.procedural.motion.surfaceWeather });

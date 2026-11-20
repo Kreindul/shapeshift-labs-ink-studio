@@ -64,7 +64,7 @@ function surfaceShading(world, options, camera) {
     weather: camera.weather,
     rain: camera.rain,
     visibility: 1,
-    skyView: [0, 0, 0], skyReflectionSource
+    skyView: [0, 0, 0], skyOverlay: camera.skyOverlay, skyReflectionSource
   };
   const rgb = [0, 0, 0];
   const result = [0, 0, 0, 1, 0];

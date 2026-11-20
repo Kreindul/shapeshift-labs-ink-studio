@@ -127,7 +127,7 @@ const VolumeLight = (() => {
   }
 
   function integrate(segments, origin, direction, stop, result, options = {}) {
-    const { time = 0, media, maxSteps = 64, stepScale = 1, jitter = .5, skip = true, cloudShadow } = options;
+    const { time = 0, media, maxSteps = 64, stepScale = 1, jitter = .5, skip = true, cloudShadow, flash } = options;
     const active = new Set(), rgb = [0, 0, 0], light = [1, 1, 1];
     result[0] = result[1] = result[2] = 0;
     result[3] = 1;
@@ -147,7 +147,7 @@ const VolumeLight = (() => {
     for (const [end, volume, sign] of segments) {
       if (hasField && result[3] < .001) break;
       if (active.size && end > last) {
-        let minStep = Infinity;
+        let minStep = flash ? flash.step * stepScale : Infinity;
         for (const v of active) {
           if (v.type === 'field') minStep = Math.min(minStep, v.step * stepScale);
           if (v.densityField) minStep = Math.min(minStep, v.densityField.step * stepScale);
@@ -167,13 +167,14 @@ const VolumeLight = (() => {
           } else blend(density, end - last);
         } else {
           const step = Math.max(minStep, rateFloor);
-          for (let t = last; t < end && result[3] >= .001;) {
+          for (let t = last; t < end && (!hasField || result[3] >= .001);) {
             const distance = Math.min(end - t, step);
             if (t + distance === t) break;
             const depth = t + distance * jitter;
             const x = origin[0] + depth * direction[0], y = origin[1] + depth * direction[1], z = origin[2] + depth * direction[2];
             const visibility = cloudShadow?.(x, y, z) ?? 1;
             const gain = clouds.dim(visibility);
+            const strike = flash?.light(x, y, z);
             let density = 0, advance = Infinity;
             rgb.fill(0);
             for (const v of active) {
@@ -181,7 +182,7 @@ const VolumeLight = (() => {
               if (v.type !== 'field') {
                 advance = 0;
                 density += localDensity;
-                for (let k = 0; k < 3; k++) rgb[k] += localDensity * v.rgb[k] * gain;
+                for (let k = 0; k < 3; k++) rgb[k] += localDensity * (v.rgb[k] * gain + .45 * (strike?.[k] ?? 0));
                 continue;
               }
               const gap = skip && v.field.skip ? v.field.skip(origin[0] + t * direction[0], origin[1] + t * direction[1],
@@ -199,7 +200,7 @@ const VolumeLight = (() => {
               if (v.lit && media) illuminate(v, light, x, y, z, direction, media, visibility);
               else light.fill(v.lit ? gain : 1);
               for (let k = 0; k < 3; k++)
-                rgb[k] += extinction * (base[k] * light[k] + v.emissiveRgb[k] * v.emissiveGain);
+                rgb[k] += extinction * (base[k] * light[k] + v.emissiveRgb[k] * v.emissiveGain + (v.lit ? .45 * (strike?.[k] ?? 0) : 0));
             }
             blend(density, distance);
             // Round to the same step grid so skipping agrees with dense integration.

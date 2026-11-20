@@ -295,6 +295,11 @@
       }
     }
     try {
+      Lightning.settings(st.finish.lightning);
+    } catch (error) {
+      bad('finish.lightning', error.message);
+    }
+    try {
       WindField.settings(st.finish.windField);
     } catch (error) {
       bad('finish.windField', error.message);

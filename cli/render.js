@@ -35,6 +35,7 @@ const surfaceShading = require('./surface-shading.js');
 const SceneOptics = require('../src/scene-optics.js');
 const SkyEnvironment = require('../src/sky-environment.js');
 const CloudField = require('../src/cloud-field.js');
+const Lightning = require('../src/lightning.js');
 const weatherFrame = require('./weather.js');
 const WindField = require('../src/wind-field.js');
 const Precipitation = require('./precipitation.js');
@@ -319,11 +320,17 @@ function render(world, o, preparedPalettes) {
   const clouds = cloudSource ? CloudField.compile(cloudSource).frame(skyTime, cloudSettings,
     sun?.direction ?? sky?.sun ?? (o.volumeLighting ?? world.volumeLighting)?.sun?.direction, cloudDisplacement) : null;
   const cloudShadow = clouds?.shadow;
+  const flash = Lightning.settings(world.lightning, o.lightning)?.frame(t);
   const skyBase = clouds?.visible && !sky ? hex(0) : bg;
-  const skySample = (sky || clouds?.visible) && ((direction, out, origin) => {
+  const skyOverlay = flash && !sky && !clouds?.visible;
+  const skySample = (sky || clouds?.visible || flash) && ((direction, out, origin) => {
     if (sky) SkyEnvironment.shade(sky, direction, out);
     else for (let c = 0; c < 3; c++) out[c] = skyBase[c];
-    return origin ? clouds?.paint(origin, direction, out) ?? out : out;
+    if (origin) {
+      flash?.sky(origin, direction, out);
+      clouds?.paint(origin, direction, out, flash?.light);
+    }
+    return out;
   });
   const showSky = skySample && !transparent && !o.captureCoverage;
   const skyRay = showSky || aerial && ortho && sky ?
@@ -364,9 +371,9 @@ function render(world, o, preparedPalettes) {
     quality.wind = !flow && world.volumeWind && !o.wind && !weather?.wind && !an.wind ? Airflow.frame(world.volumeWind).velocity : wind.velocity;
     if (volumeFlow) quality.windOffset = volumeFlow.windOffset;
     const media = volumes.some(volume => volume.type === 'field') ? prepareVolumeLight() : undefined;
-    return { ...quality, time: t, cloudShadow, media };
+    return { ...quality, time: t, cloudShadow, flash, media };
   };
-  const geometrySample = probe || sortedSurfaces || aerial || cloudShadow ? sampleFrames(world, t) : null;
+  const geometrySample = probe || sortedSurfaces || aerial || cloudShadow || flash ? sampleFrames(world, t) : null;
   const captured = o.captureCoverage || transparent ? new Float32Array(W * H) : null;
   // The reflected pass uses the same projection and reads only the plane's front side.
   const reflectionTint = effects?.reflection || o.reflectionTint;
@@ -405,7 +412,8 @@ function render(world, o, preparedPalettes) {
     eye,
     forward: [V[2], V[6], V[10]],
     reflection,
-    sky: skySample,
+    sky: skyOverlay ? (direction, out, origin) => flash.sky(origin, direction, out) : skySample,
+    skyOverlay: Boolean(skyOverlay),
     skyReflectionSource,
     parallel: ortho ? [V[2], V[6], V[10]] : null,
     footprint: (dist * 2) / (tp * H),
@@ -598,6 +606,7 @@ function render(world, o, preparedPalettes) {
   // Keep later translucent coats when the opaque receiver is recoloured per pixel.
   let surfaceOverlay = null;
   const bend = world.refract === undefined ? 6 : world.refract;
+  const patternFlashes = flash && PIX ? new Map() : null;
   let contributions = retainLayers && PIX ? contributionLayers(col, captured, W, H, true, bend) : null;
   const stageMasks = stages?.surfaceMask || contribution && localConstraints?.some(policy => policy?.mask);
   const stagedFrames = stageMasks ? sampleFrames(world, t) : null;
@@ -796,17 +805,19 @@ function render(world, o, preparedPalettes) {
     const planar = surface?.planar(i);
     const pixelSurface = PIX?.[i * 8] && !surface?.reveals(i) && (!planar || (al >= 1 && !(flags & 1)));
     const projected = surface?.projected(i);
-    const reflectedSky = surface?.environment(i);
+    const reflectedSky = !skyOverlay && surface?.environment(i);
     const fragmentSurface = !pixelSurface && (planar || projected || reflectedSky || liveNormal && hasSurface);
     const detailParticle = world.effectParticles?.some(({ first, count }) => i >= first && i < first + count);
     if (hasSurface && !pixelSurface && !fragmentSurface) {
       [r, g, b, coverage, glint, centerPalette] = surface.shade(i, x, y, z, x, y, z, r, g, b, undefined, undefined, lookPass?.surface);
     }
+    const splatFlash = flash && !(flags & 6) ? flash.light(x, y, z, liveNormal || geometrySample(i).normal) : null;
+    if (pixelSurface && splatFlash) patternFlashes.set(i, splatFlash);
     const fogMix =
       !(flags & 2) && world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dn) * world.fog.max : 0;
     const reflectInRaster = (planar || reflectedSky) && !pixelSurface;
     const normal = fragmentSurface ? surface.surfaceNormal(i) : null;
-    if (fogMix && !reflectInRaster && !staged?.lit && !liveNormal) {
+    if (fogMix && !reflectInRaster && !staged?.lit && !liveNormal && !splatFlash) {
       r += (fog[0] - r) * fogMix;
       g += (fog[1] - g) * fogMix;
       b += (fog[2] - b) * fogMix;
@@ -888,7 +899,7 @@ function render(world, o, preparedPalettes) {
             pg = c[1];
             pb = c[2];
             if (staged?.material) [pr, pg, pb] = stagedMaterial(i, staged.material, [pr, pg, pb], materialSample);
-            if (!reflectInRaster && !staged?.lit) {
+            if (!reflectInRaster && !staged?.lit && !splatFlash) {
               pr += (fog[0] - pr) * fogMix;
               pg += (fog[1] - pg) * fogMix;
               pb += (fog[2] - pb) * fogMix;
@@ -936,7 +947,12 @@ function render(world, o, preparedPalettes) {
           pg *= gain;
           pb *= gain;
         }
-        if (staged?.lit || (fragmentSurface && reflectInRaster) || liveNormal) {
+        if (splatFlash) {
+          pr = Lightning.shade(pr, splatFlash[0]);
+          pg = Lightning.shade(pg, splatFlash[1]);
+          pb = Lightning.shade(pb, splatFlash[2]);
+        }
+        if (staged?.lit || (fragmentSurface && reflectInRaster) || liveNormal || splatFlash) {
           pr += (fog[0] - pr) * fogMix;
           pg += (fog[1] - pg) * fogMix;
           pb += (fog[2] - pb) * fogMix;
@@ -1230,6 +1246,8 @@ function render(world, o, preparedPalettes) {
           const gain = CloudField.dim(cloudShadow(HX[p], HY[p], HZ[p]));
           lit = [lit[0] * gain, lit[1] * gain, lit[2] * gain];
         }
+        const patternFlash = patternFlashes?.get(i);
+        if (patternFlash) lit = lit.slice(0, 3).map((value, c) => Lightning.shade(value, patternFlash[c]));
         if (lookPass) lookPass.fragment(p, retainLayers ? contributions.weight(p) : 1 - (surfaceOverlay?.[p * 4 + 3] || 0),
           lookPass.mark, true);
         const kf = world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dep[p]) * world.fog.max : 0;
