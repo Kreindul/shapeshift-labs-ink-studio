@@ -48,6 +48,9 @@ needs and recurring shifts, and let orders end after sustained route failures.
 [Public influence](public-influence.md) lets players post priority notices
 and fund rewards that agents may choose to pursue.
 
+[Households and population](population.md) track housing, named residents,
+cohort changes, employment, and shared demand on a slower clock.
+
 [Jobs and reservations](job-reservations.md) arbitrate shared capacity and
 single-use work across agent rosters.
 
