@@ -70,7 +70,8 @@
       function affected(id,area) {
         const local = bounds(area), reasons = new Map();
         for (const read of declarations.get(id)?.reads ?? []) for (const change of byField.get(read.field) ?? []) {
-          if (overlaps(read.bounds,local) && overlaps(read.bounds,change.bounds,read.padding) &&
+          if ((!change.deliveredTo || change.deliveredTo===id) &&
+              overlaps(read.bounds,local) && overlaps(read.bounds,change.bounds,read.padding) &&
               overlaps(local,change.bounds,read.padding))
             reasons.set(change.id,change);
         }
@@ -87,8 +88,12 @@
           return because.length ? [{system:id,because}] : [];
         }),work:work.slice()});
       }
+      function deliver(row,reader) {
+        if (!declarations.has(reader)) throw new TypeError('Unknown spatial reader '+reader);
+        return append({...write(row.writer,row.field,row.bounds,row.reason),deliveredTo:reader});
+      }
       return Object.freeze({change:(id,field,domain,reason,because)=>append(write(id,field,domain,reason),because),
-        affected,recordWork,report});
+        affected,recordWork,report,deliver});
     }
     return Object.freeze({describe,write,begin});
   }

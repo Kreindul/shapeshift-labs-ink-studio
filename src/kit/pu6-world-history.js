@@ -55,6 +55,7 @@
     }}]);
   }
   function wear(config) {
+    check(config.contactEvents===undefined || typeof config.contactEvents==='boolean','contactEvents must be boolean');
     const region=bounds(config.bounds), cell=config.cell??.25, recovery=config.recovery??.01, gain=config.gain??.12;
     const sources=config.sources??[], spread=config.spread??.18;
     check(Number.isFinite(cell)&&cell>=.03&&Number.isFinite(recovery)&&recovery>=0&&Number.isFinite(gain)&&gain>=0&&
@@ -117,7 +118,8 @@
         sampleStep:cell*.35,minClearance:0});
       return Q.ok({status:result.status,points:result.route?.points??[]});
     }
-    return {inputs:{enabled:{type:'bool',default:config.enabled??true}},initial:()=>({cells:{},pending:[],enabled:config.enabled??true}),
+    return {inputs:{enabled:{type:'bool',default:config.enabled??true},
+        ...(config.contactEvents && {contacts:'event'})},initial:()=>({cells:{},pending:[],enabled:config.enabled??true}),
       validateState(state){
         check(record(state?.cells)&&Array.isArray(state.pending)&&typeof state.enabled==='boolean'&&
           Object.keys(state.cells).length<=100000&&Object.values(state.cells).every(row=>vector(row.point)&&
@@ -132,7 +134,7 @@
       step(state,ctx){
         const enabled=ctx.input.enabled;
         if(!enabled)return {...state,pending:[],enabled};
-        const contacts=[...state.pending,...sources.flatMap(name=>ctx.states[name]?.contacts??[])];
+        const contacts=[...state.pending,...(ctx.input.contacts??[]),...sources.flatMap(name=>ctx.states[name]?.contacts??[])];
         return {cells:contact(state,contacts,ctx.dt),pending:[],enabled};
       },
       fields:{wear:{type:'number',units:'fraction',read:at},

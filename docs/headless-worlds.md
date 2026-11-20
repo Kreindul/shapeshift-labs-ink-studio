@@ -318,11 +318,76 @@ Painting a material can rebuild nearby splats using retained surface
 geometry. Physical spans and route links can stay cached. Ordinary
 `sim render` still assembles a fresh headless render scene.
 
+## Multi-rate simulation
+
+Declare a system's `schedule` on the system record. The world's `dt`
+still defines command times, scenario evaluation, and checkpoint
+ticks.
+
+| Schedule | Solver cadence |
+| --- | --- |
+| Omitted | One step per world tick with `ctx.dt = world.dt`. |
+| `{"substeps":4}` | Four evenly spaced steps per tick, each with a quarter of the world timestep. |
+| `{"every":4}` | One step on ticks 4, 8, 12, and so on, with four world timesteps of elapsed time. |
+
+The runtime aligns fast solvers on an integer grid. It limits the
+combined subdivision to 64 and the slow interval to 3600 ticks.
+Solvers due at the same boundary read the same state snapshot.
+A stateful publication is visible at the following boundary.
+Combinational connections can deliver values at a shared boundary
+in dependency order.
+
+A connection's `sample` sets the crossing rule.
+
+| Rule | Behavior |
+| --- | --- |
+| `hold` | Read the most recent available value when the consumer runs. This is the default for level signals. |
+| `average` | Time-weight the held number or vector over the consumer's interval. The initial output covers the interval before the first publication. |
+| `sum` | Add each published number or vector increment once. Consume the accumulated total on the next solver call. |
+| `events` | Queue event entries in publication order and deliver them once. Event connections use this rule when multi-rate scheduling is active. |
+
+Connection delays are measured in world ticks. Delayed levels hold
+the selected tick's final value. Delayed sums and events carry all
+publications from the selected tick as a batch. Manual numeric inputs
+hold their latest command value. Manual events accumulate in command
+order and wait for the scheduled consumer. Initial outputs seed held
+levels, while sums and event wires collect solver publications.
+
+`ctx.time` is the end of the current solver step. `ctx.baseDt`,
+`ctx.every`, `ctx.substep`, and `ctx.substeps` describe the schedule
+when multi-rate mode is active. `ctx.tick` is the containing world
+tick. Peer state and field queries read the snapshot at the start
+of the current boundary. Fast steps use distinct deterministic
+random streams. Commands and conservative transfer settlement run
+once at the world tick boundary. Spatial writes emitted by a step
+become visible on the next world tick. Slow spatial readers keep
+matching notices until their next step.
+
+Checkpoints preserve pending signal samples and spatial notices.
+Only completed world ticks publish state. If a substep fails, the
+run retains its previous checkpoint, inputs, and pending commands.
+Profile `calls` counts actual scheduled solver calls. `maxMs` is
+the largest total time spent on that system in one world tick.
+
+The [multi-rate yard](../examples/world-multi-rate.json) runs a
+native cart at 80 Hz, weather controls at 20 Hz, and terrain wear
+at 5 Hz. Set `contactEvents:true` on mechanics and wear to connect
+their `contacts` ports across rates. The wear system applies a
+batch of wheel contacts at its update boundary. The example also
+shows a slow temperature average alongside a held temperature
+signal for the heater.
+
+```sh
+ink-studio sim run examples/world-multi-rate.json --ticks 4 --profile --record yard.run.json
+ink-studio probe yard.run.json --field world/signal --args '{"port":"trail/contacts"}'
+ink-studio sim replay yard.run.json
+```
+
 ## Author a world
 
 A manifest has `format: "ink-studio/world"`, `version: 1`, a stable `id`,
 `seed`, `dt`, and tables of `entities` and `systems`. A system record
-declares a `kind` and a `config`. Optional sections include `connections`,
+declares a `kind`, a `config`, and optionally a [solver schedule](#multi-rate-simulation). Optional sections include `connections`,
 `prefabs`, `assetPacks`, `commands`, `history`, `metadata` and
 `scenario`. See [the watershed](../examples/world-watershed.json) and
 [the quarry crossing](../examples/world-crossing.json) for working manifests.

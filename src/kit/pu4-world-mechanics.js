@@ -50,10 +50,12 @@
   }
   function extents(body) { return geometry(body).extent; }
   function mechanics(config) {
+    check(config.contactEvents===undefined || typeof config.contactEvents==='boolean','contactEvents must be boolean');
     const start=config.bodies??{}, jointSpecs=config.joints??{}, forceSpecs=config.forces??{};
     check([start,jointSpecs,forceSpecs].every(group=>record(group)&&Object.keys(group).length<=512&&Object.keys(group).every(id)),
       'Mechanics needs bounded body, joint and force tables');
     const initialBodies={}, initials={}, inputs={}, outputs={}, claimed=new Map(), driveOrder=[], mountOrder=[];
+    if (config.contactEvents) outputs.contacts='event';
     const index = W.spatial.create(), indexed = new Map(), poseCache = new WeakMap();
     let indexedBodies = null, unbounded = 0, enoughBodies = false;
     const entityNames = new Set(Object.entries(start).map(([key,row])=>row.entity??key));
@@ -482,6 +484,7 @@
         out['speed.'+key]=joint.speed;
         out['stalled.'+key]=joint.stalled;
       }
+      if (config.contactEvents) out.contacts=state.contacts;
       return out;
     },
     fields:{

@@ -67,6 +67,7 @@
     })));
     const transfers = W.transfers.bind(systems);
     for (const name of transfers.producers) systems[name].checkTransfers?.(transfers.validate);
+    const schedule = W.rates.schedules(world,systems);
     const incoming = new Map(), edges = new Map(), indegree = new Map();
     for (const name of ordered(systems)) {
       edges.set(name,[]);
@@ -81,8 +82,9 @@
       const delay = edge.delay ?? 0;
       check(Number.isSafeInteger(delay) && delay >= 0 && delay <= 3600, 'Invalid connection delay');
       check(!incoming.has(edge.to), 'More than one connection feeds ' + edge.to);
-      incoming.set(edge.to,{from:edge.from,to:edge.to,delay});
-      if (delay === 0 && systems[from].combinational) {
+      const sample = W.rates.policy(edge,source.type,schedule.active);
+      incoming.set(edge.to,{from:edge.from,to:edge.to,delay,sample});
+      if (delay === 0 && sample !== 'average' && systems[from].combinational) {
         indegree.set(to,indegree.get(to)+1);
         edges.get(from).push(to);
       }
@@ -98,7 +100,8 @@
       }
     }
     check(order.length === names.length, 'Instantaneous signal cycle; use a delay or a stateful system');
-    return {world,systems,ports,incoming,order,names,transfers,dependencies};
+    const rates = schedule.active ? W.rates.bind(schedule,systems,ports,incoming,order) : null;
+    return {world,systems,ports,incoming,order,names,transfers,dependencies,rates};
   }
   function actionCheck(raw, plan, min = 1) {
     check(record(raw) && tickOK(raw.tick) && raw.tick >= min && record(raw.args ?? {}) &&
@@ -181,28 +184,35 @@
       world=result.world;
     }
     const {plan}=result;
-    const {systems,ports,incoming,order,names,transfers,dependencies} = plan;
+    const {systems,ports,incoming,order,names,transfers,dependencies,rates} = plan;
     const projection = Q.projection(systems);
+    const slowReaders = new Map(rates ? dependencies.describe.filter(({id,reads})=>reads.length&&rates.rates[id].every>1)
+      .map(({id})=>[id,rates.rates[id].every]) : []);
     const rootInputs = Object.fromEntries(Object.entries(ports.inputs).map(([name,port]) => [name,port.default]));
     const rootOutputs = Object.fromEntries(Object.entries(ports.outputs).map(([name,port]) => [name,port.default]));
     const rootDelays = Object.fromEntries([...incoming.values()].filter(edge => edge.delay).map(edge =>
-      [edge.to,Array(edge.delay).fill(rootOutputs[edge.from])]));
+      [edge.to,Array(edge.delay).fill(W.rates.buffered(edge)?W.rates.zero(ports.outputs[edge.from].type):rootOutputs[edge.from])]));
     const metrics = new Map();
     const scheduled = new Map();
     const added = [];
     const historyLimit = world.history?.limit ?? 10000;
     let tick = 0, states = {}, outputs = rootOutputs, manual = rootInputs, delays = rootDelays,
       history = [], dropped = 0, lastEvents = [], scenario = {status:'running',score:0,matched:{},metrics:{}};
-    let pendingWrites = [], lastDependencies = null;
+    let pendingWrites = [], lastDependencies = null, sampling = rates?.initial, spatialSampling = {};
     let currentQuery, lastTransfers = [], lastSignals = {...rootInputs,...rootOutputs};
 
     function view(worldValue = world, statesValue = states, signals = lastSignals, tickValue = tick, receipts = lastTransfers) {
       return Object.freeze({world:worldValue,states:statesValue,signals,tick:tickValue,time:tickValue*worldValue.dt,history,dropped,
         ...(receipts.length && {transfers:receipts})});
     }
-    function context(name, worldValue, statesValue, at, input, emit, query, spatial) {
-      return Object.freeze({world:worldValue,query,id:name,states:statesValue,tick:at,time:at*worldValue.dt,dt:worldValue.dt,
-        input,emit,...(spatial && {spatial}),random:key => P.data.hash(name+'/'+at+'/'+String(key),worldValue.seed)/4294967296});
+    function context(name, worldValue, statesValue, at, input, emit, query, spatial, timing) {
+      const baseDt = worldValue.dt, substeps = timing?.substeps ?? 1;
+      const time = timing && timing.end !== 1 ? (at-1+timing.end)*baseDt : at*baseDt;
+      const dt = timing ? baseDt*timing.every/substeps : baseDt;
+      const randomTick = substeps>1 ? at+'.'+timing.substep : at;
+      return Object.freeze({world:worldValue,query,id:name,states:statesValue,tick:at,time,dt,input,emit,
+        ...(timing && {baseDt,every:timing.every,substep:timing.substep,substeps}),...(spatial && {spatial}),
+        random:key => P.data.hash(name+'/'+randomTick+'/'+String(key),worldValue.seed)/4294967296});
     }
     function rootedState(value) {
       return P.data.isImmutable(value) ? value : freeze(copy(value));
@@ -251,7 +261,8 @@
       return freeze({format:checkpointFormat,version:1,tick,world,states,outputs,manual,delays,history,dropped,
         signals:lastSignals,events:lastEvents,pending:packCommands(),scenario,
         ...(lastTransfers.length && {transfers:lastTransfers}),
-        ...(pendingWrites.length && {dependencyWrites:pendingWrites})});
+        ...(pendingWrites.length && {dependencyWrites:pendingWrites}),...(rates && {sampling}),
+        ...(Object.keys(spatialSampling).length && {spatialSampling})});
     }
     function restore(saved) {
       check(record(saved) && saved.format === checkpointFormat && saved.version === 1 && equal(saved.world,world) && tickOK(saved.tick),
@@ -269,6 +280,10 @@
         check(Array.isArray(payload.delays[name]) && payload.delays[name].length === rootDelays[name].length,'Invalid delay buffer ' + name);
         for (const value of payload.delays[name]) portValue(ports.inputs[name],value,name);
       }
+      if (rates) {
+        rates.validate(payload.sampling,portValue,payload.tick);
+        sampling = payload.sampling;
+      }
       for (const name of names) systems[name].validateState?.(payload.states[name]);
       transfers.validateBalances(payload.states);
       if (own(payload,'transfers')) transfers.validateReceipts(payload.transfers,payload.tick);
@@ -277,6 +292,14 @@
         check(Array.isArray(payload.dependencyWrites),'Invalid saved spatial writes');
         dependencies.begin(payload.dependencyWrites);
         pendingWrites = payload.dependencyWrites;
+      }
+      if (own(payload,'spatialSampling')) {
+        check(record(payload.spatialSampling),'Malformed spatial sampling buffers');
+        for (const [name,notices] of Object.entries(payload.spatialSampling)) {
+          check(slowReaders.has(name) && payload.tick%slowReaders.get(name) && Array.isArray(notices) &&
+            dependencies.begin(notices).affected(name).length===notices.length,'Invalid saved spatial notices for '+name);
+        }
+        spatialSampling = payload.spatialSampling;
       }
       ({tick,states,outputs,manual,delays,history,dropped,scenario,signals:lastSignals,events:lastEvents} = payload);
       enqueue(payload.pending,false);
@@ -356,7 +379,12 @@
         const [name,key] = endpoint(item.action);
         const emit = makeEmit(name);
         if (name === 'world') {
-          if (key === 'input') nextManual[item.args.port] = portValue(ports.inputs[item.args.port],item.args.value,item.args.port);
+          if (key === 'input') {
+            const {port,value} = item.args, descriptor = ports.inputs[port];
+            const next = portValue(descriptor,value,port);
+            nextManual[port] = rates && descriptor.type==='event' ?
+              W.rates.add(nextManual[port],next,'event') : next;
+          }
           if (key === 'patch') {
             const result = W.apply(nextWorld,item.args.edits);
             for(const edge of nextWorld.connections)
@@ -399,23 +427,65 @@
         makeEmit(name)('transfer',receipt);
         return receipt;
       })) : [];
+      let nextSpatial = spatialSampling;
+      if (slowReaders.size && (trace || Object.keys(spatialSampling).length)) {
+        nextSpatial = {...spatialSampling};
+        for (const [name,every] of slowReaders) {
+          const waiting = nextSpatial[name] ?? [];
+          if (at%every===0) {
+            for (const notice of waiting) activeTrace().deliver(notice,name);
+            delete nextSpatial[name];
+          } else {
+            const current = trace?.affected(name) ?? [];
+            if (current.length) {
+              check(waiting.length+current.length<=P.spatialDependencies.limit,'Spatial sampling buffer exceeds its budget');
+              nextSpatial[name]=waiting.concat(current.map(({writer,field,bounds,reason})=>({writer,field,bounds,reason})));
+            }
+          }
+        }
+        nextSpatial=freeze(nextSpatial);
+      }
       const committed = freeze(drafts);
-      const previousQuery = Q.create(view(nextWorld,committed,lastSignals,tick,receipts),systems,projection);
-      const immediate = {}, nextStates = {}, nextOutputs = {}, observed = {}, spent = {};
-      for (const name of order) {
-        const system = systems[name];
-        const input = currentValues(name,nextManual,immediate,outputs,delays);
-        for (const [key,value] of Object.entries(input)) observed[name+'/'+key] = value;
-        const ctx = context(name,nextWorld,committed,at,input,makeEmit(name),previousQuery,spatial(name,true));
+      const spent = {};
+      let phaseQuery, phaseStart;
+      function integrate(name, snapshot, input, timing, target) {
+        if (!phaseQuery || phaseStart !== timing?.start) {
+          phaseStart = timing?.start;
+          const base = view(nextWorld,snapshot,timing?.signals??lastSignals,tick,receipts);
+          phaseQuery = Q.create(timing ? {...base,time:(tick+timing.start)*nextWorld.dt} : base,systems,projection);
+        }
+        const system = systems[name], state = snapshot[name];
+        const ctx = context(name,nextWorld,snapshot,at,input,makeEmit(name),phaseQuery,spatial(name,true),timing);
         const start = profile ? clock() : 0;
-        nextStates[name] = system.step ? rootedState(system.step(committed[name],ctx)) : committed[name];
-        readOutputs(name,nextStates[name],ctx,nextOutputs);
-        if (system.combinational) for (const key of Object.keys(system.outputs ?? {})) immediate[name+'/'+key] = nextOutputs[name+'/'+key];
-        if (profile) spent[name] = clock()-start;
+        const next = system.step ? rootedState(system.step(state,ctx)) : state;
+        readOutputs(name,next,ctx,target);
+        if (profile) {
+          const cost = spent[name] ??= {calls:0,ms:0};
+          cost.calls++;
+          cost.ms += clock()-start;
+        }
+        return next;
+      }
+
+      let nextStates, nextOutputs, publishedSignals, nextSampling, delayedSamples;
+      if (rates) {
+        const frame = rates.advance(at,committed,outputs,nextManual,delays,lastSignals,sampling,integrate);
+        ({states:nextStates,outputs:nextOutputs,signals:publishedSignals,buffers:nextSampling,delayedSamples}=frame);
+      } else {
+        nextStates = {}; nextOutputs = {};
+        const immediate = {}, observed = {};
+        for (const name of order) {
+          const input = currentValues(name,nextManual,immediate,outputs,delays);
+          for (const [key,value] of Object.entries(input)) observed[name+'/'+key] = value;
+          nextStates[name] = integrate(name,committed,input,undefined,nextOutputs);
+          if (systems[name].combinational) for (const key of Object.keys(systems[name].outputs ?? {}))
+            immediate[name+'/'+key] = nextOutputs[name+'/'+key];
+        }
+        publishedSignals = {...observed,...nextOutputs};
       }
       const nextDelays = Object.fromEntries([...incoming.values()].filter(edge => edge.delay).map(edge =>
-        [edge.to,[...delays[edge.to].slice(1),nextOutputs[edge.from]]]));
-      const publishedSignals = freeze({...observed,...nextOutputs});
+        [edge.to,[...delays[edge.to].slice(1),delayedSamples?.[edge.to] ?? nextOutputs[edge.from]]]));
+      publishedSignals = freeze(publishedSignals);
       const memory = historyWith(events,nextWorld.history);
       const dependencyReport = trace && trace.report();
       const nextScenario = evaluateScenario({...view(nextWorld,freeze(nextStates),publishedSignals,at,receipts),...memory},events);
@@ -430,14 +500,16 @@
       dropped = memory.dropped;
       lastEvents = freeze(events);
       lastTransfers = receipts;
+      sampling = nextSampling;
+      spatialSampling = nextSpatial;
       pendingWrites = freeze(nextWrites);
       lastDependencies = dependencyReport;
       scenario = nextScenario;
       scheduled.delete(at);
       currentQuery = undefined;
-      for (const [name,ms] of Object.entries(spent)) {
+      for (const [name,{calls,ms}] of Object.entries(spent)) {
         const value = metrics.get(name) ?? {calls:0,ms:0,maxMs:0};
-        metrics.set(name,{calls:value.calls+1,ms:value.ms+ms,maxMs:Math.max(value.maxMs,ms)});
+        metrics.set(name,{calls:value.calls+calls,ms:value.ms+ms,maxMs:Math.max(value.maxMs,ms)});
       }
       return view();
     }
@@ -459,7 +531,9 @@
         const all=[...origin.pending,...added];
         return {scheduled:all.length,applied:all.filter(command=>command.tick<=tick).length,pending:packCommands().length};
       },
-      profile:() => Object.fromEntries(metrics),
+      profile:() => rates && profile ? Object.fromEntries(names.map(name=>[name,
+        metrics.get(name)??{calls:0,ms:0,maxMs:0}])) : Object.fromEntries(metrics),
+      rates:() => rates ? {subdivision:rates.subdivision,systems:rates.rates} : null,
       dependencies:() => ({declarations:dependencies.describe,
         ...(lastDependencies ?? {changes:[],affected:[],work:[]}),pending:pendingWrites}),
       fork:() => create(world,{checkpoint:save(),implementations,profile,validated:true}),
