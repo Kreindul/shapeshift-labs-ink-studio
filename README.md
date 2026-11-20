@@ -791,7 +791,7 @@ Common rendering controls:
 | `--w`, `--h`, `--out` | Output viewport size and destination. The renderer resolves a lower-resolution pixel grid derived from the scene's detail settings. |
 | `--px 2` | Use two screen pixels per art pixel. In `compare` and `review`, `--px` specifies the scale of the reference. |
 | `--tone stipple\|off` | Enable the stipple preset or turn off the scene's tone settings. |
-| `--ink off`, `--effects off` | Disable authored selective ink or art-pixel effects. |
+| `--ink on\|off\|file.json`, `--effects off` | Choose a [selective ink profile](docs/art-passes.md#selective-ink-and-stable-pixels) or disable art-pixel effects. |
 | `--emissive-finishes off` | Disable authored emissive cores, shaped spill, and size-aware glow. |
 | `--snap`, `--dither-space screen\|world\|object`, `--resolve native\|coverage\|clusters` | Configure camera snapping, dither coordinates, and pixel resolve. Use `--stable off` to disable the scene's stability profile. |
 | `--splat-order center\|surface` | Choose global center ordering or local ordering using the sampled surface plane. |

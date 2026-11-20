@@ -262,6 +262,7 @@ function renderFrame(world, o, preparedPalettes) {
     T = cameraMotion.kick ? [T0[0] + cameraMotion.kick[0], T0[1] + cameraMotion.kick[1], T0[2] + cameraMotion.kick[2]] : T0,
     cw = o.w || 900,
     ch = o.h || 620;
+  const depthOffset = ortho && !authored ? 2 * world.radius + 4 : 0;
   const audit = o.lookAudit === true ? createAudit() : o.lookAudit;
   const onPaletteClip = audit && ((scope, i, r, g, b) => audit.palette(scope, world.pal[i], r, g, b));
   const transparent = !!o.transparent && !o.captureCoverage;
@@ -336,7 +337,7 @@ function renderFrame(world, o, preparedPalettes) {
     for (const channel of ['objectId', 'materialId', 'emission', 'protected']) passSelection.add(channel);
   }
   const finishLook = (frame, passes, fog, effectSignals, source) => {
-    if (ink) frame = ArtInk.apply(frame, passes, ink, world.pal, fog);
+    if (ink) frame = ArtInk.apply(frame, passes, ink, world.pal, fog, { world, depthOffset });
     if (effects) frame = ArtEffects.apply(frame, passes, effects, t, {
       history: o.artHistory, world: o[reconstructionSource] ?? world, palette: world.pal, motionReference: frame.motionReference,
       haloSource: passes.scopedEmission && (p => emissive.profiles[passes.scopedEmission.slots[p]-1]?.glow === undefined)
@@ -449,7 +450,7 @@ function renderFrame(world, o, preparedPalettes) {
   lookPass = createLookPass(W, H, passSelection, o.lookPassRegistry);
   /* Legacy orthographic views back the eye away. Authored rigs keep their rail or orbit position. */
   const oh = dist * tangent,
-    eyeD = ortho && !authored ? dist + 2 * world.radius + 4 : dist,
+    eyeD = dist + depthOffset,
     reflectionPlane = o.reflectionPlane,
     focal = ortho ? H / 2 / oh : H / 2 / tangent,
     cameraView = probeView?.matrix ?? viewMatrix(yaw, pitch, eyeD, T),
