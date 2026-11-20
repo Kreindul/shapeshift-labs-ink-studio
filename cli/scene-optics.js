@@ -169,9 +169,13 @@ function traceMedia(volumes, segments, origin, direction, stop, result, sample, 
   }
   function waterSurface(style, t, surface) {
     const atSurface=Math.abs(origin[1]+t*direction[1]-surface)<=1e-6;
-    const reflection = style.reflection && !style.optical && atSurface ?
+    let reflection = style.reflection && !style.optical && atSurface ?
       style.surface*(.16+.84*(1-Math.abs(direction[1]))**3) :
       OpticalMaterials.waterReflection(style, origin[1], direction[1], t, surface);
+    if (options?.waterTransition && reflection) {
+      const phase = Math.min(1, (stop - t) * (options.axial ?? 1) / options.waterTransition);
+      reflection *= phase * phase * (3 - 2 * phase);
+    }
     if (!reflection) return;
     let reflected;
     if (style.reflection && options?.reflection) {
@@ -262,6 +266,7 @@ function mediaSampler(volumes, water, rayAt, width, horizon, options, aerial) {
       ray.useAerial = mode;
       ray.fogScale = fogScale;
       query.fogScale = fogScale;
+      query.axial = ray.axial;
       query.rayBounds = ray.bounds;
       query.fullFog = ray.fullFog;
       values.fill(0);

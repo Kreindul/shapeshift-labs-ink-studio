@@ -28,11 +28,11 @@ function contributionLook(palettes, policies, targets, targetOffset, fallback, s
 function contributionLayers(col, alpha, w, h, patterned, bend) {
   // Pattern RGB and its surviving alpha. Later fragments attenuate only this contribution.
   const pattern = patterned ? new Float32Array(w * h * 4) : null;
-  // Captured backdrop RGB, transmission, backdrop alpha, pattern coverage and pane depth.
-  const REAR = 7;
+  // Captured backdrop RGB, transmission, backdrop alpha, pattern coverage, pane depth and refraction weight.
+  const REAR = 8;
   let backdrop;
 
-  function before(p, r, g, b, a, winner, glass, depth) {
+  function before(p, r, g, b, a, winner, glass, depth, refraction = 1) {
     const ia = 1 - a, q = p * 4, j = p * REAR, k = p * 3;
     if (glass && bend) {
       backdrop ??= new Float32Array(w * h * REAR);
@@ -42,6 +42,7 @@ function contributionLayers(col, alpha, w, h, patterned, bend) {
         backdrop[j + 4] = alpha?.[p] ?? 1;
         backdrop[j + 5] = pattern?.[q + 3] ?? 0;
         backdrop[j + 6] = depth;
+        backdrop[j + 7] = refraction;
       }
     }
     if (backdrop) {
@@ -66,25 +67,33 @@ function contributionLayers(col, alpha, w, h, patterned, bend) {
     }
   }
 
-  function refract(glass, depth) {
+  function refract(glass, depth, linear = false) {
     if (!backdrop) return;
     const at = (x, y) => Math.max(0, Math.min(h - 1, y)) * w + Math.max(0, Math.min(w - 1, x));
+    const colors = linear ? col.slice() : col, coverage = linear && alpha ? alpha.slice() : alpha;
+    function tap(p, j, source, weight) {
+      if (!weight || source === p) return;
+      const sourceRear = backdrop[source * REAR + 3] > 0;
+      if (!sourceRear && depth[source] < backdrop[j + 6]) return;
+      const from = source * (sourceRear ? REAR : 3), samples = sourceRear ? backdrop : colors;
+      for (let c = 0; c < 3; c++) col[p * 3 + c] += (samples[from + c] - backdrop[j + c]) * weight;
+      if (alpha) alpha[p] += ((sourceRear ? backdrop[from + 4] : coverage[source]) - backdrop[j + 4]) * weight;
+    }
     for (let p = 0; p < w * h; p++) {
-      const j = p * REAR, weight = backdrop[j + 3];
+      const j = p * REAR, weight = backdrop[j + 3] * backdrop[j + 7];
       if (weight < 1e-6 || glass[p] < 1e-6) continue;
       const x = p % w, y = Math.floor(p / w);
-      const dx = Math.round((glass[at(x + 1, y)] - glass[at(x - 1, y)]) * bend);
-      const dy = Math.round((glass[at(x, y + 1)] - glass[at(x, y - 1)]) * bend);
-      const source = at(x + dx, y + dy);
-      if (source === p) continue;
-      const sourceRear = backdrop[source * REAR + 3] > 0;
-      if (!sourceRear && depth[source] < backdrop[j + 6]) continue;
-      const from = source * (sourceRear ? REAR : 3), colors = sourceRear ? backdrop : col;
-      for (let c = 0; c < 3; c++) col[p * 3 + c] += (colors[from + c] - backdrop[j + c]) * weight;
-      if (alpha) {
-        const coverage = sourceRear ? backdrop[from + 4] : alpha[source];
-        alpha[p] += (coverage - backdrop[j + 4]) * weight;
+      const dx = (glass[at(x + 1, y)] - glass[at(x - 1, y)]) * bend;
+      const dy = (glass[at(x, y + 1)] - glass[at(x, y - 1)]) * bend;
+      if (!linear) {
+        tap(p, j, at(x + Math.round(dx), y + Math.round(dy)), weight);
+        continue;
       }
+      const ix = Math.floor(dx), iy = Math.floor(dy), fx = dx - ix, fy = dy - iy;
+      tap(p, j, at(x + ix, y + iy), weight * (1 - fx) * (1 - fy));
+      tap(p, j, at(x + ix + 1, y + iy), weight * fx * (1 - fy));
+      tap(p, j, at(x + ix, y + iy + 1), weight * (1 - fx) * fy);
+      tap(p, j, at(x + ix + 1, y + iy + 1), weight * fx * fy);
     }
   }
 

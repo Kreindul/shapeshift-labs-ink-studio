@@ -19,6 +19,7 @@ const RenderGraph = require('../src/render-graph.js');
 const runGraph = require('./render-graph.js');
 const FrameComposite = require('../src/frame-composite.js');
 const SplatOrder = require('../src/splat-order.js');
+const { blendLayers } = require('./translucent-layers.js');
 const OpticalMaterials = require('../src/optical-materials.js');
 const SplatRelighting = require('../src/splat-relighting.js');
 const MaterialPixelStyle = require('../src/material-pixel-style.js');
@@ -232,8 +233,9 @@ function renderFrame(world, o, preparedPalettes) {
   const orderMode = o.splatOrder ?? look.splatOrder ?? 'center';
   const sdfSettings = SdfAssist.prepare(o.sdfAssist ?? look.sdfAssist);
   const useSdf = sdfSettings && world.renderSdfs?.length && !o.reflectionPlane?.select;
-  const sortedSurfaces = orderMode === 'surface';
   const transparency = SplatOrder.transparency(o.stableTransparency ?? look.stableTransparency);
+  const blendDepth = transparency?.mode === 'blend' ? transparency.depthTolerance : 0;
+  const sortedSurfaces = orderMode === 'surface' || blendDepth > 0;
   const fragmentBudget = o.fragmentBudget ?? 500000;
   if (!['center', 'surface'].includes(orderMode) ||
       ((sortedSurfaces || useSdf) && (!Number.isSafeInteger(fragmentBudget) || fragmentBudget < 1 || fragmentBudget > 2e6)))
@@ -803,11 +805,12 @@ function renderFrame(world, o, preparedPalettes) {
   let mn = Infinity;
   for (let i = 0; i < N; i++) if ((i < baseCount || AL[i] > 0) && depth[i] < mn) mn = depth[i];
   const mediumHorizon = aerial ? Math.max(horizon, -mn + R) : horizon;
+  const backRows = blendDepth && world.back?.length ? new Set(world.back) : null;
   if (world.back) for (let j = 0; j < world.back.length; j++) depth[world.back[j]] = mn;
   const order = new Uint32Array(N);
   for (let i = 0; i < N; i++) order[i] = i;
   order.sort((a, b) => depth[a] - depth[b]);
-  if (transparency) {
+  if (transparency && !blendDepth) {
     const { depthTolerance: tolerance } = transparency;
     const depthAt = i => depth[i];
     const back = world.back?.length ? new Set(world.back) : null;
@@ -830,9 +833,11 @@ function renderFrame(world, o, preparedPalettes) {
         sameSpan });
     } else SplatOrder.stabilize(order, tolerance, depthAt, transparentAt, undefined, sameSpan);
   }
-  const mediaOptions = (water || aerial || cloudView) && atmosphereOptions();
+  const mediaOptions = (water || aerial || cloudView || blendDepth && volumes.length) && atmosphereOptions();
   const hazeCoverage = effectRules?.ramps.get('fog')?.geometry && world.fog.max > 0 && new Float32Array(W * H);
-  const rayMedia = mediaOptions && mediaSampler(volumes, water, rayAt, W, mediumHorizon, { ...mediaOptions, reflection, reflectionBackground: bg }, air);
+  const rayMedia = mediaOptions && mediaSampler(volumes, water, rayAt, W, mediumHorizon, {
+    ...mediaOptions, reflection, reflectionBackground: bg, waterTransition: blendDepth
+  }, air);
   const retainLayers = retainContributions || Boolean(rayMedia);
   const col = new Float32Array(W * H * 3),
     dep = new Float32Array(W * H),
@@ -916,6 +921,12 @@ function renderFrame(world, o, preparedPalettes) {
       (defaultFine || detailBudget?.fineOn) && world.fine && world.fine.length >= baseCount * 12 ? world.fine : null,
     FPAL = FN ? world.pal.map((h, i) => hex(i)) : null;
   let deferred = sortedSurfaces || sdf ? new Map() : null, deferredCount = 0, orderFallback = false;
+  function countDeferred() {
+    if (blendDepth && deferredCount >= fragmentBudget)
+      throw new RangeError('Layered transparency exceeded the fragment budget. Raise it or reduce the art resolution.');
+    deferredCount++;
+    if (counters) counters.peakDeferredFragments = Math.max(counters.peakDeferredFragments, deferredCount);
+  }
   const foreground = direction?.foreground;
   const contrastColor = (foreground || protection) && [0,0,0];
   const targetFog = (amount, rule) => rule && rule.fogScale !== 1 ? clamp(amount*rule.fogScale,0,1) : amount;
@@ -924,7 +935,7 @@ function renderFrame(world, o, preparedPalettes) {
   }
   const foregroundDepth = z => z - (eyeD-dist);
   function composite(p, i, z, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, mark,
-    opticalDepth = z, sprite, haze = 0, rule, reflected, filteredEdge = false) {
+    opticalDepth = z, sprite, haze = 0, rule, reflected, filteredEdge = false, refraction = 1) {
     if (surfaceDepth && (!sprite?.surface || sdf) && opticalDepth > surfaceDepth[p]+1e-5) return;
     const p3 = p * 3, ia = 1 - a;
     if (counters) {
@@ -938,7 +949,7 @@ function renderFrame(world, o, preparedPalettes) {
     environmentPasses?.fragment?.(p, i, a, pr, pg, pb, reflected, wd && a > .5);
     if (rayMedia) [pr, pg, pb] = rayMedia.shade(p, opticalDepth, [pr, pg, pb], true, rule?.fogScale);
     if (retainLayers && glass && bend && !contributions) contributions = contributionLayers(col, captured, W, H, false, bend);
-    if (contributions) contributions.before(p, pr, pg, pb, a, wd && a > .5, glass && !wd, dn);
+    if (contributions) contributions.before(p, pr, pg, pb, a, wd && a > .5, glass && !wd, dn, refraction);
     edgePatterns?.before(p, pr, pg, pb, a, wd && a > .5, false, dn);
     if (edgePixels) {
       const through = !filteredEdge && wd && a > .5 ? 0 : ia;
@@ -1018,6 +1029,7 @@ function renderFrame(world, o, preparedPalettes) {
     while (spriteIndex<sprites.length && sprites[spriteIndex].z>=through) {
       const sprite=sprites[spriteIndex++], sample=spriteSample(sprite);
       if (deferred && (queued || sdf?.hits[sprite.p])) {
+        if (blendDepth) countDeferred();
         if (!deferred.has(sprite.p)) deferred.set(sprite.p,[]);
         deferred.get(sprite.p).push({ sort:sprite.z,index:spriteIndex-sprites.length-1,center:sprite.z,sample });
       } else composite(sprite.p,...sample);
@@ -1029,7 +1041,8 @@ function renderFrame(world, o, preparedPalettes) {
     for (const [p, layers] of deferred) {
       if (sort) {
         layers.sort((a, b) => b.sort - a.sort || a.index - b.index);
-        if (transparency) SplatOrder.stabilize(layers, transparency.depthTolerance, entry => -entry.sort,
+        if (blendDepth) blendLayers(layers, blendDepth);
+        else if (transparency) SplatOrder.stabilize(layers, transparency.depthTolerance, entry => -entry.sort,
           entry => entry.transparent, entry => entry.index);
       } else if (sprites.length || sdf) {
         layers.sort((a,b)=>b.center-a.center || a.index-b.index);
@@ -1042,6 +1055,10 @@ function renderFrame(world, o, preparedPalettes) {
           args[1] = entry.center;
           args[2] = clamp((entry.center - (eyeD - R)) / (2 * R), 0, 1);
         }
+        if (blendDepth && entry.transparent) {
+          args[3] = entry.opacity;
+          args[22] = entry.refraction;
+        }
         composite(p, ...args);
       }
     }
@@ -1050,6 +1067,7 @@ function renderFrame(world, o, preparedPalettes) {
   // Carriers are below the original color fragments at the same traced depth.
   for (const sample of sdf?.samples ?? []) {
     if (sample.z > surfaceDepth[sample.p]+1e-5) continue;
+    if (blendDepth) countDeferred();
     deferred.set(sample.p,[{sort:sample.z,center:sample.z,index:-1e9,transparent:false,sample:spriteSample(sample)}]);
   }
   for (let n = 0; n < N; n++) {
@@ -1403,21 +1421,21 @@ function renderFrame(world, o, preparedPalettes) {
           sampledDepth(rayAt(ix + .5, iy + .5), probeNormal, probeCenter, -cz, probeReach) : -cz);
         if (sdfHit && surfaceDepth && surfaceZ>surfaceDepth[p]+1e-5) continue;
         if (probe) probe(p, i, -cz, surfaceZ, pr, pg, pb, a);
-        if (deferred && deferredCount >= fragmentBudget) {
+        if (!blendDepth && deferred && deferredCount >= fragmentBudget) {
           playFragments(false,-cz);
           orderFallback = true;
         }
-        const opticalDepth = aerial || cloudView || sdfHit ? surfaceZ : undefined;
+        const opticalDepth = blendDepth || aerial || cloudView || sdfHit ? surfaceZ : undefined;
         if (deferred && (sortedSurfaces || sdfHit)) {
-          const entry = { sort: flags & 4 ? Infinity : surfaceZ, index: n, center: exact?.z ?? -cz,
-            transparent: !wd && !exact && !(flags & 4),
+          const entry = { sort: (flags & 4 || blendDepth && backRows?.has(i)) ? Infinity : surfaceZ, index: n, center: exact?.z ?? -cz,
+            transparent: !wd && !exact && !(flags & 4) && !(blendDepth && backRows?.has(i)), opacity: a,
+            pane: blendDepth && glass && bend ? renderMeta?.objectIds?.[i] || -pk - 1 : 0,
             sample: [i, surfaceZ, normalizedDepth(surfaceZ), a, pr, pg, pb,
               wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, lookPass && { ...lookPass.mark },
               opticalDepth, undefined, fogMix, rule, reflected?.slice(), filteredEdge] };
+          countDeferred();
           if (!deferred.has(p)) deferred.set(p, []);
           deferred.get(p).push(entry);
-          deferredCount++;
-          if (counters) counters.peakDeferredFragments = Math.max(counters.peakDeferredFragments,deferredCount);
         } else composite(p, i, exact?.z ?? -cz, exact ? normalizedDepth(exact.z) : dn, a, pr, pg, pb, wd, emits, highlight,
           paletteId, detailParticle, projected, coat, glass, lookPass?.mark, opticalDepth, undefined, fogMix, rule, reflected, filteredEdge);
       }
@@ -1897,7 +1915,7 @@ function renderFrame(world, o, preparedPalettes) {
       }
     }
   }
-  contributions?.refract(gls, dep);
+  contributions?.refract(gls, dep, blendDepth > 0);
   let atmosphere, volumeStats = mediaOptions?.stats ? rayMedia.stats : undefined;
   const captureFog = ink?.ramps.has('fog') || o.captureFog;
   const effectMedia = trackMedia && axialDepth && new Float32Array(W * H * 3);
