@@ -43,7 +43,7 @@ const WindField = (() => {
     return { fallback, amplitude, period, phase, cover, clouds };
   }
 
-  function create(config, { ambient = () => config.fallback ?? calm, local, gust, localGust } = {}) {
+  function create(config, { ambient = () => config.fallback ?? calm, local, gust, localGust, exposure } = {}) {
     if ([ambient,local,gust,localGust].some(source => source !== undefined && typeof source !== 'function'))
       throw new TypeError('Wind sources must be functions');
     const { amplitude, period, phase, cover } = config;
@@ -101,7 +101,7 @@ const WindField = (() => {
       cells.set(key,gain);
       return gain;
     }
-    function sample(x,y,z,time=0) {
+    function unmasked(x,y,z,time=0) {
       if (![x,y,z].every(Number.isFinite)) throw new TypeError('Wind position must be finite XYZ');
       const state = at(time);
       const candidate = local?.(time,x,z,state.open);
@@ -111,6 +111,13 @@ const WindField = (() => {
       const vx = clamp(xWind*multiplier,-20,20), vz = clamp(zWind*multiplier,-20,20);
       const gain = shelter(x,y,z,vx,vz);
       return [vx*gain,vz*gain];
+    }
+    const attenuate = (velocity,x,y,z) => {
+      const scale = exposure?.wind?.(x,y,z) ?? 1;
+      return scale === 1 ? velocity : [velocity[0]*scale,velocity[1]*scale];
+    };
+    function sample(x,y,z,time=0) {
+      return attenuate(unmasked(x,y,z,time),x,y,z);
     }
     function integrate(from,to,velocity) {
       if (!Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(to-from))
@@ -135,13 +142,13 @@ const WindField = (() => {
       const windOffset = cover || local || localGust ? (x,y,z) => {
         const ix = Math.round(x/spacing), iy = Math.round(y/spacing), iz = Math.round(z/spacing);
         const key = ix + '/' + iy + '/' + iz;
-        if (!offsets.has(key)) offsets.set(key,travel(ix*spacing,iy*spacing,iz*spacing,0,time));
+        if (!offsets.has(key)) offsets.set(key,integrate(0,time,t => unmasked(ix*spacing,iy*spacing,iz*spacing,t)));
         return offsets.get(key);
       } : (() => {
         const shift = integrate(0,time,open);
         return () => shift;
       })();
-      return { windOffset };
+      return { windOffset: exposure?.wind ? (x,y,z) => attenuate(windOffset(x,y,z),x,y,z) : windOffset };
     }
     return Object.freeze({ open, sample, travel, frame,
       cloudTravel:(from,to) => integrate(from,to,open),

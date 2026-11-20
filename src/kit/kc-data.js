@@ -295,6 +295,11 @@
       }
     }
     try {
+      SceneExposure.settings(st.finish.sceneExposure);
+    } catch (error) {
+      bad('finish.sceneExposure', error.message);
+    }
+    try {
       Lightning.settings(st.finish.lightning);
     } catch (error) {
       bad('finish.lightning', error.message);

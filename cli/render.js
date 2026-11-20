@@ -36,6 +36,7 @@ const SceneOptics = require('../src/scene-optics.js');
 const SkyEnvironment = require('../src/sky-environment.js');
 const CloudField = require('../src/cloud-field.js');
 const Lightning = require('../src/lightning.js');
+const SceneExposure = require('../src/scene-exposure.js');
 const weatherFrame = require('./weather.js');
 const WindField = require('../src/wind-field.js');
 const Precipitation = require('./precipitation.js');
@@ -279,17 +280,18 @@ function render(world, o, preparedPalettes) {
   const clock = skySource ? SkyEnvironment.compile(skySource) : null;
   const environment = clock?.frame(skyTime, o.skyProfiles);
   const weather = weatherFrame(world, o, skySource, clock, environment?.parameters, skyTime);
+  const exposure = SceneExposure.settings(world.sceneExposure, o.sceneExposure);
   const windConfig = WindField.settings(world.windField, o.windField);
   const fallbackWind = o.wind ?? weather?.wind ?? windConfig?.fallback ?? an.wind ?? (windConfig && world.volumeWind) ?? undefined;
   const weatherWindAt = o.wind == null ? weather?.windAt : undefined;
   const weatherWindHere = o.wind == null ? weather?.windHere : undefined;
-  const flow = windConfig && WindField.create(windConfig,{
+  const flow = (windConfig || exposure?.wind) && WindField.create(windConfig ?? WindField.settings(true),{
     ambient: time => weatherWindAt?.(time) ?? fallbackWind,
     local:weatherWindHere,
-    gust:weather?.gustAt, localGust:weather?.gustHere
+    gust:windConfig ? weather?.gustAt : undefined, localGust:windConfig ? weather?.gustHere : undefined, exposure
   });
   const wind = Airflow.frame(flow ? flow.open(skyTime) : fallbackWind);
-  const localWind = flow && (windConfig.cover || weatherWindHere || weather?.gustHere)
+  const localWind = flow && (windConfig?.cover || weatherWindHere || (windConfig && weather?.gustHere) || exposure?.wind)
     ? (time,x,z,_fallback,y=0) => flow.sample(x,y,z,time) : weatherWindHere;
   const airAt = (x,y,z) => localWind ? Airflow.frame(localWind(skyTime,x,z,wind.velocity,y)) : wind;
   const windAt = flow ? flow.open : weatherWindAt;
@@ -315,7 +317,7 @@ function render(world, o, preparedPalettes) {
   const cloudSettings = cloudSource === false ? null :
     CloudField.shadowSettings(world.cloudShadows, o.cloudShadows, environment?.parameters);
   if (cloudSettings && !cloudSource) throw new TypeError('Cloud shadows need a cloud field');
-  const cloudDisplacement = cloudSource && flow && windConfig.clouds !== false
+  const cloudDisplacement = cloudSource && windConfig && windConfig.clouds !== false
     ? flow.cloudTravel(0,skyTime).map(n => n*windConfig.clouds) : undefined;
   const clouds = cloudSource ? CloudField.compile(cloudSource).frame(skyTime, cloudSettings,
     sun?.direction ?? sky?.sun ?? (o.volumeLighting ?? world.volumeLighting)?.sun?.direction, cloudDisplacement) : null;
@@ -360,18 +362,21 @@ function render(world, o, preparedPalettes) {
   const lamps = LightSchedule.select(world.lights || [], lampEye, { daylight, duskOnly: true });
   const rainConfig = RainImpacts.settings(world.rainImpacts, o.rainImpacts);
   const precipitation = Precipitation.frame(world, o.precipitation, {
-    time: skyTime, wind: wind.velocity, windAt, weather, localWind, impacts: rainConfig,
+    time: skyTime, wind: wind.velocity, windAt, weather, localWind, impacts: rainConfig, exposure,
     lamps: world.precipitationRanges?.length ? LightSchedule.select(world.lights || [], lampEye, { daylight }) : [],
     localLighting: prepareVolumeLight
   });
   const rain = RainImpacts.frame(rainConfig, precipitation?.contacts, skyTime);
-  const volumeFlow = flow && volumes.some(v => v.type === 'field') ? flow.frame(skyTime) : null;
+  const volumeWind = !windConfig && world.volumeWind && !o.wind && !weather?.wind && !an.wind
+    ? Airflow.frame(world.volumeWind).velocity : null;
+  const volumeFlow = volumes.some(v => v.type === 'field') && (volumeWind && exposure?.wind
+    ? WindField.create(WindField.settings(true), { ambient:() => volumeWind, exposure }) : flow)?.frame(skyTime);
   const atmosphereOptions = () => {
     const quality = atmosphereQuality({ ...world.volumeQuality, ...o.volumeQuality });
-    quality.wind = !flow && world.volumeWind && !o.wind && !weather?.wind && !an.wind ? Airflow.frame(world.volumeWind).velocity : wind.velocity;
+    quality.wind = volumeWind ?? wind.velocity;
     if (volumeFlow) quality.windOffset = volumeFlow.windOffset;
     const media = volumes.some(volume => volume.type === 'field') ? prepareVolumeLight() : undefined;
-    return { ...quality, time: t, cloudShadow, flash, media };
+    return { ...quality, time: t, cloudShadow, flash, media, exposure };
   };
   const geometrySample = probe || sortedSurfaces || aerial || cloudShadow || flash ? sampleFrames(world, t) : null;
   const captured = o.captureCoverage || transparent ? new Float32Array(W * H) : null;
@@ -420,6 +425,7 @@ function render(world, o, preparedPalettes) {
     time: t,
     sun: sun?.direction,
     cloudShadow,
+    exposure,
     weather: weather?.surface,
     rain,
     sunVisibility: sun && ((i, x, y, z) => live?.visibility(i, x, y, z)),
@@ -495,6 +501,10 @@ function render(world, o, preparedPalettes) {
         x += velocity[0] * age;
         z += velocity[1] * age;
         al *= weather?.rainHere ? weather.rainHere(x,z) : weather?.rainGain ?? 0;
+      }
+      if (exposure?.rain) {
+        al *= exposure.rain(x,y,z);
+        if (al && exposure.rainBlocked?.([d[q],d[q+1],d[q+2]],[x,y,z])) al = 0;
       }
       sc *= 1 + pr * ex;
     } else if (kind === 3) {
@@ -572,7 +582,7 @@ function render(world, o, preparedPalettes) {
   if (sun) {
     const frames = sampleFrames(world, t), normals = [];
     const normalAt = i => normals[i] ?? (normals[i] = frames(i).normal ?? false);
-    live = LiveSun.create(sun, world, { x: X, y: Y, z: Z, alpha: AL, scale: SC }, normalAt, cloudShadow);
+    live = LiveSun.create(sun, world, { x: X, y: Y, z: Z, alpha: AL, scale: SC }, normalAt, cloudShadow, exposure?.light);
   }
   let mn = Infinity;
   for (let i = 0; i < N; i++) if (depth[i] < mn) mn = depth[i];
@@ -813,11 +823,13 @@ function render(world, o, preparedPalettes) {
     }
     const splatFlash = flash && !(flags & 6) ? flash.light(x, y, z, liveNormal || geometrySample(i).normal) : null;
     if (pixelSurface && splatFlash) patternFlashes.set(i, splatFlash);
-    const fogMix =
-      !(flags & 2) && world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dn) * world.fog.max : 0;
+    const coverGain = !liveNormal && !(flags & 6) && exposure?.light ?
+      .24 + .76 * exposure.light(x,y,z) : 1;
+    const fogMix = !(flags & 2) && world.fog.max > 0 && world.fog.start < 1
+      ? sstep(world.fog.start, 1, dn) * world.fog.max * (exposure?.fog?.(x,y,z) ?? 1) : 0;
     const reflectInRaster = (planar || reflectedSky) && !pixelSurface;
     const normal = fragmentSurface ? surface.surfaceNormal(i) : null;
-    if (fogMix && !reflectInRaster && !staged?.lit && !liveNormal && !splatFlash) {
+    if (fogMix && !reflectInRaster && !staged?.lit && !liveNormal && !splatFlash && coverGain === 1) {
       r += (fog[0] - r) * fogMix;
       g += (fog[1] - g) * fogMix;
       b += (fog[2] - b) * fogMix;
@@ -899,7 +911,7 @@ function render(world, o, preparedPalettes) {
             pg = c[1];
             pb = c[2];
             if (staged?.material) [pr, pg, pb] = stagedMaterial(i, staged.material, [pr, pg, pb], materialSample);
-            if (!reflectInRaster && !staged?.lit && !splatFlash) {
+            if (!reflectInRaster && !staged?.lit && !splatFlash && coverGain === 1) {
               pr += (fog[0] - pr) * fogMix;
               pg += (fog[1] - pg) * fogMix;
               pb += (fog[2] - pb) * fogMix;
@@ -912,6 +924,11 @@ function render(world, o, preparedPalettes) {
           pr *= sunGains[0];
           pg *= sunGains[1];
           pb *= sunGains[2];
+        }
+        if (coverGain < 1) {
+          pr *= coverGain;
+          pg *= coverGain;
+          pb *= coverGain;
         }
         if (automatic || scheduled) {
           const exposure = scheduled?.gain ?? sourceScale;
@@ -952,7 +969,7 @@ function render(world, o, preparedPalettes) {
           pg = Lightning.shade(pg, splatFlash[1]);
           pb = Lightning.shade(pb, splatFlash[2]);
         }
-        if (staged?.lit || (fragmentSurface && reflectInRaster) || liveNormal || splatFlash) {
+        if (staged?.lit || (fragmentSurface && reflectInRaster) || liveNormal || splatFlash || coverGain < 1) {
           pr += (fog[0] - pr) * fogMix;
           pg += (fog[1] - pg) * fogMix;
           pb += (fog[2] - pb) * fogMix;
@@ -1234,6 +1251,10 @@ function render(world, o, preparedPalettes) {
         const masked = staged?.material?.some(rule => rule.mask) || staged?.lit?.some(rule => rule.mask);
         const sample = masked ? stageSample(i, [HX[p], HY[p], HZ[p]]) : undefined;
         let base = staged?.material ? stagedMaterial(i, staged.material, PALC[ci], sample) : PALC[ci];
+        if (exposure?.light && !live?.normal(i) && !(Math.round(d[i*16+11]) & (32 | 64))) {
+          const gain = .24 + .76 * exposure.light(HX[p],HY[p],HZ[p]);
+          if (gain < 1) base = base.map(value => value * gain);
+        }
         if (bounceTints && live.normal(i)) base = base.map((value, channel) => value * bounceTints[p * 3 + channel]);
         const c = surface?.has(i) ? surface.shade(i, HX[p], HY[p], HZ[p], X[i], Y[i], Z[i], ...base, x + 0.5, y + 0.5, lookPass?.surface) : base;
         let rgb = c;
@@ -1250,7 +1271,8 @@ function render(world, o, preparedPalettes) {
         if (patternFlash) lit = lit.slice(0, 3).map((value, c) => Lightning.shade(value, patternFlash[c]));
         if (lookPass) lookPass.fragment(p, retainLayers ? contributions.weight(p) : 1 - (surfaceOverlay?.[p * 4 + 3] || 0),
           lookPass.mark, true);
-        const kf = world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dep[p]) * world.fog.max : 0;
+        const kf = world.fog.max > 0 && world.fog.start < 1
+          ? sstep(world.fog.start, 1, dep[p]) * world.fog.max * (exposure?.fog?.(HX[p],HY[p],HZ[p]) ?? 1) : 0;
         if (surfaceGlint) surfaceGlint[p] = c[4] > 0.22;
         if (retainLayers) {
           if (localAt) localAt[p] = localSlot(i, c[5], p);

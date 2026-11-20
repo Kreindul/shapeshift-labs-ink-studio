@@ -119,7 +119,8 @@ function traceMedia(volumes, segments, origin, direction, stop, result, sample, 
       }
     }
     if (!aerial || end <= aerial.start || aerialThrough === 0) return;
-    dryDistance += end - Math.max(cursor, aerial.start);
+    const from = Math.max(cursor, aerial.start);
+    dryDistance += options?.exposure?.fogDistance?.(origin,direction,from,end) ?? end-from;
     const through = airTransmission(aerial, dryDistance), ratio = through / aerialThrough;
     for (let channel = 0; channel < 3; channel++) {
       result[channel] += result[channel + 3] * (1 - ratio) * aerial.color[channel];

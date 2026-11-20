@@ -149,7 +149,7 @@ function shadowMap(sun, data, { x, y, z, alpha, scale }, normalAt) {
   };
 }
 
-function create(sun, world, pose, normalAt, cloudShadow) {
+function create(sun, world, pose, normalAt, cloudShadow, exposure) {
   // Albedo exists on opted-in sculpt bakes and explicitly described builder rows.
   // Older pixel-material bakes still carry the original material ramps.
   const fill = new Int32Array(pose.alpha.length).fill(-1);
@@ -181,7 +181,7 @@ function create(sun, world, pose, normalAt, cloudShadow) {
   const visibility = (i, x, y, z) => {
     if (!normals[i]) return undefined;
     const geometry = shadow && facing[i] > 0 ? shadow(x, y, z, normals[i], facing[i]) : 1;
-    return geometry && cloudShadow ? geometry * cloudShadow(x, y, z) : geometry;
+    return geometry && geometry * (cloudShadow?.(x,y,z) ?? 1) * (exposure?.(x,y,z) ?? 1);
   };
   const level = (i, x, y, z) => sun.ambient + sun.intensity * facing[i] * visibility(i, x, y, z);
   function gains(i, x, y, z, rgb) {
@@ -190,7 +190,8 @@ function create(sun, world, pose, normalAt, cloudShadow) {
     if (!indirect || !(indirect[offset] || indirect[offset+1] || indirect[offset+2])) return rgb;
     // Add bounce energy in linear light, preserving the existing neutral live-light response.
     linear(rgb, rgb);
-    for (let c = 0; c < 3; c++) rgb[c] += indirect[offset+c];
+    const openness = exposure?.(x,y,z) ?? 1;
+    for (let c = 0; c < 3; c++) rgb[c] += indirect[offset+c] * openness;
     return srgb(rgb, rgb);
   }
   function rampLevel(i, x, y, z, tint) {

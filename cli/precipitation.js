@@ -45,7 +45,7 @@ function blocks(occluder, from, to, time) {
   return distance > 1e-6 && occluder(...from, delta.map(n => n / distance), distance, time);
 }
 
-function frame(world, override, { time, wind, windAt, localWind, weather, lamps, localLighting, impacts }) {
+function frame(world, override, { time, wind, windAt, localWind, weather, lamps, localLighting, impacts, exposure }) {
   if (!world.precipitationRanges?.length) return null;
   const config = settings(world.precipitation, override);
   // Tag the authored rows even in the disabled view so they disappear together.
@@ -86,11 +86,13 @@ function frame(world, override, { time, wind, windAt, localWind, weather, lamps,
     }
   }
   function blocked(point, origin, age, born, count) {
-    if (!occlusion || !occluder) return false;
+    const geometry = occlusion && occluder;
+    if (!geometry && !exposure?.rainBlocked) return false;
     let from = origin;
     for (let i = 1; i <= count; i++) {
       const to = point(i / count);
-      if (blocks(occluder, from, to, born + age * (i - .5) / count)) return true;
+      if (exposure?.rainBlocked?.(from,to) ||
+          (geometry && blocks(occluder, from, to, born + age * (i - .5) / count))) return true;
       from = to;
     }
     return false;
@@ -114,7 +116,8 @@ function frame(world, override, { time, wind, windAt, localWind, weather, lamps,
           const contact = hit(x, y, z, speed, height, born, Math.min(born, period), drift);
           if (!contact || born - contact.age > impacts.lookback) continue;
           const eventTime = time - born + contact.age;
-          const strength = config.rain * (profile ? weather.rainAt?.(eventTime,contact.at[0],contact.at[2]) ?? weather.rainGain : 1);
+          const strength = config.rain * (exposure?.rain?.(...contact.at) ?? 1) *
+            (profile ? weather.rainAt?.(eventTime,contact.at[0],contact.at[2]) ?? weather.rainGain : 1);
           if (!(strength > 0)) continue;
           const total = drift(born);
           // Stop just above the authored receiving plane so the receiver itself is not treated as upstream cover.
@@ -154,7 +157,7 @@ function frame(world, override, { time, wind, windAt, localWind, weather, lamps,
       return [x + total[0] - remaining[0] + wx, y - flown * height, z + total[1] - remaining[1] + wz];
     }
     const position = point(1);
-    const rate = gain * (localRate ? localRate(position[0],position[2]) : uniformRate);
+    const rate = gain * (exposure?.rain?.(...position) ?? 1) * (localRate ? localRate(position[0],position[2]) : uniformRate);
     if (!rate || blocked(point, [x,y,z], age, time - age, snow || windAt || localWind ? flightSegments : 1)) return null;
     const coverage = snow ? fade(0,.05,fraction) * (1 - fade(.92,1,fraction)) : 1 - fraction * fraction;
     return [...position, Math.min(.99, alpha * rate * coverage)];

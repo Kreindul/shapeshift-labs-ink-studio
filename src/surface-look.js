@@ -239,7 +239,7 @@ const SurfaceLook = (() => {
         const twice = 2 * dot(normal, view);
         q.sky(normal.map((v, i) => twice * v - view[i]), col);
       }
-      return fresnel(q.nv, layer.f0 ?? 0.04, layer.power ?? 5);
+      return fresnel(q.nv, layer.f0 ?? 0.04, layer.power ?? 5) * (scene ? q.skyAccess : 1);
     },
     planarReflection(layer, q, col) {
       const reflected = q.reflection?.(layer, q.n, q.geometricNormal);
@@ -524,7 +524,7 @@ const SurfaceLook = (() => {
       geometricNormal,
       reflection: sample.reflection,
       sky: sample.sky, skyOverlay: sample.skyOverlay, skyReflectionSource: sample.skyReflectionSource,
-      skyNormal: sample.skyNormal, skyView: sample.skyView,
+      skyNormal: sample.skyNormal, skyView: sample.skyView, skyAccess: sample.skyAccess ?? 1,
       nt: dot(n, half),
       nl: dot(n, sun),
       light: visibility

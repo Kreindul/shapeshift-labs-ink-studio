@@ -127,7 +127,7 @@ const VolumeLight = (() => {
   }
 
   function integrate(segments, origin, direction, stop, result, options = {}) {
-    const { time = 0, media, maxSteps = 64, stepScale = 1, jitter = .5, skip = true, cloudShadow, flash } = options;
+    const { time = 0, media, maxSteps = 64, stepScale = 1, jitter = .5, skip = true, cloudShadow, flash, exposure } = options;
     const active = new Set(), rgb = [0, 0, 0], light = [1, 1, 1];
     result[0] = result[1] = result[2] = 0;
     result[3] = 1;
@@ -159,12 +159,15 @@ const VolumeLight = (() => {
             density += v.density;
             for (let k = 0; k < 3; k++) rgb[k] += v.density * v.rgb[k];
           }
+          const fogLength = exposure?.fogDistance;
           if (cloudShadow) {
             // Sample the changing light along the segment while keeping analytic extinction.
             const step = (end - last) / 4;
-            for (let i = 0; i < 4; i++)
-              blend(density, step, clouds.dim(cloudVisibility(last + (i + .5) * step)));
-          } else blend(density, end - last);
+            for (let i = 0; i < 4; i++) {
+              const length = fogLength?.(origin,direction,last+i*step,last+(i+1)*step) ?? step;
+              blend(density, length, clouds.dim(cloudVisibility(last + (i + .5) * step)));
+            }
+          } else blend(density, fogLength?.(origin,direction,last,end) ?? end-last);
         } else {
           const step = Math.max(minStep, rateFloor);
           for (let t = last; t < end && (!hasField || result[3] >= .001);) {
@@ -175,10 +178,11 @@ const VolumeLight = (() => {
             const visibility = cloudShadow?.(x, y, z) ?? 1;
             const gain = clouds.dim(visibility);
             const strike = flash?.light(x, y, z);
+            const mist = exposure?.fog?.(x,y,z) ?? 1;
             let density = 0, advance = Infinity;
             rgb.fill(0);
             for (const v of active) {
-              const localDensity = v.density * (v.densityField?.sample(x,z) ?? 1);
+              const localDensity = v.density * (v.densityField?.sample(x,z) ?? 1) * mist;
               if (v.type !== 'field') {
                 advance = 0;
                 density += localDensity;
@@ -197,7 +201,7 @@ const VolumeLight = (() => {
               if (!extinction) continue;
               density += extinction;
               const base = mediumColor(v, value);
-              if (v.lit && media) illuminate(v, light, x, y, z, direction, media, visibility);
+              if (v.lit && media) illuminate(v, light, x, y, z, direction, media, visibility * (exposure?.light?.(x,y,z) ?? 1));
               else light.fill(v.lit ? gain : 1);
               for (let k = 0; k < 3; k++)
                 rgb[k] += extinction * (base[k] * light[k] + v.emissiveRgb[k] * v.emissiveGain + (v.lit ? .45 * (strike?.[k] ?? 0) : 0));

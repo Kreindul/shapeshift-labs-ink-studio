@@ -187,7 +187,7 @@ const SceneOptics = (() => {
       if (range) hits.push([range[0], volume, 1], [range[1], volume, -1]);
     }
     hits.sort((a, b) => a[0] - b[0]);
-    if (options?.cloudShadow || options?.flash || hits.some(([, volume]) => volume.type === 'field' || volume.densityField))
+    if (options?.cloudShadow || options?.flash || options?.exposure?.fog || hits.some(([, volume]) => volume.type === 'field' || volume.densityField))
       return volumeLight.integrate(hits, origin, direction, stop, result, options);
     result[0] = result[1] = result[2] = 0;
     result[3] = 1;

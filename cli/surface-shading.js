@@ -127,7 +127,8 @@ function surfaceShading(world, options, camera) {
     normal[0] = surfaceData[offset + 1];
     normal[1] = surfaceData[offset + 2];
     normal[2] = surfaceData[offset + 3];
-    sample.visibility = camera.sunVisibility?.(i, x, y, z) ?? surfaceData[offset + 4] * (camera.cloudShadow?.(x, y, z) ?? 1);
+    sample.skyAccess = camera.exposure?.light?.(x,y,z) ?? 1;
+    sample.visibility = camera.sunVisibility?.(i, x, y, z) ?? surfaceData[offset + 4] * (camera.cloudShadow?.(x, y, z) ?? 1) * sample.skyAccess;
     const tx = surfaceData[offset + 5],
       ty = surfaceData[offset + 6],
       tz = surfaceData[offset + 7];
