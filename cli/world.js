@@ -314,8 +314,20 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
         break;
       }
       case 'probe': {
-        ensure(typeof opt.field==='string'||opt.select!==undefined,'Use --field to select a query');
-        const field=opt.field??'look/output';
+        ensure(typeof opt.field==='string'||opt.select!==undefined||opt.at!==undefined||opt.entity!==undefined,
+          'Use --field to select a query');
+        const field=opt.field??(opt.at!==undefined||opt.entity!==undefined?'look/sample':'look/output');
+        if (field === 'look/sample') {
+          ensure(opt.socket===undefined && !(opt.select!==undefined && opt.entity!==undefined),
+            'Use one render selector with --select or --entity');
+          ensure(opt.at===undefined||typeof opt.at==='string'&&opt.at.split(',').every(value=>value.trim()),
+            '--at needs three finite comma-separated coordinates');
+          const selector=opt.select!==undefined?parse(opt.select):opt.entity!==undefined?{entity:opt.entity}:undefined;
+          const options={...args(),...(opt.at!==undefined&&{at:numbers(opt.at)}),
+            ...(opt.radius!==undefined&&{radius:opt.radius===true?NaN:Number(opt.radius)})};
+          respond(view(file).probe(field,selector,options));
+          break;
+        }
         const site=['look/output','look/provenance'].includes(field)&&opt.select===undefined&&opt.at===undefined&&opt.entity===undefined?undefined:target(opt);
         respond(view(file).probe(field,site,args()));
         break;

@@ -106,11 +106,13 @@ function select(source, options, authoring, report) {
   const params = options.params === undefined ? undefined : JSON.parse(options.params);
   const bound = authoring.looks.bind({ asset: id, ...(params !== undefined && { params }) }, catalog);
   const { look } = entry;
-  report.look = id;
-  if (Object.keys(look.params).length) note(report, 'parameterized', 'The look was evaluated with its selected parameter values.');
-  for (const key of ['stage', 'mask', 'order', 'weight']) if (bound[key] !== undefined)
-    note(report, 'look-' + key, 'The external format omits the look ' + key + '.');
-  return { label: look.label, stack: bound.stack, palette: bound.palette };
+  if (report) {
+    report.look = id;
+    if (Object.keys(look.params).length) note(report, 'parameterized', 'The look was evaluated with its selected parameter values.');
+    for (const key of ['stage', 'mask', 'order', 'weight']) if (bound[key] !== undefined)
+      note(report, 'look-' + key, 'The external format omits the look ' + key + '.');
+  }
+  return { ...bound, label: look.label };
 }
 
 const unitMin = [0, 0, 0], unitMax = [1, 1, 1];
@@ -131,14 +133,22 @@ function copiesTable(definition, options) {
     options['domain-min'] === undefined && options['domain-max'] === undefined;
 }
 
-function compile(stack, reference) {
+function compile(stack, reference, missingSwatches = 'A .cube has no palette indices. Export this look to a palette using --swatches.') {
   const steps = stack.amount === 0 ? [] : stack.steps.filter(step => step.enabled !== false && step.amount !== 0);
   if (!reference && steps.some(step => step.type === 'paletteRemap'))
-    throw new TypeError('A .cube has no palette indices. Export this look to a palette using --swatches.');
+    throw new TypeError(missingSwatches);
   const palette = reference?.rows.map(row => row.color);
   return ColorStack.prepare({ ...stack, steps }, palette ? {
     paletteRemap: (definition, color) => PixelLook.prepareRemap(definition, palette, {}, color)
   } : {});
+}
+
+function readReference(file, packs) {
+  const input = read(file, packs);
+  if (input.paletteFile) return input.paletteFile;
+  if (!input.palette?.palette || input.stack) throw new TypeError('--swatches needs an external palette or a native swatch list');
+  const { entries } = Palette.colors(input.palette.palette);
+  return { rows: entries.map(color => ({ color })) };
 }
 
 function point(value, fallback) {
@@ -294,13 +304,7 @@ async function run(pos, options, authoring) {
   if (options.report && [file, options.out, options.swatches].some(name => name && path.resolve(name) === path.resolve(options.report)))
     throw new TypeError('--report needs a separate path');
   const report = { source: input.source, target: format === 'json' ? (input.native?.packs ? 'asset-bundle' : 'asset-pack') : format, losses: [] };
-  const reference = file => {
-    const input = read(file, authoring.assetPacks);
-    if (input.paletteFile) return input.paletteFile;
-    if (!input.palette?.palette || input.stack) throw new TypeError('--swatches needs an external palette or a native swatch list');
-    const { entries } = Palette.colors(input.palette.palette);
-    return { rows: entries.map(color => ({ color })) };
-  };
+  const reference = file => readReference(file, authoring.assetPacks);
   const output = format === 'json' ? [JSON.stringify(native(input, options, authoring.assetPacks, report)) + '\n'] : (() => {
     const look = select(input, options, authoring, report);
     return format === 'cube' ? toCube(look, options, report) : toPalette(look, options, format, reference, report);
@@ -368,4 +372,12 @@ function report(output, options, source) {
   return write([pretty(output)], options.out);
 }
 
-module.exports = { run, isSource, inspectSource, assertValid, report };
+function sample(file, options, kit) {
+  const authoring = kit.KIT.authoring;
+  const source = read(file, authoring.assetPacks);
+  const look = select(source, options, authoring);
+  const reference = options.swatches && readReference(options.swatches, authoring.assetPacks);
+  return require('./look-sample.js')({ file, options, source: source.source, look, reference, kit, report, compile });
+}
+
+module.exports = { run, isSource, inspectSource, assertValid, report, sample };

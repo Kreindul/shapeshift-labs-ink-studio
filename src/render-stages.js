@@ -184,15 +184,16 @@ const RenderStages = (() => {
     return evaluate(rules, rgb, sample);
   }
 
-  function trace(rules, rgb, sample, [x, y] = [0, 0]) {
+  function trace(rules, rgb, sample, pixel = [0, 0]) {
+    const [x, y] = pixel ?? [];
     const contributions = [];
     const output = evaluate(rules, rgb, sample, x, y, contributions);
     return { rgb: output, contributions };
   }
 
-  function material(rules, shaded, reference, sample) {
-    if (!rules || reference === undefined) return apply(rules, shaded, sample);
-    const base = unpack(reference), painted = apply(rules, base, sample);
+  function material(rules, shaded, reference, sample, contributions) {
+    if (!rules || reference === undefined) return evaluate(rules, shaded, sample, undefined, undefined, contributions);
+    const base = unpack(reference), painted = evaluate(rules, base, sample, undefined, undefined, contributions);
     if (painted.every((value, i) => value === base[i])) return shaded;
     const unlit = linear(base), lit = linear(shaded), changed = linear(painted);
     const baseLuma = luma(unlit);

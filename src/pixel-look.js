@@ -316,7 +316,8 @@ const PixelLook = (() => {
     }
     const effects = mask !== undefined && mask !== false ?
       (typeof SplatEffects === 'undefined' ? require('./splat-effects.js') : SplatEffects) : null;
-    return Object.assign(plan, { grade, mapOnly, assetId, sourceSwatches: grade ? Array.from(options.palette, unpack) : undefined,
+    return Object.assign(plan, { grade, mapOnly, assetId, stackName: active?.name,
+      sourceSwatches: grade ? Array.from(options.palette, unpack) : undefined,
       mask: effects?.prepareMask(mask, options.context, { validateOnly: options.validateOnly }) });
   }
 

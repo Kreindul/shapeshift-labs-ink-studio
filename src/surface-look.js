@@ -454,7 +454,7 @@ const SurfaceLook = (() => {
   /* Inputs are RGB in 0..1 and a world-space sample. Output packs RGB, the opacity
      multiplier, a glint mask and, for projected paint, an optional local palette.
      Supply a normal Array when you want to retain the palette reference. */
-  function shade(prepared, sample, base, output = [0, 0, 0, 1, 0]) {
+  function shade(prepared, sample, base, output = [0, 0, 0, 1, 0], trace) {
     const { settings, layers } = prepared;
     const sun = sample.lightDirection ?? prepared.sun;
     const { position, normal, view } = sample;
@@ -510,13 +510,22 @@ const SurfaceLook = (() => {
         normal: geometricNormal, tangent: geometricTangent, bitangent: cross(geometricNormal, geometricTangent),
         footprint: sample.footprint || 0, time: sample.time || 0
       };
-      const strength = layer.strength *
-        (layer.spatialMask ? layer.spatialMask(sample) : maskAt(layer.mask, p, seed, position, maskFrame));
-      if (!strength) continue;
+      const maskWeight = layer.spatialMask ? layer.spatialMask(sample) : maskAt(layer.mask, p, seed, position, maskFrame);
+      const strength = layer.strength * maskWeight;
+      const step = trace && layer.effect && { layer: layer.id, type: layer.type,
+        ...(layer.stack?.name && { stack: layer.stack.name }), maskWeight, input: output.slice(0, 3) };
+      if (step) trace.push(step);
+      if (!strength) {
+        if (step) Object.assign(step, { applied: false, effectiveWeight: 0, output: step.input });
+        continue;
+      }
       if (layer.effect) {
         const result = layer.effect.sample(sample, output);
         const amount = clamp(result[3] * strength);
-        if (!amount && layer.type === 'colorCurve') continue;
+        if (!amount && layer.type === 'colorCurve') {
+          if (step) Object.assign(step, { applied: false, effectiveWeight: 0, output: step.input });
+          continue;
+        }
         output[3] *= mix(1, clamp(result[4]), strength);
         output[4] = Math.max(output[4], clamp(result[5] * strength));
         if (amount >= 0.5) output[5] = layer.effect.palette;
@@ -525,6 +534,7 @@ const SurfaceLook = (() => {
             layer.blend === 'multiply' ? output[i] * result[i] : result[i];
           output[i] = clamp(mix(output[i], next, amount));
         }
+        if (step) Object.assign(step, { applied: amount > 0, effectiveWeight: amount, output: output.slice(0, 3) });
         continue;
       }
       const { cosine: c, sine: s } = layer;

@@ -141,6 +141,7 @@ const ColorStack = (() => {
     const protectedBy = index => locks.find(plan => plan.protects(index));
     return Object.freeze({
       name: definition.name,
+      requiresIndex: indexed,
       protects: index => Boolean(protectedBy(index)),
       sample(rgb, out = [0, 0, 0], index) {
         if (!rgb || !Number.isFinite(rgb[0]) || !Number.isFinite(rgb[1]) || !Number.isFinite(rgb[2]))

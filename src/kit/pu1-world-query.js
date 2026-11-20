@@ -114,7 +114,7 @@
     return Object.freeze({change,spatial});
   }
 
-  const lookFields = ['output', 'provenance'].map(key => ({name:'look/'+key,type:'record',selector:true}));
+  const lookFields = ['output', 'provenance', 'sample'].map(key => ({name:'look/'+key,type:'record',selector:true}));
   function create(view, systems = {}, projected, visual) {
     const {world, states = {}, signals = {}, tick = 0, history = [], dropped = 0} = view;
     const fields = new Map(), traces = new Map();

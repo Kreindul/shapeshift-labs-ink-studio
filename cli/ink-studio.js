@@ -295,12 +295,14 @@ const CMD = {
         '  inspect <scene|run>         discover fields, actions, ports and entities',
         '  probe <scene|run> --field name [--at x,y,z | --entity id]  sample world state',
         '  inspect|validate|probe <scene|run> --select JSON   inspect, check, or sample a look target',
+        '  probe <scene|run> --field look/sample [--select JSON | --entity ID] [--at x,y,z]   explain a baked splat',
         '  trace <scene|run> <name>    trace a route, signal or other exposed query',
         '  field <scene|run> <name> --spec file.json  export a line, grid or time series',
         '  scene apply|stamp|remix|capture|history|promote <world> ...  edit or derive a world manifest',
         '    scene apply <scene> <edits.json> --dry-run   preview edited paths and look targets',
         '  sim run|resume|fork|reset|replay|diff|sweep|render ...  run or compare fixed-tick simulations',
         '  look inspect <scene|run|look-file> [--renderer headless|webgl]   list bindings, dependencies and targets',
+        '  look sample <look-file> [--look pack/look] [--colors JSON | --chart] [--out file.json|chart.png]',
         '  look import <file> [--out pack.json] [--id pack/look]   import a LUT or palette as a versioned look',
         '  look export <file> [--out file | --format json|cube|gpl|pal|hex]   convert or sample a look',
         '    --look pack/look --params JSON --size N --swatches palette-file --report report.json --exact',
@@ -369,6 +371,10 @@ const CMD = {
   },
   look() {
     const io = require('./look.js');
+    if (pos[0] === 'sample') {
+      if (pos.length !== 2) die('Usage: ink-studio look sample <look-file> [--colors JSON | --chart]');
+      return io.sample(pos[1], opt, lib());
+    }
     if (pos[0] !== 'inspect') return io.run(pos, opt, lib().KIT.authoring);
     if (pos.length !== 2) die('Usage: ink-studio look inspect <scene|run|look-file>');
     const file = pos[1];

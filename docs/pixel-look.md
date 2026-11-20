@@ -552,6 +552,42 @@ lose a binding. Edits are checked together against the final scene.
 Supply `--asset-pack` to install a pack in the saved result and
 `--renderer webgl` to check WebGL compatibility.
 
+## Sample colors and probe a scene
+
+Use `look sample` with a LUT, color stack, palette, or look asset. Pass a
+JSON array of hex colors and RGB triples in normalized sRGB units, or
+use `--chart` for a set of grays, hues, shadows, and highlights. JSON
+results include the input, transformed RGB, and selected swatch when
+the look quantizes the color. Save a PNG to see each input on the left
+and the corresponding result on the right.
+
+```sh
+node cli/ink-studio.js look sample examples/blue-shadow.cube \
+  --colors '["#182c55",[0.8,0.1,0.05]]'
+node cli/ink-studio.js look sample examples/relay-look-pack.json \
+  --look relay/glazed-enamel --chart --out enamel-chart.png
+node cli/ink-studio.js probe examples/wet-spillway.js \
+  --select '{"surface":"spillway-wall"}' --at 1,0.55,0
+```
+
+Standalone sampling accepts `--params` for look assets and `--swatches`
+to supply a reference palette for indexed looks. Indexed RGB samples
+use the nearest reference swatch. Use `--at` or `--rest` to evaluate a
+standalone axis or texture mask in its declared space. Without a
+position or scene field, the standalone sampler shows the full
+look and reports an unknown mask weight.
+
+`look/sample` reads an actual baked splat from the scene or saved
+simulation tick. `--at` selects the nearest matching splat center,
+and `--radius` bounds the search. Use `--entity` or `--select` to
+restrict the search. With no point, `--field look/sample` picks the first
+matching splat. The result gives the material, baked RGB, sampled
+positions, matched looks and mask weights, and the resulting RGB for
+that isolated splat. A continuous color or a blend between swatches
+has `swatch: null`. Art pixel coordinates for palette dithering can
+be passed in `--args '{"pixel":[8,7]}'`. Use `look/output` to supply
+your own RGB for an individual stage.
+
 ## Shared look selectors
 
 Use `finish.look.targets` in a diorama, `visual.look.targets` on a world,
