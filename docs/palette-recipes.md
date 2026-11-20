@@ -48,6 +48,56 @@ Each role has exactly one of these sources:
 - `color: '#rrggbb'`: one constant color. Only `steps: 1` may be supplied.
 - `path: pathDefinition`: sample any color path into the role's shade slots. Set `steps` on the role; the path's preview sample count is independent.
 
+## Bind a surface effect to named roles
+
+Use a role name anywhere a surface finish asks for a single colour. For
+a role with several shades, pick a stop such as `glacier.shadow`,
+`glacier.midtone`, `glacier.highlight`, or `glacier.2`.
+
+Set `surface.paletteRoles` to map an effect's names to the scene's
+`paletteRoles`. Each binding accepts a scene role or stop, a palette
+index, or an exact swatch in the scene palette. A local name takes
+precedence over a scene role of the same name on that surface. Binding
+a whole ramp preserves all its stops for uses such as a lighting ramp.
+Aliases resolve directly against the scene roles.
+
+```js
+const decal = {
+  type: 'projected',
+  pattern: 'indexed',
+  raster: {
+    width: 2, height: 2, slots: [0, 1, 2, 3],
+    palette: ['shadow', 'body', 'rim', 'emission']
+  }
+};
+const finish = KIT.surface.material(base, {
+  paletteRoles: {
+    shadow: 'glacier.shadow',
+    body: 'glacier.midtone',
+    rim: 'glacier.highlight',
+    emission: 'glacier-light'
+  },
+  layers: { decal }
+});
+```
+
+Use the same aliases for finish colours, indexed graphics, palette
+ramps and fields, lighting-ramp stops, driven colours, and the
+surface's palette constraints or render stages. Role references
+resolve against the scene's authored palette. A missing role or an
+ambiguous single-colour reference reports an error.
+
+The [relay colourways scene](../examples/surface-palette-roles.js) uses
+one indexed dial for three recipe ramps. Run the scene at native size
+to compare how their labels, rim and signal colours resolve.
+
+```sh
+ink-studio render examples/surface-palette-roles.js --w 354 --h 168 --px 1 --out relays.png
+```
+
+[Palette remaps](pixel-look.md#palette-remaps) also accept a named
+destination swatch.
+
 ## Independent channel curves
 
 ```js
