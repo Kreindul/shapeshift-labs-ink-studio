@@ -1183,6 +1183,61 @@ ink-studio probe shelter.run.json --field air/budget
 ink-studio sim replay shelter.run.json
 ```
 
+## Power networks and motor loads
+
+A `power-network` system routes watts through a lossless graph of
+named `buses`. Buses optionally declare XYZ `position` for rendering.
+Each `lines` entry links `from` and `to` in both directions.
+`closed` defaults to true and can be driven by `close.<line>`.
+The graph uses deterministic shortest closed paths. Loads are served
+in descending `priority`, with generator power used before batteries.
+Surplus generation charges reachable batteries.
+
+| Table | Configuration |
+| --- | --- |
+| `generators` | Set `bus`, a rated output `watts`, and optional `enabled`. Drive `supply.<id>` and `enable-generator.<id>`. A `wind` source samples a `world/s` XYZ or XZ vector `field` at `at` and uses a cubic response between `cutIn` and `rated`. Output holds at the rating until `cutOut`. |
+| `batteries` | Set `bus`, `capacity` and `initial` in joules. `chargeWatts` and `dischargeWatts` cap bus power. `chargeEfficiency` and `dischargeEfficiency` account for conversion losses. Every battery exposes an `energy` account in `J` for standard world transfers. |
+| `loads` | Set `bus`, optional `watts`, `idle`, `efficiency`, `priority`, and `enabled`. `enable-load.<id>` switches the load, and `demand.<id>` replaces its requested useful watts. Optional `idle` is electrical standby draw. The network adds standby and accounts for efficiency when calculating electrical demand. |
+
+Add `breaker: {"watts":112,"delay":0.2}` to a line to trip after
+that much time above the rated power. The breaker measures proposed
+net watts through the line. A trip opens the branch and reallocates the
+same tick before posting energy. The trip latches. Call the
+`reset` action with `{"line":"workshop-breaker"}` after clearing the
+overload. The breaker records its measured load and the contributing
+machines. With `causality` enabled, the event can link to their demands.
+
+On a root `mechanics` shaft, hinge, or slider, set `powerLimited: true`.
+The joint reports `power-demand.<joint>` based on its requested speed,
+reflected torque or force, and its moving `idlePower` (default 1 W).
+Enable `gravityLoad` on a slider to include the weight of its mounted
+mass when moving against gravity. Motion at the travel limit requests
+zero power. Wire this demand to the load's `demand.<id>`. Wire
+`allowance.<id>` back to `power.<joint>`. The joint caps speed by the
+budget and reports `power-draw.<joint>` and `power-limited.<joint>`.
+The normal stateful signal boundary applies. At a shared update rate,
+an electrical dispatch reserves energy for the next mechanical update.
+`delivered.<id>` reports electrical watts and `allowance.<id>` reports
+the motor budget after load efficiency and standby.
+
+Probe the `lines`, `loads`, `generators`, or `batteries` fields and
+inspect the `energy` ledger. Use `trace` with `<system>/power` to see
+the generation or storage paths serving a load and related trips.
+Bind the `lines` field to `visual.fields.powerLines` for splats.
+Lines can use `guides`, `radius`, and live, dead, and tripped palette ramps.
+
+In the [windmill workshop](../examples/world-windmill-workshop.json),
+the windmill charges the battery, and the battery supplies the lift's
+shortfall. Starting the grinder trips the shared breaker until reset.
+
+```sh
+ink-studio sim run examples/world-windmill-workshop.json --ticks 96 --record workshop.run.json
+ink-studio probe examples/world-windmill-workshop.json --ticks 52 --field power/lines --args '{"line":"workshop-breaker"}'
+ink-studio trace examples/world-windmill-workshop.json power/power --ticks 52 --args '{"load":"lift"}'
+ink-studio probe workshop.run.json --field power/energy
+ink-studio sim replay workshop.run.json
+```
+
 ## Extend the runtime in JavaScript
 
 ```js

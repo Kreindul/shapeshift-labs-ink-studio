@@ -142,6 +142,11 @@
         (!spec.drive||own(jointSpecs,spec.drive))&&['speed','position'].includes(spec.mode??'speed')&&
         (spec.externalLoad===undefined||typeof spec.externalLoad==='boolean'),
         'Invalid joint settings for ' + key);
+      check((spec.powerLimited===undefined||typeof spec.powerLimited==='boolean')&&
+        (!spec.powerLimited||spec.kind!=='fixed'&&!spec.drive&&Number.isFinite(spec.idlePower??1)&&(spec.idlePower??1)>0)&&
+        (spec.idlePower===undefined||spec.powerLimited)&&
+        (spec.gravityLoad===undefined||spec.powerLimited&&spec.kind==='slider'&&typeof spec.gravityLoad==='boolean'),
+      'Invalid motor power or gravity load for '+key);
       claimed.set(spec.child,key);
       initials[key]={active:true,value:clamp(spec.at??0,...range),speed:0,load:0,stalled:false};
       if(spec.wear!==undefined){
@@ -154,6 +159,12 @@
       inputs['drive.'+key]={type:'number',default:spec.mode==='position'?spec.at??0:spec.speed??0};
       outputs['speed.'+key]='number';
       outputs['stalled.'+key]='bool';
+      if(spec.powerLimited){
+        inputs['power.'+key]='number';
+        outputs['power-demand.'+key]=outputs['power-draw.'+key]='number';
+        outputs['power-limited.'+key]='bool';
+        initials[key].power={demand:0,draw:0,grant:0,limited:false,gravity:0};
+      }
       if(spec.externalLoad){
         inputs['external-load.'+key]='number';
         outputs['load.'+key]='number';
@@ -214,8 +225,24 @@
           angular:V.mad(parent?.angular??zero,M.app(parentRotation,axis),['hinge','shaft'].includes(spec.kind)?joint.speed:0)};
       }
     }
+    const usesGravityLoad=Object.values(jointSpecs).some(row=>row.gravityLoad);
+    function liftMasses(state){
+      const mass=Object.fromEntries(Object.entries(state.bodies).map(([key,row])=>[key,row.mass]));
+      for(let i=mountOrder.length-1;i>=0;i--){
+        const key=mountOrder[i], {child,parent}=jointSpecs[key];
+        if(state.joints[key].active&&own(mass,child)&&own(mass,parent))mass[parent]+=mass[child];
+      }
+      return mass;
+    }
+    function commandSpeed(spec,joint,ctx,key){
+      const drive=ctx.input['drive.'+key];
+      if(spec.mode!=='position')return drive;
+      const limit=Math.abs(spec.speed??1);
+      return clamp((drive-joint.value)/ctx.dt,-limit,limit);
+    }
     function advanceJoints(state,ctx) {
       const next={}, ratios={}, roots={}, demand={}, loading=ctx.causal?{}:null, transitions=ctx.causal?{}:null;
+      const liftMass=usesGravityLoad?liftMasses(state):null;
       for(const key of driveOrder){
         const spec=jointSpecs[key], s=state.joints[key];
         const coupled=s.active&&spec.drive&&next[spec.drive]?.active;
@@ -233,18 +260,42 @@
         next[key]={...s,load};
       }
       for(const key of driveOrder){
-        const spec=jointSpecs[key], s=next[key], root=roots[key], motor=jointSpecs[root],
-          stalled=s.active&&demand[root]>(motor.capacity??1e9), [min,max]=spec.range??[-1e6,1e6];
+        const spec=jointSpecs[key], s=next[key], root=roots[key], motor=jointSpecs[root], [min,max]=spec.range??[-1e6,1e6];
+        let requested=0, gravity=0;
+        if(spec.powerLimited&&s.active){
+          const raw=commandSpeed(spec,s,ctx,key);
+          requested=(clamp(s.value+raw*ctx.dt,min,max)-s.value)/ctx.dt;
+          if(spec.gravityLoad&&requested){
+            const axis=M.app(state.bodies[spec.parent]?.rotation??M.id(),V.norm(spec.axis??up));
+            gravity=Math.max(0,-Math.sign(requested)*V.dot(config.gravity??[0,-9.81,0],axis))*(liftMass[spec.child]??0);
+            demand[root]+=gravity;
+            if(loading&&gravity)loading[root].push({joint:key,load:gravity,gravity:true,axis});
+          }
+        }
+        const stalled=s.active&&demand[root]>(motor.capacity??1e9);
+        let power;
         let speed=0;
+        const idle=spec.idlePower??1, grant=spec.powerLimited?Math.max(0,ctx.input['power.'+key]):0;
+        const effort=demand[root];
         if(s.active&&!stalled&&spec.kind!=='fixed'){
           if(root!==key) speed=next[spec.drive].speed*(spec.ratio??1);
-          else if(spec.mode==='position'){
-            const limit=Math.abs(spec.speed??1);
-            speed=clamp((ctx.input['drive.'+key]-s.value)/ctx.dt,-limit,limit);
-          }else speed=ctx.input['drive.'+key];
+          else if(spec.powerLimited){
+            if(grant>=idle)speed=effort>0?Math.sign(requested)*Math.min(Math.abs(requested),(grant-idle)/effort):requested;
+          }else speed=commandSpeed(spec,s,ctx,key);
         }
         const proposed=s.value+speed*ctx.dt, value=clamp(proposed,min,max);
         let measuredSpeed=(value-s.value)/ctx.dt, wear=s.durability, active=s.active;
+        if(spec.powerLimited){
+          const demand=s.active&&!stalled&&requested?Math.abs(requested)*effort+idle:0;
+          const draw=measuredSpeed?Math.min(grant,Math.abs(measuredSpeed)*effort+idle):0;
+          power={demand,draw,grant,gravity,limited:demand-grant>1e-9*Math.max(1,demand)};
+          if(power.limited&&!s.power.limited){
+            const detail={joint:key,demand,grant,effort,gravity};
+            const cause=ctx.causal?.record('motor-power-budget',detail,{inputs:['power.'+key,'drive.'+key],
+              outputs:['speed.'+key,'power-limited.'+key]});
+            ctx.emit('motor-power-limited',detail,cause?[cause]:undefined);
+          }
+        }
         if(wear&&active){
           const settings=wearSpecs[key], child=state.bodies[spec.child], material=child&&bodyMaterial(ctx,child);
           const nextWear=durability.joint(wear,settings,material,{before:s.value,value,load:root===key?demand[root]:s.load});
@@ -282,7 +333,8 @@
           transitions[key]=cause;
           ctx.emit('machine-stop',detail,[cause]);
         }
-        next[key]={...s,active,value,speed:measuredSpeed,stalled:active&&stalled,networkLoad:demand[root],...(wear&&{durability:wear})};
+        next[key]={...s,active,value,speed:measuredSpeed,stalled:active&&stalled,networkLoad:demand[root],
+          ...(wear&&{durability:wear}),...(power&&{power})};
       }
       return next;
     }
@@ -845,6 +897,11 @@
         for(const [key,spec] of Object.entries(structures))durability.beamValidate(state.beams[key],spec);
       }
       for(const key of Object.keys(wearSpecs))durability.jointValidate(state.joints[key].durability);
+      for(const [key,spec] of Object.entries(jointSpecs))if(spec.powerLimited){
+        const power=state.joints[key].power;
+        check(record(power)&&[power.demand,power.draw,power.grant,power.gravity].every(n=>Number.isFinite(n)&&n>=0)&&
+          power.draw<=power.grant&&typeof power.limited==='boolean','Invalid saved motor power '+key);
+      }
       if(fabricFields.length)check(Array.isArray(state.fabricLoads)&&state.fabricLoads.every(load=>record(load)&&
         id(load.system)&&id(load.shape)&&id(load.body)&&vector(load.point)&&vector(load.impulse)),
       'Invalid saved deformable reactions');
@@ -888,6 +945,11 @@
         out['speed.'+key]=joint.speed;
         out['stalled.'+key]=joint.stalled;
         if(jointSpecs[key].externalLoad)out['load.'+key]=joint.networkLoad??((jointSpecs[key].load??0)+(joint.load??0));
+        if(jointSpecs[key].powerLimited){
+          out['power-demand.'+key]=joint.power.demand;
+          out['power-draw.'+key]=joint.power.draw;
+          out['power-limited.'+key]=joint.power.limited;
+        }
       }
       if (config.contactEvents) out.contacts=state.contacts;
       if(fabricFields.length)out['deformable-loads']=state.fabricLoads;
