@@ -356,6 +356,13 @@
     } catch (error) {
       bad('finish.look.colorStack', error.message);
     }
+    try {
+      PixelLook.preparePaletteConstraints(look?.paletteConstraints, {
+        palette: pal, roles: st.roles, blueNoise: K.procedural.materials.blueNoise
+      });
+    } catch (error) {
+      bad('finish.look.paletteConstraints', error.message);
+    }
     const roleNames = Object.keys(st.roles),
       ids = new Set(),
       parts = new Set(),
@@ -721,7 +728,7 @@
       matOf = m => {
         if (m === undefined) m = 'stone';
         const r = ramp(m),
-          out = { r };
+          out = { r, materialId: typeof m === 'string' ? m : m.role };
         if (typeof m === 'object') {
           const sc = m.scale || 0.7;
           if (m.noise) out.mod = (x, y, z) => m.noise * (B.n3(x * sc, y * sc, z * sc) - 0.5);
@@ -752,7 +759,7 @@
               : K.poly2.rect(o.rect[0], o.rect[1]);
     const made = {},
       make = (s, held) => {
-        const o = { res: s.res };
+        const o = { res: s.res, objectId: s.part ?? s.id };
         if (s.res === undefined) delete o.res;
         if (s.part) {
           o.tag = s.part;
@@ -818,7 +825,7 @@
         } else if (k === 'bubbles') p = S.bubbles(sub(s.of), Object.assign({ cell: s.cell || 0.5, h: s.h || 0.12 }, o));
         else {
           const mats = { stone: m, post: m, rail: m, metal: m },
-            oo = Object.assign({}, s, { mats, tag: s.part, res: s.res });
+            oo = Object.assign({}, s, { mats, tag: s.part, res: s.res, objectId: o.objectId });
           p =
             k === 'pillar'
               ? K.build.pillar(S, s.at, s.h, oo)

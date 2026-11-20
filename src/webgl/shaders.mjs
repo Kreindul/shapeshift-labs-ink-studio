@@ -268,11 +268,60 @@ ${water ? `  vec3 mark; rgb = waterPaint(rgb, gl_FragCoord.xy, u_viewport,
   return { vertex: SPLAT_VS, fragment: SPLAT_FS };
 }
 
-export function pixelShaderSources(PixelLook, { water = false, airPockets = false, layered = false, atlas = false } = {}) {
+const paletteConstraintGlsl = `
+uniform highp sampler2D u_constraintSlots, u_constraintRows;
+uniform int u_constraintDefault;
+bool g_constrained = false;
+bool constrainPalette(ivec2 p, vec3 inputColor, out vec3 color) {
+  int dab = dabAt(p);
+  if (dab < 0) return false;
+  int span = textureSize(u_constraintSlots, 0).x * 4;
+  int slot = int(texelFetch(u_constraintSlots, ivec2((dab % span) / 4, dab / span), 0)[dab & 3]);
+  int row = (slot > 0 ? slot : u_constraintDefault) - 1;
+  if (row < 0) return false;
+  vec4 settings = texelFetch(u_constraintRows, ivec2(0, row), 0);
+  int count = int(settings.x), total = int(settings.y);
+  vec3 bytes = floor(clamp(inputColor, 0.0, 1.0) * 255.0 + 0.5);
+  const vec3 weight = vec3(0.30, 0.55, 0.15);
+  float firstDistance = 1e9, secondDistance = 1e9;
+  vec3 best = vec3(0.0), second = vec3(0.0);
+  for (int i = 0; i < 48; i++) {
+    if (i >= total) break;
+    vec3 swatch = texelFetch(u_constraintRows, ivec2(i + 1, row), 0).rgb;
+    if (i >= count) {
+      if (all(equal(bytes, floor(swatch * 255.0 + 0.5)))) { color = swatch; return true; }
+      continue;
+    }
+    vec3 d = inputColor - swatch;
+    float distance = dot(weight, d * d);
+    if (distance < firstDistance) {
+      second = best; secondDistance = firstDistance;
+      best = swatch; firstDistance = distance;
+    } else if (distance < secondDistance) {
+      second = swatch; secondDistance = distance;
+    }
+  }
+  color = best;
+  float amount = texelFetch(u_constraintRows, ivec2(1, row), 0).a;
+  if (count < 2 || amount == 0.0) return true;
+  ivec2 size = ivec2(settings.zw);
+  int y = textureSize(u_idxTex, 0).y - 1 - p.y;
+  int cell = (y % size.y) * size.x + p.x % size.x;
+  float rank = texelFetch(u_constraintRows, ivec2(49 + cell / 4, row), 0)[cell & 3];
+  vec3 delta = second - best;
+  if (rank < 0.5 && dot(weight * delta, inputColor - best) >=
+      (0.5 + (rank - 0.5) * amount) * dot(weight, delta * delta)) color = second;
+  return true;
+}
+`;
+
+export function pixelShaderSources(PixelLook, { water = false, airPockets = false, layered = false, atlas = false,
+  paletteConstraints = false } = {}) {
   const POST_VS = `#version 300 es
 void main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }`;
   const POST_FS = `#version 300 es
 precision highp float;
+${paletteConstraints ? 'precision highp int;' : ''}
 uniform sampler2D u_scene, u_depth, u_crispScene, u_crispDepth;
 uniform vec3 u_line;
 uniform float u_edge;
@@ -649,6 +698,7 @@ vec3 pixelNative(ivec2 p) {
   return c;
 }
 ${PixelLook.glsl}
+${paletteConstraints ? paletteConstraintGlsl : ''}
 // a hole a pixel across in a surface (its dabs, seen nearly edge on, leave gaps, and what lies under it or far behind shows through, as
 // dark broken lines across the ground): it is drawn as the nearer of the pixels either side of it, which lie on the surface
 ivec2 holeFill(ivec2 p) { ivec2 ms = textureSize(u_depth, 0) - 1; float d0 = texelFetch(u_depth, p, 0).r;
@@ -697,6 +747,7 @@ ${water ? '      vec4 sl = texelFetch(u_sprLayer, p, 0); if (sl.a > 0.5) { g_spr
     c = u_line;
   }
   else {
+${paletteConstraints ? '    vec3 constrained; if (constrainPalette(p, c, constrained)) { g_constrained = true; return constrained; }' : ''}
     float th = (BAYER[(p.x & 3) + ((p.y & 3) << 2)] + 0.5) / 16.0 - 0.5;
     c = clamp(c + th * u_dither, 0.0, 1.0);
   }
@@ -717,7 +768,9 @@ ${water ? '      vec4 sl = texelFetch(u_sprLayer, p, 0); if (sl.a > 0.5) { g_spr
 }
 bool like(vec3 a, vec3 b) { vec3 d = abs(a - b); return max(d.r, max(d.g, d.b)) < 0.004; }
 vec3 lookAt(ivec2 p) {
-  if (u_colored > 0.5) { vec3 c = pixelResolve(p); vec4 dq = texelFetch(u_crispDepth, p, 0);
+  if (u_colored > 0.5) {
+${paletteConstraints ? '    vec3 constrained; if (constrainPalette(p, pixelNative(p), constrained)) { g_constrained = true; return constrained; }' : ''}
+    vec3 c = pixelResolve(p); vec4 dq = texelFetch(u_crispDepth, p, 0);
     if (u_grade > 0.5 && dq.b > 0.3 + ((BAYER[(p.x & 3) + ((p.y & 3) << 2)] + 0.5) / 16.0 - 0.5) * 0.3) { for (int j = 0; j < 64; j++) { if (j >= u_n) break; if (like(c, u_out[j])) { c = u_outl[j]; break; } } }   // under a carried light
     return glassAir(c, p, dq.r, vec2(textureSize(u_crispScene, 0))); }
   return plainAt(p);
@@ -729,7 +782,7 @@ void main(){
 ${water ? '  p = waterPixel(p);' : ''}
   if (u_bypass > 0.5) { o = vec4(texelFetch(u_scene, p, 0).rgb, 1.0); return; }
   vec3 c0 = lookAt(p);
-  o = vec4(c0, g_spr && u_markA > 0.5 ? 0.5 : 1.0);   // (an edge sprite is marked for the clean-up pass, which leaves it as drawn)
+  o = vec4(c0, (g_spr${paletteConstraints ? ' || g_constrained' : ''}) && u_markA > 0.5 ? 0.5 : 1.0);
 }`;
   const CLEAN_FS = `#version 300 es
 precision highp float;

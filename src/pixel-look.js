@@ -34,29 +34,17 @@ const PixelLook = (() => {
   const isSwatch = value => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
   const unpack = color => [color >> 16, (color >> 8) & 255, color & 255].map(n => n / 255);
   const clamp = n => Math.max(0, Math.min(1, n));
+  const record = value => value && Object.getPrototypeOf(value) === Object.prototype;
+  const packedRgb = ([r, g, b]) => (Math.round(clamp(r) * 255) << 16) |
+    (Math.round(clamp(g) * 255) << 8) | Math.round(clamp(b) * 255);
 
-  function prepareRemap(definition, palette, roles = {}, override) {
-    if (definition === undefined || definition === false) return null;
-    if (!definition || Object.getPrototypeOf(definition) !== Object.prototype ||
-        Object.keys(definition).some(key => !['rules', 'protect', 'color'].includes(key)))
-      throw new TypeError('Palette remap needs a settings object with rules and optional protect');
-    const colors = Array.isArray(palette) || ArrayBuffer.isView(palette) ? Array.from(palette) : [];
-    if (!colors.length || !colors.every(isColor))
-      throw new TypeError('Palette remap needs a palette of packed RGB colors');
-    const { rules, protect = [] } = definition;
-    const contract = spaces.settings(override === undefined ? definition.color : override);
-    const encodeTarget = contract && spaces.prepare(undefined, { ...contract.output, outOfRange: 'preserve' });
-    const applyTarget = contract && spaces.wrap((rgb, out, target) => {
-      for (let i = 0; i < 3; i++) out[i] = target[i];
-    }, contract);
-    if (!Array.isArray(rules) || rules.length > 1024 || !Array.isArray(protect) || protect.length > 1024)
-      throw new TypeError('Palette remap rules and protect must be lists of at most 1024 entries');
+  function paletteSelector(colors, roles) {
     const index = value => {
       if (!Number.isSafeInteger(value) || value < 0 || value >= colors.length)
         throw new RangeError('Palette index out of range: ' + value);
       return value;
     };
-    function select(from) {
+    return from => {
       if (typeof from === 'number') return [index(from)];
       if (typeof from !== 'string' || !from) throw new TypeError('Expected a palette index, #rrggbb swatch or role');
       if (isSwatch(from)) {
@@ -74,7 +62,25 @@ const PixelLook = (() => {
         stop === 'highlight' ? ramp.length - 1 : /^(0|[1-9]\d*)$/.test(stop) ? Number(stop) : -1;
       if (step < 0 || step >= ramp.length) throw new RangeError('Unknown palette ramp stop: ' + from);
       return [index(ramp[step])];
-    }
+    };
+  }
+
+  function prepareRemap(definition, palette, roles = {}, override) {
+    if (definition === undefined || definition === false) return null;
+    if (!record(definition) || Object.keys(definition).some(key => !['rules', 'protect', 'color'].includes(key)))
+      throw new TypeError('Palette remap needs a settings object with rules and optional protect');
+    const colors = Array.isArray(palette) || ArrayBuffer.isView(palette) ? Array.from(palette) : [];
+    if (!colors.length || !colors.every(isColor))
+      throw new TypeError('Palette remap needs a palette of packed RGB colors');
+    const { rules, protect = [] } = definition;
+    const contract = spaces.settings(override === undefined ? definition.color : override);
+    const encodeTarget = contract && spaces.prepare(undefined, { ...contract.output, outOfRange: 'preserve' });
+    const applyTarget = contract && spaces.wrap((rgb, out, target) => {
+      for (let i = 0; i < 3; i++) out[i] = target[i];
+    }, contract);
+    if (!Array.isArray(rules) || rules.length > 1024 || !Array.isArray(protect) || protect.length > 1024)
+      throw new TypeError('Palette remap rules and protect must be lists of at most 1024 entries');
+    const select = paletteSelector(colors, roles);
     const overrides = new Map();
     for (const rule of rules) {
       if (!rule || Object.getPrototypeOf(rule) !== Object.prototype ||
@@ -217,6 +223,118 @@ const PixelLook = (() => {
     }
     return best;
   }
+
+  function preparePalette(definition, { palette = [], roles = {}, blueNoise } = {}) {
+    if (!record(definition) || Object.keys(definition).some(key => !['palette', 'reserved', 'dither'].includes(key)))
+      throw new TypeError('A palette constraint accepts palette, reserved and dither settings');
+    const select = paletteSelector(palette, roles);
+    function colors(values, name) {
+      if (!Array.isArray(values) || values.length > 48)
+        throw new RangeError(name + ' needs up to 48 swatches');
+      return [...new Set(Array.from(values).flatMap(value => {
+        if (isSwatch(value)) return parseInt(value.slice(1), 16);
+        if (Array.isArray(value) && value.length === 3 && Array.from(value).every(fraction)) return packedRgb(value);
+        return select(value).map(index => {
+          const color = palette[index];
+          if (!isColor(color)) throw new RangeError('Palette constraints require packed RGB scene swatches');
+          return color;
+        });
+      }))];
+    }
+    const reserved = colors(definition.reserved ?? [], 'Reserved list');
+    const candidates = colors(definition.palette ?? Array.from(palette, (_, i) => i), 'Output palette')
+      .filter(color => !reserved.includes(color));
+    const packed = [...candidates, ...reserved];
+    if (!candidates.length || packed.length > 48) throw new RangeError('Use 1 to 48 swatches with at least one unreserved color');
+    const swatches = packed.map(unpack), exact = new Map(reserved.map((color, index) => [color, candidates.length + index]));
+    const dither = definition.dither ?? {};
+    if (!record(dither) || Object.keys(dither).some(key => !['pattern', 'strength', 'seed'].includes(key)))
+      throw new TypeError('Palette dither accepts pattern, strength and seed settings');
+    const { pattern = 'bayer', strength = 0, seed = 0 } = dither;
+    if (!['none', 'checker', 'bayer', 'blue-noise'].includes(pattern) || !fraction(strength) || !Number.isSafeInteger(seed))
+      throw new RangeError('Palette dither requires a valid pattern, strength in [0, 1] and integer seed');
+    const amount = pattern === 'none' ? 0 : strength;
+    let width = 4, height = 4, ranks = bayerRanks;
+    if (pattern === 'checker') {
+      width = height = 2;
+      ranks = Float32Array.of(.25, .75, .75, .25);
+    } else if (pattern === 'blue-noise' && amount) {
+      if (typeof blueNoise !== 'function') throw new TypeError('Pass materials.blueNoise to prepare this palette pattern');
+      const tile = blueNoise({ seed });
+      ({ width, height } = tile);
+      ranks = Float32Array.from(tile.ranks, rank => (rank + .5) / tile.ranks.length);
+    }
+    const count = candidates.length;
+    const mod = (n, size) => ((Math.floor(n) % size) + size) % size;
+    function index(rgb, x = 0, y = 0, useDither = true) {
+      const locked = exact.size ? exact.get(packedRgb(rgb)) : undefined;
+      if (locked !== undefined) return locked;
+      let best = 0, second = 0, firstDistance = Infinity, secondDistance = Infinity;
+      for (let i = 0; i < count; i++) {
+        let distance = 0;
+        for (let k = 0; k < 3; k++) distance += weights[k] * (rgb[k] - swatches[i][k]) ** 2;
+        if (distance < firstDistance) {
+          second = best; secondDistance = firstDistance;
+          best = i; firstDistance = distance;
+        } else if (distance < secondDistance) {
+          second = i; secondDistance = distance;
+        }
+      }
+      if (!amount || !useDither || count < 2) return best;
+      const rank = ranks[mod(y, height) * width + mod(x, width)];
+      if (rank >= .5) return best;
+      let projection = 0, length = 0;
+      for (let k = 0; k < 3; k++) {
+        const delta = swatches[second][k] - swatches[best][k];
+        projection += weights[k] * delta * (rgb[k] - swatches[best][k]);
+        length += weights[k] * delta * delta;
+      }
+      return projection >= (.5 + (rank - .5) * amount) * length ? second : best;
+    }
+    return { packed, swatches, count, width, height, ranks, amount, index };
+  }
+
+  function preparePaletteConstraints(definition, options) {
+    if (definition === undefined || definition === false) return null;
+    if (!record(definition) || Object.keys(definition).some(key => key !== 'default' && key !== 'targets'))
+      throw new TypeError('Palette constraints accept default and targets');
+    const { default: fallback, targets = [] } = definition;
+    if (!Array.isArray(targets) || targets.length > 63)
+      throw new RangeError('Palette constraints accept up to 63 targets');
+    const rules = [], palettes = [];
+    const defaultSlot = fallback === undefined ? 0 : palettes.push(preparePalette(fallback, options));
+    const validName = value => Number.isSafeInteger(value) || typeof value === 'string' && value.trim().length > 0;
+    for (const target of targets) {
+      if (!record(target)) throw new TypeError('Expected a palette target');
+      const { object, material, ...policy } = target;
+      if ((object === undefined && material === undefined) ||
+          (object !== undefined && !validName(object)) || (material !== undefined && !validName(material)))
+        throw new TypeError('Palette targets need a named object or material');
+      rules.push({ object, material, slot: palettes.push(preparePalette(policy, options)) });
+    }
+    if (!palettes.length) return null;
+
+    function slots(world) {
+      const { objectIds, materialIds, objects, materials } = world.renderMetadata ?? {};
+      const matches = new Map(), result = new Uint8Array(world.count);
+      if (!rules.length) return result;
+      for (let i = 0; i < world.count; i++) {
+        const object = objectIds?.[i] || 0, material = materialIds?.[i] || 0;
+        const key = object * (materials?.length ?? 1) + material;
+        let slot = matches.get(key);
+        if (slot === undefined) {
+          const objectName = objects?.[object], materialName = materials?.[material];
+          slot = rules.findLast(rule => (rule.object === undefined || rule.object === objectName) &&
+            (rule.material === undefined || rule.material === materialName))?.slot ?? 0;
+          matches.set(key, slot);
+        }
+        result[i] = slot;
+      }
+      return result;
+    }
+    return { palettes, defaultSlot, slots };
+  }
+
   function outputPalettes(base, locals) {
     const packed = base.slice();
     const indices = new Map(packed.map((color, index) => [color, index]));
@@ -229,6 +347,12 @@ const PixelLook = (() => {
       return indices.get(color);
     }));
     return { packed, rows };
+  }
+
+  function localIndex(local, id, rgb, x, y, useDither) {
+    const row = id - 1;
+    const slot = local.constraints?.[row]?.index(rgb, x, y, useDither) ?? nearest(rgb, local.palettes[row], false);
+    return local.output.rows[row][slot];
   }
 
   function ink(body) {
@@ -246,12 +370,11 @@ const PixelLook = (() => {
       const average = [0, 1, 2].map(k => samples.reduce((s, c) => s + c[k], 0) / 4);
       const base = (y * width + x) * 3;
       const native = interiorColor ? [0, 1, 2].map(k => interiorColor[base + k] / 255) : average;
-      const rank = ditherAt ? bayerRank(...ditherAt(x, y)) : bayerRank(x, y);
-      const noise = interiorColor ? (rank - 0.5) * dither : 0;
+      const anchor = ditherAt?.(x, y);
       const localId = local?.at[y * width + x];
       if (localId) {
-        const id = localId - 1;
-        const index = local.output.rows[id][nearest(native, local.palettes[id], false)];
+        const [dx, dy] = anchor ?? [x, height - 1 - y];
+        const index = localIndex(local, localId, native, dx, dy);
         const tone = local.output.packed[index], q = ((height - 1 - y) * width + x) * 3;
         rgb[q] = tone >> 16;
         rgb[q + 1] = (tone >> 8) & 255;
@@ -259,6 +382,8 @@ const PixelLook = (() => {
         use[index]++;
         continue;
       }
+      const rank = anchor ? bayerRank(...anchor) : bayerRank(x, y);
+      const noise = interiorColor ? (rank - 0.5) * dither : 0;
       let selected = nearest(native.map(v => Math.max(0, Math.min(1, v + noise))), palette, false);
       let c = Array.from(mapped(selected));
       const votes = new Map(); let best = -1, score = 0, coverage = 0;
@@ -355,7 +480,8 @@ vec3 inkToneResolve(vec3 color, ivec2 pixel) {
   float rank = texelFetch(u_inkToneRanks, pixel % textureSize(u_inkToneRanks, 0), 0).r;
   return share >= mix(0.5, rank, u_inkToneAmount) ? b.rgb : a.rgb;
 }`;
-  return { nearest, ink, resolve, glsl, presets, toneSettings, prepareTone, toneIndex, toneGlsl, bayerRank, outputPalettes,
+  return { nearest, ink, resolve, glsl, presets, toneSettings, prepareTone, toneIndex, toneGlsl, bayerRank, outputPalettes, localIndex,
+    preparePalette, preparePaletteConstraints,
     prepareRemap, gradePalette, prepareColorStack, colorGrade };
 })();
 if (typeof module !== 'undefined') module.exports = PixelLook;

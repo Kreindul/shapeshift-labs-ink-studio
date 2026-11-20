@@ -9,16 +9,15 @@ const ArtEffects = require('../src/art-effects.js');
 const ArtStability = require('../src/art-stability.js');
 const { footprint, sampledDepth } = require('./splat-sampling.js');
 const blueNoiseTiles = new WeakMap();
-function toneFor(world, definition) {
-  return PixelLook.prepareTone(definition, ({ seed }) => {
-    let tile = blueNoiseTiles.get(world);
-    if (tile?.seed !== seed) {
-      const { KIT } = require('../index.js').load();
-      tile = { seed, ranks: KIT.procedural.materials.blueNoise({ seed }) };
-      blueNoiseTiles.set(world, tile);
-    }
-    return tile.ranks;
-  });
+function blueNoise(world, { seed }) {
+  if (!blueNoiseTiles.has(world)) blueNoiseTiles.set(world, new Map());
+  const tiles = blueNoiseTiles.get(world);
+  if (!tiles.has(seed)) {
+    const { KIT } = require('../index.js').load();
+    if (tiles.size >= 65) tiles.delete(tiles.keys().next().value);
+    tiles.set(seed, KIT.procedural.materials.blueNoise({ seed }));
+  }
+  return tiles.get(seed);
 }
 const SampleCoverage = require('../src/sample-coverage.js');
 const Airflow = require('../src/airflow.js');
@@ -71,7 +70,7 @@ function viewMatrix(yaw, pitch, dist, T) {
   ];
 }
 // o: t (seconds), yaw, pitch, dist, target, w, h (the size of the stage in screen pixels), zoom (1 = the diorama's own distance), raw (skip the palette)
-function render(world, o) {
+function render(world, o, preparedPalettes) {
   o = o || {};
   const lensScale = o.lensScale ?? 1;
   if (!Number.isFinite(lensScale) || lensScale <= 0) throw new RangeError('Lens scale must be finite and positive');
@@ -127,7 +126,10 @@ function render(world, o) {
   };
   if (look.pixelSize !== undefined && (!Number.isSafeInteger(look.pixelSize) || look.pixelSize < 1))
     throw new RangeError('look.pixelSize must be a positive integer');
-  const tone = o.raw || o.samples || o.captureCoverage ? null : toneFor(world, o.tone ?? look.tone);
+  const tone = styled ? PixelLook.prepareTone(o.tone ?? look.tone, settings => blueNoise(world, settings)) : null;
+  const paletteRules = styled ? PixelLook.preparePaletteConstraints(o.paletteConstraints ?? look.paletteConstraints, {
+    palette: world.pal, roles: world.paletteRoles, blueNoise: settings => blueNoise(world, settings)
+  }) : preparedPalettes;
   const colorGrade = styled && !tone && PixelLook.colorGrade(world.pal, world.paletteRoles, an.grade,
     o.paletteRemap ?? look.paletteRemap, o.colorCurves ?? look.colorCurves, o.colorLut ?? look.colorLut,
     o.colorStack ?? look.colorStack);
@@ -144,7 +146,7 @@ function render(world, o) {
   const captureMotion = !!o.captureMotion || passSelection.has('motion') || passSelection.has('emissionMotion');
   if (styled && (specializedResolve || (o.colored && !tone))) {
     const native = render(world, Object.assign({}, o, { colored: false, samples: true, worked: true, passes: [...passSelection], artInkActive: !!ink,
-      captureMotion, motionFrom, reflectionTint: effects?.reflection, captureFog: o.captureFog || ink?.ramps.has('fog') }));
+      captureMotion, motionFrom, reflectionTint: effects?.reflection, captureFog: o.captureFog || ink?.ramps.has('fog') }), paletteRules);
     const samples = render(
       world,
       Object.assign({}, o, {
@@ -166,6 +168,7 @@ function render(world, o) {
     const palette = basePalette.map(h => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255]);
     const local = native.localAt && {
       at: native.localAt, palettes: native.localPalettes,
+      constraints: native.localConstraints,
       output: PixelLook.outputPalettes(evaluatedPalette || basePalette, native.localPalettes)
     };
     const amount = (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither;
@@ -259,7 +262,17 @@ function render(world, o) {
     time: t
   });
   const surfaceGlint = surface ? new Uint8Array(W * H) : null;
-  const localAt = surface?.palettes.length && !o.raw ? new Uint32Array(W * H) : null;
+  const layerPalettes = surface?.palettes ?? [];
+  const localConstraints = paletteRules && Array.from({ length: layerPalettes.length }).concat(paletteRules.palettes);
+  const localPalettes = paletteRules ? layerPalettes.concat(paletteRules.palettes.map(policy => policy.swatches)) : layerPalettes;
+  const localAt = localPalettes.length && !o.raw ? new Uint32Array(W * H) : null;
+  const targetSlots = paletteRules?.slots(world);
+  const defaultSlot = paletteRules?.defaultSlot || 0;
+  function localSlot(i, layer) {
+    const target = targetSlots?.[i];
+    if (target) return layerPalettes.length + target;
+    return layer || (defaultSlot ? layerPalettes.length + defaultSlot : 0);
+  }
   const hasEffectInk = world.effectParticles?.length || world.surfaces?.some(({ settings }) =>
     Object.values(settings.layers || {}).some(layer => layer?.type === 'projected'));
   const detail = hasEffectInk ? new Uint8Array(W * H) : null;
@@ -409,7 +422,7 @@ function render(world, o) {
     if (captured) captured[p] = a + captured[p] * ia;
     if (art) art.fragment(p, i, a, wd, z, emits, pr, pg, pb);
     if (surfaceGlint && a > 0.5) surfaceGlint[p] = highlight > 0.22 || detailParticle;
-    if (localAt && a > 0.5) localAt[p] = paletteId || 0;
+    if (localAt && a > 0.5) localAt[p] = localSlot(i, paletteId);
     if (detail) {
       const q = (H - 1 - Math.floor(p / W)) * W + p % W;
       if (a > 0.5) detail[q] = 0;
@@ -911,7 +924,7 @@ function render(world, o) {
           kf = world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dep[p]) * world.fog.max : 0;
         if (surfaceGlint) surfaceGlint[p] = c[4] > 0.22;
         if ((surfaceOverlay?.[p * 4 + 3] || 0) < 0.5) {
-          if (localAt) localAt[p] = c[5] || 0;
+          if (localAt) localAt[p] = localSlot(i, c[5]);
           if (detail && surface?.projected(i) && c[4] > 0.22) detail[(H - 1 - y) * W + x] = 1;
         }
         col[p * 3] = c[0] + (fog[0] - c[0]) * kf;
@@ -1112,7 +1125,7 @@ function render(world, o) {
     }
     return {
       w: W, h: H, color: Uint8Array.from(c2, v => Math.round(clamp(v, 0, 1) * 255)), depth: dep, drawn,
-      ...(localAt && { localAt, localPalettes: surface.palettes }), ...(detail && { detail }), ...(passes && { passes }), ...(motionReference && { motionReference }),
+      ...(localAt && { localAt, localPalettes, localConstraints }), ...(detail && { detail }), ...(passes && { passes }), ...(motionReference && { motionReference }),
       ...(atmosphere?.fog && { fog: atmosphere.fog }), ...(volumeStats && { volumeStats }), ...(alpha && { alpha }), ...(orderFallback && { orderFallback })
     };
   }
@@ -1126,7 +1139,8 @@ function render(world, o) {
     edge = world.outline && world.outline.edge ? world.outline.edge / (2 * R) : 0,
     line = hex(world.outline ? world.outline.c : 0),
     dith = (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither,
-    localOutput = localAt && PixelLook.outputPalettes(tone?.palette || evaluatedPalette || world.pal, surface.palettes),
+    localOutput = localAt && PixelLook.outputPalettes(tone?.palette || evaluatedPalette || world.pal, localPalettes),
+    local = localAt && { constraints: localConstraints, palettes: localPalettes, output: localOutput },
     use = new Uint32Array(localOutput?.packed.length ?? (tone ? tone.palette.length : np)),
     ln = look.lines ? (look.lines === true ? {} : look.lines) : null,
     lines = !ink && !!ln,
@@ -1214,7 +1228,8 @@ function render(world, o) {
       let ditherX = x, ditherY = y;
       if (anchoring) [ditherX, ditherY] = ArtStability.ditherCoordinates(stable, passes, yo * W + x, x, y);
       if (tone || localId) {
-        const index = localId ? localOutput.rows[localId - 1][PixelLook.nearest([r, g, b], surface.palettes[localId - 1], false)] :
+        const localY = anchoring && passes.splatId[yo * W + x] ? ditherY : yo;
+        const index = localId ? PixelLook.localIndex(local, localId, [r, g, b], ditherX, localY, !surfaceGlint?.[p]) :
           PixelLook.toneIndex(tone, r, g, b, ditherX, anchoring && passes.splatId[yo * W + x] ? ditherY : yo);
         const color = (localOutput?.packed || tone.palette)[index];
         use[index]++;
@@ -1294,7 +1309,8 @@ function render(world, o) {
       for (let x = 0; x < W; x++) {
         const q = at(x, y);
         const pixel = (H - 1 - y) * W + x;
-        if ((alpha && alpha[q / 3] < 128) || sprM?.[pixel] || surfaceGlint?.[pixel] || detail?.[q / 3] || ArtStability.protectedPixel(stable, passes, q / 3)) continue;
+        if (localConstraints?.[(localAt?.[pixel] || 0) - 1] || (alpha && alpha[q / 3] < 128) || sprM?.[pixel] ||
+            surfaceGlint?.[pixel] || detail?.[q / 3] || ArtStability.protectedPixel(stable, passes, q / 3)) continue;
         // outlines, as on the page: a notch is filled from what is round it, a bump against the background taken off
         const e0 = empty(x, y),
           N4 = N8.slice(0, 4),

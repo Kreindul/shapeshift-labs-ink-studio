@@ -63,7 +63,7 @@ const ArtStability = (() => {
       const localId = local?.at[(h - 1 - y) * w + x];
       if (localId && (detail[p] || coverage[p] >= settings.threshold)) {
         const nativeShade = [color[c] / 255, color[c + 1] / 255, color[c + 2] / 255];
-        const index = local.output.rows[localId - 1][pixelLook.nearest(nativeShade, local.palettes[localId - 1], false)];
+        const index = pixelLook.localIndex(local, localId, nativeShade, dx, dy, !detail[p]);
         use[index]++;
         const packed = local.output.packed[index];
         rgb[q] = packed >> 16; rgb[q + 1] = (packed >> 8) & 255; rgb[q + 2] = packed & 255;

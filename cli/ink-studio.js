@@ -207,7 +207,7 @@ function pose(w, t) {
 const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
 if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
   die('--px needs a positive integer');
-let lutOverride, stackOverride;
+let lutOverride, stackOverride, constraintsOverride;
 const view = extra =>
   Object.assign(
     {
@@ -231,6 +231,8 @@ const view = extra =>
       colorLut: opt.lut === undefined ? undefined : (lutOverride ??= require('./lut.js').override(opt.lut)),
       colorStack: opt['color-stack'] === undefined ? undefined :
         (stackOverride ??= require('./color-stack.js').override(opt['color-stack'])),
+      paletteConstraints: opt['palette-constraints'] === undefined ? undefined :
+        (constraintsOverride ??= require('./palette-constraints.js').override(opt['palette-constraints'])),
       raw: !!opt.raw,
       colored: !!opt.colored,
       splatOrder: opt['splat-order'],
@@ -299,6 +301,7 @@ const CMD = {
         '  catalog [words]             what the toolkit can do, searchable',
         '  stats <id>                  splat counts, colours used, size, cost per frame, warnings',
         '  render <id> [--t 1.5]       one PNG rendered on the CPU',
+        '  render <id> --palette-constraints <file.json|off>   override target palettes and dither settings',
         '  ramps <id> [--n 12]         the ramps it is shaded on, and which only get darker without turning; a turning one is offered from the same palette',
         '  values <id> [--t 1.5]       the value check: the picture sorted into dark, middle and light, and whether it reads in three tones',
         '  sheet <id> [--from 0 --to 6 --n 12 | --t 0,1,2]   the same view at several moments, on one sheet',

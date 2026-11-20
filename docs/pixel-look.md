@@ -315,3 +315,62 @@ node cli/ink-studio.js lut import examples/half-gain-legal.cube \
   --out half-linear.json
 node cli/ink-studio.js render examples/rgb-lut.js --ortho --lut half-linear.json --out linear.png
 ```
+
+## Target palettes and dithering
+
+Use `finish.look.paletteConstraints` on a JSON diorama, `look.paletteConstraints`
+in `B.finish()`, or `visual.look.paletteConstraints` on a simulation manifest.
+Each target chooses the swatches that can appear on its visible surfaces.
+Background pixels and unselected surfaces use the scene resolve. Use an
+optional `default` policy to cover foreground surfaces without a target.
+
+```json
+{
+  "targets": [
+    {
+      "material": "foliage",
+      "palette": ["#152a2a", "#234839", "#356449", "#4c8054", "#71a260", "#a0bf77"],
+      "dither": { "pattern": "blue-noise", "strength": 0.85, "seed": 74 }
+    },
+    {
+      "object": "courier",
+      "material": "status",
+      "palette": ["#9c343a", "#d84a43"],
+      "reserved": ["#ff654e"]
+    }
+  ]
+}
+```
+
+- A target matches its `object`, its `material`, or both. The last
+  matching rule wins. In JSON dioramas, these names come from the solid's
+  `part` or `id` and the material's role. JavaScript sculpts use
+  `objectId` on the shape and `materialId` on the material. For direct
+  splats use `B.describeSplats(first, end, { object, material })`.
+  Simulation renders expose entity, body, and agent IDs, authored body
+  materials, and material names such as `terrain` and `water`.
+- Swatches accept hex colors, normalized RGB triples, scene palette
+  indices, and named palette roles or stops. Omitting `palette` uses the
+  scene swatches. `reserved` entries preserve exact matches at 8-bit RGB
+  precision and stay out of ordinary quantization and dithering.
+- `none`, `checker`, `bayer`, and seeded `blue-noise` set the threshold
+  pattern. Strength 0 picks the nearest swatch. Increasing strength lets
+  more art pixels pick the second swatch near a transition. CLI renders
+  can use the existing screen, world, or object dither coordinates.
+- Explicit target palettes take precedence over a surface layer's
+  `outputPalette` in CLI renders. Layer palettes take precedence over
+  `default`. Outlines and finish overlays use their existing paths.
+  Standard WebGL targets use solid splat ownership and screen art pixels.
+
+In JavaScript, `PixelLook.preparePalette(policy, { palette, roles, blueNoise })`
+returns packed swatches and `index(rgb, x, y)` for sampling normalized
+RGB at a chosen position. Pass `KIT.procedural.materials.blueNoise` when
+preparing a blue-noise policy.
+
+```sh
+node cli/ink-studio.js render examples/palette-constraints.js --ortho --palette-constraints off --out before.png
+node cli/ink-studio.js render examples/palette-constraints.js --ortho --out constrained.png
+```
+
+Use `--palette-constraints rules.json` to override the authored rules
+in `render` or `sim render`. `off` bypasses the target policies.

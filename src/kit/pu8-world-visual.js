@@ -15,7 +15,7 @@
     if(config.look?.pixel)S.pixel=true;
     const mid=min.map((n,i)=>(n+max[i])/2);
     const fields=config.fields??{}, terrain=fields.bed, water=fields.water, wear=fields.wear;
-    const earth={r:[7,8,9,10,11],rf(x,y,z,ny) {
+    const earth={r:[7,8,9,10,11],materialId:'terrain',rf(x,y,z,ny) {
       if (ny<.4) return [19,20,21,22];
       const result=wear&&query.probe(wear,[x,y,z]);
       return result?.status==='ok'&&result.value>.18?[19,20,21,22,23]:null;
@@ -40,7 +40,7 @@
       const ramp=entry.look??[1,2,3,4,5,6];
       const rotation=entry.rotation??M.id();
       const axis=[0,1,2].map(i=>[rotation[i],rotation[i+3],rotation[i+6]]);
-      S.box(entry.position,entry.half,{r:ramp},{ax:axis,res:resolution*.72,
+      S.box(entry.position,entry.half,{r:ramp,materialId:entry.material??'body'},{ax:axis,res:resolution*.72,
         rd:Math.min(.055,...entry.half)*.4,tag:entry.id});
     }
     for (const [id,entity] of Object.entries(view.world.entities)) {
@@ -49,24 +49,25 @@
       if (!point) continue;
       const {half,ramp,surface}=entity.visual;
       hasSurface ||= Boolean(surface);
-      S.box(point,half,{r:ramp??[19,20,21,22,23],surface}, {res:resolution*.72,tag:id});
+      S.box(point,half,{r:ramp??[19,20,21,22,23],surface,materialId:'entity'}, {res:resolution*.72,tag:id});
     }
     for (const field of fields.agents??[]) {
       const reading=query.probe(field);
       if (reading.status!=='ok') continue;
-      for (const agent of Object.values(reading.value)) {
+      for (const [id,agent] of Object.entries(reading.value)) {
         if (!agent.position || agent.mode==='dormant') continue;
         const r=agent.radius??.16, p=agent.position, face=agent.direction??[1,0,0];
-        S.ball(V.add(p,[0,r*.7,0]),[r*1.27,r*.78,r*.76],{r:agent.look??[4,5,6,24]},{res:resolution*.64});
-        S.ball(V.mad(V.add(p,[0,r,0]),face,r),r*.48,{r:[19,20,23]},{res:resolution*.64});
+        S.ball(V.add(p,[0,r*.7,0]),[r*1.27,r*.78,r*.76],{r:agent.look??[4,5,6,24],materialId:'agent'},{objectId:id,res:resolution*.64});
+        S.ball(V.mad(V.add(p,[0,r,0]),face,r),r*.48,{r:[19,20,23],materialId:'agent'},{objectId:id,res:resolution*.64});
         for(const limb of agent.limbs??[]){
           const top=V.add(limb.point,[0,r*.42,0]);
-          S.tube([limb.point,top],r*.18,r*.18,{r:[19,20,21,22]},{res:resolution*.6});
+          S.tube([limb.point,top],r*.18,r*.18,{r:[19,20,21,22],materialId:'agent'},{objectId:id,res:resolution*.6});
         }
       }
     }
     S.bake();
     if (water) {
+      const first=B.count();
       const wobble=(x,z)=>((Math.sin(x*9.1+z*13.7)*43758.58)%1+1)%1;
       for (let z=min[2]+resolution/2; z<max[2]; z+=resolution) for (let x=min[0]+resolution/2; x<max[0]; x+=resolution) {
         const read=query.probe(water,[x,0,z]);
@@ -76,6 +77,7 @@
         B.disc(x,surface+.013,z,[0,1,0],resolution*.66,resolution*.16,B.P[color],1);
         if (speed>.12 && glow<.063) B.disc(x,surface+.032,z,[0,1,0],resolution*.4,resolution*.14,B.P[18],1);
       }
+      B.describeSplats?.(first,B.count(),{material:'water'});
     }
     return B.finish({cam:config.camera??{target:[mid[0],.05,mid[2]],dist:span*1.48,yaw:.62,pitch:.8},
       radius:span,detail:30,dither:.22,look:config.look,paletteRoles:config.paletteRoles,
