@@ -90,7 +90,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
   function advanceVisual(run, tick) {
     const emitters = kit.KIT.atmosphere.emitters;
     const { world, tick: start } = run.view();
-    const program = emitters.settings(world.visual?.atmosphereEmitters, atmosphereEmittersOption?.());
+    const program = emitters.settings(W.visualEnvironment(world).atmosphereEmitters, atmosphereEmittersOption?.());
     const targets = program?.targets.filter(target => target.entity !== undefined);
     if (!targets?.length || tick < start) {
       run.advance(tick);

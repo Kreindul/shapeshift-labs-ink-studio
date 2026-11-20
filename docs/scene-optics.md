@@ -29,6 +29,8 @@ Use [Layered horizon art](layered-horizon.md) to paint a distant vista with dept
 
 Use [Transition review](transition-review.md) to compare native export frames through changes in weather, lighting, and camera.
 
+Use [Environment packs](environment-packs.md) to share versioned sky, weather, and atmosphere settings across scenes.
+
 ## Planar reflections
 
 ```js
