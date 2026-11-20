@@ -474,6 +474,7 @@ There are several simulation levels:
 | --- | --- |
 | `K.breaker`, `K.rubble`, `K.debris` | Breaking, unsupported pieces, falling rubble and loose fragments. |
 | [`K.destruction`](docs/destruction.md) | Named structural groups, current-pose physics handoffs, swept cannonball/catapult impacts, support cascades and exact reset. |
+| [`K.ecology`](docs/ecology.md) | Shared material channels, extensible processes and contacts, existing fire integration, splat/texture damage, local light and checkpoint replay. |
 | `K.jelly`, `K.sand` | Lightweight shape deformation or granular motion. |
 | `K.mpm` | A material-point solver for elastic jelly, yielding clay, granular sand and water. |
 | `K.sandbox` | A cellular material simulation with fluid flow, heat, phase changes and reactions. |
@@ -751,6 +752,7 @@ Common rendering controls:
 | `--ink off`, `--effects off` | Disable authored selective ink or art-pixel effects. |
 | `--snap`, `--dither-space screen\|world\|object`, `--resolve native\|coverage\|clusters` | Configure camera snapping, dither coordinates, and pixel resolve. Use `--stable off` to disable the scene's stability profile. |
 | `--splat-order center\|surface` | Choose global center ordering or local ordering using the sampled surface plane. |
+| `--stable-transparency on\|off` | Stabilize close translucent layers through camera motion. |
 | `--volume-scale`, `--volume-steps`, `--volume-jitter` | Override the atmosphere volume's sampling settings. |
 | `--seed` | Override the scene seed. |
 | `--colored` | Use palette-aware smoothing of silhouettes and body-colored contours. |
