@@ -1077,7 +1077,7 @@
     }
     if (spec.timeline !== undefined) {
       try {
-        presentation.timeline = dioramaTimeline(spec, parts, presentation.cameraRig);
+        presentation.timeline = dioramaTimeline(spec, parts, presentation.cameraRig, look);
       } catch (error) {
         bad('timeline', error.message);
       }
@@ -1169,11 +1169,13 @@
     dust: ['at', 'n', 'every', 'spread'], embers: ['at', 'n', 'every'],
     smoke: ['at', 'n', 'every'], sparks: ['at', 'n', 'every', 'dir', 'speed']
   };
-  function dioramaTimeline(spec, parts, cameraRig) {
+  function dioramaTimeline(spec, parts, cameraRig, look) {
     const poses = { translation: { size: 3 }, rotation: { size: 3, mode: 'radians' },
       orientation: { size: 9, mode: 'orientation' }, scale: { mode: 'positive' } };
     return K.timeline.compile(spec.timeline, { channel([root, name, field, ...rest]) {
       if (root === 'camera' && field === undefined) return K.cameraRig.channel(name, cameraRig?.shots);
+      if (root === 'renderGraph' || root === 'inspection')
+        return K.presentationTimeline.channel(look, [root, name, field, ...rest]);
       if (rest.length || spec.brushRegion != null) return null;
       if (root === 'poses' && parts.has(name) && Object.hasOwn(poses, field)) return poses[field];
       const effect = root === 'effects' && /^(0|[1-9][0-9]*)$/.test(name) ? spec.effects?.[name] : undefined;
@@ -1189,7 +1191,7 @@
     for (const { path: [root, name, field], value } of timeline.sample(time).edits) {
       if (root === 'camera') camera[name] = value;
       else if (root === 'poses') (poses[name] ??= {})[field] = value;
-      else {
+      else if (root === 'effects') {
         if (!changes.has(name)) changes.set(name, { ...effects[name] });
         changes.get(name)[field] = field === 'box' ? [value.slice(0, 3), value.slice(3)] :
           field === 'n' ? Math.floor(value) : value;

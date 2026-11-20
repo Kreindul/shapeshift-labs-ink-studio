@@ -1671,6 +1671,7 @@ const CMD = {
   sheet() {
     const artHistory = require('../src/art-effects.js').history({ frames: 24 });
     const afterimageHistory = lib().KIT.afterimages.history();
+    const renderHistory = lib().KIT.renderGraph.history();
     const volumeHistory = lib().KIT.atmosphere.history();
     const transparencyHistory = lib().KIT.stableTransparency.history();
     const w = buildPreview(), diagnostics = previewPasses(),
@@ -1679,7 +1680,7 @@ const CMD = {
       imgs = [];
     for (const t of ts) {
       pose(w, t);
-      const im = R.render(w, view({ t, artHistory, afterimageHistory, volumeHistory, transparencyHistory, w: num('w', 600), h: num('h', 420), ...diagnostics?.settings }));
+      const im = R.render(w, view({ t, artHistory, afterimageHistory, renderHistory, volumeHistory, transparencyHistory, w: num('w', 600), h: num('h', 420), ...diagnostics?.settings }));
       diagnostics?.capture(im, opt.px1 ? 1 : im.px);
       imgs.push(displayFrame(im, w));
     }
@@ -1852,6 +1853,7 @@ const CMD = {
   clip() {
     const artHistory = require('../src/art-effects.js').history({ frames: 24 });
     const afterimageHistory = lib().KIT.afterimages.history();
+    const renderHistory = lib().KIT.renderGraph.history();
     const volumeHistory = lib().KIT.atmosphere.history();
     const transparencyHistory = lib().KIT.stableTransparency.history();
     const w = buildPreview(), diagnostics = previewPasses(),
@@ -1867,7 +1869,7 @@ const CMD = {
     for (let k = 0; k < n; k++) {
       const t = from + k / fps;
       pose(w, t);
-      const im = R.render(w, view({ t, artHistory, afterimageHistory, volumeHistory, transparencyHistory, w: num('w', 600), h: num('h', 420),
+      const im = R.render(w, view({ t, artHistory, afterimageHistory, renderHistory, volumeHistory, transparencyHistory, w: num('w', 600), h: num('h', 420),
         ...camera?.(k/(n-1)), ...diagnostics?.settings }));
       diagnostics?.capture(im, opt.px1 ? 1 : im.px);
       ts.push(t);

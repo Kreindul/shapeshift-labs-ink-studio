@@ -123,6 +123,7 @@ const edgeCoverageThreshold = .03;
 const afterimageRows = Symbol('afterimage rows');
 const reconstructionSource = Symbol('reconstruction source');
 const captureCamera = Symbol('rendered camera');
+const sampledPresentation = Symbol('sampled presentation');
 const scopedGlowPass = Symbol('emissive glow pass');
 const probeCamera = Symbol('reflection probe camera');
 const probeCaptures = Symbol('reflection probe captures');
@@ -156,6 +157,11 @@ function render(world, o, preparedPalettes) {
       }) };
     }
   }
+  if (!o?.[sampledPresentation] && world.timeline && !o?.samples && !o?.captureCoverage) {
+    const time = o?.t ?? world.lookSnapshot?.time ?? 0;
+    const presentation = require('../index.js').load().KIT.presentationTimeline.sample(world, time, o);
+    o = { ...o, ...presentation, [sampledPresentation]: true };
+  }
   const inspection = o?.inspection ?? world.look?.inspection;
   if (inspection !== undefined && inspection !== false && !o?.samples && !o?.captureCoverage) {
     const start = o?.renderStats ? performance.now() : 0;
@@ -180,20 +186,23 @@ function render(world, o, preparedPalettes) {
   if (graph?.passes.length) {
     const start = o?.renderStats ? performance.now() : 0;
     const requested = ArtPasses.select(o?.passes);
-    const passes = graph.needsOwner ? [...new Set([...requested, 'splatId'])] : o?.passes;
+    const diagnostic = graph.needsOwner || graph.needsDepth;
+    const passes = diagnostic ? [...new Set([...requested, ...(graph.needsOwner ? ['splatId'] : []),
+      ...(graph.needsDepth ? ['depth'] : [])])] : o?.passes;
     let camera;
-    const base = render(world, { ...o, renderGraph: false, passes,
+    const base = render(world, { ...o, renderGraph: false, renderHistory: undefined, passes,
       ...(graph.needsCamera && cameraCapture(o, view => { camera ??= view; })) }, preparedPalettes);
     const time = o?.t ?? world.lookSnapshot?.time ?? 0;
     const kit = require('../index.js').load().KIT;
-    const frame = { ...base, ...runGraph(graph, base, world, time, kit.poly2.text, camera, kit.annotations.anchor) };
-    if (base.passes && graph.needsOwner) {
+    const frame = { ...base, ...runGraph(graph, base, world, time, kit.poly2.text, camera, kit.annotations.anchor, { ...o, renderHistoryKey: o?.renderHistoryKey ?? o?.[reconstructionSource] }) };
+    if (base.passes && diagnostic) {
       if (requested.length) frame.passes = ArtPasses.subset(base.passes, requested);
       else delete frame.passes;
     }
     if (frame.renderStats) frame.renderStats.frameMs = performance.now() - start;
     return frame;
   }
+  if (!o?.samples && !o?.captureCoverage) o?.renderHistory?.clear();
   const definition = o?.composite ?? world.look?.composite;
   if (definition !== undefined && definition !== false && !o?.samples && !o?.captureCoverage) {
     const start = o?.renderStats ? performance.now() : 0;
