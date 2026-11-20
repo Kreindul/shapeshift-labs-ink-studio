@@ -25,6 +25,8 @@ Use [Art direction](art-direction.md) to control cloud edges, atmospheric bands,
 
 Use [Silhouette protection](silhouette-protection.md) to tune fog and contrast on a selected subject and review it across the export directions.
 
+Use [Layered horizon art](layered-horizon.md) to paint a distant vista with depth-dependent parallax, bounded tiling, and camera fades.
+
 ## Planar reflections
 
 ```js

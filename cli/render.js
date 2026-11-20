@@ -37,6 +37,7 @@ const LiveSun = require('./live-sun.js');
 const surfaceShading = require('./surface-shading.js');
 const SceneOptics = require('../src/scene-optics.js');
 const SkyEnvironment = require('../src/sky-environment.js');
+const HorizonBands = require('../src/horizon-bands.js');
 const CelestialTracks = require('../src/celestial-tracks.js');
 const CloudField = require('../src/cloud-field.js');
 const Lightning = require('../src/lightning.js');
@@ -402,19 +403,24 @@ function render(world, o, preparedPalettes) {
     if (fogScales) fogScales[pixel] = rule?.fogScale ?? 1;
     if (silhouetteMask) silhouetteMask[(H-1-Math.floor(pixel/W))*W+pixel%W] = rule?.slot ?? 0;
   }
+  // The bands use the nominal eye and sky rays. The foreground still uses its original camera and depth.
+  const horizonArt = !transparent && !o.captureCoverage &&
+    HorizonBands.prepare(look.horizonBands, o.horizonBands)?.frame({ eye:cloudEye, yaw, pitch, distance:dist, parameters:environment?.parameters });
   const backdropClouds = clouds?.visible && !cloudView;
   const skyBase = backdropClouds && !sky ? hex(0) : bg;
   const skyOverlay = (flash || cloudView) && !sky && !backdropClouds;
-  const skySample = (sky || clouds?.visible || flash) && ((direction, out, origin, reflection, cloudSignal) => {
+  const opticalSky = sky || clouds?.visible || flash;
+  const skySample = (opticalSky || horizonArt) && ((direction, out, origin, reflection, cloudSignal) => {
     if (sky) SkyEnvironment.shade(sky, direction, out);
     else for (let c = 0; c < 3; c++) out[c] = skyBase[c];
+    if (horizonArt && !reflection) horizonArt(direction, out);
     if (origin) {
       flash?.sky(origin, direction, out);
       if (!cloudView || reflection) clouds?.paint(origin, direction, out, flash?.light, cloudSignal);
     }
     return out;
   });
-  const showSky = (sky || backdropClouds || flash) && !transparent && !o.captureCoverage;
+  const showSky = (sky || backdropClouds || flash || horizonArt) && !transparent && !o.captureCoverage;
   const skyRay = showSky || aerial && ortho && sky ?
     cameraRays(V, eye, W, H, ortho ? H * .5 / Math.tan((sky?.orthoFov ?? Math.PI / 3) * .5) : focal, false) : null;
   const skyRayAt = pixel => skyRay(pixel % W + .5, Math.floor(pixel / W) + .5);
@@ -500,7 +506,7 @@ function render(world, o, preparedPalettes) {
     eye,
     forward: [V[2], V[6], V[10]],
     reflection,
-    sky: skySample && ((direction, out, origin) => {
+    sky: opticalSky && ((direction, out, origin) => {
       if (!skyOverlay) return skySample(direction,out,origin,true);
       flash?.sky(origin,direction,out);
       cloudView && clouds.paint(origin,direction,out,flash?.light);

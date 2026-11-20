@@ -388,6 +388,11 @@
       bad('finish.look.silhouetteProtection', error.message);
     }
     try {
+      HorizonBands.compile(look?.horizonBands);
+    } catch (error) {
+      bad('finish.look.horizonBands', error.message);
+    }
+    try {
       ArtDirection.prepare(look?.artDirection);
     } catch (error) {
       bad('finish.look.artDirection', error.message);

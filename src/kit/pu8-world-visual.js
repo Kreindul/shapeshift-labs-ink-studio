@@ -45,6 +45,7 @@
     }
     function validate() {
       W.data.check(look?.coverageAware === undefined || typeof look.coverageAware === 'boolean', 'coverageAware must be a boolean');
+      HorizonBands.compile(look?.horizonBands);
       RenderStages.prepare(look?.renderStages, paletteOptions);
       RenderStages.optics(look?.optics, paletteOptions);
       if (look?.paletteConstraints || Object.hasOwn(config.look ?? {}, 'asset') || Object.hasOwn(config.look ?? {}, 'targets')) {

@@ -228,7 +228,7 @@ function pose(w, t) {
 const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
 if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
   die('--px needs a positive integer');
-let silhouetteOverride, artDirectionOverride, stableOverride, lutOverride, stackOverride, effectPalettesOverride, constraintsOverride, skyOverride, skyProfiles, celestialOverride, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, splatFieldsOverride, atmosphereEmittersOverride, inputSpriteAtlas;
+let horizonOverride, silhouetteOverride, artDirectionOverride, stableOverride, lutOverride, stackOverride, effectPalettesOverride, constraintsOverride, skyOverride, skyProfiles, celestialOverride, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, splatFieldsOverride, atmosphereEmittersOverride, inputSpriteAtlas;
 function skyProfileOverrides(value) {
   if (typeof value !== 'string') die('--sky-profile expects track=profile pairs');
   const pairs = value.split(',').map(entry => entry.split('=').map(part => part.trim()));
@@ -415,6 +415,14 @@ function onOffOption(flag) {
   die('--' + flag + ' expects on or off');
 }
 
+function horizonOption() {
+  const value = opt['horizon-bands'];
+  if (value === undefined) return;
+  if (value === 'off') return false;
+  if (value === true || value === 'on') return true;
+  return horizonOverride ??= require('./horizon-bands.js').readHorizonBands(value);
+}
+
 function silhouetteOption() {
   const value = opt['silhouette-protection'];
   if (value === undefined) return;
@@ -478,6 +486,7 @@ const view = extra =>
       stable: stabilityOption(),
       artDirection: artDirectionOption(),
       silhouetteProtection: silhouetteOption(),
+      horizonBands: horizonOption(),
       effectPalettes: effectPalettesOption(),
       artEffects: opt.effects === 'off' ? false : opt.effects,
       ink: opt.ink === 'off' ? false : opt.ink,
@@ -573,7 +582,7 @@ function die(m) {
   console.error(m);
   process.exit(1);
 }
-const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,atmosphereEmittersOption,effectPalettesOption,stabilityOption,artDirectionOption,silhouetteOption});
+const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,atmosphereEmittersOption,effectPalettesOption,stabilityOption,artDirectionOption,silhouetteOption,horizonOption});
 const worldCommands = new Set(['inspect','probe','trace','field','scene','sim']);
 const CMD = {
   help() {
@@ -682,6 +691,7 @@ const CMD = {
         'shaped fog options: --shaped-atmosphere on|off|file.json --volume-cutouts on|off|file.json',
         'fog lighting options: --volume-local-lights on|off --volume-local-shadows on|off',
         'silhouette protection: --silhouette-protection on|off|file.json',
+        'layered horizon: --horizon-bands on|off|file.json',
         'art direction: --art-direction on|off|painted-pixel|storm-silhouette|soft-dawn|file.json',
         'effect palette options: --effect-palettes on|off|file.json',
         'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable on|off|file.json --snap on|off --dither-space screen|world|object --dither-spacing n --dither-origin x,y,z --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
