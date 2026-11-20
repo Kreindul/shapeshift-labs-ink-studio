@@ -211,6 +211,23 @@ node -e 'const fs = require("node:fs"); fs.mkdirSync("dist", { recursive: true }
 python3 -m http.server 8080
 ```
 
+## Environment rendering
+
+Include the Ink Studio `KIT` in the renderer toolkit. Authored `skyEnvironment`, horizon bands, cloud cards and analytic `atmosphere` volumes are picked up from the same world used by the CLI. Both renderers evaluate profile tracks, interrupted transitions, and conditional weather cues with the shared clock. Pass `skyTime`, `skyProfiles`, or `skyTransitions` on a WebGL frame to override the authored playback.
+
+Cloud cards use the same baked optical-depth projection as the CLI and clip against scene splats. Set `cloudRepresentation: 'card'` in the world or frame to use a card throughout a shot. Automatic selection draws the card where the asset's card weight reaches one. Impostors, near-volume blends, cloud cutouts and lightning remain on the software path.
+
+WebGL integrates overlapping constant-density height, box, sphere, and shaft volumes before the palette resolve. Uniform weather profile density bindings apply. The WebGL pass supports up to 16 enabled analytic volumes per frame. Density fields, regional fog fronts, volume lighting, cutouts, and coupled water–air integration use the software renderer. Use `atmosphere: false` to bypass analytic fog, `cloudField: false` to hide clouds, or `environment: false` to bypass the WebGL environment passes.
+
+Run the fixed-camera comparison with a local Chrome or Chromium executable.
+
+```sh
+ink-studio environment-parity --out studio/out/environment-parity
+```
+
+The command writes matched raw CLI and WebGL frames at the same art resolution, camera and time, plus amplified pixel differences and JSON error measurements. Sky-only cases isolate the directional background. Card and fog cases use matching soft splat edges to compare the media and depth compositing.
+
+
 ## Feature coverage
 
 | Feature | WebGL canvas renderer | Node and CLI renderer |
@@ -220,7 +237,9 @@ python3 -m http.server 8080
 | Oriented live portal views with fragment clipping and foreground occlusion | Supported | Travel and camera mapping |
 | Contours, cleanup, and camera-dependent glass beams | Supported | Supported |
 | Selective ink, diagnostic buffers, stable art resolves, and frame-history effects | Host integration | Supported |
-| View-dependent surface finishes, projected layers, reflection captures, and atmosphere volumes | Host integration | Supported |
+| Directional environment sky, parallax horizon bands, and baked cloud cards | Supported | Supported |
+| Constant-density height, box, sphere, and shaft fog | Supported | Supported |
+| View-dependent surface finishes, projected layers, reflection captures, and marched density fields | Host integration | Supported |
 | Water-column extinction, surface highlights, foam, caustics, and refraction | Supported | Water data and queries |
 | Text rendering, PNG/APNG, scene reviews, and sprite atlases | Host integration | Supported |
 
