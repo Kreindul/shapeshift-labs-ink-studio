@@ -55,6 +55,8 @@
     check([start,jointSpecs,forceSpecs].every(group=>record(group)&&Object.keys(group).length<=512&&Object.keys(group).every(id)),
       'Mechanics needs bounded body, joint and force tables');
     const initialBodies={}, initials={}, inputs={}, outputs={}, claimed=new Map(), driveOrder=[], mountOrder=[];
+    const surface=W.surfaceState, surfaceChannels=K.procedural.surfaceState.channels(config.surfaceChannels);
+    const initialCharts={};
     if (config.contactEvents) outputs.contacts='event';
     const index = W.spatial.create(), indexed = new Map(), poseCache = new WeakMap();
     let indexedBodies = null, unbounded = 0, enoughBodies = false;
@@ -97,6 +99,7 @@
         material:item.material??'stone',look:item.look??[1,2,3,4,5,6],origin:key,
         ...(item.materialAsset!==undefined&&{materialAsset:item.materialAsset}),
         ...(item.materialWetness!==undefined&&{materialWetness:item.materialWetness})};
+      if(item.surfaceState!==undefined)initialBodies[key]=surface.init(initialBodies[key],item.surfaceState,initialCharts,surfaceChannels);
     }
     for (const [key,spec] of Object.entries(jointSpecs)) {
       check(record(spec)&&['fixed','hinge','slider','shaft'].includes(spec.kind)&&own(start,spec.child)&&
@@ -440,7 +443,7 @@
             wheel:key,...(cue&&{cue})});
         }
       }
-      return {bodies,joints,contacts};
+      return {...state,bodies,joints,contacts};
     }
     function detach(state,key,ctx) {
       check(own(state.joints,key)&&state.joints[key].active,'Unknown or detached joint ' + key);
@@ -460,6 +463,7 @@
         body.half[axis]/parts>=.005&&Array.isArray(omit)&&omit.every(i=>Number.isSafeInteger(i)&&i>=0&&i<parts)&&
         vector(impulse)&&Object.keys(state.bodies).length+parts<=1024,'Invalid fracture command');
       const bodies={...state.bodies}, joints={...state.joints}, fragments=[];
+      const surfaceCharts=body.surfaceState?{...state.surfaceCharts}:state.surfaceCharts;
       delete bodies[key];
       for(const [id,spec] of Object.entries(jointSpecs))if(spec.parent===key||spec.child===key)
         joints[id]={...joints[id],active:false,speed:0};
@@ -471,14 +475,34 @@
         check(!own(bodies,name),'Fragment already exists: '+name);
         local[axis]=(2*i+1-parts)*half[axis];
         const offset=M.app(body.rotation,local);
-        bodies[name]={...body,id:name,entity:name,fixed:false,half,position:V.add(body.position,offset),
+        const child={...body,id:name,entity:name,fixed:false,half,position:V.add(body.position,offset),
           ...(profile&&{materialAsset:profile.id,materialWetness:profile.wetness}),
           velocity:V.add(V.add(body.velocity,V.cross(body.angular,offset)),impulse),mass:body.mass/parts};
+        bodies[name]=surface.fragment(body,child,axis,i,parts,surfaceCharts);
         fragments.push(name);
       }
+      if(body.surfaceState)surface.prune(surfaceCharts,bodies);
       ctx.emit('fracture',{body:key,at:body.position,material,fragments,...(cue&&{cue}),
         ...(energy!==undefined&&{energy,...(response&&{threshold:response.energy})})});
-      return {...state,bodies,joints};
+      return {...state,bodies,joints,...(surfaceCharts&&{surfaceCharts})};
+    }
+    function reshape(state,{body:key,half},ctx) {
+      check(own(state.bodies,key),'Unknown body '+key);
+      const body=state.bodies[key];
+      ctx.emit('body-reshaped',{body:key,before:body.half,half});
+      return {...state,bodies:{...state.bodies,[key]:{...body,half}}};
+    }
+    function readSurface({state,target,args}) {
+      const key=args.body??target.entity;
+      const body=state&&(args.body===undefined?Object.values(state.bodies).find(row=>row.entity===key):
+        own(state.bodies,key)?state.bodies[key]:null);
+      if(!body?.surfaceState)return Q.missing('body has no surface atlas','missing');
+      check(args.face===undefined||surface.isFace(args.face),'Unknown body surface face');
+      let {face,uv}=args;
+      if(uv===undefined&&target.point)({face,uv}=surface.frame(body)(target.point,undefined,face));
+      if(face===undefined||uv===undefined)return Q.missing('surface sample needs a face and UV or a world point');
+      check(K.procedural.surfaceState.isUv(uv),'Surface sample needs unit UV coordinates');
+      return Q.ok({body:body.id,...surface.sample(body,state.surfaceCharts,surfaceChannels,face,uv)});
     }
     function support(context) {
       const {state,target,args}=context;
@@ -531,7 +555,7 @@
       const bodies={...initialBodies}, joints={...initials};
       follow(bodies,ctx.world);
       placeMounted(bodies,joints,0);
-      return {bodies,joints,contacts:[]};
+      return {bodies,joints,contacts:[],...(Object.keys(initialCharts).length&&{surfaceCharts:initialCharts})};
     },step,validateState(state){
       check(record(state?.bodies)&&record(state.joints)&&Object.keys(state.bodies).length<=1024&&
         Object.keys(state.joints).sort().join(',')===Object.keys(jointSpecs).sort().join(',')&&
@@ -540,9 +564,13 @@
           Number.isFinite(body.mass)&&body.mass>0)&&Object.values(state.joints).every(joint=>typeof joint.active==='boolean'&&
           Number.isFinite(joint.value)&&Number.isFinite(joint.speed)),'Invalid mechanical checkpoint');
       for(const body of Object.values(state.bodies))W.materials.validateEntity(catalog,body);
+      surface.validate(state,surfaceChannels);
     },checkAction(type,args){
       if(type==='detach')check(own(jointSpecs,args.joint),'Unknown joint '+args.joint);
       if(type==='impulse')check(id(args.body)&&vector(args.linear??zero)&&vector(args.angular??zero),'Invalid body impulse');
+      if(type==='surface-stamp')surface.checkStamp(args,surfaceChannels);
+      if(type==='reshape')check(id(args.body)&&vector(args.half)&&args.half.every(n=>n>=.005&&n<=1e4)&&
+        Object.keys(args).every(key=>['body','half'].includes(key)),'A reshape needs a body and bounded half sizes');
       if(type==='fracture'){
         const parts=args.parts??(catalog?.materials.length?32:3), omit=args.omit??[];
         check(id(args.body)&&[0,1,2].includes(args.axis??0)&&Number.isSafeInteger(parts)&&parts>=2&&parts<=32&&
@@ -576,6 +604,9 @@
       bodies:{type:'record',read:({state})=>Q.ok(state.bodies)},
       joints:{type:'record',read:({state})=>Q.ok(state.joints)},
       contacts:{type:'records',read:({state})=>Q.ok(state.contacts??[])},
+      surface:{type:'record',read:readSurface},
+      'surface-charts':{type:'record',read:({state})=>state?.surfaceCharts?
+        Q.ok({charts:state.surfaceCharts,channels:surfaceChannels}):Q.missing('surface atlas is unavailable')},
       clearance:{type:'number',units:'world',read:context=>obstruction(context,context.args.exclude)},
       support:{type:'records',units:'world',read:support}
     },
@@ -594,7 +625,8 @@
       }
       return Q.ok({status:'ok',points});
     }}},
-    actions:{detach(state,{joint},ctx){return detach(state,joint,ctx);},fracture,
+    actions:{detach(state,{joint},ctx){return detach(state,joint,ctx);},fracture,reshape,
+      'surface-stamp':(state,args,ctx)=>surface.apply(state,args,surfaceChannels,ctx),
       impulse(state,{body,linear=zero,angular=zero},ctx){
         const target=state.bodies[body];
         check(own(state.bodies,body)&&!target.fixed&&vector(linear)&&vector(angular),'Invalid body impulse');

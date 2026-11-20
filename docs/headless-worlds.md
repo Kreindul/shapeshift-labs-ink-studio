@@ -528,6 +528,48 @@ ink-studio trace quarry.run.json quarry/segment --at -3.1,1,0 --args '{"to":[3.1
 ink-studio sim render quarry.run.json --colored --out quarry.png
 ```
 
+## Surface state that follows geometry
+
+Add `surfaceState` to a mechanics body to attach state to its original
+faces. Face keys are `-x`, `+x`, `-y`, `+y`, `-z`, and `+z`. Each
+entry in `surfaceState.faces` is an ordered array of stamps in unit UV.
+The default channels are `paint` in RGB, `heat` in degrees Celsius, and
+`grime`, `scar`, and `wear` on a scale from zero to one. Mechanics
+`surfaceChannels` can add named color or scalar channels with bounds,
+defaults, and units.
+
+Use `rig/surface-stamp` with `body`, `face`, and `stamp` at a scheduled
+tick. A stamp selects a `channel`, a `brush`, and a `value` for `set`
+or scalar `add`. `clear` restores the channel's default. `strength`
+scales the coverage. Use a `rect` brush with `min` and `max`, a `bitmap`
+with those bounds and rows of dots and hashes, or a `stroke` with
+UV `points`, `width`, and optional `softness` measured in the rest chart.
+On a fragment, a stamp uses that face's local UV and affects only the
+chosen piece.
+
+`rig/reshape` changes the body's XYZ `half` sizes while keeping its
+chart coordinates. When `rig/fracture` splits a body, its pieces keep
+the correct regions of the original faces. New faces start at the
+channel defaults and can use `surfaceState.fresh.material` and a
+`surfaceState.fresh.ramp` of palette indices. The renderer retains the
+original surface ID on the exterior splats, including after a rebake.
+
+Probe `rig/surface` by body ID and face UV, or pass a world-space point
+and body ID to resolve the local face and original UV. `rig/surface-charts`
+returns the atlas data. Checkpoints save the chart windows and stamps.
+For a custom mesh, use [surface chart correspondences](procedural.md#surface-state-through-remeshing).
+
+The [split sign](../examples/world-surface-state.json) keeps the same
+lettering through a reshape and fracture. Each broken edge exposes a
+separate, unmarked wood surface.
+
+```sh
+ink-studio sim run examples/world-surface-state.json --ticks 11 --record sign.run.json
+ink-studio probe sign.run.json --field rig/surface --args '{"body":"sign.0","face":"+z","uv":[0.44,0.5]}'
+ink-studio probe sign.run.json --field rig/surface --args '{"body":"sign.0","face":"+x","uv":[0.5,0.5]}'
+ink-studio sim render sign.run.json --colored --out sign.png
+```
+
 ## Author a world
 
 A manifest has `format: "ink-studio/world"`, `version: 1`, a stable `id`,

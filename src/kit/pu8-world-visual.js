@@ -144,6 +144,11 @@
       const reading=query.probe(fields.bodies);
       if (reading.status==='ok') bodies=Object.values(reading.value);
     }
+    let surfaceAtlas;
+    if(bodies.some(body=>body.surfaceState)){
+      const field=query.field(fields.bodies)?.name;
+      if(field)surfaceAtlas=query.probe(field.slice(0,field.lastIndexOf('/'))+'/surface-charts').value;
+    }
     for (const entry of bodies) {
       if (!entry.half || !entry.position) continue;
       const ramp=entry.look??[1,2,3,4,5,6];
@@ -151,11 +156,14 @@
       const axis=[0,1,2].map(i=>[rotation[i],rotation[i+3],rotation[i+6]]);
       const entityId=entry.entity??entry.id, visual=entities[entityId]?.visual;
       const physical=W.materials.forBody(catalog,view.world,entry);
-      const finish=looks.material(finishFor({r:ramp,materialId:visual?.materialId??visual?.material??entry.material??'body'},physical),
+      let finish=looks.material(finishFor({r:ramp,materialId:visual?.materialId??visual?.material??entry.material??'body'},physical),
         looks.forEntity(entityId));
+      const sample=W.surfaceState.materialSampler(entry,surfaceAtlas,finish,B.P);
+      const target=targetFor(entityId);
+      if(sample)finish={...finish,materialAt:sample};
       hasSurface ||= Boolean(finish.surface);
       S.box(entry.position,entry.half,finish,{ax:axis,res:resolution*.72,
-        rd:Math.min(.055,...entry.half)*.4,tag:entry.id,target:targetFor(entry.entity??entry.id)});
+        rd:Math.min(.055,...entry.half)*.4,tag:entry.id,target:sample?{...target,surface:undefined}:target});
     }
     for (const [id,entity] of Object.entries(view.world.entities)) {
       if (!entity.visual?.half) continue;

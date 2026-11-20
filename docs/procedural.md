@@ -1602,6 +1602,22 @@ const trip = frame.traceRoute(coast.itinerary(frame));
   changes and reuse the packed world across render frames. Water optics
   use the [WebGL renderer](browser-renderer.md#water-optics).
 
+### Surface state through remeshing
+
+Store paint and scalar surface values in rest chart coordinates with
+`P.surfaceState.prepare(stamps, {size, definitions})`. Supply the rest
+chart width and height in `size`, then call `sample([u, v])`. The
+[headless surface state guide](headless-worlds.md#surface-state-that-follows-geometry)
+documents the stamp schema and the default channels. Use
+`P.surfaceState.channels(extra)` for additional scalar and color channels.
+
+Keep a `{chart, uv}` reference on each source corner as its position
+deforms. When a remesher supplies a source triangle and barycentric
+weights for a new sample, interpolate its reference with
+`P.surfaceState.correspondence(corners, weights)`. It returns a chart
+address when all three corners share a chart. Keep chart seams split and
+give new interior faces their own charts with the default state.
+
 ### Sparse bricks
 
 `P.sparseBricks.create({cell, brickSize, base})` makes an empty snapshot around
