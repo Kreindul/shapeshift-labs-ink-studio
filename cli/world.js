@@ -83,7 +83,16 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
       ? {...input.world,...(opt.seed===undefined?{}:{seed:Number(opt.seed)}),...(opt.dt===undefined?{}:{dt:Number(opt.dt)})}
       : input.world;
     if (input.checkpoint) ensure(opt.seed===undefined && opt.dt===undefined,'A resumed run uses its checkpoint seed and timestep');
-    return R.create(source,{checkpoint:input.checkpoint,profile,workerPool,regionRevisions});
+    return R.create(source,{checkpoint:input.checkpoint,profile,workerPool,regionRevisions,traceSteps:traceRetention()});
+  }
+  function traceRetention(){
+    const value=opt['trace-steps'];
+    if(value===undefined)return undefined;
+    if(value===true)return 256;
+    const count=Number(value);
+    ensure(/^\d+$/.test(value)&&Number.isInteger(count)&&count>=1&&count<=4096,
+      '--trace-steps needs a retention count from 1 to 4096');
+    return count;
   }
   function to(run) {
     const {tick,world} = run.view(), modes = [opt.ticks,opt.steps,opt.t].filter(v => v !== undefined);
@@ -323,6 +332,40 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
     ensure(['applied','duplicate'].includes(applied.status),'Region update '+applied.status);
     return respond(mirror.snapshot());
   }
+  function firstDivergence(file,other){
+    ensure(opt.first===true,'Use --first without a value');
+    ensure(opt.field===undefined&&opt.spec===undefined&&opt.t===undefined&&opt.steps===undefined,
+      'Use --from and --ticks for a first-divergence comparison');
+    const source=file=>{
+      const input=load(file);
+      ensure(input.world,'First-divergence comparison needs a world, checkpoint or recording');
+      return input.log??input.checkpoint??input.world;
+    };
+    const count=(value,name)=>{
+      if(value===undefined)return undefined;
+      ensure(typeof value==='string'&&/^\d+$/.test(value),'--'+name+' needs a nonnegative integer');
+      return Number(value);
+    };
+    const pools=[];
+    function side(key){
+      const workers=count(opt[key],key);
+      if(workers===undefined)return workerPool;
+      if(workers===0)return undefined;
+      const pool=require('../index.js').createSimulationWorkers(workers);
+      pools.push(pool);
+      return pool;
+    }
+    try {
+      return respond(R.firstDivergence(source(file),other===undefined?undefined:source(other),{
+        from:count(opt.from,'from'),to:count(opt.ticks,'ticks'),limit:count(opt.limit,'limit'),
+        leftOptions:{workerPool:side('left-workers')},rightOptions:{workerPool:side('right-workers')},
+        leftReplay:opt['left-workers']!==undefined||opt.workers!==undefined,
+        rightReplay:opt['right-workers']!==undefined||opt.workers!==undefined
+      }));
+    } finally {
+      for(const pool of pools)pool.close();
+    }
+  }
   function runSimulation([mode,file,other]) {
     switch (mode) {
       case 'run':
@@ -347,10 +390,11 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
       case 'replay': {
         const input=load(file);
         ensure(input.log,'Expected a run recording');
-        finish(R.replay(input.log,{profile:!!(opt.profile||opt.assert),workerPool}),input.store);
+        finish(R.replay(input.log,{profile:!!(opt.profile||opt.assert),workerPool,traceSteps:traceRetention()}),input.store);
         break;
       }
       case 'diff': {
+        if(opt.first!==undefined)return firstDivergence(file,other);
         const a=getCheckpoint(file), b=getCheckpoint(other);
         if(!opt.field){respond(R.diff(a,b));break;}
         ensure(a.tick===b.tick,'Simulation diff needs matched ticks');

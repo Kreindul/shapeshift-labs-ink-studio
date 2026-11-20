@@ -280,7 +280,7 @@
     return {world,plan,weather};
   }
   const validate=(source,options)=>prepare(source,options).world;
-  function create(source, {checkpoint,implementations,profile = false,validated = false,workerPool,regionRevisions} = {}, token) {
+  function create(source, {checkpoint,implementations,profile = false,validated = false,workerPool,regionRevisions,traceSteps} = {}, token) {
     check(workerPool===undefined||typeof workerPool?.solve==='function','Invalid simulation worker pool');
     const modules=workerPool?.implementations;
     const installed=modules?{...modules,...implementations}:implementations;
@@ -294,6 +294,7 @@
     const {plan, weather = weatherProgram(world)}=result;
     const {systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,aggregates,causePolicy} = plan;
     const regions=regionRevisions===undefined?null:W.regionRevisions.capture(world,regionRevisions,systems);
+    const debug=traceSteps===undefined?null:W.stepDebug.capture(traceSteps);
     const partitioned=workerPool&&new Set(names.filter(name=>{
       const {kind}=world.systems[name];
       return systems[name].partitionStep===true&&(own(installed,kind)?
@@ -502,6 +503,7 @@
     }
     const origin = save();
     regions?.publish(view());
+    debug?.publish(origin);
     function query() {
       return currentQuery ?? (currentQuery = Q.create(view(),systems,projection));
     }
@@ -533,6 +535,8 @@
     function step() {
       const at = tick+1, commands = scheduled.get(at) ?? [], events = [];
       check(tickOK(at),'Tick budget exceeded');
+      debug?.start();
+      const observedSteps=debug?[]:null;
       let nextWorld = world, changedEntities = new Set();
       const drafts = {...states}, nextManual = {...manual}, requests = [];
       let nextChunkState=chunkState;
@@ -563,6 +567,7 @@
       };
       for (const item of commands) {
         const [name,key] = endpoint(item.action);
+        if(debug)debug.enter({system:W.stepDebug.actionSystem(item),inputs:item.args});
         const root = causal?.command(name,item), emit = makeEmit(name,undefined,root);
         if (name === 'world') {
           if (key === 'input') {
@@ -605,6 +610,7 @@
           drafts[name] = rootedState(systems[name].actions[key](drafts[name],item.args,ctx));
         }
       }
+      debug?.leave();
       projection?.change(world.entities,nextWorld.entities,changedEntities);
       let focusQuery;
       const chunkStep=chunks?.select(nextChunkState,at=>(focusQuery??=Q.create(view(nextWorld,drafts),systems,projection)).target(at),at,{
@@ -694,6 +700,10 @@
           queryTick:tick,queryTime:(tick+(timing?.start??0))*nextWorld.dt});
         if (scope) for (const key of Object.keys(input)) scope.api.input(key);
         const ctx = context(name,nextWorld,snapshot,at,input,makeEmit(name,scope),phaseQuery,spatial(name,true),timing,scope?.api);
+        const observed=debug&&{system:name,fraction:timing?.end??1,substep:timing?.substep??1,
+          substeps:timing?.substeps??1,dt:ctx.dt,inputs:input};
+        const eventStart=debug?events.length:0, writeStart=debug?nextWrites.length:0;
+        if(debug)debug.enter(observed);
         const start = profile ? clock() : 0;
         const worker=workerResults?.get(name);
         if(worker?.error)throw Error(worker.error.message,{cause:worker.error});
@@ -706,6 +716,13 @@
           }
         }else if(system.step)next=rootedState(system.step(state,ctx));
         readOutputs(name,next,ctx,target);
+        if(debug){
+          const outputs=Object.fromEntries(Object.keys(system.outputs??{}).map(key=>[key,target[name+'/'+key]]));
+          observedSteps.push({...observed,state:next,outputs,
+            ...(eventStart<events.length&&{events:events.slice(eventStart)}),
+            ...(writeStart<nextWrites.length&&{invalidations:nextWrites.slice(writeStart)})});
+          debug.leave();
+        }
         if (causal) {
           for (const key of Object.keys(system.outputs??{})) {
             const port=name+'/'+key;
@@ -789,6 +806,7 @@
       }
       const committedView=view();
       regions?.publish(committedView,commands);
+      if(debug)debug.publish(save(),commands,observedSteps);
       return committedView;
     }
     function advance(to, {onTick,stopOnOutcome = false} = {}) {
@@ -800,9 +818,11 @@
       return view();
     }
     function recording() {
-      return freeze({format:runFormat,version:1,origin,commands:added.slice(),end:save()});
+      const trace=debug?.recording();
+      return freeze({format:runFormat,version:1,origin,commands:added.slice(),end:save(),...(trace&&{trace})});
     }
     return Object.freeze({view,query,step,advance,...(regions&&{regions:regions.api}),
+      ...(debug&&{stepFrame:debug.latest,stepAttempt:debug.attempt}),
       get scenario(){return scenario;}, get history(){return history;}, get events(){return lastEvents;},
       schedule:commands => enqueue(commands,true),checkpoint:save,recording,
       commandCounts:() => {
@@ -819,7 +839,7 @@
       fork:() => branch(save()),
       reset:() => branch(origin)});
     function branch(checkpoint){
-      return create(checkpoint.world,{checkpoint,implementations,profile,validated:true,workerPool},
+      return create(checkpoint.world,{checkpoint,implementations,profile,validated:true,workerPool,traceSteps},
         checkpoint.world===plan.world?branchToken:undefined);
     }
   }
@@ -836,5 +856,6 @@
       'Simulation diff needs two checkpoints at the same tick');
     return {tick:a.tick,time:{before:a.tick*a.world.dt,after:b.tick*b.world.dt},edits:Q.keyedChanges(a,b)};
   }
-  W.runtime = Object.freeze({register,validate,create,replay,diff,checkpointFormat,runFormat,partitionKernel});
+  W.runtime = Object.freeze({register,validate,create,replay,diff,firstDivergence:W.stepDebug.firstDivergence,
+    checkpointFormat,runFormat,partitionKernel});
 })(KIT);

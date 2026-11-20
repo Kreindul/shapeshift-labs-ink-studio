@@ -657,6 +657,8 @@ const CMD = {
         '    scene apply <scene> <edits.json> --dry-run   preview edited paths and look targets',
         '  sim run|resume|fork|reset|replay|diff|sweep|render ...  run or compare fixed-tick simulations',
         '    sim run <world> --workers N [--profile]   advance eligible systems in deterministic Node worker partitions',
+        '    sim run <world> --record file.json [--trace-steps [N]]   retain actual solver inputs and state for debugging',
+        '    sim diff <run|world> [<run|world>] --first [--from N] [--ticks N]   locate the first divergence',
         '    sim run <world> --checkpoint file.json --checkpoint-store DIR   reuse snapshot blocks across checkpoints and runs',
         '    sim regions <world|run> --stream ID [--regions IDs | --near X,Y,Z --radius N] [--since snapshot.json]',
         '    sim regions-apply <snapshot.json> <update.json>   reconstruct a scoped snapshot',

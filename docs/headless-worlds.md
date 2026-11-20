@@ -25,6 +25,9 @@ reuse immutable state in process and content-addressed blocks on disk.
 [Region revisions](region-revisions.md) project selected chunks into
 local snapshots and bounded changes against an applied cursor.
 
+[First-divergence debugging](first-divergence.md) compares timelines
+tick by tick and reports actual inputs and changed state paths.
+
 ## Run and compare a watershed
 
 Save the starting checkpoint after the reservoir has settled.
