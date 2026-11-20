@@ -1,5 +1,7 @@
 # Scene optics
 
+Use [SDF-assisted rendering](sdf-assist.md) to trace opaque static sculpt surfaces while keeping their baked splat color.
+
 Ink Studio can capture the objects around a planar mirror, move their reflected colours with a ripple field, and composite fog, mist or beams against scene depth. Each tool works independently. The [beacon pool](../examples/beacon-pool.js) uses all three with sculpted geometry.
 
 ```sh
