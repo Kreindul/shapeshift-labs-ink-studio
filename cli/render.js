@@ -71,6 +71,7 @@ const AtlasSprites = require('../src/atlas-sprites.js');
 const AtlasRaster = require('./atlas-sprites.js');
 const SurfaceRaster = require('./sprite-surfaces.js');
 let SplatFields, AtmosphereEmitters;
+const ReflectionProbes = require('../src/reflection-probes.js');
 const { cameraRays, surfacePoint, reflectionSampler, atmosphereQuality, mediaSampler, applyAtmosphere } = require('./scene-optics.js');
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x),
   sstep = (a, b, x) => {
@@ -121,6 +122,8 @@ const edgeCoverageThreshold = .03;
 const afterimageRows = Symbol('afterimage rows');
 const reconstructionSource = Symbol('reconstruction source');
 const captureCamera = Symbol('rendered camera');
+const probeCamera = Symbol('reflection probe camera');
+const probeCaptures = Symbol('reflection probe captures');
 
 function cameraCapture(options, receive) {
   return { [captureCamera](camera) {
@@ -136,6 +139,9 @@ function render(world, o, preparedPalettes) {
     world = require('../index.js').load().KIT.reconstruction.frame(world, time, reconstruction);
     o = { ...o, [reconstructionSource]: source };
   }
+  if (world.reflectionProbes?.length && o?.surface !== false && o?.reflections !== false &&
+      o?.reflectionProbes !== false && !o?.[probeCaptures])
+    o = { ...o, [probeCaptures]: new Map() };
   if (o?.afterimageHistory && !o[afterimageRows] && !o.samples && !o.captureCoverage) {
     const definition = o.afterimages ?? world.look?.afterimages;
     if (o.resetAfterimages || definition === false || definition === undefined) o.afterimageHistory.clear();
@@ -205,7 +211,7 @@ function render(world, o, preparedPalettes) {
   if (!o?.renderStats) return renderFrame(world, o, preparedPalettes);
   const start = performance.now();
   const counters = {
-    rasterPasses:0, fragments:0, translucentFragments:0, peakDeferredFragments:0, deferredFlushes:0,
+    rasterPasses:0, reflectionProbeFaces:0, fragments:0, translucentFragments:0, peakDeferredFragments:0, deferredFlushes:0,
     volume:{ traces:0, boundsTests:0, boundsCacheHits:0, mediaQueries:0, mediaCacheHits:0, fullFogCacheHits:0, emptyFogIntervals:0, raySamples:0,
       analyticSegments:0, marchSteps:0, densitySamples:0, skipTests:0, skippedSteps:0, cloudTraces:0, cloudSamples:0 }
   };
@@ -256,7 +262,8 @@ function renderFrame(world, o, preparedPalettes) {
   const orderMode = o.splatOrder ?? look.splatOrder ?? 'center';
   const sdfSettings = SdfAssist.prepare(o.sdfAssist ?? look.sdfAssist);
   const areaLights = AreaLights.prepare(o.areaLights === true ? world.areaLights : o.areaLights ?? world.areaLights);
-  const useSdf = sdfSettings && world.renderSdfs?.length && !o.reflectionPlane?.select;
+  const probeView = o[probeCamera];
+  const useSdf = sdfSettings && world.renderSdfs?.length && !o.reflectionPlane?.select && !probeView?.allow;
   const transparency = SplatOrder.transparency(o.stableTransparency ?? look.stableTransparency);
   const blendDepth = transparency?.mode === 'blend' ? transparency.depthTolerance : 0;
   const sortedSurfaces = orderMode === 'surface' || blendDepth > 0;
@@ -272,7 +279,8 @@ function renderFrame(world, o, preparedPalettes) {
     blueNoise: settings => blueNoise(world, settings), skipMasks: o.lookMasks === false };
   const stages = !o.raw && RenderStages.plan(world, lookOptions);
   const optics = o.raw ? null : RenderStages.optics(look.optics, lookOptions);
-  const scopedReflection = world.reflections?.length && (look.paletteConstraints?.targets?.length ||
+  const useLocalReflections = o.surface !== false && o.reflections !== false && o.reflectionProbes !== false;
+  const scopedReflection = (world.reflections?.length || (useLocalReflections && world.reflectionProbes?.length)) && (look.paletteConstraints?.targets?.length ||
     world.surfaces?.some(({ settings }) => settings.paletteConstraint));
   const coverageAware = !o.raw && (o.coverageAware ?? look.coverageAware ?? Boolean(optics || scopedReflection)) === true;
   const retainContributions = coverageAware || Boolean(stages || optics);
@@ -424,15 +432,15 @@ function renderFrame(world, o, preparedPalettes) {
     eyeD = ortho && !authored ? dist + 2 * world.radius + 4 : dist,
     reflectionPlane = o.reflectionPlane,
     focal = ortho ? H / 2 / oh : H / 2 / tangent,
-    cameraView = viewMatrix(yaw, pitch, eyeD, T),
+    cameraView = probeView?.matrix ?? viewMatrix(yaw, pitch, eyeD, T),
     view = ortho && stable?.snap ? ArtStability.snapView(cameraView, focal / (o.artGridScale || 1), stable.anchor) : cameraView,
     V = reflectionPlane ? SceneOptics.reflectedView(view, reflectionPlane) : view,
-    near = Math.max(0.4, 0.15 * dist),
+    near = probeView?.near ?? Math.max(0.4, 0.15 * dist),
     tp = 1 / tangent,
     asp = W / H,
     baseCount = world.count,
     R = world.radius;
-  if (!o.reflectionPlane) o[captureCamera]?.({view: V, tangent: ortho ? oh : tangent, aspect: asp, ortho,
+  if (!o.reflectionPlane && !probeView) o[captureCamera]?.({view: V, tangent: ortho ? oh : tangent, aspect: asp, ortho,
     clipNear: near, clipFar: 400, distance: eyeD, setback: eyeD - dist, depthRange: [eyeD - R, eyeD + R],
     eye: [-(V[0]*V[12]+V[1]*V[13]+V[2]*V[14]), -(V[4]*V[12]+V[5]*V[13]+V[6]*V[14]), -(V[8]*V[12]+V[9]*V[13]+V[10]*V[14])]});
   const hex = i => {
@@ -460,6 +468,7 @@ function renderFrame(world, o, preparedPalettes) {
   const { celestial,sun,flash,clouds } = resolveLighting(world,lightingOptions,climate,windState,direction);
   const transparencySource = o[reconstructionSource]?.data ?? world.data;
   const shadowFootprint = 2 * dist * tangent * (o.artGridScale || 1) / H;
+  const captureWorld = world;
   if (!sun && o.shadowArt !== false) world = ShadowArt.frame(world, shadowFootprint);
   const travel = (at, birth, time) => {
     const age = time - birth;
@@ -529,7 +538,7 @@ function renderFrame(world, o, preparedPalettes) {
   const surfaceFragments=o.spriteSurfaces===false?[]:SurfaceRaster.rasterize(world.spriteSurfaces,{V,W,H,focal,ortho,near,clip:geometryClip});
   const sdf = useSdf ? SdfRaster.rasterize(world,d,sdfSettings,{w:W,h:H,rayAt,near,clip:geometryClip}) : null;
   for (const sample of sdf?.samples ?? []) surfaceFragments.push(sample);
-  const emitterHits = areaLights.length && AreaRaster.rasterize(areaLights, { w:W, h:H, rayAt, near, capture:!!reflectionPlane, clip:geometryClip });
+  const emitterHits = areaLights.length && AreaRaster.rasterize(areaLights, { w:W, h:H, rayAt, near, capture:!!(reflectionPlane || probeView), clip:geometryClip });
   if (emitterHits) for (const hit of emitterHits) if (hit) surfaceFragments.push(hit);
   const surfaceDepth=surfaceFragments.length?new Float32Array(W*H).fill(Infinity):null;
   for(const sample of surfaceFragments)surfaceDepth[sample.p]=Math.min(surfaceDepth[sample.p],sample.z);
@@ -591,7 +600,7 @@ function renderFrame(world, o, preparedPalettes) {
     { time: t, localLights: o.volumeLocalLights, localShadows: o.volumeLocalShadows, celestialSun: celestial?.sun })) : undefined;
   const daylight = o.lightDaylight ?? o.environment?.daylight ?? an.daylight ?? 1;
   const dusk = LightSchedule.gain(daylight);
-  const lampEye = [
+  const lampEye = probeView ? eye : [
     T[0]+eyeD*Math.cos(pitch)*Math.sin(yaw),
     T[1]+eyeD*Math.sin(pitch),
     T[2]+eyeD*Math.cos(pitch)*Math.cos(yaw)
@@ -649,12 +658,26 @@ function renderFrame(world, o, preparedPalettes) {
           o.reflectionScale ?? 1
         )
       : null;
+  const definitions = useLocalReflections ? ReflectionProbes.prepare(world.reflectionProbes) : [];
+  const probeFilters = definitions.length && new Map();
+  const localReflection = definitions.length ? ReflectionProbes.sampler(definitions, (probe, face) => {
+    if (!probeFilters.has(probe.id)) probeFilters.set(probe.id, ShadowArt.bind({ cast:probe.capture }, captureWorld,'cast'));
+    if (counters) counters.reflectionProbeFaces++;
+    return render(captureWorld, {
+      ...o, [probeCamera]:{ matrix:ReflectionProbes.view(probe.at,face), near:probe.near, allow:probeFilters.get(probe.id) },
+      target:probe.at, dist:1, yaw:0, pitch:0, fov:Math.PI/2, lensScale:1, lockCamera:true, ortho:false,
+      w:probe.size, h:probe.size, px:1, artGridScale:1, raw:false, samples:false, worked:false, colored:false,
+      captureCoverage:true, lookInputSession:lookInputs, pick:undefined, passes:false, lookAudit:false,
+      fragmentProbe:undefined, captureMotion:false, cutaway:false, reflectionPlane:undefined,
+      atmosphere:false, water:false, reflections:false, edges:false, transparencyHistory:undefined
+    });
+  }, o[probeCaptures]) : null;
   let live;
   const sunGains = sun && [0, 0, 0];
   const surface = surfaceShading(world, stages && !coverageAware ? { ...o, paletteConstraints: false } : o, {
     eye,
     forward: [V[2], V[6], V[10]],
-    reflection,
+    reflection, localReflection,
     sky: opticalSky && ((direction, out, origin) => {
       if (!skyOverlay) return skySample(direction,out,origin,true);
       flash?.sky(origin,direction,out);
@@ -1144,6 +1167,7 @@ function renderFrame(world, o, preparedPalettes) {
       z = Z[i];
     const opt = i * OpticalMaterials.STRIDE, opticalActive = optical?.[opt + 3];
     if (al <= 0 || y < -30 || opticalActive && !optical[opt]) continue;
+    if (probeView?.allow && (i >= baseCount || !probeView.allow(i))) continue;
     if (
       reflectionPlane &&
       (SceneOptics.planeDistance(reflectionPlane, x, y, z) <= reflectionPlane.bias ||
@@ -1281,11 +1305,11 @@ function renderFrame(world, o, preparedPalettes) {
     let coverage = 1,
       glint = 0,
       centerPalette = 0;
-    const planar = surface?.planar(i);
+    const planar = surface?.planar(i), localProbeReflection = surface?.local(i);
     const pixelSurface = !opticalActive && PIX?.[i * 8] && !surface?.reveals(i) && (!planar || (al >= 1 && !(flags & 1)));
     const projected = surface?.projected(i);
     const reflectedSky = !skyOverlay && surface?.environment(i);
-    const fragmentSurface = !pixelSurface && (planar || projected || surface?.bevel(i) || reflectedSky || liveNormal && hasSurface);
+    const fragmentSurface = !pixelSurface && (planar || localProbeReflection || projected || surface?.bevel(i) || reflectedSky || liveNormal && hasSurface);
     const ditherRule = fragmentRule(i);
     const detailParticle = fieldParticle || world.effectParticles?.some(({ first, count }) => i >= first && i < first + count);
     const centered = hasSurface && !pixelSurface && !fragmentSurface;
@@ -1304,7 +1328,7 @@ function renderFrame(world, o, preparedPalettes) {
     const localAlbedo = localProbe && probeAlbedo(i);
     const fogMix = !(flags & 2) && world.fog.max > 0 && world.fog.start < 1
       ? targetFog(sstep(world.fog.start,1,dn)*world.fog.max*(exposure?.fog?.(x,y,z)??1),rule) : 0;
-    const reflectInRaster = (planar || reflectedSky) && !pixelSurface;
+    const reflectInRaster = (planar || localProbeReflection || reflectedSky) && !pixelSurface;
     const finishBeforeFog = reflectInRaster || !pixelSurface && surface?.finishBeforeFog(i);
     const normal = fragmentSurface ? surface.surfaceNormal(i) : null;
     const centerFog = !opticalActive && !finishBeforeFog && !staged?.lit && !liveNormal && !splatFlash && !relit && coverGain === 1;

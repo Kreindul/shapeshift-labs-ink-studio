@@ -9,21 +9,22 @@ function surfaceShading(world, options, camera) {
   const rig = world.anim?.rig;
   const rigFrames = new Map();
   const projected = i => materials[surfaceData[i * STRIDE] - 1]?.projected;
+  const local = i => localMaterials?.[surfaceData[i * STRIDE] - 1];
   const bevel = i => materials[surfaceData[i * STRIDE] - 1]?.bevelDistance;
 
   function rigFrame(i) {
     const part = rig?.bid[i];
-    if (!part || rig.free?.[i] || !(projected(i) || bevel(i))) return null;
+    if (!part || rig.free?.[i] || !(projected(i) || bevel(i) || local(i))) return null;
     if (!rigFrames.has(part)) {
       const { M } = require('../index.js').load().KIT;
       const matrix = rig.M.subarray(part * 12, part * 12 + 9);
       if (Math.abs(M.det(matrix)) < 1e-8) return null;
       const inverse = M.inv(matrix);
-      rigFrames.set(part, { inverse, normal: M.tr(inverse), apply: M.app });
+      rigFrames.set(part, { matrix, inverse, normal: M.tr(inverse), apply: M.app });
     }
     return rigFrames.get(part);
   }
-  const { eye, forward, parallel, footprint, time, reflection, sky, skyReflectionSource, blueNoise } = camera;
+  const { eye, forward, parallel, footprint, time, reflection, localReflection, sky, skyReflectionSource, blueNoise } = camera;
   const { STRIDE } = SurfaceLook;
   const liveLight = camera.sun ?? (world.surfaceLight === undefined ? undefined :
     SurfaceLook.prepareLightTrack(world.surfaceLight)(time));
@@ -55,6 +56,8 @@ function surfaceShading(world, options, camera) {
     material =>
       reflection && material.layers.some(layer => layer.type === 'planarReflection' && reflection.has(layer.plane))
   );
+  const localMaterials = localReflection && materials.map(material => material.layers.some(layer =>
+    layer.type === 'localReflection' && localReflection.has(layer.probe)));
   const skyMaterials = sky && materials.map(material => material.layers.some(layer =>
     layer.type === 'reflection' && (skyReflectionSource ?? layer.source) === 'scene'));
   const environment = i => Boolean(skyMaterials?.[surfaceData[i * STRIDE] - 1]);
@@ -99,6 +102,8 @@ function surfaceShading(world, options, camera) {
   }
 
   const sampleSky = sky && ((direction, out) => sky(direction, out, sample.worldPosition));
+  const sampleLocal = localReflection && ((layer, ray, axis) =>
+    localReflection(layer.probe, sample.worldPosition, ray, layer.roughness, axis));
   function shade(i, x, y, z, centerX, centerY, centerZ, r, g, b, sx, sy, visit, reflected) {
     const offset = i * STRIDE;
     const { position, normal, view } = sample;
@@ -109,7 +114,7 @@ function surfaceShading(world, options, camera) {
     const angle = rotation(i);
     const c = Math.cos(angle),
       s = Math.sin(angle);
-    const source = prepared.projected || prepared.bevelDistance ? rest : data;
+    const source = prepared.projected || prepared.bevelDistance || local(i) ? rest : data;
     const frame = rigFrame(i);
     const ox = c * dx - s * dz, oy = y - centerY, oz = s * dx + c * dz;
     if (frame) {
@@ -156,7 +161,8 @@ function surfaceShading(world, options, camera) {
       sample.detailFootprint = sample.artFootprint / Math.max(.12, facing);
     }
     sample.sky = environment(i) ? sampleSky : undefined;
-    if (sample.sky) {
+    sample.localReflection = local(i) ? sampleLocal : undefined;
+    if (sample.sky || sample.localReflection) {
       sample.skyView[0] = vx;
       sample.skyView[1] = view[1];
       sample.skyView[2] = vz;
@@ -165,6 +171,13 @@ function surfaceShading(world, options, camera) {
         const local = frame ? frame.apply(frame.normal, n) : n;
         return [c * local[0] + s * local[2], local[1], c * local[2] - s * local[0]];
       } : undefined;
+      sample.reflectionTangent = angle || frame ? tangent => {
+        const direction = frame ? frame.apply(frame.matrix, tangent) : tangent;
+        return [c * direction[0] + s * direction[2], direction[1], c * direction[2] - s * direction[0]];
+      } : undefined;
+    } else {
+      sample.skyNormal = undefined;
+      sample.reflectionTangent = undefined;
     }
     const [lx, ly, lz] = prepared.sun;
     sample.lightDirection = angle ? [c * lx - s * lz, ly, s * lx + c * lz] : undefined;
@@ -193,7 +206,7 @@ function surfaceShading(world, options, camera) {
 
   return {
     has, normalAt, surfaceNormal, planar, environment, shade, palettes, constraints,
-    projected, bevel,
+    projected, bevel, local,
     finishBeforeFog: i => materials[surfaceData[i * STRIDE] - 1]?.finishBeforeFog,
     reveals: i => materials[surfaceData[i * STRIDE] - 1]?.reveals
   };

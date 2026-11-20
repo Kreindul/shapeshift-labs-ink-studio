@@ -8,8 +8,12 @@
   K.clouds = CloudField;
   K.reflection = {
     plane: SceneOptics.plane,
+    probe: ReflectionProbes.probe,
     reflectedView: SceneOptics.reflectedView,
     captureView: SceneOptics.captureView,
+    localMaterial(base, probe, options) {
+      return SurfaceLook.material(base, { layers: { local: { ...options, type: 'localReflection', probe } } });
+    },
     material(base, plane, options) {
       return SurfaceLook.material(base, { layers: { mirror: { ...options, type: 'planarReflection', plane } } });
     }
