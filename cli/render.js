@@ -32,6 +32,7 @@ function blueNoise(world, { seed }) {
   return tiles.get(seed);
 }
 const SampleCoverage = require('../src/sample-coverage.js');
+const ContributionRules = require('../src/contribution-rules.js');
 const Airflow = require('../src/airflow.js');
 const LightSchedule = require('../src/light-schedule.js');
 const LiveSun = require('./live-sun.js');
@@ -1011,12 +1012,8 @@ function render(world, o, preparedPalettes) {
           pw = -0.5 * (k0 * dx * dx + k2 * dy * dy) - k1 * dx * dy;
         let a;
         if (integrateFootprint) a = footprint(dx, dy, k0, k1, k2, al, solid && !o.soft);
-        else {
-          if (pw > 0 || pw < -4.5) continue;
-          const gg = al * Math.exp(pw);
-          a = !o.soft && solid ? 0.99 * sstep(0.38, 0.62, gg) : Math.min(0.99, gg);
-        }
-        if (a < 0.004) continue;
+        else a = ContributionRules.alpha(pw, al, solid && !o.soft);
+        if (a < ContributionRules.minimum) continue;
         lookPass?.begin(centerMark);
         let pr = r,
           pg = g,

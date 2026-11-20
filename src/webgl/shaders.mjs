@@ -1,6 +1,7 @@
 // Shared draw and resolve shaders extracted from Inkwell Rebirth's WebGL renderer.
 // Hosts provide the ASCII shader hooks and Ink Studio's shared PixelLook GLSL.
 import { waterGLSL } from './water-optics.mjs';
+import { coverageSource, policyUniforms, maskUniforms, maskVaryings, maskFragment, maskVertex, ownerMaskWrite } from './contribution-shaders.mjs';
 
 // Reconstruct the sample on its pixel ray from a camera-space axial distance.
 const axialPosition = `
@@ -10,7 +11,7 @@ vec3 axialPosition(vec2 pixel, float axial, vec2 size) {
 }`;
 
 export function splatShaderSources(ascii, sampleCoverage, {
-  water = false, airPockets = false, layered = false, atlas = false, portal = false, instances = false
+  water = false, airPockets = false, layered = false, atlas = false, portal = false, instances = false, contributions = false, masked = false, textured = false, layeredGlass = false, coverageRules
 } = {}) {
   const SPLAT_VS = `#version 300 es
 precision highp float; precision highp int;
@@ -46,6 +47,8 @@ uniform highp sampler2D u_fine; uniform float u_fineOn;
 // colour the next lighter one of its own family. What is near a light steps up its own colours; nothing is tinted.
 uniform vec4 u_lamp[8]; uniform float u_lamps[8]; uniform int u_lampN; uniform float u_lampGain; uniform vec3 u_lpal[48]; uniform int u_lup[48];
 flat out vec4 v_fm; flat out vec4 v_ft; flat out float v_fk; flat out float v_lit; flat out float v_ix;
+${contributions || masked ? `${policyUniforms}flat out int v_policySlot;` : ''}
+${masked ? maskUniforms + maskVaryings(textured).replaceAll('LOOK_IO','out') + maskVertex(textured) : ''}
 void main(){
   int record = a_index;
   ${instances ? `ivec2 inst = ivec2((a_instance & 15) * 16, a_instance >> 4);
@@ -189,7 +192,9 @@ void main(){
   if (cam.z > -u_near) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
 ${water && !portal ? '  v_waterAxial = -cam.z;' : ''}
   vec4 clip = u_proj * cam;
-  ${portal ? '' : 'v_ownerDepth = u_idx > 1.5 ? clip.z / clip.w * 0.5 + 0.5 : 0.0;'}
+  ${contributions || masked ? 'v_policySlot = contributionSlot(a_index);' : ''}
+  ${masked ? 'if (u_idx < 2.5) placeMask(a_index, v_policySlot, pos, cam.xyz, abs(determinant(FM)) > 1e-8 ? inverse(FM) : mat3(1.0), mat3(u_view));' : ''}
+  ${portal ? '' : `v_ownerDepth = ${layeredGlass ? '' : 'u_idx > 1.5 ? '}clip.z / clip.w * 0.5 + 0.5${layeredGlass ? '' : ' : 0.0'};`}
   float dn = clamp((-cam.z - u_fogp.z) / (u_fogp.w - u_fogp.z), 0.0, 1.0);
   if (u_lampN > 0 && (flags & 22) == 0 && alpha >= 1.0) {
     float tr = cov[0][0] + cov[1][1] + cov[2][2], pp = tr / 2.4253, add = 0.0;   // (a dab is a disc, thin the way it faces: from its shape, how squarely it faces a light)
@@ -241,7 +246,7 @@ ${water && !portal ? '  v_waterAxial = -cam.z;' : ''}
 ${ascii ? ascii.vsMain : ''}  gl_Position = vec4(ndc + a_corner * extN, 0.0, 1.0);
 }`;
   const SPLAT_FS = `#version 300 es
-precision highp float;
+precision highp float; precision highp int;
 in vec2 v_d; in vec3 v_conic; in vec4 v_color; in float v_depth;
 ${portal ? 'flat in vec3 v_portalDepth; uniform mat4 u_proj; uniform float u_ortho; uniform vec4 u_splatPlane;' :
   'flat in float v_ownerDepth;'}
@@ -251,14 +256,36 @@ flat in vec4 v_fm; flat in vec4 v_ft; flat in float v_fk; flat in float v_lit; f
 uniform float u_idx;
 layout(location=0) out vec4 o;
 layout(location=1) out vec4 od;
-layout(location=2) out vec4 oa;
+${layeredGlass && !water ? 'vec4 oa;' : 'layout(location=2) out vec4 oa;'}
+${layeredGlass ? `layout(location=${water ? 3 : 2}) out vec4 o_back;
+layout(location=${water ? 4 : 3}) out vec4 o_through;
+uniform highp sampler2D u_glassBoundary;
+float glassDepth(vec4 sampleDepth) {
+  return dot(floor(sampleDepth.rgb*255.0+0.5),vec3(1.0,256.0,65536.0)) / 16777215.0;
+}` : ''}
 ${water || portal ? 'uniform vec2 u_viewport;' : ''}
 ${portal ? axialPosition : ''}
+${coverageSource(coverageRules)}
+${contributions || masked ? `${policyUniforms}flat in int v_policySlot;` : ''}
+${contributions ? `uniform vec3 u_pal[64], u_out[64]; uniform int u_n;
+uniform float u_toneOn, u_grade;
+uniform vec2 u_lookGrid, u_lookViewportScale;
+${paletteRowGlsl}` : ''}
+${masked ? maskUniforms + maskVaryings(textured).replaceAll('LOOK_IO','in') + maskFragment(textured) : ''}
 ${water ? waterGLSL(airPockets, layered, atlas) + (portal ? '' : 'flat in float v_waterAxial;') : ''}
 void main(){
 ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + v_conic.z * v_d.y * v_d.y) - v_conic.y * v_d.x * v_d.y;
   if (power > 0.0 || power < -4.5) discard;
   float g = v_color.a * exp(power);
+  ${layeredGlass ? `
+  gl_FragDepth = gl_FragCoord.z;
+  if (u_idx > 2.5) {
+    if (v_gl < 0.5 || g < 0.004) discard;
+    float z = round(clamp(v_ownerDepth,0.0,1.0)*16777215.0);
+    gl_FragDepth = clamp(v_ownerDepth,0.000001,1.0);
+    o = vec4(mod(z,256.0),mod(floor(z/256.0),256.0),floor(z/65536.0),255.0)/255.0;
+    return;
+  }` : ''}
   ${portal ? `
   float axial = v_portalDepth.x + dot(v_portalDepth.yz, v_d);
   bool clipped = any(notEqual(u_splatPlane.xyz, vec3(0.0)));
@@ -283,10 +310,11 @@ ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + 
   if (u_idx > 0.5) {   // the index pass (colour per pixel): which solid dab is in front here, its number in three bytes
     if (v_color.a < 1.0 || g < 0.5 || v_depth < 0.0) discard;
     float k = v_ix + 1.0;
-    o = vec4(mod(k, 256.0), mod(floor(k / 256.0), 256.0), floor(k / 65536.0), 255.0) / 255.0; od = vec4(0.0); oa = vec4(0.0); return; }
-  float a = min(0.99, g);
-  // pixel-art mode: solid splats get a tight falloff so shapes read cleanly; soft ones stay soft
-  if (u_crisp > 0.5 && v_color.a >= 1.0) a = u_hard > 0.5 ? (g > 0.5 ? 1.0 : 0.0) : 0.99 * smoothstep(0.38, 0.62, g);
+    o = vec4(mod(k, 256.0), mod(floor(k / 256.0), 256.0), floor(k / 65536.0), 255.0) / 255.0;
+    od = vec4(0.0); ${masked ? `if (v_policySlot > 0) {${ownerMaskWrite}}` : ''}
+    oa = vec4(0.0); return; }
+  bool solid = u_crisp > 0.5 && v_color.a >= 1.0;
+  float a = solid && u_hard > 0.5 ? (g > 0.5 ? 1.0 : 0.0) : contributionAlpha(power,v_color.a,solid);
   if (a < 0.004) discard;
   vec3 rgb = v_color.rgb;
   if (v_fk >= 0.0) {   // inked detail: this pixel's own place on the dab's tile
@@ -294,9 +322,26 @@ ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + 
     float f = ij.y == 0 ? v_ft.x : ij.y == 1 ? v_ft.y : ij.y == 2 ? v_ft.z : v_ft.w;
     int ci = int(mod(floor(f / (ij.x == 0 ? 1.0 : ij.x == 1 ? 64.0 : ij.x == 2 ? 4096.0 : 262144.0)), 64.0));
     rgb = mix(u_fpal[min(ci, 63)], u_fog, v_fk); }
+${contributions ? `  if (v_policySlot > 0) {
+    ivec2 p = ivec2(floor(gl_FragCoord.xy * u_lookViewportScale));
+    p.y = int(u_lookGrid.y) - 1 - p.y;
+    vec3 next = paletteRow(v_policySlot, rgb, p);
+    float mask = ${masked ? 'maskAt(v_policySlot)' : '1.0'};
+    if (mask < 1.0) {
+      vec3 base = rgb;
+      ${masked ? `if (u_constraintDefault > 0 && maskSettings(u_constraintDefault).x == 0.0)
+        base = paletteRow(u_constraintDefault, rgb, p);` : ''}
+      next = mix(base, next, mask);
+    }
+    rgb = next;
+  }` : ''}
 ${water ? `  vec3 mark; rgb = waterPaint(rgb, gl_FragCoord.xy, u_viewport,
     ${portal ? 'clipped ? axial : v_portalDepth.x' : 'v_waterAxial'}, mark);` : ''}
   o = vec4(rgb * a, a);
+  ${layeredGlass ? `vec4 pane = texelFetch(u_glassBoundary,ivec2(gl_FragCoord.xy),0);
+  bool behind = pane.a > 0.0 && v_ownerDepth > glassDepth(pane)+0.0000001;
+  o_back = behind ? o : vec4(0.0);
+  o_through = pane.a > 0.0 && !behind ? vec4(0.0,0.0,0.0,a) : vec4(0.0);` : ''}
   float a2 = v_color.a >= 1.0 && v_depth >= 0.0 ? a : 0.0;   // only solid splats write depth
   od = vec4(v_depth * a2, v_gl * a * 0.5, v_lit * a2, a2);   // (green: how much glass lies over this pixel, in front of the last solid thing; a solid splat wipes it)
   oa = ${water ? 'vec4(mark * a, a)' : 'vec4(v_as * a, v_ast * 0.25 * a, 0.0, a)'};
@@ -304,17 +349,9 @@ ${water ? `  vec3 mark; rgb = waterPaint(rgb, gl_FragCoord.xy, u_viewport,
   return { vertex: SPLAT_VS, fragment: SPLAT_FS };
 }
 
-const paletteConstraintGlsl = `
-uniform highp sampler2D u_constraintSlots, u_constraintRows;
-uniform int u_constraintDefault, u_constraintMap;
-bool g_constrained = false;
-bool constrainPalette(ivec2 p, vec3 inputColor, out vec3 color) {
-  int dab = dabAt(p);
-  if (dab < 0) return false;
-  int span = textureSize(u_constraintSlots, 0).x * 4;
-  int slot = int(texelFetch(u_constraintSlots, ivec2((dab % span) / 4, dab / span), 0)[dab & 3]);
-  int row = (slot > 0 ? slot : u_constraintDefault) - 1;
-  if (row < 0) return false;
+const paletteRowGlsl = `
+vec3 paletteRow(int slot, vec3 inputColor, ivec2 p) {
+  int row = slot - 1;
   vec4 settings = texelFetch(u_constraintRows, ivec2(0, row), 0);
   int count = int(settings.x), total = int(settings.y);
   vec3 bytes = floor(clamp(inputColor, 0.0, 1.0) * 255.0 + 0.5);
@@ -331,7 +368,7 @@ bool constrainPalette(ivec2 p, vec3 inputColor, out vec3 color) {
       if (distance < nearestDistance) { index = i; nearestDistance = distance; }
     }
     inputColor = mapping > 0.5 ? texelFetch(u_constraintRows, ivec2(u_constraintMap + index, row), 0).rgb : u_out[index];
-    if (mapping > 1.5) { color = inputColor; return true; }
+    if (mapping > 1.5) { return inputColor; }
     gradedBytes = floor(clamp(inputColor, 0.0, 1.0) * 255.0 + 0.5);
   }
   float firstDistance = 1e9, secondDistance = 1e9;
@@ -341,7 +378,7 @@ bool constrainPalette(ivec2 p, vec3 inputColor, out vec3 color) {
     vec3 swatch = texelFetch(u_constraintRows, ivec2(i + 1, row), 0).rgb;
     if (i >= count) {
       vec3 code = floor(swatch * 255.0 + 0.5);
-      if (all(equal(bytes, code))) { color = swatch; return true; }
+      if (all(equal(bytes, code))) { return swatch; }
       if (all(equal(gradedBytes, code))) { gradedReserve = swatch; hasGradedReserve = true; }
       continue;
     }
@@ -354,23 +391,59 @@ bool constrainPalette(ivec2 p, vec3 inputColor, out vec3 color) {
       second = swatch; secondDistance = distance;
     }
   }
-  if (hasGradedReserve) { color = gradedReserve; return true; }
-  color = best;
+  if (hasGradedReserve) { return gradedReserve; }
+  vec3 color = best;
   float amount = texelFetch(u_constraintRows, ivec2(1, row), 0).a;
-  if (count < 2 || amount == 0.0) return true;
+  if (count < 2 || amount == 0.0) return color;
   ivec2 size = ivec2(settings.zw);
-  int y = textureSize(u_idxTex, 0).y - 1 - p.y;
-  int cell = (y % size.y) * size.x + p.x % size.x;
+  int cell = (p.y % size.y) * size.x + p.x % size.x;
   float rank = texelFetch(u_constraintRows, ivec2(49 + cell / 4, row), 0)[cell & 3];
   vec3 delta = second - best;
   if (rank < 0.5 && dot(weight * delta, inputColor - best) >=
       (0.5 + (rank - 0.5) * amount) * dot(weight, delta * delta)) color = second;
-  return true;
+  return color;
 }
 `;
 
+function constraintGlsl(masked) {
+  return `${policyUniforms}${paletteRowGlsl}
+bool g_constrained = false;
+${masked ? `${maskUniforms}
+uniform highp sampler2D u_maskOwner;
+vec3 defaultMaskColor(vec3 rgb, ivec2 p) {
+  float th = (BAYER[(p.x & 3) + ((p.y & 3) << 2)] + 0.5) / 16.0 - 0.5;
+  rgb = clamp(rgb + th * u_dither, 0.0, 1.0);
+  int best = 0; float bd = 1e9;
+  for (int i = 0; i < 64; i++) {
+    if (i >= u_n) break;
+    vec3 d = rgb - u_pal[i];
+    float dd = dot(d*d, vec3(0.30, 0.55, 0.15));
+    if (dd < bd) { bd = dd; best = i; }
+  }
+  return u_grade > 0.5 ? u_out[best] : u_pal[best];
+}` : ''}
+bool constrainPalette(ivec2 p, vec3 inputColor, out vec3 color) {
+  int index = dabAt(p);
+  if (index < 0) return false;
+  int slot = contributionSlot(index);
+  if (slot == 0) return false;
+  ivec2 pos = ivec2(p.x, textureSize(u_idxTex, 0).y - 1 - p.y);
+  color = paletteRow(slot,inputColor,pos);
+  ${masked ? `if (maskSettings(slot).x != 0.0) {
+    vec2 encoded = floor(texelFetch(u_maskOwner,p,0).rg * 255.0 + 0.5);
+    float amount = dot(encoded, vec2(1.0,256.0)) / 65535.0;
+    if (amount < 1.0) {
+      vec3 base = u_constraintDefault > 0 && maskSettings(u_constraintDefault).x == 0.0 ?
+        paletteRow(u_constraintDefault,inputColor,pos) : defaultMaskColor(inputColor,p);
+      color = mix(base,color,amount);
+    }
+  }` : ''}
+  return true;
+}`;
+}
+
 export function pixelShaderSources(PixelLook, { water = false, airPockets = false, layered = false, atlas = false,
-  paletteConstraints = false } = {}) {
+  paletteConstraints = false, masked = false, contributions = false, layeredGlass = false } = {}) {
   const waterPixelGLSL = `
 uniform highp sampler2D u_waterMask;
 ivec2 waterPixel(ivec2 p) {
@@ -752,8 +825,34 @@ vec3 pixelNative(ivec2 p) {
   if (u_ao > 0.0) { float occ = 0.0; for (int i = 0; i < 8; i++) { float dd = (dm.r - texelFetch(u_crispDepth, clamp(p + AOT[i], ivec2(0), mx), 0).r) / u_aor; if (dd > 0.08 && dd < 3.0) occ += min(1.0, dd); } c *= 1.0 - u_ao * min(1.0, occ / 4.0); }
   return c;
 }
+${layeredGlass ? `
+uniform highp sampler2D u_glassBoundary, u_glassBack, u_glassThrough;
+uniform vec2 u_glassRange;
+uniform mat4 u_glassProjection;
+float glassDepth(vec4 info) {
+  return dot(floor(info.rgb*255.0+0.5),vec3(1.0,256.0,65536.0)) / 16777215.0;
+}
+vec3 refractContributions(ivec2 p, vec3 color) {
+  vec4 front=texelFetch(u_glassBoundary,p,0);
+  if (front.a==0.0) return color;
+  float through=texelFetch(u_glassThrough,p,0).r;
+  if (through<=0.0 || texelFetch(u_depth,p,0).g==0.0) return color;
+  ivec2 mx=textureSize(u_depth,0)-1;
+  vec2 delta=vec2(texelFetch(u_depth,clamp(p+ivec2(1,0),ivec2(0),mx),0).g-texelFetch(u_depth,clamp(p-ivec2(1,0),ivec2(0),mx),0).g,
+    texelFetch(u_depth,clamp(p+ivec2(0,1),ivec2(0),mx),0).g-texelFetch(u_depth,clamp(p-ivec2(0,1),ivec2(0),mx),0).g);
+  ivec2 source=clamp(p+ivec2(round(delta*u_refract)),ivec2(0),mx);
+  if (all(equal(source,p))) return color;
+  bool rear=texelFetch(u_glassBoundary,source,0).a>0.0;
+  if (!rear) {
+    float axial=mix(u_glassRange.x,u_glassRange.y,texelFetch(u_depth,source,0).r);
+    vec4 clip=u_glassProjection*vec4(0.0,0.0,-axial,1.0);
+    if (clip.z/clip.w*0.5+0.5 < glassDepth(front)) return color;
+  }
+  vec3 shifted=rear?texelFetch(u_glassBack,source,0).rgb:texelFetch(u_scene,source,0).rgb;
+  return clamp(color + (shifted-texelFetch(u_glassBack,p,0).rgb)*through,0.0,1.0);
+}` : ''}
 ${PixelLook.glsl}
-${paletteConstraints ? paletteConstraintGlsl : ''}
+${paletteConstraints ? constraintGlsl(masked) : ''}
 // a hole a pixel across in a surface (its dabs, seen nearly edge on, leave gaps, and what lies under it or far behind shows through, as
 // dark broken lines across the ground): it is drawn as the nearer of the pixels either side of it, which lie on the surface
 ivec2 holeFill(ivec2 p) { ivec2 ms = textureSize(u_depth, 0) - 1; float d0 = texelFetch(u_depth, p, 0).r;
@@ -768,6 +867,7 @@ ivec2 holeFill(ivec2 p) { ivec2 ms = textureSize(u_depth, 0) - 1; float d0 = tex
 vec3 plainAt(ivec2 p) {
   p = holeFill(p);
   vec3 c = texelFetch(u_scene, p, 0).rgb;
+  ${layeredGlass ? 'c = refractContributions(p,c);' : ''}
   g_pixed = false;
   if (u_pixOn > 0.5) { if (u_sprOn > 0.5) {
 ${water ? '      vec4 sl = texelFetch(u_sprLayer, p, 0); if (sl.a > 0.5) { g_spr = true; g_pixed = true; return sl.rgb; }' :
@@ -779,8 +879,8 @@ ${water ? '      vec4 sl = texelFetch(u_sprLayer, p, 0); if (sl.a > 0.5) { g_spr
   float dl = texelFetch(u_depth, clamp(p - ivec2(1, 0), ivec2(0), mx), 0).r, dr = texelFetch(u_depth, clamp(p + ivec2(1, 0), ivec2(0), mx), 0).r;
   float du = texelFetch(u_depth, clamp(p + ivec2(0, 1), ivec2(0), mx), 0).r, db = texelFetch(u_depth, clamp(p - ivec2(0, 1), ivec2(0), mx), 0).r;
   // glass bends what is behind it: the picture is looked up a little to one side, by how the thickness of glass changes across this pixel
-  { vec2 gg = vec2(texelFetch(u_depth, clamp(p + ivec2(1, 0), ivec2(0), mx), 0).g - texelFetch(u_depth, clamp(p - ivec2(1, 0), ivec2(0), mx), 0).g, texelFetch(u_depth, clamp(p + ivec2(0, 1), ivec2(0), mx), 0).g - texelFetch(u_depth, clamp(p - ivec2(0, 1), ivec2(0), mx), 0).g);
-    if (texelFetch(u_depth, p, 0).g + abs(gg.x) + abs(gg.y) > 0.0) c = texelFetch(u_scene, clamp(p + ivec2(round(gg * u_refract)), ivec2(0), mx), 0).rgb; }
+  ${contributions ? '' : `{ vec2 gg = vec2(texelFetch(u_depth, clamp(p + ivec2(1, 0), ivec2(0), mx), 0).g - texelFetch(u_depth, clamp(p - ivec2(1, 0), ivec2(0), mx), 0).g, texelFetch(u_depth, clamp(p + ivec2(0, 1), ivec2(0), mx), 0).g - texelFetch(u_depth, clamp(p - ivec2(0, 1), ivec2(0), mx), 0).g);
+    if (texelFetch(u_depth, p, 0).g + abs(gg.x) + abs(gg.y) > 0.0) c = texelFetch(u_scene, clamp(p + ivec2(round(gg * u_refract)), ivec2(0), mx), 0).rgb; }`}
   // where a diorama asks for it, a pixel with nearer things close round it is shaded: what moves still sits in its own shadow
   if (u_ao > 0.0) { float occ = 0.0;
     for (int i = 0; i < 8; i++) { float dd = (dc - texelFetch(u_depth, clamp(p + AOT[i], ivec2(0), mx), 0).r) / u_aor; if (dd > 0.08 && dd < 3.0) occ += min(1.0, dd); } c *= 1.0 - u_ao * min(1.0, occ / 4.0); }
@@ -801,11 +901,12 @@ ${water ? '      vec4 sl = texelFetch(u_sprLayer, p, 0); if (sl.a > 0.5) { g_spr
     if (u_remapLine > 0) return glassAir(u_out[u_remapLine - 1], p, dc, vec2(textureSize(u_depth, 0)));
     c = u_line;
   }
-  else {
+  ${contributions ? 'return glassAir(c, p, dc, vec2(textureSize(u_depth, 0)));' : ''}
+  ${contributions ? '' : 'else {'}
 ${paletteConstraints ? '    vec3 constrained; if (constrainPalette(p, c, constrained)) { g_constrained = true; return constrained; }' : ''}
     float th = (BAYER[(p.x & 3) + ((p.y & 3) << 2)] + 0.5) / 16.0 - 0.5;
     c = clamp(c + th * u_dither, 0.0, 1.0);
-  }
+  ${contributions ? '' : '}'}
   if (u_toneOn > 0.5) { float lu = dot(c, vec3(0.30, 0.55, 0.15)); if (lu <= u_toneCut) return vec3(0.0);
     float v = (lu - u_toneCut) / (1.0 - u_toneCut); int lo = 0; for (int i = 0; i < 46; i++) { if (lo >= u_toneN - 2 || v <= texelFetch(u_toneStops, ivec2(lo + 1, 0), 0).a) break; lo++; }
     vec4 s0 = texelFetch(u_toneStops, ivec2(lo, 0), 0), s1 = texelFetch(u_toneStops, ivec2(lo + 1, 0), 0); ivec2 th = textureSize(u_toneTh, 0), sz = textureSize(u_depth, 0);
