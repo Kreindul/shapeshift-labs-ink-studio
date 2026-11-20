@@ -3,12 +3,14 @@
   const W=K.world, Q=W.query, {V,M}=K, {record,check,vector,id,own}=W.data;
   const zero=[0,0,0];
   function characters(config){
-    const {gravity,clearance,support,medium,supportPadding}=config, authored=config.characters;
+    const {gravity,clearance,support,medium,supportPadding,surfaceBodies,surfaces}=config, authored=config.characters;
     check(typeof gravity==='string'&&typeof clearance==='string'&&
-      [support,medium].every(name=>name===undefined||typeof name==='string')&&
+      [support,medium,surfaceBodies].every(name=>name===undefined||typeof name==='string')&&
+      (surfaces===undefined||record(surfaces))&&(surfaceBodies===undefined||typeof support==='string')&&
       (supportPadding===undefined||Number.isFinite(supportPadding)&&supportPadding>=0&&supportPadding<=2)&&
       record(authored)&&Object.keys(authored).length>0&&Object.keys(authored).length<=128,'Invalid local character configuration');
     const initial={}, specs={}, inputs={};
+    const surfaceResponse=surfaces===undefined?undefined:W.characters.surfaces(surfaces);
     for(const key of Object.keys(authored).sort()){
       const row=authored[key];
       check(id(key)&&key.length<=80&&record(row)&&id(row.entity??key)&&vector(row.position)&&
@@ -28,7 +30,8 @@
       direction:actor.forward,bodyCenter:true,radius:specs[key].controller.tuning.radius,
       height:specs[key].controller.tuning.height,...(specs[key].look&&{look:specs[key].look})});
     function environment(query,row){
-      return W.characters.fromQuery(query,{gravity,clearance,support,medium,supportPadding,exclude:row.entity});
+      return W.characters.fromQuery(query,{gravity,clearance,support,medium,supportPadding,exclude:row.entity,
+        surfaceBodies,surfaceResponse});
     }
     return {initial:()=>initial,inputs,
       settleInitial(state,{query}){
@@ -41,6 +44,7 @@
         W.gravity.checkField(query,gravity);
         const collision=query.field(clearance);
         check(collision?.type==='number'&&collision.units==='world','Local character clearance needs a world distance');
+        if(surfaceBodies)check(query.field(surfaceBodies)?.type==='record','Character moving supports need a body record field');
         if(medium){
           const field=query.field(medium);
           check(field?.type==='record'||field?.type==='number'&&field.units==='world','Local character medium needs a water record or world depth');
@@ -48,7 +52,7 @@
         if(support)check(query.inspect().traces.some(trace=>trace.name===support||trace.name.endsWith('/'+support)),
           'Unknown local character support trace '+support);
       },
-      dependencies:{reads:[gravity,clearance,medium].filter(Boolean)},
+      dependencies:{reads:[gravity,clearance,medium,surfaceBodies].filter(Boolean)},
       step(state,ctx){
         return Object.fromEntries(Object.entries(state).map(([key,actor])=>{
           const spec=specs[key], move=ctx.input['move.'+key]??zero;
