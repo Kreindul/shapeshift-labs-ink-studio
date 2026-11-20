@@ -664,6 +664,13 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         ensure(typeof opt.field==='string'||opt.select!==undefined||opt.at!==undefined||opt.entity!==undefined,
           'Use --field to select a query');
         const field=opt.field??(opt.at!==undefined||opt.entity!==undefined?'look/sample':'look/output');
+        if(opt.spec!==undefined){
+          ensure(field==='world/spatial-batch'&&typeof opt.spec==='string'&&opt.args===undefined&&
+            opt.at===undefined&&opt.entity===undefined&&opt.select===undefined&&opt.socket===undefined,
+          'Use --field world/spatial-batch --spec file.json with origins in the spec');
+          respond(view(file).probe(field,{},read(opt.spec)));
+          break;
+        }
         if (field === 'look/sample') {
           ensure(opt.socket===undefined && !(opt.select!==undefined && opt.entity!==undefined),
             'Use one render selector with --select or --entity');

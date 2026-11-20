@@ -101,6 +101,13 @@
           const adapter=using(state);
           return adapter?.poseEntities?adapter.poseEntities(state.data):provider.poseEntities(fine(state));
         }}),
+        ...(provider.occupancy&&{occupancy:{...provider.occupancy,key(state){
+          const adapter=using(state);
+          return adapter?state.data:provider.occupancy.key?.(state)??state;
+        },rows(state){
+          const adapter=using(state);
+          return adapter?.occupancyRows?adapter.occupancyRows(state.data):provider.occupancy.rows(fine(state));
+        }}}),
         ...(provider.waterFrame&&{waterFrame:state=>provider.waterFrame(fine(state))}),
         ...(provider.volumeFrame&&{volumeFrame:state=>provider.volumeFrame(fine(state))}),
         step(state,ctx){

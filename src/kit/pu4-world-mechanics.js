@@ -986,6 +986,15 @@
           (args.energy===undefined||Number.isFinite(args.energy)&&args.energy>=0),
           'Invalid fracture command');
       }
+    },...(!local&&{occupancyField:'ground-clearance'}),occupancy:{
+      kind:'body',key:state=>state.bodies,distance,
+      *rows(state){
+        for(const body of Object.values(state.bodies)){
+          const {min,max,bounded}=boundsOf(body);
+          yield {id:body.id,entity:body.entity,position:body.position,min:bounded?min:null,max:bounded?max:null,
+            shape:body,...(body.material!==undefined&&{material:body.material})};
+        }
+      }
     },*poseEntities(state) {
       for(const body of Object.values(state?.bodies??{}))yield body.entity;
     },pose(state,entity) {
@@ -1026,6 +1035,9 @@
       'surface-charts':{type:'record',read:({state})=>state?.surfaceCharts?
         Q.ok({charts:state.surfaceCharts,channels:surfaceChannels}):Q.missing('surface atlas is unavailable')},
       clearance:{type:'number',units:'world',read:context=>obstruction(context,context.args.exclude)},
+      ...(!local&&{'ground-clearance':{type:'number',units:'world',qualified:true,
+        read:context=>context.target.point?Q.ok(context.target.point[1]-ground(context,context.target.point)):
+          Q.missing('point required')}}),
       support:{type:'records',units:'world',read:support}
     },
     traces:{ray:{run({state,target,args}){

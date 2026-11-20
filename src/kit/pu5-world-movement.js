@@ -257,6 +257,22 @@
       return null;
     }
     const profileFor = agent => ({radius:.15,maxWade:.14,entity:agent.entity,...profiles[agent.species]});
+    const stepUpFor=profile=>profile.stepUp??Math.min(.3,profile.radius*.8);
+    const heightFor=profile=>profile.height??Math.min(12,profile.radius*2+stepUpFor(profile)+.08);
+    function* occupants(roster,reconstruct){
+      for(const page of roster.pages)for(let i=0;i<page.ids.length;i++){
+        const row=page.details[i], id=page.ids[i], profile=profiles[row.species];
+        const saved=page.positions.slice(i*3,i*3+3), position=reconstruct?.(id,saved)??saved;
+        if(row.mode==='dormant'&&position===saved)continue;
+        const radius=profile.radius??.15, walking=profile.mode==='walk';
+        const height=walking?heightFor({...profile,radius}):radius*2;
+        const [x,y,z]=position, low=walking?y:y-radius;
+        yield {id,entity:row.entity,species:row.species,generation:page.generations[i],position,radius,height,
+          min:[x-radius,low,z-radius],max:[x+radius,low+height,z+radius],
+          ...(row.name!==undefined&&{name:row.name}),...(row.metadata&&{metadata:row.metadata}),
+          shape:{x,z,a:low+radius,b:low+height-radius,radius}};
+      }
+    }
     const plan = (ctx, profile, from, goal) => profile.mode==='walk' ? groundPlan(ctx,config,from,goal,profile) :
       spatialPlan(ctx,config,from,goal,profile);
     function one(agent,ctx,contacts,dirty,directed=false){
@@ -300,8 +316,7 @@
       const desired=distance>1e-8?V.mad(position,aim,step/distance):position;
       let moved, lastSupports=[];
       if(profile.mode==='walk'){
-        const requested=profile.stepUp??Math.min(.3,profile.radius*.8);
-        const bodyHeight=profile.height??Math.min(12,profile.radius*2+requested+.08);
+        const requested=stepUpFor(profile), bodyHeight=heightFor(profile);
         const stepUp=Math.min(requested,bodyHeight-profile.radius*2-.025);
         const body=P.traversal.create({radius:profile.radius,height:bodyHeight,
           stepUp,stepDown:profile.drop??.5,
@@ -409,8 +424,14 @@
     }
     return {initial:()=>packed(initialRoster,[],policy?.initial),
     shareCheckpoint:true,viewState:S.view,legacyCheckpoint:S.legacyState,dependencies:routeDependencies(config),
+    occupancy:{
+      kind:'agent',key:S.get,rows:state=>occupants(S.get(state)),
+      distance:({x,z,a,b,radius},point)=>Math.hypot(point[0]-x,
+        point[1]-W.fields.clamp(point[1],a,b),point[2]-z)-radius
+    },
     simulationAggregate(settings){
-      return W.aggregatePopulation.cohorts(settings,{profiles,fit,bounds:config.bounds,contacts:config.contactEvents,validateState});
+      return W.aggregatePopulation.cohorts(settings,
+        {profiles,fit,bounds:config.bounds,contacts:config.contactEvents,validateState,occupants});
     },
     ...(config.contactEvents&&{outputs:{contacts:'event'},output:state=>({contacts:state.contacts})}),
     ...((config.surface!==undefined||policy)&&{checkFields(query){

@@ -7,7 +7,7 @@
     for(const page of roster.pages)for(const row of page.details)counts[row.species]++;
     return {total:W.agentStorage.count(roster),counts};
   }
-  function cohorts(settings,{profiles,fit,bounds,contacts,validateState}){
+  function cohorts(settings,{profiles,fit,bounds,contacts,validateState,occupants}){
     const S=W.agentStorage, aliases=new WeakMap();
     const {clamp}=W.fields;
     const {model,cell=12,goalCell=cell}=settings;
@@ -33,10 +33,13 @@
       }
       return freeze({roster,...(decisions&&{decisions}),groups,memberGroup});
     }
+    function memberPosition(group,position){
+      return group.distance?position.map((n,i)=>clamp(n+group.position[i]-group.origin[i],bounds.min[i],bounds.max[i])):position;
+    }
     function individual(state,row){
       const group=state.groups[state.memberGroup[row.id]];
       if(!group.distance)return group.velocity?{...row,velocity:group.velocity}:row;
-      const position=row.position.map((n,i)=>clamp(n+group.position[i]-group.origin[i],bounds.min[i],bounds.max[i]));
+      const position=memberPosition(group,row.position);
       return {...row,position,direction:V.norm(V.sub(group.position,group.origin),row.direction),
         velocity:group.velocity??S.zero,mode:profiles[row.species].mode,route:[],cursor:0,retry:0,limbs:[]};
     }
@@ -100,6 +103,7 @@
       output:()=>contacts?{contacts:[]}:undefined,
       fields:{population:({state})=>Q.ok(totals(state,true)),
         contacts:()=>Q.ok([]),decisions:({state})=>Q.ok(state.decisions)},
+      occupancyRows:state=>occupants(S.get(state),(name,position)=>memberPosition(state.groups[state.memberGroup[name]],position)),
       pose(state,entity){
         const roster=S.get(state);
         let index=aliases.get(roster);

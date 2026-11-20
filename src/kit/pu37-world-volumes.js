@@ -341,6 +341,7 @@
         'Invalid saved volume work report');
       },
       dependencies:{reads:[id+'/clearance',id+'/material'],writes:['clearance','material','support','height','medium','water'].map(key=>id+'/'+key)},
+      occupancyField:'clearance',
       volumeFrame:state=>state?(lighting?illuminated(state).render:prepare(state).render):null,
       fields:{
         ...(lighting&&{lighting:{type:'record',read:({state})=>state?

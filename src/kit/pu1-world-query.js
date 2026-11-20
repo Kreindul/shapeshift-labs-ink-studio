@@ -121,7 +121,7 @@
     const fields = new Map(), traces = new Map();
     const base = {world, states:visible, signals, tick, time:view.time ?? tick * world.dt};
     const locations = new Map(), active = new Set();
-    let spatialIndex, aliases, appearance, picker, renderScene;
+    let spatialIndex, spatialBatchRead, aliases, appearance, picker, renderScene;
     const scene = () => renderScene ??= (visual ? visual() : W.visual({makeBuilder,makeSculpt},view,api));
     const transfers = () => W.transfers.bind(systems);
     const look = () => appearance ??= W.lookQuery(scene,base.time);
@@ -181,6 +181,11 @@
       if (spec.point !== undefined) check(vector(spec.point), 'Expected a finite XYZ point');
       return spec.point ? {...spec,point:spec.point.slice()} : spec;
     }
+    function spatialBatch(spec) {
+      spatialBatchRead??=W.occupancy.create({entities:world.entities,states,systems,frame:fieldFrame,target,
+        condition,probe:(name,site,args)=>api.probe(name,site,args)});
+      return freeze({tick,time:base.time,results:spatialBatchRead(spec)});
+    }
     function add(descriptors, system, collection, handler) {
       for (const [key,item] of Object.entries(collection ?? {})) {
         check(W.data.id(key) && record(item) && typeof item[handler] === 'function', 'Invalid query descriptor ' + key);
@@ -213,6 +218,7 @@
         }}
       }),
       position:{type:'vec3',units:'world',read:({target:site}) => site.point ? ok(site.point) : missing('point or entity required')},
+      'spatial-batch':{type:'record',selector:true,qualified:true,read:({args})=>ok(spatialBatch(args))},
       history:{type:'records',read:({args}) => {
         const {after=-1e15,before=tick,entity,where,limit=history.length}=args;
         check(Number.isSafeInteger(after)&&Number.isSafeInteger(before)&&before>=after&&Number.isSafeInteger(limit)&&limit>=0,
@@ -349,31 +355,20 @@
     function spatial({point,radius,where} = {}) {
       check(vector(point) && Number.isFinite(radius) && radius >= 0, 'Expected a finite spatial query');
       if(projected)return projected.spatial(world.entities,states,location,point,radius,where);
-      const size=4, at=value=>Math.floor(value/size);
       if(!spatialIndex){
-        const rows=[], cells=new Map();
+        spatialIndex=W.spatial.grid();
         for(const id of sorted(world.entities)){
           const p=location(id)?.point;
           if(!p)continue;
           const row=freeze({...world.entities[id],id,position:p});
-          const key=p.map(at).join(',');
-          if(!cells.has(key))cells.set(key,[]);
-          cells.get(key).push(row);
-          rows.push(row);
+          spatialIndex.add(p,row);
         }
-        spatialIndex={rows,cells};
       }
-      const low=point.map(n=>at(n-radius)), high=point.map(n=>at(n+radius));
-      const count=low.reduce((n,v,i)=>n*(high[i]-v+1),1);
-      let candidates=spatialIndex.rows;
-      if(Number.isFinite(count)&&count<=Math.min(4096,Math.max(32,spatialIndex.rows.length))&&
-        [...low,...high].every(Number.isSafeInteger)){
-        candidates=[];
-        for(let z=low[2];z<=high[2];z++)for(let y=low[1];y<=high[1];y++)for(let x=low[0];x<=high[0];x++)
-          for(const row of spatialIndex.cells.get([x,y,z].join(','))??[])candidates.push(row);
-      }
-      return candidates.filter(row=>K.V.dist(point,row.position)<=radius&&condition(where,row))
-        .sort((a,b)=>a.id.localeCompare(b.id));
+      const result=[];
+      spatialIndex.overlap(point.map(n=>n-radius),point.map(n=>n+radius),row=>{
+        if(K.V.dist(point,row.position)<=radius&&condition(where,row))result.push(row);
+      });
+      return result.sort((a,b)=>a.id.localeCompare(b.id));
     }
     function exportField(field, spec, args) {
       let points, grid;
@@ -399,7 +394,7 @@
         ...(description?.spatial && {type:description.type,spatial:description.spatial}),
         ...(grid ? {grid} : {}),samples:points.map(point => ({point,...api.probe(field,point,args)}))};
     }
-    const api = Object.freeze({inspect,spatial,target,frame:fieldFrame,field,sampler,
+    const api = Object.freeze({inspect,spatial,spatialBatch,target,frame:fieldFrame,field,sampler,
       simulationClock:name=>view.simulationChunks?.clocks[name],
       renderVolume:name=>own(systems,name)?systems[name].volumeFrame?.(states[name]):null,
       renderWater:name=>own(systems,name)?systems[name].waterFrame?.(states[name]):null,

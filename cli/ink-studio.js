@@ -680,6 +680,7 @@ const CMD = {
         '  inspect <scene|run>         discover fields, actions, ports and entities',
         '  environment inspect <scene|run> --at x,y,z [--t seconds] [--out report.json]   explain sky and local weather',
         '  probe <scene|run> --field name [--at x,y,z | --entity id] [--explain]  sample world state',
+        '  probe <scene|run> --field world/spatial-batch --spec queries.json   proximity, occupancy and sockets',
         '  inspect|validate|probe <scene|run> --select JSON   inspect, check, or sample a look target',
         '  probe <scene|run> --field look/sample [--select JSON | --entity ID] [--at x,y,z]   explain a baked splat',
         '  trace <scene|run> <name>    trace a route, signal or other exposed query',

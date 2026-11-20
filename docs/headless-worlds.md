@@ -27,6 +27,9 @@ reuse immutable state in process and content-addressed blocks on disk.
 [Region revisions](region-revisions.md) project selected chunks into
 local snapshots and bounded changes against an applied cursor.
 
+[Batch spatial queries](batch-spatial-queries.md) find nearby agents,
+test free space, and discover usable sockets on the same snapshot.
+
 [First-divergence debugging](first-divergence.md) compares timelines
 tick by tick and reports actual inputs and changed state paths.
 

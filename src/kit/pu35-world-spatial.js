@@ -167,5 +167,34 @@
     return Object.freeze({set,remove,overlap,nearest,work:()=>({...work})});
   }
 
-  W.spatial = Object.freeze({create});
+  function grid(cell=4){
+    const buckets=new Map(), rows=[], outside=[];
+    const key=(x,y,z)=>x+','+y+','+z, at=n=>Math.floor(n/cell);
+    function add(point,row){
+      rows.push(row);
+      const [x,y,z]=point.map(at);
+      if(![x,y,z].every(Number.isSafeInteger)){
+        outside.push(row);
+        return;
+      }
+      const name=key(x,y,z);
+      let members=buckets.get(name);
+      if(!members)buckets.set(name,members=[]);
+      members.push(row);
+    }
+    function overlap(min,max,visit){
+      const low=min.map(at), high=max.map(at);
+      const count=low.reduce((n,v,i)=>n*(high[i]-v+1),1);
+      if(!Number.isFinite(count)||count>Math.min(4096,Math.max(32,rows.length))||
+        ![...low,...high].every(Number.isSafeInteger)){
+        for(const row of rows)visit(row);
+        return;
+      }
+      for(let z=low[2];z<=high[2];z++)for(let y=low[1];y<=high[1];y++)for(let x=low[0];x<=high[0];x++)
+        for(const row of buckets.get(key(x,y,z))??[])visit(row);
+      for(const row of outside)visit(row);
+    }
+    return {add,overlap};
+  }
+  W.spatial = Object.freeze({create,grid});
 })(KIT);
