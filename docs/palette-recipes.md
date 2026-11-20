@@ -746,6 +746,42 @@ Use `result.indexed()` or the JSON report's `raster` as an
 The fit raster contains only the selected palette swatches, with no
 interpolated colors baked into it.
 
+## Review dither usefulness
+
+```sh
+ink-studio palette dither-review examples/palette-dither-fit.json --out dither-review
+```
+
+Review uses the same input as `palette fit`. It measures each approved
+pair against the same closest solid, including pairs that produce a
+worse match. The pair's average is a linear-light blend weighted by
+the actual pixel counts in the native crop. `gain` is the solid's
+OKLab error minus the mix's OKLab error. A positive gain means the mix
+is closer to the target. The PNG for each reviewed pair shows the
+target, closest solid, blended average, and native pattern from left
+to right.
+
+The report includes the endpoints' OKLab and lightness separation,
+and counts horizontal and vertical neighbours that switch swatches.
+The texture score is the larger of two RMS contrasts. One weights
+the swatch contrast by their coverage in the whole patch. The other uses the
+measured contrast between neighbours in the native crop. This flags
+strong contrast in both large clusters and fine stipple.
+
+Add `"review": { "minGain": 0.01, "textureLimit": 0.12 }` to set the
+thresholds. A pair is useful when it improves the match by at least
+`minGain` and stays within `textureLimit`. The texture flag is a guide
+to visual review. Add `"share": 0.5` inside `review` to check a specific
+fraction of the second swatch, in palette order. That share snaps to the
+closest attainable two-colour coverage. With no requested share, each
+pair uses its best attainable average.
+
+Pairs gated by lightness, reserved targets, a disabled pattern, or
+crops too small for two colours are listed with a status. In the
+library, call `K.palette.reviewDither(definition, context)`. Use the
+zero-based pair index with `result.preview(index)` for the comparison
+or `result.indexed(index)` for the pattern by itself.
+
 ## Suggest editable lighting ramps
 
 Use `K.palette.lightingRamps.suggest({ palette, roles, materials })` to choose lighting swatches from an existing palette. `roles` can carry the scene's current named roles. Each material needs a `base` palette index or a hex/RGB target. An index pins the exact swatch. A target uses the nearest allowed swatch as the base.
