@@ -1598,6 +1598,8 @@ Use [shared boarding](boarding.md) for occupied mounts, carts, and ferries
 whose movement must clear both the carrier and its passengers.
 [Character surface contact](character-surfaces.md) lets walking characters
 ride moving decks, slip or drift along materials, and launch on landing.
+[Traversal links](traversal-links.md) connect characters to rails, timed
+lifts, boost rings, and flow volumes.
 
 `KIT.world.characters.create({tuning, selectMode, modes, allowSupport})`
 is an optional Y-up capsule solver. It uses the same support, signed
