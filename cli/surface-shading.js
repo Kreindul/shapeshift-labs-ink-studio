@@ -9,10 +9,11 @@ function surfaceShading(world, options, camera) {
   const rig = world.anim?.rig;
   const rigFrames = new Map();
   const projected = i => materials[surfaceData[i * STRIDE] - 1]?.projected;
+  const bevel = i => materials[surfaceData[i * STRIDE] - 1]?.bevelDistance;
 
   function rigFrame(i) {
     const part = rig?.bid[i];
-    if (!part || rig.free?.[i] || !projected(i)) return null;
+    if (!part || rig.free?.[i] || !(projected(i) || bevel(i))) return null;
     if (!rigFrames.has(part)) {
       const { M } = require('../index.js').load().KIT;
       const matrix = rig.M.subarray(part * 12, part * 12 + 9);
@@ -26,11 +27,14 @@ function surfaceShading(world, options, camera) {
   const { STRIDE } = SurfaceLook;
   const liveLight = camera.sun ?? (world.surfaceLight === undefined ? undefined :
     SurfaceLook.prepareLightTrack(world.surfaceLight)(time));
-  const materials = world.surfaces.map(({ settings, light }) =>
-    SurfaceLook.prepare(settings, world.pal, liveLight ?? light, world.surfaceEffects,
+  const materials = world.surfaces.map(({ settings, light, bevelDistance }) => {
+    const material = SurfaceLook.prepare(settings, world.pal, liveLight ?? light, world.surfaceEffects,
       { colorCurves: options.colorCurves !== false, colorLut: options.colorLut !== false, colorStack: options.colorStack !== false,
         paletteConstraints: options.paletteConstraints !== false && (options.lookMasks !== false || !settings.paletteConstraint?.mask),
-        paletteRoles: world.paletteRoles, blueNoise, onPaletteClip: camera.onPaletteClip }));
+        paletteRoles: world.paletteRoles, blueNoise, onPaletteClip: camera.onPaletteClip });
+    if (bevelDistance && material.layers.some(layer => layer.type === 'bevel')) material.bevelDistance = bevelDistance;
+    return material;
+  });
   const ids = new Map();
   const palettes = [], constraints = [];
   for (const material of materials) {
@@ -105,7 +109,7 @@ function surfaceShading(world, options, camera) {
     const angle = rotation(i);
     const c = Math.cos(angle),
       s = Math.sin(angle);
-    const source = prepared.projected ? rest : data;
+    const source = prepared.projected || prepared.bevelDistance ? rest : data;
     const frame = rigFrame(i);
     const ox = c * dx - s * dz, oy = y - centerY, oz = s * dx + c * dz;
     if (frame) {
@@ -139,13 +143,17 @@ function surfaceShading(world, options, camera) {
     view[0] = c * vx - s * vz;
     view[1] = parallel ? parallel[1] : eye[1] - y;
     view[2] = s * vx + c * vz;
+    if (prepared.bevelDistance || camera.detail?.texture || camera.detail?.specular) {
+      const depth = camera.orthographic ? 1 :
+        (eye[0]-x)*forward[0]+(eye[1]-y)*forward[1]+(eye[2]-z)*forward[2];
+      sample.artFootprint = Math.max(1e-6, depth) / camera.pixelsPerUnit;
+    }
+    sample.bevelDistance = prepared.bevelDistance;
     if (camera.detail?.texture || camera.detail?.specular) {
       const worldNormal = surfaceNormal(i);
       const normalLength = Math.hypot(...worldNormal) || 1, viewLength = Math.hypot(vx, view[1], vz) || 1;
       const facing = Math.abs(worldNormal[0]*vx+worldNormal[1]*view[1]+worldNormal[2]*vz)/(normalLength*viewLength);
-      const axial = camera.orthographic ? 1 :
-        (eye[0]-x)*forward[0]+(eye[1]-y)*forward[1]+(eye[2]-z)*forward[2];
-      sample.detailFootprint = Math.max(1e-6,axial)/(camera.pixelsPerUnit*Math.max(.12,facing));
+      sample.detailFootprint = sample.artFootprint / Math.max(.12, facing);
     }
     sample.sky = environment(i) ? sampleSky : undefined;
     if (sample.sky) {
@@ -185,7 +193,7 @@ function surfaceShading(world, options, camera) {
 
   return {
     has, normalAt, surfaceNormal, planar, environment, shade, palettes, constraints,
-    projected,
+    projected, bevel,
     reveals: i => materials[surfaceData[i * STRIDE] - 1]?.reveals
   };
 }

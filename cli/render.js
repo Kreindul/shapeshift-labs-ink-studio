@@ -1263,7 +1263,7 @@ function renderFrame(world, o, preparedPalettes) {
     const pixelSurface = !opticalActive && PIX?.[i * 8] && !surface?.reveals(i) && (!planar || (al >= 1 && !(flags & 1)));
     const projected = surface?.projected(i);
     const reflectedSky = !skyOverlay && surface?.environment(i);
-    const fragmentSurface = !pixelSurface && (planar || projected || reflectedSky || liveNormal && hasSurface);
+    const fragmentSurface = !pixelSurface && (planar || projected || surface?.bevel(i) || reflectedSky || liveNormal && hasSurface);
     const ditherRule = fragmentRule(i);
     const detailParticle = fieldParticle || world.effectParticles?.some(({ first, count }) => i >= first && i < first + count);
     const centered = hasSurface && !pixelSurface && !fragmentSurface;
