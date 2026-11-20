@@ -30,6 +30,7 @@
     const {targets,verbs,factionPath=['metadata','faction'],maxActive=256,historyLimit=128}=config;
     check(between(maxActive,1,1024)&&between(historyLimit,1,1024),'Invalid interaction limits');
     const path=selector(factionPath), definitions=new Map(), offers=new Map(), sources=new Set();
+    const emits=new Set(['started','completed','rejected','failed','cancelled','denied'].map(status=>'interaction-'+status));
     for(const [name,rule] of rows(verbs,128,'verbs')){
       check(keys(rule,['range','ticks','access','actorWhen','targetWhen','requires','cue'])&&
         Number.isFinite(rule.range)&&rule.range>=0&&rule.range<=128&&tick(rule.ticks??0)&&
@@ -49,6 +50,7 @@
         Q.condition(req.when,undefined);
         sources.add(req.field);
       }
+      if(rule.cue!==undefined)emits.add(rule.cue);
       definitions.set(name,{...rule,access,ticks:rule.ticks??0});
     }
     check(definitions.size>0,'Interactions need at least one verb');
@@ -62,6 +64,7 @@
         check(definitions.has(verb)&&keys(binding,['changes','effect']),'Invalid interaction binding '+name+'/'+verb);
         const changes=E.changes(binding.changes??{},attributes);
         bindings.set(verb,{changes,effect:binding.effect});
+        if(binding.effect?.action==='world/transfer')emits.add('transfer');
       }
       check(bindings.size>0,'Interaction target needs at least one verb '+name);
       offers.set(name,{...target,attributes,bindings,capacity:target.capacity??1});
@@ -162,7 +165,7 @@
 
     const field=read=>({type:'record',qualified:true,selector:true,read});
     const missing=()=>Q.missing('unknown interaction target or verb','missing');
-    return {initial:()=>initial,checkFields,validateState,shareCheckpoint:true,
+    return {initial:()=>initial,checkFields,validateState,shareCheckpoint:true,contract:{emits:[...emits]},
       checkAction(key,args){
         request(args,key==='cancel');
       },

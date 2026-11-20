@@ -65,6 +65,7 @@ function world(){
 
 test('gate access uses the live faction, due ticks, and the typed signal path',()=>{
   const run=W.runtime.create(world());
+  assert(run.composition().systems.use.emits.includes('gate-opened'));
   const preview=field(run,'use/check',{actor:actor('outsider'),target:'gate',verb:'open'});
   assert.equal(preview.reason,'access-denied');
   assert.equal(preview.subject.tags[0],'secure');
