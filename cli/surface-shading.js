@@ -24,7 +24,8 @@ function surfaceShading(world, options, camera) {
   }
   const { eye, forward, parallel, footprint, time, reflection, blueNoise } = camera;
   const { STRIDE } = SurfaceLook;
-  const liveLight = world.surfaceLight === undefined ? undefined : SurfaceLook.prepareLightTrack(world.surfaceLight)(time);
+  const liveLight = camera.sun ?? (world.surfaceLight === undefined ? undefined :
+    SurfaceLook.prepareLightTrack(world.surfaceLight)(time));
   const materials = world.surfaces.map(({ settings, light }) =>
     SurfaceLook.prepare(settings, world.pal, liveLight ?? light, world.surfaceEffects,
       { colorCurves: options.colorCurves !== false, colorLut: options.colorLut !== false, colorStack: options.colorStack !== false,
@@ -114,7 +115,7 @@ function surfaceShading(world, options, camera) {
     normal[0] = surfaceData[offset + 1];
     normal[1] = surfaceData[offset + 2];
     normal[2] = surfaceData[offset + 3];
-    sample.visibility = surfaceData[offset + 4];
+    sample.visibility = camera.sunVisibility?.(i, x, y, z) ?? surfaceData[offset + 4];
     const tx = surfaceData[offset + 5],
       ty = surfaceData[offset + 6],
       tz = surfaceData[offset + 7];

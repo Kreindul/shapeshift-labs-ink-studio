@@ -11,6 +11,8 @@ Use `--reflections off` or `--atmosphere off` to inspect each effect separately.
 
 The [WebGL canvas renderer](browser-renderer.md) supports the shared glass-beam pass. Planar capture, ripple-driven reflection, and volume integration in this guide use the CPU renderer unless a host implements those passes explicitly.
 
+For moving directional light and cast shadows on solid geometry, see [Live sun lighting](live-sun.md).
+
 ## Planar reflections
 
 ```js

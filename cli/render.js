@@ -30,6 +30,7 @@ function blueNoise(world, { seed }) {
 const SampleCoverage = require('../src/sample-coverage.js');
 const Airflow = require('../src/airflow.js');
 const LightSchedule = require('../src/light-schedule.js');
+const LiveSun = require('./live-sun.js');
 const surfaceShading = require('./surface-shading.js');
 const SceneOptics = require('../src/scene-optics.js');
 const { cameraRays, surfacePoint, reflectionSampler, atmosphereQuality, mediaSampler, applyAtmosphere } = require('./scene-optics.js');
@@ -113,7 +114,7 @@ function render(world, o, preparedPalettes) {
   const lookOptions = { palette: world.pal, roles: world.paletteRoles, context: world.surfaceEffects, lookInputs,
     blueNoise: settings => blueNoise(world, settings), skipMasks: o.lookMasks === false };
   const stages = !o.raw && RenderStages.plan(world, lookOptions);
-  const optics = !o.raw && RenderStages.optics(look.optics, lookOptions);
+  const optics = o.raw ? null : RenderStages.optics(look.optics, lookOptions);
   const scopedReflection = world.reflections?.length && (look.paletteConstraints?.targets?.length ||
     world.surfaces?.some(({ settings }) => settings.paletteConstraint));
   const coverageAware = !o.raw && (o.coverageAware ?? look.coverageAware ?? Boolean(optics || scopedReflection)) === true;
@@ -320,6 +321,8 @@ function render(world, o, preparedPalettes) {
           o.reflectionScale ?? 1
         )
       : null;
+  const sun = LiveSun.prepare(world.liveSun, o.liveSun, t);
+  let live;
   const surface = surfaceShading(world, stages && !coverageAware ? { ...o, paletteConstraints: false } : o, {
     eye,
     forward: [V[2], V[6], V[10]],
@@ -327,6 +330,8 @@ function render(world, o, preparedPalettes) {
     parallel: ortho ? [V[2], V[6], V[10]] : null,
     footprint: (dist * 2) / (tp * H),
     time: t,
+    sun: sun?.direction,
+    sunVisibility: sun && ((i, x, y, z) => live?.visibility(i, x, y, z)),
     blueNoise: settings => blueNoise(world, settings), onPaletteClip,
     onSurfaceClip: audit && ((r, g, b) => audit.sample('surface', r, g, b))
   });
@@ -467,6 +472,11 @@ function render(world, o, preparedPalettes) {
     SC[i] = sc;
     depth[i] = V[2] * x + V[6] * y + V[10] * z + V[14];
   }
+  if (sun) {
+    const frames = sampleFrames(world, t), normals = [];
+    const normalAt = i => normals[i] ?? (normals[i] = frames(i).normal ?? false);
+    live = LiveSun.create(sun, world, { x: X, y: Y, z: Z, alpha: AL, scale: SC }, normalAt);
+  }
   let mn = Infinity;
   for (let i = 0; i < N; i++) if (depth[i] < mn) mn = depth[i];
   if (world.back) for (let j = 0; j < world.back.length; j++) depth[world.back[j]] = mn;
@@ -604,9 +614,10 @@ function render(world, o, preparedPalettes) {
     const materialSample = staged?.material?.some(rule => rule.mask) ? stageSample(i, [x, y, z]) : undefined;
     const litMask = staged?.lit?.some(rule => rule.mask);
     const litNormal = litMask ? stageFrame(i).normal : null;
-    let r = (pk % 256) / 255,
-      g = (Math.floor(pk / 256) % 256) / 255,
-      b = Math.floor(pk / 65536) / 255;
+    const liveNormal = live?.normal(i), liveAlbedo = liveNormal && live.albedo(i);
+    let r = liveAlbedo ? liveAlbedo[0] : (pk % 256) / 255,
+      g = liveAlbedo ? liveAlbedo[1] : (Math.floor(pk / 256) % 256) / 255,
+      b = liveAlbedo ? liveAlbedo[2] : Math.floor(pk / 65536) / 255;
     if (staged?.material) [r, g, b] = stagedMaterial(i, staged.material, [r, g, b], materialSample);
     r += add[i];
     g += add[i];
@@ -674,7 +685,7 @@ function render(world, o, preparedPalettes) {
     const planar = surface?.planar(i);
     const pixelSurface = PIX?.[i * 8] && !surface?.reveals(i) && (!planar || (al >= 1 && !(flags & 1)));
     const projected = surface?.projected(i);
-    const fragmentSurface = !pixelSurface && (planar || projected);
+    const fragmentSurface = !pixelSurface && (planar || projected || liveNormal && hasSurface);
     const detailParticle = world.effectParticles?.some(({ first, count }) => i >= first && i < first + count);
     if (hasSurface && !pixelSurface && !fragmentSurface) {
       [r, g, b, coverage, glint, centerPalette] = surface.shade(i, x, y, z, x, y, z, r, g, b, undefined, undefined, lookPass?.surface);
@@ -683,7 +694,7 @@ function render(world, o, preparedPalettes) {
       !(flags & 2) && world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dn) * world.fog.max : 0;
     const reflectInRaster = planar && !pixelSurface;
     const normal = fragmentSurface ? surface.surfaceNormal(i) : null;
-    if (fogMix && !reflectInRaster && !staged?.lit) {
+    if (fogMix && !reflectInRaster && !staged?.lit && !liveNormal) {
       r += (fog[0] - r) * fogMix;
       g += (fog[1] - g) * fogMix;
       b += (fog[2] - b) * fogMix;
@@ -715,7 +726,7 @@ function render(world, o, preparedPalettes) {
       i01 = 0,
       i10 = 0,
       i11 = 0;
-    if (FN && FN[i * 12 + 11] && FN[i * 12 + 7] === pk && !add[i] && kind !== 5 && kind !== 12 && kind !== 13) {
+    if (!liveNormal && FN && FN[i * 12 + 11] && FN[i * 12 + 7] === pk && !add[i] && kind !== 5 && kind !== 12 && kind !== 13) {
       const f = i * 12,
         sc = SC[i],
         m00 = (a0 * FN[f + 4] + a1 * FN[f + 5] + a2 * FN[f + 6]) * sc,
@@ -771,6 +782,13 @@ function render(world, o, preparedPalettes) {
             }
           }
         }
+        if (liveNormal) {
+          const point = surfacePoint(rayAt(ix + .5, iy + .5), liveNormal, x, y, z, -cz, R);
+          const level = live.level(i, ...point);
+          pr *= level;
+          pg *= level;
+          pb *= level;
+        }
         if (automatic || scheduled) {
           const exposure = scheduled?.gain ?? sourceScale;
           const tint = scheduled?.color;
@@ -797,7 +815,7 @@ function render(world, o, preparedPalettes) {
           if (staged?.lit) rgb = RenderStages.apply(staged.lit, rgb, sample, lookPass?.stage);
           [pr, pg, pb] = glassLook ? glassLook(rgb, lookPass?.optics) : rgb;
         }
-        if (staged?.lit || (fragmentSurface && reflectInRaster)) {
+        if (staged?.lit || (fragmentSurface && reflectInRaster) || liveNormal) {
           pr += (fog[0] - pr) * fogMix;
           pg += (fog[1] - pg) * fogMix;
           pb += (fog[2] - pb) * fogMix;
