@@ -213,7 +213,7 @@ function pose(w, t) {
 const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
 if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
   die('--px needs a positive integer');
-let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles;
+let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, cloudOverride;
 function skyProfileOverrides(value) {
   if (typeof value !== 'string') die('--sky-profile expects track=profile pairs');
   const pairs = value.split(',').map(entry => entry.split('=').map(part => part.trim()));
@@ -253,6 +253,16 @@ function aerialOption() {
   if (value === 'off') return false;
   if (value !== undefined && value !== 'on' && value !== true) die('--aerial-perspective expects on or off');
   const pairs = [['aerial-start', 'start'], ['aerial-density', 'density'], ['aerial-contrast', 'contrast']];
+  const supplied = pairs.filter(([flag]) => opt[flag] !== undefined);
+  if (!value && !supplied.length) return undefined;
+  return Object.fromEntries(supplied.map(([flag, setting]) => [setting, opt[flag] === true ? NaN : num(flag)]));
+}
+
+function cloudShadowOption() {
+  const value = opt['cloud-shadows'];
+  if (value === 'off') return false;
+  if (value !== undefined && value !== 'on' && value !== true) die('--cloud-shadows expects on or off');
+  const pairs = [['cloud-shadow-strength', 'strength'], ['cloud-shadow-softness', 'softness']];
   const supplied = pairs.filter(([flag]) => opt[flag] !== undefined);
   if (!value && !supplied.length) return undefined;
   return Object.fromEntries(supplied.map(([flag, setting]) => [setting, opt[flag] === true ? NaN : num(flag)]));
@@ -299,6 +309,10 @@ const view = extra =>
       skyEnvironment: opt['sky-environment'] === 'off' ? false : opt['sky-environment'] === undefined ? undefined :
         (skyOverride ??= require('../src/sky-environment.js').compile(
           JSON.parse(fs.readFileSync(path.resolve(opt['sky-environment']), 'utf8')))),
+      cloudField: opt['cloud-field'] === 'off' ? false : opt['cloud-field'] === undefined ? undefined :
+        (cloudOverride ??= require('../src/cloud-field.js').compile(
+          JSON.parse(fs.readFileSync(path.resolve(opt['cloud-field']), 'utf8')))),
+      cloudShadows: cloudShadowOption(),
       skyTime: num('sky-time'),
       skyProfiles: opt['sky-profile'] === undefined ? undefined : (skyProfiles ??= skyProfileOverrides(opt['sky-profile'])),
       liveSun: liveSunOption(),
@@ -439,6 +453,7 @@ const CMD = {
         'any command that plays a diorama takes --poke 2:x,y,z (tap it at 2 seconds, toward that point; several with ;)',
         'sun options: --live-sun on|off --sun-direction x,y,z --sun-ambient n --sun-intensity n --shadow-map-size n --shadow-bias n --sun-shadows off',
         'bounce options: --sky-bounce color|preset|off --ground-bounce color|preset|off --sky-bounce-intensity n --ground-bounce-intensity n',
+        'cloud options: --cloud-field file.json|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',
         'sky options: --sky-environment file.json|off --sky-time seconds --sky-profile track=profile --sky-reflections scene|material',
         'aerial options: --aerial-perspective on|off --aerial-start units --aerial-density per-unit --aerial-contrast 0..1',
         'view options: --surface off (no finish layers) --water off --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --px1 (native art pixels) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (remove lone pixels) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n',

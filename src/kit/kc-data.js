@@ -294,6 +294,20 @@
         bad('finish.skyEnvironment', error.message);
       }
     }
+    if (st.finish.cloudField !== undefined && st.finish.cloudField !== false) {
+      try {
+        K.clouds.compile(st.finish.cloudField);
+      } catch (error) {
+        bad('finish.cloudField', error.message);
+      }
+    }
+    try {
+      const cloudShadows = K.clouds.shadowSettings(st.finish.cloudShadows);
+      if (cloudShadows && st.finish.cloudField === undefined)
+        bad('finish.cloudShadows', 'Cloud shadows need a cloud field');
+    } catch (error) {
+      bad('finish.cloudShadows', error.message);
+    }
     try {
       SkyEnvironment.aerial(st.finish.aerialPerspective);
     } catch (error) {

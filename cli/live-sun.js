@@ -149,7 +149,7 @@ function shadowMap(sun, data, { x, y, z, alpha, scale }, normalAt) {
   };
 }
 
-function create(sun, world, pose, normalAt) {
+function create(sun, world, pose, normalAt, cloudShadow) {
   // Albedo exists on opted-in sculpt bakes and explicitly described builder rows.
   // Older pixel-material bakes still carry the original material ramps.
   const fill = new Int32Array(pose.alpha.length).fill(-1);
@@ -180,7 +180,8 @@ function create(sun, world, pose, normalAt) {
   }
   const visibility = (i, x, y, z) => {
     if (!normals[i]) return undefined;
-    return shadow && facing[i] > 0 ? shadow(x, y, z, normals[i], facing[i]) : 1;
+    const geometry = shadow && facing[i] > 0 ? shadow(x, y, z, normals[i], facing[i]) : 1;
+    return geometry && cloudShadow ? geometry * cloudShadow(x, y, z) : geometry;
   };
   const level = (i, x, y, z) => sun.ambient + sun.intensity * facing[i] * visibility(i, x, y, z);
   function gains(i, x, y, z, rgb) {

@@ -34,6 +34,7 @@ const LiveSun = require('./live-sun.js');
 const surfaceShading = require('./surface-shading.js');
 const SceneOptics = require('../src/scene-optics.js');
 const SkyEnvironment = require('../src/sky-environment.js');
+const CloudField = require('../src/cloud-field.js');
 const { cameraRays, surfacePoint, reflectionSampler, atmosphereQuality, mediaSampler, applyAtmosphere } = require('./scene-optics.js');
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x),
   sstep = (a, b, x) => {
@@ -287,11 +288,26 @@ function render(world, o, preparedPalettes) {
   const aerial = o.atmosphere !== false && !o.captureCoverage ?
     SkyEnvironment.aerial(world.aerialPerspective, o.aerialPerspective, environment?.parameters) : null;
   const axialDepth = volumes.length || water || aerial ? new Float32Array(W * H).fill(Infinity) : null;
-  const skySample = sky && ((direction, out) => SkyEnvironment.shade(sky, direction, out));
-  const showSky = sky && !transparent && !o.captureCoverage;
-  const skyRay = sky && (showSky || aerial && ortho) ?
-    cameraRays(V, eye, W, H, ortho ? H * .5 / Math.tan(sky.orthoFov * .5) : focal, false) : null;
-  const skyDirection = pixel => skyRay(pixel % W + .5, Math.floor(pixel / W) + .5).direction;
+  const sun = LiveSun.prepare(world.liveSun, o.liveSun, t);
+  const cloudSource = o.cloudField ?? world.cloudField;
+  const cloudSettings = cloudSource === false ? null :
+    CloudField.shadowSettings(world.cloudShadows, o.cloudShadows, environment?.parameters);
+  if (cloudSettings && !cloudSource) throw new TypeError('Cloud shadows need a cloud field');
+  const clouds = cloudSource ? CloudField.compile(cloudSource).frame(o.skyTime ?? t, cloudSettings,
+    sun?.direction ?? sky?.sun ?? (o.volumeLighting ?? world.volumeLighting)?.sun?.direction) : null;
+  const cloudShadow = clouds?.shadow;
+  const skyBase = clouds?.visible && !sky ? hex(0) : bg;
+  const skySample = (sky || clouds?.visible) && ((direction, out, origin) => {
+    if (sky) SkyEnvironment.shade(sky, direction, out);
+    else for (let c = 0; c < 3; c++) out[c] = skyBase[c];
+    return origin ? clouds?.paint(origin, direction, out) ?? out : out;
+  });
+  const showSky = skySample && !transparent && !o.captureCoverage;
+  const skyRay = showSky || aerial && ortho && sky ?
+    cameraRays(V, eye, W, H, ortho ? H * .5 / Math.tan((sky?.orthoFov ?? Math.PI / 3) * .5) : focal, false) : null;
+  const skyRayAt = pixel => skyRay(pixel % W + .5, Math.floor(pixel / W) + .5);
+  const skyDirection = pixel => skyRayAt(pixel).direction;
+  const cloudEye = ortho ? eye.map((value, i) => value - (eyeD - dist) * V[2 + i * 4]) : eye;
   const skyColor = showSky && [0, 0, 0];
   // Orthographic geometry uses an artificial camera setback. Measure aerial distance from the nominal eye.
   const air = aerial && { ...aerial, start: aerial.start + eyeD - dist,
@@ -304,9 +320,9 @@ function render(world, o, preparedPalettes) {
     const quality = atmosphereQuality({ ...world.volumeQuality, ...o.volumeQuality });
     quality.wind = world.volumeWind && !o.wind && !an.wind ? Airflow.frame(world.volumeWind).velocity : wind.velocity;
     const lighting = volumes.some(volume => volume.type === 'field') && (o.volumeLighting ?? world.volumeLighting);
-    return { ...quality, time: t, media: lighting ? SceneOptics.lighting(lighting, world.pal) : undefined };
+    return { ...quality, time: t, cloudShadow, media: lighting ? SceneOptics.lighting(lighting, world.pal) : undefined };
   };
-  const geometrySample = probe || sortedSurfaces || aerial ? sampleFrames(world, t) : null;
+  const geometrySample = probe || sortedSurfaces || aerial || cloudShadow ? sampleFrames(world, t) : null;
   const captured = o.captureCoverage || transparent ? new Float32Array(W * H) : null;
   // The reflected pass uses the same projection and reads only the plane's front side.
   const reflectionTint = effects?.reflection || o.reflectionTint;
@@ -339,7 +355,6 @@ function render(world, o, preparedPalettes) {
           o.reflectionScale ?? 1
         )
       : null;
-  const sun = LiveSun.prepare(world.liveSun, o.liveSun, t);
   let live;
   const sunGains = sun && [0, 0, 0];
   const surface = surfaceShading(world, stages && !coverageAware ? { ...o, paletteConstraints: false } : o, {
@@ -352,6 +367,7 @@ function render(world, o, preparedPalettes) {
     footprint: (dist * 2) / (tp * H),
     time: t,
     sun: sun?.direction,
+    cloudShadow,
     sunVisibility: sun && ((i, x, y, z) => live?.visibility(i, x, y, z)),
     blueNoise: settings => blueNoise(world, settings), onPaletteClip,
     onSurfaceClip: audit && ((r, g, b) => audit.sample('surface', r, g, b))
@@ -496,7 +512,7 @@ function render(world, o, preparedPalettes) {
   if (sun) {
     const frames = sampleFrames(world, t), normals = [];
     const normalAt = i => normals[i] ?? (normals[i] = frames(i).normal ?? false);
-    live = LiveSun.create(sun, world, { x: X, y: Y, z: Z, alpha: AL, scale: SC }, normalAt);
+    live = LiveSun.create(sun, world, { x: X, y: Y, z: Z, alpha: AL, scale: SC }, normalAt, cloudShadow);
   }
   let mn = Infinity;
   for (let i = 0; i < N; i++) if (depth[i] < mn) mn = depth[i];
@@ -512,7 +528,7 @@ function render(world, o, preparedPalettes) {
     dep = new Float32Array(W * H),
     gls = new Float32Array(W * H);
   for (let i = 0; i < W * H; i++) {
-    const background = showSky ? skySample(skyDirection(i), skyColor) : bg;
+    const background = showSky ? skySample(skyDirection(i), skyColor, cloudEye) : bg;
     const backdrop = rayMedia ? rayMedia.shade(i, horizon, background, false) : background;
     col[i * 3] = backdrop[0];
     col[i * 3 + 1] = backdrop[1];
@@ -767,8 +783,9 @@ function render(world, o, preparedPalettes) {
         i11 = m00 / dt;
       }
     }
+    const bakedCloud = cloudShadow && !liveNormal && !(flags & 6);
     const wantsDepth = probe || deferred || aerial;
-    const probeNormal = wantsDepth ? geometrySample(i).normal : null, probeCenter = wantsDepth && [x, y, z];
+    const probeNormal = wantsDepth || bakedCloud ? geometrySample(i).normal : null, probeCenter = wantsDepth && [x, y, z];
     const probeReach = wantsDepth ? 3 * Math.sqrt(c00 + c11 + c22) : 0;
     const centerMark = lookPass && { ...lookPass.mark };
     for (let iy = y0; iy <= y1; iy++) {
@@ -839,6 +856,14 @@ function render(world, o, preparedPalettes) {
           if (scoped) rgb = contribution.shade(i, paletteId, rgb, ix, H - 1 - iy, sample, highlight <= .22, lookPass?.palette);
           if (staged?.lit) rgb = RenderStages.apply(staged.lit, rgb, sample, lookPass?.stage);
           [pr, pg, pb] = glassLook ? glassLook(rgb, lookPass?.optics) : rgb;
+        }
+        if (bakedCloud) {
+          const point = hit ?? (probeNormal ?
+            surfacePoint(rayAt(ix + .5, iy + .5), probeNormal, x, y, z, -cz, R) : [x, y, z]);
+          const gain = CloudField.dim(cloudShadow(...point));
+          pr *= gain;
+          pg *= gain;
+          pb *= gain;
         }
         if (staged?.lit || (fragmentSurface && reflectInRaster) || liveNormal) {
           pr += (fog[0] - pr) * fogMix;
@@ -1129,7 +1154,11 @@ function render(world, o, preparedPalettes) {
           const site = sample ?? (contribution.masked(i, c[5]) ? stageSample(i, [HX[p], HY[p], HZ[p]]) : undefined);
           rgb = contribution.shade(i, c[5], c, x, H - 1 - y, site, !(c[4] > .22), lookPass?.palette);
         }
-        const lit = staged?.lit ? RenderStages.apply(staged.lit, rgb, sample, lookPass?.stage) : rgb;
+        let lit = staged?.lit ? RenderStages.apply(staged.lit, rgb, sample, lookPass?.stage) : rgb;
+        if (cloudShadow && !live?.normal(i) && !(Math.round(d[i * 16 + 11]) & (32 | 64))) {
+          const gain = CloudField.dim(cloudShadow(HX[p], HY[p], HZ[p]));
+          lit = [lit[0] * gain, lit[1] * gain, lit[2] * gain];
+        }
         if (lookPass) lookPass.fragment(p, retainLayers ? contributions.weight(p) : 1 - (surfaceOverlay?.[p * 4 + 3] || 0),
           lookPass.mark, true);
         const kf = world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dep[p]) * world.fog.max : 0;
@@ -1269,7 +1298,15 @@ function render(world, o, preparedPalettes) {
       for (let q = 0; q < W * H; q++) {
         if (sprC[q] < 0 || !PALC[sprC[q]]) continue;
         const depth = eyeD - R + sprD[q] * 2 * R;
-        const c = rayMedia ? rayMedia.shade(q, depth, PALC[sprC[q]]) : PALC[sprC[q]];
+        let c = PALC[sprC[q]];
+        if (cloudShadow) {
+          const { origin, direction, axial } = rayAt(q % W + .5, Math.floor(q / W) + .5);
+          const distance = depth / axial;
+          const gain = CloudField.dim(cloudShadow(origin[0] + direction[0] * distance,
+            origin[1] + direction[1] * distance, origin[2] + direction[2] * distance));
+          c = c.map(value => value * gain);
+        }
+        if (rayMedia) c = rayMedia.shade(q, depth, c);
         col[q * 3] = c[0];
         col[q * 3 + 1] = c[1];
         col[q * 3 + 2] = c[2];

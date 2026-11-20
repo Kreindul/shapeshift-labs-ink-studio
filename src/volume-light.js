@@ -1,5 +1,6 @@
 /* Front-to-back integration for a bounded density with optional single scattering. */
 const VolumeLight = (() => {
+  const clouds = typeof CloudField === 'undefined' ? require('./cloud-field.js') : CloudField;
   const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const vector = (value, name) => {
@@ -51,11 +52,11 @@ const VolumeLight = (() => {
   }
 
   const phase = (g, cosine) => (1 - g * g) / Math.pow(1 + g * g - 2 * g * cosine, 1.5);
-  function illuminate(volume, output, x, y, z, direction, media) {
+  function illuminate(volume, output, x, y, z, direction, media, visibility) {
     const { ambient, sun, point, shadow } = media;
     output.fill(ambient);
-    if (sun && sun.intensity && (!shadow || !shadow(x, y, z, sun.direction, sun.distance))) {
-      const amount = sun.intensity * phase(volume.anisotropy, dot(direction, sun.direction));
+    if (sun && sun.intensity && visibility && (!shadow || !shadow(x, y, z, sun.direction, sun.distance))) {
+      const amount = sun.intensity * visibility * phase(volume.anisotropy, dot(direction, sun.direction));
       for (let i = 0; i < 3; i++) output[i] += sun.rgb[i] * amount;
     }
     if (point?.intensity) {
@@ -72,22 +73,25 @@ const VolumeLight = (() => {
   }
 
   function integrate(segments, origin, direction, stop, result, options = {}) {
-    const { time = 0, media, maxSteps = 64, stepScale = 1, jitter = .5, skip = true } = options;
+    const { time = 0, media, maxSteps = 64, stepScale = 1, jitter = .5, skip = true, cloudShadow } = options;
     const active = new Set(), rgb = [0, 0, 0], light = [1, 1, 1];
     result[0] = result[1] = result[2] = 0;
     result[3] = 1;
     let last = 0;
-    function blend(density, length) {
+    const cloudVisibility = t => cloudShadow(origin[0] + t * direction[0], origin[1] + t * direction[1],
+      origin[2] + t * direction[2]);
+    function blend(density, length, gain = 1) {
       if (density <= 0) return;
       const alpha = -Math.expm1(-density * length);
       const contribution = result[3] * alpha / density;
-      for (let k = 0; k < 3; k++) result[k] += contribution * rgb[k];
+      for (let k = 0; k < 3; k++) result[k] += contribution * rgb[k] * gain;
       result[3] *= 1 - alpha;
     }
     const entry = segments[0]?.[0] ?? 0;
     const rateFloor = (Math.min(stop, segments.at(-1)?.[0] ?? stop) - entry) / maxSteps;
+    const hasField = segments.some(([, volume]) => volume.type === 'field');
     for (const [end, volume, sign] of segments) {
-      if (result[3] < .001) break;
+      if (hasField && result[3] < .001) break;
       if (active.size && end > last) {
         let minStep = Infinity;
         for (const v of active) if (v.type === 'field') minStep = Math.min(minStep, v.step * stepScale);
@@ -98,7 +102,12 @@ const VolumeLight = (() => {
             density += v.density;
             for (let k = 0; k < 3; k++) rgb[k] += v.density * v.rgb[k];
           }
-          blend(density, end - last);
+          if (cloudShadow) {
+            // Sample the changing light along the segment while keeping analytic extinction.
+            const step = (end - last) / 4;
+            for (let i = 0; i < 4; i++)
+              blend(density, step, clouds.dim(cloudVisibility(last + (i + .5) * step)));
+          } else blend(density, end - last);
         } else {
           const step = Math.max(minStep, rateFloor);
           for (let t = last; t < end && result[3] >= .001;) {
@@ -106,13 +115,15 @@ const VolumeLight = (() => {
             if (t + distance === t) break;
             const depth = t + distance * jitter;
             const x = origin[0] + depth * direction[0], y = origin[1] + depth * direction[1], z = origin[2] + depth * direction[2];
+            const visibility = cloudShadow?.(x, y, z) ?? 1;
+            const gain = clouds.dim(visibility);
             let density = 0, advance = Infinity;
             rgb.fill(0);
             for (const v of active) {
               if (v.type !== 'field') {
                 advance = 0;
                 density += v.density;
-                for (let k = 0; k < 3; k++) rgb[k] += v.density * v.rgb[k];
+                for (let k = 0; k < 3; k++) rgb[k] += v.density * v.rgb[k] * gain;
                 continue;
               }
               const gap = skip && v.field.skip ? v.field.skip(origin[0] + t * direction[0], origin[1] + t * direction[1],
@@ -127,8 +138,8 @@ const VolumeLight = (() => {
               if (!extinction) continue;
               density += extinction;
               const base = mediumColor(v, value);
-              if (v.lit && media) illuminate(v, light, x, y, z, direction, media);
-              else light.fill(1);
+              if (v.lit && media) illuminate(v, light, x, y, z, direction, media, visibility);
+              else light.fill(v.lit ? gain : 1);
               for (let k = 0; k < 3; k++)
                 rgb[k] += extinction * (base[k] * light[k] + v.emissiveRgb[k] * v.emissiveGain);
             }

@@ -48,7 +48,8 @@ const SkyEnvironment = (() => {
   const colorChannels = ['zenith', 'horizon', 'ground', 'sunColor', 'overcastColor'];
   const ranges = { daylight: [0, 1], sunAzimuth: [-1e6, 1e6], sunAltitude: [-Math.PI/2, Math.PI/2],
     sunSize: [.001, .3], sunStrength: [0, 8], overcast: [0, 1],
-    aerialStart: [0, 1e6], aerialDensity: [0, 64], aerialContrast: [0, 1] };
+    aerialStart: [0, 1e6], aerialDensity: [0, 64], aerialContrast: [0, 1],
+    cloudShadowStrength: [0, 1], cloudShadowSoftness: [0, 1000] };
   const base = Object.freeze({
     zenith: '#234a80', horizon: '#aec5cc', ground: '#263442', sunColor: '#ffe7be',
     sunAzimuth: 2.8, sunAltitude: .36, sunSize: .022, sunStrength: .6, orthoFov: 38

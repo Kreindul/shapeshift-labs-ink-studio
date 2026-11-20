@@ -91,6 +91,7 @@ function surfaceShading(world, options, camera) {
     return normalAt(i, frame ? frame.apply(frame.normal, normal) : normal);
   }
 
+  const sampleSky = sky && ((direction, out) => sky(direction, out, sample.worldPosition));
   function shade(i, x, y, z, centerX, centerY, centerZ, r, g, b, sx, sy, visit) {
     const offset = i * STRIDE;
     const { position, normal, view } = sample;
@@ -119,7 +120,7 @@ function surfaceShading(world, options, camera) {
     normal[0] = surfaceData[offset + 1];
     normal[1] = surfaceData[offset + 2];
     normal[2] = surfaceData[offset + 3];
-    sample.visibility = camera.sunVisibility?.(i, x, y, z) ?? surfaceData[offset + 4];
+    sample.visibility = camera.sunVisibility?.(i, x, y, z) ?? surfaceData[offset + 4] * (camera.cloudShadow?.(x, y, z) ?? 1);
     const tx = surfaceData[offset + 5],
       ty = surfaceData[offset + 6],
       tz = surfaceData[offset + 7];
@@ -129,7 +130,7 @@ function surfaceShading(world, options, camera) {
     view[0] = c * vx - s * vz;
     view[1] = parallel ? parallel[1] : eye[1] - y;
     view[2] = s * vx + c * vz;
-    sample.sky = environment(i) ? sky : undefined;
+    sample.sky = environment(i) ? sampleSky : undefined;
     if (sample.sky) {
       sample.skyView[0] = vx;
       sample.skyView[1] = view[1];

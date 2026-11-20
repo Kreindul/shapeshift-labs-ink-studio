@@ -1,4 +1,5 @@
 const SceneOptics = require('../src/scene-optics.js');
+const CloudField = require('../src/cloud-field.js');
 const { airTransmission } = require('../src/sky-environment.js');
 
 function cameraRays(view, eye, W, H, focal, ortho) {
@@ -130,13 +131,17 @@ function traceMedia(volumes, segments, origin, direction, stop, result, sample, 
     if (start >= stop) break;
     const end = Math.min(stop, exit);
     air(start);
-    const depth = surface - origin[1] - (start + end) * .5 * direction[1];
+    const midpoint = (start + end) * .5;
+    const depth = surface - origin[1] - midpoint * direction[1];
+    const visibility = options?.cloudShadow?.(origin[0] + midpoint * direction[0], surface,
+      origin[2] + midpoint * direction[2]) ?? 1;
+    const gain = CloudField.dim(visibility);
     const u = Math.max(0, Math.min(1, (depth - style.depthRange[0]) / (style.depthRange[1] - style.depthRange[0])));
     const deep = u * u * (3 - 2 * u);
     for (let channel = 0; channel < 3; channel++) {
       const loss = -Math.expm1(-style.extinction[channel] * (end - start));
       const tint = style.tint[channel] + (style.deepTint[channel] - style.tint[channel]) * deep;
-      result[channel] += result[channel + 3] * loss * tint;
+      result[channel] += result[channel + 3] * loss * tint * gain;
       result[channel + 3] *= 1 - loss;
     }
     cursor = end;
@@ -201,7 +206,8 @@ function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon, quality, ti
   const light = [0, 0, 0, 1], sample = [0, 0, 0, 1];
   const fields = volumes.some(volume => volume.type === 'field');
   const query = { ...quality, time, media };
-  const temporal = fields && quality.jitter === 'spatiotemporal' && history;
+  // Density history cannot track lighting changes from the moving coverage grid.
+  const temporal = fields && !quality.cloudShadow && quality.jitter === 'spatiotemporal' && history;
   const tile = fields && quality.jitter !== 'off' ? volumeNoise(quality.seed) : null;
   const accumulation = temporal ? new Float32Array(W * H * 4) : null;
   const frame = temporal ? Math.floor(time * 60) : 0;
