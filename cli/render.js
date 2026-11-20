@@ -42,6 +42,8 @@ const weatherFrame = require('./weather.js');
 const WindField = require('../src/wind-field.js');
 const Precipitation = require('./precipitation.js');
 const RainImpacts = require('./rain-impacts.js');
+const AtlasSprites = require('../src/atlas-sprites.js');
+const AtlasRaster = require('./atlas-sprites.js');
 const { cameraRays, surfacePoint, reflectionSampler, atmosphereQuality, mediaSampler, applyAtmosphere } = require('./scene-optics.js');
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x),
   sstep = (a, b, x) => {
@@ -63,8 +65,8 @@ function viewMatrix(yaw, pitch, dist, T) {
     xz = -zx;
   const xy = 0,
     xl = Math.hypot(xx, xz);
-  xx /= xl;
-  xz /= xl;
+  xx = xl ? xx / xl : Math.cos(yaw);
+  xz = xl ? xz / xl : -Math.sin(yaw);
   const yx = zy * xz - zz * xy,
     yy = zz * xx - zx * xz,
     yz = zx * xy - zy * xx;
@@ -328,6 +330,12 @@ function render(world, o, preparedPalettes) {
     sun?.direction ?? sky?.sun ?? (o.volumeLighting ?? world.volumeLighting)?.sun?.direction,
     cloudDisplacement, o.cloudRepresentation ?? world.cloudRepresentation, flash?.light, cutouts?.cloud) : null;
   const cloudShadow = clouds?.shadow;
+  const spriteAtlases=AtlasSprites.placements(world.spriteAtlases,o.spriteAtlases);
+  const sprites=AtlasRaster.rasterize(spriteAtlases,{
+    eye,V,W,H,focal,ortho,near,rayAt,time:t,override:o.spriteAtlasMode,sun,
+    visibility:(position)=>(cloudShadow?.(...position)??1)*(exposure?.light?.(...position)??1),
+    clip:reflectionPlane && (position=>SceneOptics.planeDistance(reflectionPlane,...position)>reflectionPlane.bias)
+  });
   const cloudEye = ortho ? eye.map((value, i) => value - (eyeD - dist) * V[2 + i * 4]) : eye;
   const cloudView = clouds?.view?.(cloudEye, ortho ? [V[2],V[6],V[10]] : null);
   const axialDepth = volumes.length || water || aerial || cloudView ? new Float32Array(W * H).fill(Infinity) : null;
@@ -655,7 +663,7 @@ function render(world, o, preparedPalettes) {
     FPAL = FN ? world.pal.map((h, i) => hex(i)) : null;
   let deferred = sortedSurfaces ? new Map() : null, deferredCount = 0, orderFallback = false;
   function composite(p, i, z, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, mark,
-    opticalDepth = z) {
+    opticalDepth = z, sprite) {
     const p3 = p * 3, ia = 1 - a;
     if (rayMedia) [pr, pg, pb] = rayMedia.shade(p, opticalDepth, [pr, pg, pb]);
     if (retainLayers && glass && bend && !contributions) contributions = contributionLayers(col, captured, W, H, false, bend);
@@ -664,7 +672,7 @@ function render(world, o, preparedPalettes) {
     col[p3 + 1] = pg * a + col[p3 + 1] * ia;
     col[p3 + 2] = pb * a + col[p3 + 2] * ia;
     if (captured) captured[p] = a + captured[p] * ia;
-    if (art) art.fragment(p, i, a, wd, z, emits, pr, pg, pb);
+    if (art) art.fragment(p, i, a, wd, z, emits, pr, pg, pb, sprite);
     if (lookPass) {
       const redraw = PIX?.[i * 8] && wd && a > .5 && !surface?.reveals(i);
       lookPass.fragment(p, a, redraw ? undefined : mark);
@@ -697,9 +705,29 @@ function render(world, o, preparedPalettes) {
     else if (win && !retainLayers && !coat && a > 0.5) win[p] = -1;
   }
 
-  function playFragments(sort) {
+  let spriteIndex=0;
+  const normalizedDepth=z=>clamp((z-(eyeD-R))/(2*R),0,1);
+  function spriteSample(sprite) {
+    const {z,alpha,color}=sprite;
+    const dn=normalizedDepth(z), fogMix=world.fog.max>0&&world.fog.start<1 ?
+      sstep(world.fog.start,1,dn)*world.fog.max*(exposure?.fog?.(...sprite.position)??1) : 0;
+    const rgb=color.map((value,c)=>value+(fog[c]-value)*fogMix);
+    return [-1,z,dn,alpha,...rgb,alpha>=.5,false,0,0,false,false,alpha<.5,false,undefined,z,sprite];
+  }
+  function playSprites(through,queued) {
+    while (spriteIndex<sprites.length && sprites[spriteIndex].z>=through) {
+      const sprite=sprites[spriteIndex++], sample=spriteSample(sprite);
+      if (queued) {
+        if (!deferred.has(sprite.p)) deferred.set(sprite.p,[]);
+        deferred.get(sprite.p).push({ sort:sprite.z,index:spriteIndex-sprites.length-1,center:sprite.z,sample });
+      } else composite(sprite.p,...sample);
+    }
+  }
+  function playFragments(sort,through=-Infinity) {
+    if (sprites.length) playSprites(through,true);
     for (const [p, layers] of deferred) {
       if (sort) layers.sort((a, b) => b.sort - a.sort || a.index - b.index);
+      else if (sprites.length) layers.sort((a,b)=>b.center-a.center || a.index-b.index);
       for (const entry of layers) {
         const args = entry.sample;
         if (!sort) {
@@ -712,8 +740,9 @@ function render(world, o, preparedPalettes) {
     deferred = null;
   }
   for (let n = 0; n < N; n++) {
-    const i = order[n],
-      q = i * 16,
+    const i = order[n];
+    if (!deferred && spriteIndex<sprites.length) playSprites(-depth[i],false);
+    const q = i * 16,
       al = AL[i],
       x = X[i],
       y = Y[i],
@@ -995,7 +1024,7 @@ function render(world, o, preparedPalettes) {
           sampledDepth(rayAt(ix + .5, iy + .5), probeNormal, probeCenter, -cz, probeReach) : -cz;
         if (probe) probe(p, i, -cz, surfaceZ, pr, pg, pb, a);
         if (deferred && deferredCount >= fragmentBudget) {
-          playFragments(false);
+          playFragments(false,-cz);
           orderFallback = true;
         }
         if (deferred) {
@@ -1012,6 +1041,7 @@ function render(world, o, preparedPalettes) {
     }
   }
   if (deferred) playFragments(true);
+  else if (spriteIndex<sprites.length) playSprites(-Infinity,false);
   /* colour per pixel. Each pixel's line of sight is met with the plane of the dab in front there (the way its surface truly faces),
      and the pixel is coloured at that exact place: by its pattern, if it has one, or by its ramp. How lit it is is the mean over the
      pixels round it that lie on the same ramp and surface, so the edges between bands are drawn by the pixels, not by the dabs */

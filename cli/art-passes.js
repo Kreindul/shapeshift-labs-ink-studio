@@ -63,14 +63,17 @@ function createArtPasses(request, w, h) {
   const owner = needsOwner ? new Int32Array(size).fill(-1) : null;
   const depth = needsOwner ? new Float32Array(size).fill(Infinity) : null;
 
-  function fragment(p, i, a, solid, z, emits, r, g, b) {
+  let atlasOwners;
+  function fragment(p, i, a, solid, z, emits, r, g, b, atlas) {
+    const tint=atlas?.emission;
+    emits ||= Boolean(tint);
     if (coverage) coverage[p] = a + coverage[p] * (1 - a);
     if (emission) {
       const j = p * 3;
       if (emits || emission[j] || emission[j + 1] || emission[j + 2]) {
-        emission[j] = ArtPasses.over(emits ? r : 0, emission[j], a);
-        emission[j + 1] = ArtPasses.over(emits ? g : 0, emission[j + 1], a);
-        emission[j + 2] = ArtPasses.over(emits ? b : 0, emission[j + 2], a);
+        emission[j] = ArtPasses.over(tint ? tint[0] : emits ? r : 0, emission[j], a);
+        emission[j + 1] = ArtPasses.over(tint ? tint[1] : emits ? g : 0, emission[j + 1], a);
+        emission[j + 2] = ArtPasses.over(tint ? tint[2] : emits ? b : 0, emission[j + 2], a);
       }
     }
     if (emissionDepth && a > .03) {
@@ -85,10 +88,13 @@ function createArtPasses(request, w, h) {
     if (owner && ArtPasses.ownsSurface(a, solid, z, depth[p])) {
       owner[p] = i;
       depth[p] = z;
+      if (atlas) (atlasOwners??=new Map()).set(p,atlas);
+      else atlasOwners?.delete(p);
     }
   }
 
   function sprite(p, i, z) {
+    atlasOwners?.delete(p);
     if (coverage) coverage[p] = 1;
     if (emission) emission.fill(0, p * 3, p * 3 + 3);
     if (emissionDepth) emissionDepth[p] = Infinity;
@@ -125,6 +131,13 @@ function createArtPasses(request, w, h) {
     if (normalOut || positionOut || objectOut) {
       const frames = new Map(), sample = sampleFrames(world, time);
       for (let p = 0; p < size; p++) {
+        const atlas=atlasOwners?.get(p);
+        if (atlas) {
+          if (normalOut && atlas.normal) normalOut.set(atlas.normal,p*3);
+          positionOut?.set(atlas.position,p*3);
+          objectOut?.set(atlas.objectPosition,p*3);
+          continue;
+        }
         const i = owner[p];
         if (i < 0) continue;
         if (!frames.has(i)) frames.set(i, sample(i));

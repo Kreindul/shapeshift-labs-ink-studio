@@ -1,8 +1,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const PNG = require('./png.js');
-const { render } = require('./render.js');
+const { render, FOV } = require('./render.js');
 const ArtEffects = require('../src/art-effects.js');
+const AtlasSprites = require('../src/atlas-sprites.js');
 
 const mapNames = ['depth', 'normal', 'emission', 'silhouette'];
 const byte = value => Math.round(Math.max(0, Math.min(1, value)) * 255);
@@ -11,7 +12,7 @@ const integer = (value, lo, hi) => Number.isSafeInteger(value) && value >= lo &&
 function spriteAtlas(world, options = {}) {
   const {
     width = 96, height = 96, directions = 8, times = [0], fps = 12, columns = directions,
-    pivot = world.cam.target, yaw = world.cam.yaw, maps = [], pose, view = {}, depthRange, sourceTimes
+    pivot = world.cam.target, yaw = world.cam.yaw, maps = [], pose, view = {}, depthRange, sourceTimes, pitches
   } = options;
   if (!integer(width, 1, 2048) || !integer(height, 1, 2048) || !integer(directions, 1, 64) ||
       !integer(columns, 1, 256) || !Number.isFinite(fps) || fps <= 0 || fps > 240 ||
@@ -20,12 +21,15 @@ function spriteAtlas(world, options = {}) {
       (sourceTimes !== undefined && (!Array.isArray(sourceTimes) || sourceTimes.length !== times.length ||
         Array.from(sourceTimes).some(time => !Number.isFinite(time) || time < 0) || typeof pose !== 'function')) ||
       !Array.isArray(pivot) || pivot.length !== 3 || !pivot.every(Number.isFinite) || !Number.isFinite(yaw) ||
+      (pitches!==undefined && (!Array.isArray(pitches)||!pitches.length||pitches.length>12||
+        !Array.from(pitches).every(n=>Number.isFinite(n)&&Math.abs(n)<=Math.PI*.5))) ||
       !Array.isArray(maps) || maps.some(map => !mapNames.includes(map)) ||
       (pose !== undefined && typeof pose !== 'function'))
     throw new RangeError('Invalid sprite atlas dimensions, timing, directions, pivot or maps');
   const requested = [...new Set(maps)];
   const passes = requested.filter(name => name !== 'silhouette');
-  const count = times.length * directions, cols = Math.min(count, columns);
+  const elevations=pitches??[undefined], views=directions*elevations.length;
+  const count = times.length * views, cols = Math.min(count, columns);
   const rows = Math.ceil(count / cols), w = width * cols, h = height * rows;
   if (w * h * (requested.length + 1) > 32e6) throw new RangeError('Sprite atlas exceeds its pixel budget');
   if (depthRange && (!Array.isArray(depthRange) || depthRange.length !== 2 ||
@@ -36,21 +40,22 @@ function spriteAtlas(world, options = {}) {
   const depths = requested.includes('depth') ? new Float32Array(w * h).fill(Infinity) : null;
   let minDepth = Infinity, maxDepth = -Infinity;
   const entries = [];
-  const history = Array.from({ length: directions }, () => ArtEffects.history({ frames: 24 }));
+  const history = Array.from({ length: views }, () => ArtEffects.history({ frames: 24 }));
   const { volumeHistory } = require('../src/scene-optics.js');
   const volumes = view.volumeQuality?.jitter === 'spatiotemporal' || world.volumeQuality?.jitter === 'spatiotemporal'
-    ? Array.from({ length: directions }, () => volumeHistory()) : [];
+    ? Array.from({ length: views }, () => volumeHistory()) : [];
   const orientation = Array.from({ length: directions }, (_, i) => yaw + i * Math.PI * 2 / directions);
   for (let f = 0; f < times.length; f++) {
     const time = times[f], sourceTime = sourceTimes?.[f] ?? time;
     if (pose) pose(world, sourceTime);
     else world.anim?.update?.(f ? time - times[f - 1] : 0, time);
     const duration = f + 1 < times.length ? times[f + 1] - time : 1 / fps;
-    for (let direction = 0; direction < directions; direction++) {
-      const i = f * directions + direction, ox = i % cols * width, oy = Math.floor(i / cols) * height;
+    for (let angle=0;angle<views;angle++) {
+      const direction=angle%directions, pitch=elevations[Math.floor(angle/directions)]??view.pitch??world.cam.pitch;
+      const i = f * views + angle, ox = i % cols * width, oy = Math.floor(i / cols) * height;
       const image = render(world, { ...view, t: sourceTime, w: width, h: height, px: 1,
-        yaw: orientation[direction], ortho: true, target: pivot,
-        transparent: true, passes, artHistory: history[direction], volumeHistory: volumes[direction] });
+        yaw: orientation[direction], pitch, ortho: true, target: pivot,
+        transparent: true, passes, artHistory: history[angle], volumeHistory: volumes[angle] });
       const data = image.passes;
       let pixels = 0, left = width, top = height, right = -1, bottom = -1;
       for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
@@ -84,7 +89,10 @@ function spriteAtlas(world, options = {}) {
           images.emission[k + 3] = Math.max(images.emission[k], images.emission[k + 1], images.emission[k + 2]);
         }
       }
-      const entry = { frame: f, direction, yaw: orientation[direction], time, duration, ...(sourceTimes && { sourceTime }),
+      const distance=(view.dist||world.cam.dist/(view.zoom||1))/(world.anim?.zoom||1);
+      const entry = { frame: f, direction, yaw: orientation[direction], pitch,
+        unitsPerPixel:2*distance*Math.tan(FOV/2)/((view.lensScale??1)*height),
+        depthOrigin:distance+2*world.radius+4, time, duration, ...(sourceTimes && { sourceTime }),
         rect: { x: ox, y: oy, width, height }, pivot: { x: width / 2, y: height / 2 } };
       if (images.silhouette) entry.silhouette = { pixels, bounds: pixels ? [left, top, right, bottom] : null,
         touchesBorder: left === 0 || top === 0 || right === width - 1 || bottom === height - 1 };
@@ -103,8 +111,8 @@ function spriteAtlas(world, options = {}) {
       images.depth[q + 3] = 255;
     }
   }
-  const metadata = { width: w, height: h, tileWidth: width, tileHeight: height, directions, fps,
-    pivot: pivot.slice(), frames: entries,
+  const metadata = { width: w, height: h, tileWidth: width, tileHeight: height, directions, fps, ...(pitches && { pitches:pitches.slice() }),
+    pivot: pivot.slice(), frames: entries, normalSpace:'asset', emissionMode:'baked',
     encodings: {
       color: 'straight RGBA',
       ...(images.silhouette && { silhouette: 'binary RGBA coverage at alpha >= 128' }),
@@ -126,4 +134,20 @@ function writeAtlas(directory, { images, metadata }) {
   fs.writeFileSync(path.join(directory, 'atlas.json'), JSON.stringify({ ...metadata, files }, null, 2) + '\n');
 }
 
-module.exports = { spriteAtlas, writeAtlas };
+function readSpriteAtlas(file) {
+  const manifest=fs.statSync(file).isDirectory()?path.join(file,'atlas.json'):file;
+  const metadata=JSON.parse(fs.readFileSync(manifest,'utf8'));
+  if (typeof metadata.files?.color!=='string') throw new TypeError('Sprite atlas manifest needs a color PNG');
+  const images={};
+  for (const name of ['color','depth','normal','emission']) {
+    const asset=metadata.files[name];
+    if (asset===undefined) continue;
+    if (typeof asset!=='string') throw new TypeError('Sprite atlas '+name+' needs a PNG path');
+    const {w,h,data,max}=PNG.raster(path.resolve(path.dirname(manifest),asset));
+    if (w!==metadata.width||h!==metadata.height) throw new RangeError('Sprite atlas '+name+' PNG dimensions differ from the manifest');
+    images[name]=Uint8Array.from(data,n=>Math.round(n*255/max));
+  }
+  return AtlasSprites.compile({metadata,images});
+}
+
+module.exports = { spriteAtlas, writeAtlas, readSpriteAtlas };

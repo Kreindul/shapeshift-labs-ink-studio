@@ -99,7 +99,18 @@ function dataScene(file, override, { installedPacks = false } = {}) {
   if (problems.length) console.error(K.diorama.report(problems));
   if (problems.some(p => p.level === 'error'))
     die('not built: ' + problems.filter(p => p.level === 'error').length + ' mistake(s) in ' + file);
-  return { ...K.diorama.scene(spec, { assets }), lookPreviewPacks: spec.assetPacks };
+  const descriptor=K.diorama.scene(spec,{assets});
+  const atlases=new Map();
+  return { ...descriptor, lookPreviewPacks:spec.assetPacks, build(...args) {
+    const world=descriptor.build(...args);
+    if (Array.isArray(world.spriteAtlases)) world.spriteAtlases=world.spriteAtlases.map(placement=>{
+      if (typeof placement?.atlas!=='string') return placement;
+      const file=path.resolve(dir,placement.atlas);
+      if (!atlases.has(file)) atlases.set(file,require('./sprite-atlas.js').readSpriteAtlas(file));
+      return K.sprite.placeAtlas({ ...placement, atlas:atlases.get(file) });
+    });
+    return world;
+  } };
 }
 function scene(id) {
   if (!id) die('which diorama? try: ink-studio scenes');
@@ -213,7 +224,7 @@ function pose(w, t) {
 const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
 if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
   die('--px needs a positive integer');
-let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride;
+let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, inputSpriteAtlas;
 function skyProfileOverrides(value) {
   if (typeof value !== 'string') die('--sky-profile expects track=profile pairs');
   const pairs = value.split(',').map(entry => entry.split('=').map(part => part.trim()));
@@ -291,6 +302,20 @@ function sceneExposureOption() {
   if (value === true || value === 'on') return true;
   return sceneExposureOverride ??= require('../src/scene-exposure.js').compile(
     JSON.parse(fs.readFileSync(path.resolve(value), 'utf8')));
+}
+
+function spriteAtlasOption() {
+  const value=opt['sprite-atlas'];
+  if (value===undefined) return undefined;
+  if (value==='off') return false;
+  if (value==='on' || value===true) return true;
+  if (!inputSpriteAtlas) {
+    const atlas=require('./sprite-atlas.js').readSpriteAtlas(path.resolve(value));
+    inputSpriteAtlas=[lib().KIT.sprite.placeAtlas({
+      atlas,at:opt['sprite-at']?list('sprite-at'):[0,0,0],scale:num('sprite-scale',1)
+    })];
+  }
+  return inputSpriteAtlas;
 }
 
 function volumeCutoutsOption() {
@@ -411,6 +436,8 @@ const view = extra =>
       atmosphere: opt.atmosphere === 'off' ? false : undefined,
       shapedAtmosphere: shapedAtmosphereOption(),
       volumeCutouts: volumeCutoutsOption(),
+      spriteAtlases: spriteAtlasOption(),
+      spriteAtlasMode: opt['sprite-atlas-mode'],
       aerialPerspective: aerialOption(),
       volumeLocalLights: onOffOption('volume-local-lights'),
       volumeLocalShadows: onOffOption('volume-local-shadows'),
@@ -525,7 +552,7 @@ const CMD = {
         '  lint <id ...> [--map]              pixel-art lint: orphans, doubles, jaggies, banding, pillow shading, noise, colours',
         '  review <id> [--ref pic --px 2]     a sheet of fixed shots (four sides, top, low, far, near, close), beside the last one',
         '  variants <id> --seeds 3,7,12 [--group silhouette|openness|wear --motion]  render a ranked seed contact sheet',
-        '  atlas <id> [--directions 8 --w 96 --h 96 --fps 12 --maps depth,normal,emission,silhouette]  export a transparent sprite atlas',
+        '  atlas <id> [--directions 8 --pitches 0,0.7 --w 96 --h 96 --fps 12 --maps depth,normal,emission,silhouette]  export a transparent sprite atlas',
         '  pose-review <id> [--directions 8 --w 96 --h 96]  review named poses at sprite resolution',
         '  motion-review <id> [--finding kind-or-id] [--out report.json]  inspect motion findings and focused playback ranges',
         '  clip-sequence <id> [--handoff 0] [--out report.json]  inspect clip instances, retimed cues, and handoffs',
@@ -557,6 +584,7 @@ const CMD = {
         'exposure options: --scene-exposure on|off|file.json',
         'aerial options: --aerial-perspective on|off --aerial-start units --aerial-density per-unit --aerial-contrast 0..1',
         'view options: --surface off (no finish layers) --water off --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --px1 (native art pixels) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (remove lone pixels) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n',
+        'sprite options: --sprite-atlas on|off|atlas.json --sprite-at x,y,z --sprite-scale n --sprite-atlas-mode card|impostor',
         'shaped fog options: --shaped-atmosphere on|off|file.json --volume-cutouts on|off|file.json',
         'fog lighting options: --volume-local-lights on|off --volume-local-shadows on|off',
         'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable off --snap --dither-space screen|world|object --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
@@ -826,7 +854,8 @@ const CMD = {
     const { spriteAtlas, writeAtlas } = require('./sprite-atlas.js');
     const atlas = spriteAtlas(w, { width: num('w', 96), height: num('h', 96), directions: num('directions', 8),
       columns: num('cols', num('directions', 8)), maps: opt.maps ? String(opt.maps).split(',') : [],
-      pivot: opt.pivot ? list('pivot') : w.cam.target, view: view(), yaw: num('yaw', w.cam.yaw), times, fps, pose });
+      pivot: opt.pivot ? list('pivot') : w.cam.target, view: view(), yaw: num('yaw', w.cam.yaw),
+      pitches:opt.pitches===undefined?undefined:list('pitches'),times,fps,pose });
     writeAtlas(directory, atlas);
     console.log('wrote', directory, atlas.metadata.frames.length, 'frames');
   },

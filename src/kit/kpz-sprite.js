@@ -190,6 +190,8 @@
       })
     );
   K.sprite = {
+    atlas: AtlasSprites.compile,
+    placeAtlas: AtlasSprites.place,
     art,
     show,
     gen,

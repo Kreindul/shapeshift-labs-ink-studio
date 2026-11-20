@@ -103,4 +103,6 @@ ink-studio atlas examples/art-effects.js --from 0 --to 1.2 --fps 12 --directions
 
 `color.png` contains straight RGBA. Optional maps share its layout. `atlas.json` includes the registered pivot, camera direction, rectangle, timestamp, duration, file names and map encodings. Depth uses a shared scene-unit range encoded into RGB24. Normals are signed world-space axes mapped into RGB. Emission stores visible premultiplied emissive RGB.
 
+Use [artist-authored cards and impostors](impostor-atlases.md) to place the resulting atlas back into a scene.
+
 In Node, use `spriteAtlas(world, { width, height, directions, times, fps, pivot, view, maps, pose })`. Supply a `pose(world, time)` callback for scenes that need to advance a stateful timeline or pose a rig. A separate effect history is kept for each direction.
