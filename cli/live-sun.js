@@ -1,4 +1,8 @@
-// An orthographic depth map in world space, rasterized from the posed opaque splats.
+// An orthographic depth map and hemisphere lighting for the posed splats.
+const ColorSpace = require('../src/color-space.js');
+const linear = ColorSpace.prepare('srgb', 'srgb-linear');
+const srgb = ColorSpace.prepare('srgb-linear', 'srgb');
+const luminance = rgb => .2126 * rgb[0] + .7152 * rgb[1] + .0722 * rgb[2];
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const unit = v => {
   const length = Math.hypot(...v);
@@ -7,6 +11,34 @@ const unit = v => {
 const cross = (a, b) => [a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0]];
 const range = (n, lo, hi) => Number.isFinite(n) && n >= lo && n <= hi;
 const defaultDirection = [-.52, .64, .57];
+const bounceColors = Object.freeze({
+  'clear-sky': '#7aaeff', overcast: '#c6d6e3', sand: '#ffbd77', snow: '#edf5ff', water: '#54bdc9'
+});
+
+function bounceSettings(value, time) {
+  const sample = typeof value === 'function' ? value(time) : value;
+  if (sample === false || sample === 'off') return null;
+  if (sample === undefined) return;
+  if (typeof sample === 'string') return { color: sample };
+  if (!sample || Object.getPrototypeOf(sample) !== Object.prototype ||
+      Object.keys(sample).some(key => key !== 'color' && key !== 'intensity'))
+    throw new TypeError('Bounce needs a color, preset name, settings object or off');
+  return sample;
+}
+
+function bounce(authored, override, fallback, time) {
+  const chosen = bounceSettings(override, time);
+  if (chosen === null) return null;
+  const previous = bounceSettings(authored, time);
+  if (!chosen && !previous) return null;
+  const { color = fallback, intensity = .4 } = { ...previous, ...chosen };
+  const value = typeof color === 'string' && Object.hasOwn(bounceColors, color) ? bounceColors[color] : color;
+  if (typeof value !== 'string' || !/^#[0-9a-f]{6}$/i.test(value))
+    throw new TypeError('Bounce color needs #rrggbb or one of ' + Object.keys(bounceColors).join(', '));
+  if (!range(intensity, 0, 4)) throw new RangeError('Bounce intensity needs a number from 0 to 4');
+  const rgb = linear([1, 3, 5].map(i => parseInt(value.slice(i, i + 2), 16) / 255));
+  return intensity && rgb.some(Boolean) ? rgb.map(c => c * intensity) : null;
+}
 
 function prepare(authored, override, time) {
   const enabled = override ?? authored;
@@ -16,8 +48,11 @@ function prepare(authored, override, time) {
     if (!value || Object.getPrototypeOf(value) !== Object.prototype) throw new TypeError('liveSun needs a settings object or boolean');
     return value;
   };
+  const base = settings(authored), selected = settings(override ?? undefined);
   const { direction = defaultDirection, ambient = .32, intensity = .88,
-    shadows = true, mapSize = 512, bias = .02, filter = 1 } = { ...settings(authored), ...settings(enabled) };
+    shadows = true, mapSize = 512, bias = .02, filter = 1 } = { ...base, ...selected };
+  const sky = bounce(base.skyBounce, selected.skyBounce, 'clear-sky', time);
+  const ground = bounce(base.groundBounce, selected.groundBounce, 'sand', time);
   const directionAt = typeof direction === 'function' ? direction(time) : direction;
   if (!Array.isArray(directionAt) || directionAt.length !== 3 || !Array.from(directionAt).every(Number.isFinite) ||
       !Number.isFinite(Math.hypot(...directionAt)) || Math.hypot(...directionAt) === 0)
@@ -25,7 +60,7 @@ function prepare(authored, override, time) {
   if (!range(ambient, 0, 4) || !range(intensity, 0, 4) || !range(bias, 0, 10) || !range(mapSize, 32, 2048) ||
       !Number.isInteger(mapSize) || !Number.isInteger(filter) || !range(filter, 0, 2) || typeof shadows !== 'boolean')
     throw new RangeError('Invalid live sun lighting or shadow map settings');
-  return { direction: unit(directionAt), ambient, intensity, shadows, mapSize, bias, filter };
+  return { direction: unit(directionAt), ambient, intensity, shadows, mapSize, bias, filter, sky, ground };
 }
 
 function covariance(data, i, a, b) {
@@ -131,17 +166,44 @@ function create(sun, world, pose, normalAt) {
   }
   const shadow = shadowMap(sun, world.data, pose, normalAt);
   const facing = new Float32Array(fill.length);
-  for (let i = 0; i < normals.length; i++) if (normals[i]) facing[i] = Math.max(0, dot(normals[i], sun.direction));
+  const indirect = (sun.sky || sun.ground) && new Float32Array(fill.length * 3);
+  for (let i = 0; i < normals.length; i++) {
+    const normal = normals[i];
+    if (!normal) continue;
+    facing[i] = Math.max(0, dot(normal, sun.direction));
+    if (indirect) {
+      // A cosine-weighted hemisphere sends half its light to a vertical surface.
+      const upper = (1 + normal[1]) * .5;
+      for (let c = 0; c < 3; c++)
+        indirect[3*i+c] = upper * (sun.sky?.[c] ?? 0) + (1 - upper) * (sun.ground?.[c] ?? 0);
+    }
+  }
   const visibility = (i, x, y, z) => {
     if (!normals[i]) return undefined;
     return shadow && facing[i] > 0 ? shadow(x, y, z, normals[i], facing[i]) : 1;
   };
   const level = (i, x, y, z) => sun.ambient + sun.intensity * facing[i] * visibility(i, x, y, z);
+  function gains(i, x, y, z, rgb) {
+    rgb.fill(level(i, x, y, z));
+    const offset = i * 3;
+    if (!indirect || !(indirect[offset] || indirect[offset+1] || indirect[offset+2])) return rgb;
+    // Add bounce energy in linear light, preserving the existing neutral live-light response.
+    linear(rgb, rgb);
+    for (let c = 0; c < 3; c++) rgb[c] += indirect[offset+c];
+    return srgb(rgb, rgb);
+  }
+  function rampLevel(i, x, y, z, tint) {
+    gains(i, x, y, z, tint);
+    const brightness = luminance(tint);
+    if (brightness > 0) for (let c = 0; c < 3; c++) tint[c] /= brightness;
+    else tint.fill(1);
+    return brightness;
+  }
   const albedo = i => {
     const n = fill[i];
     return n >= 0 ? [(n >> 16)/255, (n >> 8 & 255)/255, (n & 255)/255] : null;
   };
-  return { albedo, normal: i => normals[i], level, visibility };
+  return { albedo, normal: i => normals[i], level, gains, rampLevel, visibility, hasBounce: Boolean(indirect) };
 }
 
 module.exports = { prepare, create };

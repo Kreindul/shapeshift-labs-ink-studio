@@ -323,6 +323,7 @@ function render(world, o, preparedPalettes) {
       : null;
   const sun = LiveSun.prepare(world.liveSun, o.liveSun, t);
   let live;
+  const sunGains = sun && [0, 0, 0];
   const surface = surfaceShading(world, stages && !coverageAware ? { ...o, paletteConstraints: false } : o, {
     eye,
     forward: [V[2], V[6], V[10]],
@@ -784,10 +785,10 @@ function render(world, o, preparedPalettes) {
         }
         if (liveNormal) {
           const point = surfacePoint(rayAt(ix + .5, iy + .5), liveNormal, x, y, z, -cz, R);
-          const level = live.level(i, ...point);
-          pr *= level;
-          pg *= level;
-          pb *= level;
+          live.gains(i, ...point, sunGains);
+          pr *= sunGains[0];
+          pg *= sunGains[1];
+          pb *= sunGains[2];
         }
         if (automatic || scheduled) {
           const exposure = scheduled?.gain ?? sourceScale;
@@ -924,6 +925,7 @@ function render(world, o, preparedPalettes) {
         }
       }
     pixed = new Uint8Array(W * H);
+    const bounceTints = live?.hasBounce && new Float32Array(W * H * 3);
     const HX = new Float32Array(W * H),
       HY = new Float32Array(W * H),
       HZ = new Float32Array(W * H);
@@ -965,6 +967,12 @@ function render(world, o, preparedPalettes) {
         HX[p] = px;
         HY[p] = py;
         HZ[p] = pz;
+        if (live?.normal(i)) {
+          if (bounceTints) {
+            lit[p] = live.rampLevel(i, px, py, pz, sunGains);
+            bounceTints.set(sunGains, p * 3);
+          } else lit[p] = live.level(i, px, py, pz);
+        }
         if (ev && ev.cell) {
           key[p] = ev.cell(
             px,
@@ -1088,7 +1096,8 @@ function render(world, o, preparedPalettes) {
         lookPass?.begin();
         const masked = staged?.material?.some(rule => rule.mask) || staged?.lit?.some(rule => rule.mask);
         const sample = masked ? stageSample(i, [HX[p], HY[p], HZ[p]]) : undefined;
-        const base = staged?.material ? stagedMaterial(i, staged.material, PALC[ci], sample) : PALC[ci];
+        let base = staged?.material ? stagedMaterial(i, staged.material, PALC[ci], sample) : PALC[ci];
+        if (bounceTints && live.normal(i)) base = base.map((value, channel) => value * bounceTints[p * 3 + channel]);
         const c = surface?.has(i) ? surface.shade(i, HX[p], HY[p], HZ[p], X[i], Y[i], Z[i], ...base, x + 0.5, y + 0.5, lookPass?.surface) : base;
         let rgb = c;
         if (contribution?.applies(i, c[5])) {

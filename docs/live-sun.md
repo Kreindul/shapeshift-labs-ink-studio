@@ -37,3 +37,30 @@ Set `world.liveSun` in the finished scene for a default. Per-render settings can
 | `filter` | Library option | 1 texel, with a range of 0–2 |
 
 The map fits opaque scene splats independently of the viewing camera, so perspective and orthographic views can reuse the same authored light. Glass and outline-free particles do not cast shadows. Emissive colours keep their emission. Pixel-material renders sample their original ramps with the live light level. Raw renders use captured albedo with ambient and direct lighting. Highly specialized baked material effects may look different under live lighting. This version runs in the headless renderer.
+
+## Sky and ground bounce
+
+Choose extra diffuse fill from above and below in either the Node API or CLI. Each side can use a preset, a hex colour, or `off`.
+
+```sh
+node cli/ink-studio.js render examples/bounce-light.js --sky-bounce clear-sky --ground-bounce sand \
+  --ground-bounce-intensity 0.55 --raw --px 1 --out sand.png
+node cli/ink-studio.js render examples/bounce-light.js --sky-bounce clear-sky --ground-bounce water \
+  --ground-bounce-intensity 0.55 --raw --px 1 --out water.png
+```
+
+Presets are `clear-sky`, `overcast`, `sand`, `snow`, and `water`. Quote a custom hex colour in the shell, such as `--ground-bounce '#ec885f'`. Either side defaults to intensity 0.4 when enabled, with an adjustable range of 0–4. An intensity-only override keeps the scene colour and uses clear sky or sand if that side has no authored colour. Set either choice to `off` to disable it independently.
+
+```js
+ink.render(world, {
+  liveSun: {
+    ambient: 0.24,
+    skyBounce: { color: '#92b6ff', intensity: 0.48 },
+    groundBounce: { color: 'sand', intensity: 0.32 }
+  }
+});
+```
+
+The same fields can live in `world.liveSun`. To animate them, supply a function of render seconds for either field. It can return a preset, a settings object, or `false`. Omit both to use the original neutral ambient light. Set `intensity: 0` on the sun to use hemisphere fill without direct sunlight.
+
+Bounce follows each posed world normal. Upward faces receive the upper fill, undersides receive the lower fill, and vertical faces receive a mix. Bounce adds diffuse light in shadows independently of the directional shadow map. Pixel materials read their normal ramp brightness and carry the bounce tint into colour resolution. A fixed export palette limits the available tints, so use `--raw` to preview a new colour choice.

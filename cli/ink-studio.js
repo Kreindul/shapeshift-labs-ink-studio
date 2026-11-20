@@ -228,6 +228,16 @@ function liveSunOption() {
     ...(opt['shadow-bias'] !== undefined && { bias: num('shadow-bias') }),
     ...(opt['sun-shadows'] !== undefined && { shadows: opt['sun-shadows'] !== 'off' })
   };
+  for (const [flag, key] of [['sky-bounce', 'skyBounce'], ['ground-bounce', 'groundBounce']]) {
+    const choice = opt[flag], strength = opt[flag + '-intensity'];
+    if (choice === undefined && strength === undefined) continue;
+    if (choice === 'off') overrides[key] = false;
+    else {
+      if (choice !== undefined && typeof choice !== 'string') die('--' + flag + ' expects a color, preset name or off');
+      overrides[key] = { ...(choice !== undefined && { color: choice }),
+        ...(strength !== undefined && { intensity: strength === true ? NaN : num(flag + '-intensity') }) };
+    }
+  }
   if (value || Object.keys(overrides).length) return overrides;
 }
 
@@ -403,6 +413,7 @@ const CMD = {
         '',
         'any command that plays a diorama takes --poke 2:x,y,z (tap it at 2 seconds, toward that point; several with ;)',
         'sun options: --live-sun on|off --sun-direction x,y,z --sun-ambient n --sun-intensity n --shadow-map-size n --shadow-bias n --sun-shadows off',
+        'bounce options: --sky-bounce color|preset|off --ground-bounce color|preset|off --sky-bounce-intensity n --ground-bounce-intensity n',
         'view options: --surface off (no finish layers) --water off --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --px1 (native art pixels) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (remove lone pixels) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n',
         'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable off --snap --dither-space screen|world|object --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
       ].join('\n')

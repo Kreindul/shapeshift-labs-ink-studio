@@ -62,3 +62,63 @@ test('scene settings can be overridden per frame and baked rendering remains the
   assert.throws(() => ink.render(world, { ...view, liveSun:{ direction:[0, 0, 0] } }), /nonzero XYZ/);
   assert.throws(() => ink.render(world, { ...view, liveSun:{ mapSize:0 } }), /shadow map settings/);
 });
+
+function bounceFixture() {
+  const B = makeBuilder(17, [0x192531, 0x2c2c2c, 0x777777, 0xc4c4c4, 0xffffff]);
+  const ramp = [1, 2, 3, 4];
+  for (const [id, x, normal] of [
+    ['top', -1.25, [0, 1, 0]], ['wall', 0, [0, 0, 1]], ['underside', 1.25, [0, -1, 0]]
+  ]) {
+    const i = B.count();
+    B.pixNext(ramp, .6, null, ...normal);
+    B.disc(x, 0, 0, normal, .35, .025, B.P[3], 3);
+    B.describeSplats(i, i + 1, { object: id });
+    B.describeAlbedo(i, i + 1, '#d5d5d5');
+  }
+  return B.finish({ cam: { target:[0,0,0], dist:6.2, yaw:0, pitch:.58 }, detail:18, look:{ pixel:true } });
+}
+
+function colorAt(frame, name) {
+  const { objectId, objects, coverage } = frame.passes;
+  const id = objects.indexOf(name), s = [0,0,0];
+  let count = 0;
+  for (let i = 0; i < objectId.length; i++) {
+    if (objectId[i] !== id || coverage[i] < .9) continue;
+    for (let c = 0; c < 3; c++) s[c] += frame.rgb[i*3+c];
+    count++;
+  }
+  assert(count > 5, name + ' has visible samples');
+  return s.map(value => value / count);
+}
+
+test('sky and ground bounce follow world normals and can be changed independently', () => {
+  const world = bounceFixture();
+  const options = { w:97, h:59, px:1, ortho:true, passes:['objectId','coverage'] };
+  const skyBounce = { color:'#3264ff', intensity:.48 }, groundBounce = { color:'#ff9933', intensity:.48 };
+  world.liveSun = { ambient:.16, intensity:0, skyBounce, groundBounce };
+
+  for (const style of [{ raw:true }, { coverageAware:true }]) {
+    const optionsForStyle = { ...options, ...style };
+    const both = ink.render(world, optionsForStyle);
+    const top = colorAt(both, 'top'), under = colorAt(both, 'underside'), wall = colorAt(both, 'wall');
+    assert(top[2] > top[0] + 30, 'upper fill is blue');
+    assert(under[0] > under[2] + 30, 'lower fill is warm');
+    assert(wall[0] > top[0] + 20 && wall[2] > under[2] + 20, 'vertical surface mixes both lights');
+    const upperOnly = ink.render(world, { ...optionsForStyle, liveSun:{ groundBounce:false } });
+    assert(colorAt(upperOnly, 'top').every((v, c) => Math.abs(v - top[c]) < .2));
+    assert(colorAt(upperOnly, 'underside')[0] < under[0] - 20);
+    const lowerOnly = ink.render(world, { ...optionsForStyle, liveSun:{ skyBounce:'off' } });
+    assert(colorAt(lowerOnly, 'underside').every((v, c) => Math.abs(v - under[c]) < .2));
+    assert(colorAt(lowerOnly, 'top')[2] < top[2] - 20);
+  }
+
+  const raw = { ...options, raw:true };
+  const neutral = ink.render(world, { ...raw, liveSun:{ skyBounce:false, groundBounce:false } });
+  const zero = ink.render(world, { ...raw, liveSun:{ skyBounce:{ intensity:0 }, groundBounce:{ intensity:0 } } });
+  assert.deepEqual(zero.rgb, neutral.rgb);
+  const animated = { ...world, liveSun:{ ...world.liveSun, groundBounce: t => t < 1 ? 'sand' : 'water' } };
+  assert(colorAt(ink.render(animated, { ...raw, t:0 }), 'underside')[0] >
+    colorAt(ink.render(animated, { ...raw, t:1 }), 'underside')[0] + 30);
+  assert.throws(() => ink.render(world, { ...raw, liveSun:{ skyBounce:'unknown' } }), /Bounce color/);
+  assert.throws(() => ink.render(world, { ...raw, liveSun:{ groundBounce:{ intensity:-1 } } }), /Bounce intensity/);
+});
