@@ -840,6 +840,7 @@ are visible during checkpoint and replay review.
 | `control` | Typed arithmetic, thresholds, selection, binary logic, pulses, latches, timers and hysteresis. |
 | [`puzzle`](puzzles.md) | Ordered switches, timed windows, reusable recipes, blocker traces and bounded solution witnesses. |
 | [`action-windows`](action-windows.md) | Assignable action phases, swept contact outcomes, phase guards, and switches or fractures driven by landing contacts. |
+| [`adaptive-music`](adaptive-music.md) | Emotion and world-driven score state, beat-aligned section changes, and named cue intents. |
 | `store` | Bounded numeric, integer, or vector accounts with named resources and units. |
 | `exchange` | Enabled links that request a fixed amount per tick or a rate per second. |
 | `logistics` | Resource stocks, atomic recipes, scheduled shipments, conservative accounting, and upstream shortage traces. |
