@@ -140,7 +140,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     const data = table(2048, 0, maxSize), bones = table(768, 4, maxSize);
     const fine = table(1536, 7, maxSize), pattern = table(2048, 10, maxSize);
     const toneStops = resources.texture();
-    let constraintRows, constraintSlots, constraintPlan, constraintKey, constraintWorld, constraintMetadata, constraintCount, constraintMap, maskAt, constraintLab;
+    let constraintRows, constraintSlots, constraintPlan, constraintKey, constraintWorld, constraintMetadata, constraintCount, constraintMap, maskAt, constraintLab, constraintPairs;
     const contributionPost = new Map(), constrainedPosts = new Map();
     let maskSites, siteState, maskTexture, glassWorld, glassData, glassIndices;
     const rasterKeys = new WeakMap();
@@ -327,7 +327,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         const masks = plan.masked && prepareMaskRows(plan.palettes,coverageRules,maxSize);
         plan.textured = Boolean(masks?.texture);
         constraintLab = maskAt + (plan.masked ? 6 : 0);
-        const width = constraintLab + (plan.palettes.some(row=>row.matchId) ? 48 : 0);
+        constraintPairs = constraintLab + (plan.palettes.some(row=>row.matchId) ? 48 : 0);
+        const width = constraintPairs + Math.max(...plan.palettes.map(row=>row.pairs?.length ?? 0));
         const rows = new Float32Array(width * 4 * plan.palettes.length);
         plan.palettes.forEach((palette, i) => {
           const offset = i * width * 4;
@@ -337,6 +338,9 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
           rows[offset + 11] = Number(palette.source === 'graded');
           rows[offset + 15] = palette.mapOnly ? 2 : Number(Boolean(palette.grade));
           rows[offset + 19] = palette.matchId ?? 0;
+          rows[offset + 23] = palette.pairs ? palette.pairs.length+1 : 0;
+          palette.pairs?.forEach(({slots,lightness},j)=>
+            rows.set([...slots,...(lightness ?? [-1,1])],offset+(constraintPairs+j)*4));
           palette.lab?.forEach((row,j)=>rows.set(row,offset+(constraintLab+j)*4));
           rows.set(palette.ranks, offset + 49 * 4);
           if (palette.grade) for (let j = 0; j < palette.grade.length / 3; j++)
@@ -944,7 +948,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         ...(useWind && { u_effectWind:[...flex('foliage'),...flex('cloth')] }),
         u_emissiveWind:(windResponse?.emissive ?? 0) * Math.hypot(...flex('emissive')),
         ...(constraints && (coverage || masked) && { u_constraintSlots:9,u_constraintRows:8,
-          u_constraintDefault:constraints.defaultSlot,u_constraintMap:constraintMap,u_constraintMask:maskAt,u_constraintLab:constraintLab,
+          u_constraintDefault:constraints.defaultSlot,u_constraintMap:constraintMap,u_constraintMask:maskAt,u_constraintLab:constraintLab,u_constraintPairs:constraintPairs,
           u_lookSites:10,u_maskTextures:14,u_maskTime:t,u_lookProjection:camera.projection,u_lookRadius:camera.radius,u_lookOrtho:+camera.ortho,
           u_pal:pal,u_n:palCount,u_grade:+Boolean(grade),u_out:grade??pal,u_toneOn:0,u_lookGrid:[width,height] }),
         u_arrivalPlane: plane, u_splatPlane: clip, ...(layeredGlass&&{u_glassBoundary:13,u_glassTolerance:tolerance}),
@@ -1057,7 +1061,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         ...(layeredGlass&&{u_glassBoundary:8,u_glassBack:4,u_glassThrough:7,
           u_glassRange:camera.depthRange,u_glassProjection:camera.projection}),
         ...(constraints ? { u_constraintSlots: 4, u_constraintRows: 8, u_constraintDefault: constraints.defaultSlot,
-          u_constraintMap: constraintMap, u_constraintMask: maskAt, u_constraintLab: constraintLab, u_maskOwner: 7 } : {}),
+          u_constraintMap: constraintMap, u_constraintMask: maskAt, u_constraintLab: constraintLab, u_constraintPairs: constraintPairs, u_maskOwner: 7 } : {}),
         u_scene: 1, u_depth: 2, u_crispScene: 5, u_crispDepth: 6, u_keyTex: 15,
         u_pixOn: +patterned, u_keyOn: +patterned, u_sprOn: +sprites,
         u_paintOn: paintOnPatterns,

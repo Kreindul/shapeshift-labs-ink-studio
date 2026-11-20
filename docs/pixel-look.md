@@ -383,6 +383,49 @@ node cli/ink-studio.js render examples/palette-constraints.js --ortho --out cons
 Use `--palette-constraints rules.json` to override the authored rules
 in `render` or `sim render`. `off` bypasses the target policies.
 
+### Authorize dither pairs
+
+Set `dither.pairs` on a palette policy to choose which swatches can
+mix. The closest swatch is still the solid color. Ink tries the closest
+authorized companion when the dither pattern calls for a mix. The pair
+works in both directions. In this example slate can mix with blue-gray
+and the warm swatches stay solid.
+
+```json
+{
+  "targets": [
+    {
+      "material": "slate",
+      "palette": ["#263747", "#536b84", "#b35b35", "#f6a74b"],
+      "dither": {
+        "pattern": "bayer",
+        "strength": 1,
+        "pairs": [{"colors": ["#263747", "#536b84"], "lightness": [0.38, 0.44]}]
+      }
+    }
+  ]
+}
+```
+
+Each endpoint must identify one unreserved candidate. Use a hex swatch,
+normalized RGB triple, scene palette index, or individual role stop
+such as `slate.shadow`. The optional `lightness` bounds are inclusive
+and measure the input color's OKLab L on a 0–1 scale. That input is the
+color at the point where the palette policy runs. List the same pair
+with several ranges to allow it in separate bands. A policy accepts up
+to 256 pair rules. An omitted `pairs`
+keeps ordinary dithering. An empty array makes every swatch solid.
+
+Use the same policy in a scene target, a material's `paletteConstraint`,
+a native look asset, or an explicit render stage. WebGL supports it in
+scene target palettes. Render the signal house example to compare the
+same scene with open, authorized, and out-of-range pairs.
+
+```sh
+node cli/ink-studio.js render examples/authorized-dither-pairs.js --ortho --w 320 --h 176 --px 1 --out signal.png
+node cli/ink-studio.js render examples/authorized-dither-pairs.js --ortho --w 320 --h 176 --px 1 --params '{"mode":"open"}' --out signal-open.png
+```
+
 ### Choose a matching priority
 
 Set `match` on a palette policy to choose the closest swatch for the
