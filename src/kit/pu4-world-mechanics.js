@@ -604,7 +604,7 @@
       bodies:{type:'record',read:({state})=>Q.ok(state.bodies)},
       joints:{type:'record',read:({state})=>Q.ok(state.joints)},
       contacts:{type:'records',read:({state})=>Q.ok(state.contacts??[])},
-      surface:{type:'record',read:readSurface},
+      'surface-state':{type:'record',read:readSurface},
       'surface-charts':{type:'record',read:({state})=>state?.surfaceCharts?
         Q.ok({charts:state.surfaceCharts,channels:surfaceChannels}):Q.missing('surface atlas is unavailable')},
       clearance:{type:'number',units:'world',read:context=>obstruction(context,context.args.exclude)},

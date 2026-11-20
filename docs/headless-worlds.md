@@ -554,7 +554,7 @@ channel defaults and can use `surfaceState.fresh.material` and a
 `surfaceState.fresh.ramp` of palette indices. The renderer retains the
 original surface ID on the exterior splats, including after a rebake.
 
-Probe `rig/surface` by body ID and face UV, or pass a world-space point
+Probe `rig/surface-state` by body ID and face UV, or pass a world-space point
 and body ID to resolve the local face and original UV. `rig/surface-charts`
 returns the atlas data. Checkpoints save the chart windows and stamps.
 For a custom mesh, use [surface chart correspondences](procedural.md#surface-state-through-remeshing).
@@ -565,8 +565,8 @@ separate, unmarked wood surface.
 
 ```sh
 ink-studio sim run examples/world-surface-state.json --ticks 11 --record sign.run.json
-ink-studio probe sign.run.json --field rig/surface --args '{"body":"sign.0","face":"+z","uv":[0.44,0.5]}'
-ink-studio probe sign.run.json --field rig/surface --args '{"body":"sign.0","face":"+x","uv":[0.5,0.5]}'
+ink-studio probe sign.run.json --field rig/surface-state --args '{"body":"sign.0","face":"+z","uv":[0.44,0.5]}'
+ink-studio probe sign.run.json --field rig/surface-state --args '{"body":"sign.0","face":"+x","uv":[0.5,0.5]}'
 ink-studio sim render sign.run.json --colored --out sign.png
 ```
 

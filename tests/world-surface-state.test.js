@@ -5,7 +5,7 @@ const {spawnSync} = require('node:child_process');
 const kit = require('..').load();
 const {KIT:K}=kit, W=K.world, P=K.procedural;
 const demo = require('../examples/world-surface-state.json');
-const probe=(run,body,face,uv)=>run.query().probe('rig/surface',{},{body,face,uv}).value;
+const probe=(run,body,face,uv)=>run.query().probe('rig/surface-state',{},{body,face,uv}).value;
 const packed=value=>JSON.parse(JSON.stringify(value));
 const entire={kind:'rect',min:[0,0],max:[1,1]};
 
@@ -55,7 +55,7 @@ test('heat, paint, grime, scars and wear stay at their rest coordinates through 
     assert.deepEqual(after.rest,[u,v]);
     assert.deepEqual(after.values,original[i].values);
     const point=K.V.add(body.position,K.M.app(body.rotation,[(uv[0]-.5)*body.half[0]*2,(v-.5)*body.half[1]*2,body.half[2]]));
-    const world=run.query().probe('rig/surface',point,{body:body.id}).value;
+    const world=run.query().probe('rig/surface-state',point,{body:body.id}).value;
     assert.equal(world.face,'+z');
     assert(Math.abs(world.rest[0]-u)<1e-9&&Math.abs(world.rest[1]-v)<1e-9);
     assert.deepEqual(world.values,after.values);
@@ -108,11 +108,19 @@ test('both render resolutions retain the original front chart and label the newl
 });
 
 test('the CLI reports the initialized states of fresh surfaces',()=>{
-  const result=spawnSync(process.execPath,['cli/ink-studio.js','probe','examples/world-surface-state.json','--field','rig/surface',
+  const result=spawnSync(process.execPath,['cli/ink-studio.js','probe','examples/world-surface-state.json','--field','rig/surface-state',
     '--ticks','11','--args',JSON.stringify({body:'sign.0',face:'+x',uv:[.5,.5]}),'--json'],
     {cwd:path.join(__dirname,'..'),encoding:'utf8'});
   assert.equal(result.status,0,result.stderr);
   const sample=JSON.parse(result.stdout).value;
   assert.equal(sample.fresh,true);
   assert.equal(sample.values.paint,null);
+});
+
+test('mechanics leaves the physical material surface alias available',()=>{
+  const yard=require('../examples/world-physical-materials.json');
+  const rig={...yard.systems.rig,config:{...yard.systems.rig.config,surface:'surface'}};
+  const run=W.runtime.create({...yard,systems:{...yard.systems,rig},
+    assetPacks:[require('../examples/physical-materials.pack.json')]});
+  assert.equal(run.query().probe('surface',[-1.15,0,-2]).value.id,'earthworks/clay');
 });
