@@ -294,6 +294,11 @@
         bad('finish.skyEnvironment', error.message);
       }
     }
+    try {
+      WeatherBinding.settings(st.finish.weatherBinding);
+    } catch (error) {
+      bad('finish.weatherBinding', error.message);
+    }
     if (st.finish.cloudField !== undefined && st.finish.cloudField !== false) {
       try {
         K.clouds.compile(st.finish.cloudField);

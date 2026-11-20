@@ -61,6 +61,7 @@ function surfaceShading(world, options, camera) {
     view: [0, 0, 0],
     footprint,
     time,
+    weather: camera.weather,
     visibility: 1,
     skyView: [0, 0, 0], skyReflectionSource
   };

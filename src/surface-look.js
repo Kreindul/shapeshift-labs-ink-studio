@@ -141,6 +141,20 @@ const SurfaceLook = (() => {
     return mask.invert ? 1 - weight : weight;
   }
 
+  function weatherMask(mask) {
+    const { channel = 'wetness', low = 0, high = 1, invert = false } = mask;
+    if (!['wetness', 'snow', 'frost'].includes(channel) || !Number.isFinite(low) || !Number.isFinite(high) ||
+        low < 0 || high <= low || typeof invert !== 'boolean')
+      throw new RangeError('Weather masks need wetness, snow or frost and increasing nonnegative bounds');
+    return sample => {
+      const [x,,z] = sample.worldPosition ?? sample.position;
+      const value = sample.weather?.(x, z)?.[channel];
+      if (!Number.isFinite(value)) return 0;
+      const coverage = smooth(low, high, value);
+      return invert ? 1 - coverage : coverage;
+    };
+  }
+
   function directionAt(direction, p, normal) {
     if (typeof direction === 'function') return vector(direction(p, normal));
     if (direction?.type === 'circular') {
@@ -404,7 +418,8 @@ const SurfaceLook = (() => {
             throw new RangeError(id + ' needs nonnegative blur and distortion');
         }
         const fieldMask = layer.mask?.type === 'field' ? effects.fieldMask(layer.mask, context) : null;
-        const spatialMask = ['axis', 'texture', 'query'].includes(layer.mask?.type)
+        const spatialMask = layer.mask?.type === 'weather' ? weatherMask(layer.mask) :
+          ['axis', 'texture', 'query'].includes(layer.mask?.type)
           ? effects.prepareMask(layer.mask, context, { validateOnly }) : fieldMask;
         if (layer.mask && typeof layer.mask !== 'function' && !spatialMask) {
           if (!isRecord(layer.mask)) throw new TypeError(id + '.mask must be an object');

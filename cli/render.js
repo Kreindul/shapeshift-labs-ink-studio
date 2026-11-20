@@ -35,6 +35,7 @@ const surfaceShading = require('./surface-shading.js');
 const SceneOptics = require('../src/scene-optics.js');
 const SkyEnvironment = require('../src/sky-environment.js');
 const CloudField = require('../src/cloud-field.js');
+const weatherFrame = require('./weather.js');
 const { cameraRays, surfacePoint, reflectionSampler, atmosphereQuality, mediaSampler, applyAtmosphere } = require('./scene-optics.js');
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x),
   sstep = (a, b, x) => {
@@ -269,10 +270,15 @@ function render(world, o, preparedPalettes) {
     -(V[4] * V[12] + V[5] * V[13] + V[6] * V[14]),
     -(V[8] * V[12] + V[9] * V[13] + V[10] * V[14])
   ];
+  const skySource = o.skyEnvironment ?? world.skyEnvironment;
+  const skyTime = o.skyTime ?? t;
+  const clock = skySource ? SkyEnvironment.compile(skySource) : null;
+  const environment = clock?.frame(skyTime, o.skyProfiles);
+  const weather = weatherFrame(world, o, skySource, clock, environment?.parameters, skyTime);
   const mediumLook = medium => optics?.transform(medium) ?? PixelLook.mediumTransform(paletteRules, medium);
   const volumes = o.atmosphere !== false && world.atmosphere?.length ?
     SceneOptics.prepareVolumes(world.atmosphere, world.pal, volume =>
-      mediumLook(TargetSelectors.medium(volume.id, volume.mediumKind ?? volume.type, volume.tags))) : [];
+      mediumLook(TargetSelectors.medium(volume.id, volume.mediumKind ?? volume.type, volume.tags)), weather?.fogGain) : [];
   const sourceWater = o.water !== false && world.water?.count && world.water.raySegments ? world.water : null;
   const water = sourceWater && (optics || paletteRules) ?
     sourceWater.mapColors((id, kind) => mediumLook(TargetSelectors.medium(id, kind))) : sourceWater;
@@ -282,8 +288,6 @@ function render(world, o, preparedPalettes) {
   const motionReference = centers && { w: W, h: H, centers };
   const art = createArtPasses([...passSelection].filter(name => name !== 'target' && name !== 'mask'), W, H);
   const rayAt = cameraRays(V, eye, W, H, focal, ortho);
-  const skySource = o.skyEnvironment ?? world.skyEnvironment;
-  const environment = skySource ? SkyEnvironment.compile(skySource).frame(o.skyTime ?? t, o.skyProfiles) : null;
   const sky = environment?.sky;
   const aerial = o.atmosphere !== false && !o.captureCoverage ?
     SkyEnvironment.aerial(world.aerialPerspective, o.aerialPerspective, environment?.parameters) : null;
@@ -318,7 +322,7 @@ function render(world, o, preparedPalettes) {
   const horizon = eyeD + 2 * R;
   const atmosphereOptions = () => {
     const quality = atmosphereQuality({ ...world.volumeQuality, ...o.volumeQuality });
-    quality.wind = world.volumeWind && !o.wind && !an.wind ? Airflow.frame(world.volumeWind).velocity : wind.velocity;
+    quality.wind = world.volumeWind && !o.wind && !weather?.wind && !an.wind ? Airflow.frame(world.volumeWind).velocity : wind.velocity;
     const lighting = volumes.some(volume => volume.type === 'field') && (o.volumeLighting ?? world.volumeLighting);
     const media = lighting ? SceneOptics.lighting(lighting, world.pal,
       { time: t, localLights: o.volumeLocalLights, localShadows: o.volumeLocalShadows }) : undefined;
@@ -370,6 +374,7 @@ function render(world, o, preparedPalettes) {
     time: t,
     sun: sun?.direction,
     cloudShadow,
+    weather: weather?.surface,
     sunVisibility: sun && ((i, x, y, z) => live?.visibility(i, x, y, z)),
     blueNoise: settings => blueNoise(world, settings), onPaletteClip,
     onSurfaceClip: audit && ((r, g, b) => audit.sample('surface', r, g, b))
@@ -412,7 +417,7 @@ function render(world, o, preparedPalettes) {
     depth = new Float32Array(N),
     add = new Float32Array(N),
     wet = new Float32Array(N);
-  const wind = Airflow.frame(o.wind ?? an.wind);
+  const wind = Airflow.frame(o.wind ?? weather?.wind ?? an.wind);
   const daylight = o.lightDaylight ?? o.environment?.daylight ?? an.daylight ?? 1;
   const dusk = LightSchedule.gain(daylight);
   const lamps = LightSchedule.select(world.lights || [], [
@@ -436,10 +441,17 @@ function render(world, o, preparedPalettes) {
     if (!SampleCoverage.visible(kraw, sampleWithdrawal)) al = 0;
     if (kind === 1) al *= 0.62 + 0.38 * Math.sin(t * sp + ph);
     else if (kind === 2) {
-      const f = (t * sp) / rg + ph,
+      const profileRain = kraw & Airflow.packedFlag;
+      const f = ((profileRain ? skyTime : t) * sp) / rg + ph,
         pr = f - Math.floor(f);
       y -= pr * rg;
       al *= 1 - pr * pr;
+      if (profileRain) {
+        al *= weather?.rainGain ?? 0;
+        const age = pr * rg / Math.max(sp, 1e-5);
+        x += wind.velocity[0] * age;
+        z += wind.velocity[1] * age;
+      }
       sc *= 1 + pr * ex;
     } else if (kind === 3) {
       const f = (t * sp) / rg + ph,
@@ -688,12 +700,25 @@ function render(world, o, preparedPalettes) {
       b0 = j00 * V[1] + j12 * V[2],
       b1 = j00 * V[5] + j12 * V[6],
       b2 = j00 * V[9] + j12 * V[10];
-    const c00 = d[q + 4] * s2,
+    let c00 = d[q + 4] * s2,
       c01 = d[q + 5] * s2,
       c02 = d[q + 6] * s2,
       c11 = d[q + 8] * s2,
       c12 = d[q + 9] * s2,
       c22 = d[q + 10] * s2;
+    if (kind === 2 && (kraw & Airflow.packedFlag)) {
+      // Profile rain is baked vertical. Rebuild its axial covariance along the current flow.
+      const [wx, wz] = wind.velocity, speed = d[q + 13];
+      const length = Math.hypot(wx, speed, wz);
+      const ax = wx / length, ay = -speed / length, az = wz / length;
+      const cross = c00, stretch = c11 - cross;
+      c00 = cross + stretch * ax * ax;
+      c01 = stretch * ax * ay;
+      c02 = stretch * ax * az;
+      c11 = cross + stretch * ay * ay;
+      c12 = stretch * ay * az;
+      c22 = cross + stretch * az * az;
+    }
     const u0 = c00 * a0 + c01 * a1 + c02 * a2,
       u1 = c01 * a0 + c11 * a1 + c12 * a2,
       u2 = c02 * a0 + c12 * a1 + c22 * a2,

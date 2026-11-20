@@ -26,6 +26,10 @@
   };
 
   K.weather = {
+    bind(environment, descriptor = true, { profiles } = {}) {
+      return WeatherBinding.bind(SkyEnvironment.compile(environment), WeatherBinding.settings(descriptor),
+        { profiles, createSurface: K.procedural.motion.surfaceWeather });
+    },
     fall(B, o) {
       o = o || {};
       const R = dice(o.seed || 61),
@@ -49,11 +53,11 @@
         const col = B.P[cols[Math.floor(R() * cols.length)]],
           an =
             kind === 'rain'
-              ? { k: 2, ph: R(), sp: speed * (0.9 + 0.2 * R()), rg: h, ex: 0, nd: true }
+              ? { k: 2, ph: R(), sp: speed * (0.9 + 0.2 * R()), rg: h, ex: 0, nd: true, wind: o.profile === true }
               : { k: 15, ph: R(), sp: speed * (0.7 + 0.6 * R()), rg: h, ex: sway * (0.6 + 0.8 * R()), nd: true };
         if (kind === 'rain') {
           // a streak, slanted with the wind
-          const ax = norm([wind[0] / speed, -1, wind[1] / speed]);
+          const ax = o.profile === true ? [0, -1, 0] : norm([wind[0] / speed, -1, wind[1] / speed]);
           B.stick(x, top, z, ax, o.len || 0.09, size, col, 1.1, an);
         } else if (kind === 'leaf') {
           const a = R() * 6.28,

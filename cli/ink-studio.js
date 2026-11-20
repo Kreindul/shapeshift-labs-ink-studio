@@ -213,7 +213,7 @@ function pose(w, t) {
 const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
 if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
   die('--px needs a positive integer');
-let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, cloudOverride;
+let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, cloudOverride, weatherOverride;
 function skyProfileOverrides(value) {
   if (typeof value !== 'string') die('--sky-profile expects track=profile pairs');
   const pairs = value.split(',').map(entry => entry.split('=').map(part => part.trim()));
@@ -266,6 +266,14 @@ function cloudShadowOption() {
   const supplied = pairs.filter(([flag]) => opt[flag] !== undefined);
   if (!value && !supplied.length) return undefined;
   return Object.fromEntries(supplied.map(([flag, setting]) => [setting, opt[flag] === true ? NaN : num(flag)]));
+}
+
+function weatherOption() {
+  const value = opt['weather-binding'];
+  if (value === undefined) return undefined;
+  if (value === false || value === 'off') return false;
+  if (value === true || value === 'on') return true;
+  return weatherOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
 }
 
 function volumeToggle(flag) {
@@ -321,6 +329,7 @@ const view = extra =>
         (cloudOverride ??= require('../src/cloud-field.js').compile(
           JSON.parse(fs.readFileSync(path.resolve(opt['cloud-field']), 'utf8')))),
       cloudShadows: cloudShadowOption(),
+      weatherBinding: weatherOption(),
       skyTime: num('sky-time'),
       skyProfiles: opt['sky-profile'] === undefined ? undefined : (skyProfiles ??= skyProfileOverrides(opt['sky-profile'])),
       liveSun: liveSunOption(),
@@ -465,6 +474,7 @@ const CMD = {
         'bounce options: --sky-bounce color|preset|off --ground-bounce color|preset|off --sky-bounce-intensity n --ground-bounce-intensity n',
         'cloud options: --cloud-field file.json|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',
         'sky options: --sky-environment file.json|off --sky-time seconds --sky-profile track=profile --sky-reflections scene|material',
+        'weather options: --weather-binding on|off|file.json',
         'aerial options: --aerial-perspective on|off --aerial-start units --aerial-density per-unit --aerial-contrast 0..1',
         'view options: --surface off (no finish layers) --water off --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --px1 (native art pixels) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (remove lone pixels) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n',
         'fog lighting options: --volume-local-lights on|off --volume-local-shadows on|off',

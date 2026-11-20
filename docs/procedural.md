@@ -2656,6 +2656,8 @@ over the retained world.
 
 ### Weather and retained materials
 
+Use [weather bindings](weather-binding.md) to run the rendering and retained fields from the same environment tracks.
+
 `airflow.frame([x, z])` converts horizontal scene velocity into raw transport
 and a bounded displacement vector for flexible materials. Use
 `airflow.bend(time, phase, frequency, reach)` for a scalar gust in scene

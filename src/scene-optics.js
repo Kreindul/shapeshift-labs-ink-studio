@@ -103,12 +103,13 @@ const SceneOptics = (() => {
   }
 
   const volumeKinds = { fog, sphere, box, shaft, field };
-  function prepareVolumes(list, palette = [], colorFor) {
+  function prepareVolumes(list, palette = [], colorFor, densityGain) {
     if (!Array.isArray(list)) throw new TypeError('Atmosphere must be a list of volumes');
     return list
       .map(d => {
         if (!d || !Object.hasOwn(volumeKinds, d.type)) throw new TypeError('Unknown atmosphere volume');
         const volume = volumeKinds[d.type](d);
+        if (densityGain) volume.density = nonnegative(volume.density * densityGain(volume), 'Volume density');
         const transform = colorFor?.(volume);
         const color = value => {
           const rgb = volumeColor(value, palette);
