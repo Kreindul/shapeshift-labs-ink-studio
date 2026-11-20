@@ -826,6 +826,51 @@ In Node, call `ink.reviewSubjectReadability(world, { plan, width, height,
 view, pose })` for the image and report. Use `view.px` just as in a
 normal render. A stateful world needs a `pose(world, time)` callback.
 
+## Compare palettes through lighting and weather
+
+```sh
+ink-studio palette weather examples/review-beacon.js --plan examples/palette-weather-beacon.json \
+  --w 268 --h 158 --px 1 --cols 3 --out palette-weather
+
+ink-studio palette weather examples/palette-field-weather.js \
+  --select '{"material":"rain-glaze"}' --times 0,2,4.5 --w 180 --h 108 --px 1
+```
+
+Weather review uses the same subject selectors, camera views,
+lighting states, and edge measurements as subject readability.
+Add a `weather` object to a state to override options such as
+`retainedWeather`, `precipitation`, or `shapedAtmosphere`. State times can
+sample any authored sky, light, or weather track. Set `baseline` to a
+state ID, or use the first named state. Each comparison uses the
+baseline sample from the same named view. Camera rigs are sampled at
+the baseline time by default. Scenes with procedural camera updates
+use the starting camera unless the plan supplies a view.
+
+The native scene colours supply brightness, hue and saturation
+distributions and the number of distinct shadows, midtones and
+highlights. Use `palette.shadow` and `palette.highlight` for the OKLab
+lightness boundaries (default 0.40 and 0.75). Each state's subject
+measurements show what changed, including newly weak silhouette edges
+and midtones that lost area or distinct swatches.
+
+Set `pairs` to arrays of two subject IDs, for example
+`[["Paving", "Inlay"]]`. The review checks every pair if this is omitted.
+It measures horizontally or vertically adjacent render pixels owned
+by the two subjects and counts contacts that resolve to the exact same
+swatch. Pink marks those contacts in the evidence panels.
+The report records the comparison counts and example pixel coordinates.
+Contacts without samples in either state have no change value.
+
+Set `limits` to tune the finding thresholds. `midtoneShareDrop`
+defaults to 0.15, `midtoneSwatchLoss` to 0.5 of the baseline count,
+`weakEdgeGain` to 0.2, and `sameSwatchGain` to 0.2. The share limits
+are absolute changes, so 0.2 means twenty percentage points.
+Select intermediate times to catch a temporary loss during a transition.
+
+Use `ink.reviewPaletteWeather(world, { plan, width, height, view, pose })`
+in Node. The CLI writes `comparison.png` and `review.json` with the
+resolved artwork, edge evidence and per-view findings.
+
 ## Suggest editable lighting ramps
 
 Use `K.palette.lightingRamps.suggest({ palette, roles, materials })` to choose lighting swatches from an existing palette. `roles` can carry the scene's current named roles. Each material needs a `base` palette index or a hex/RGB target. An index pins the exact swatch. A target uses the nearest allowed swatch as the base.

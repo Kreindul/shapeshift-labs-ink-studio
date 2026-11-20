@@ -39,9 +39,11 @@ const PaletteDistributions = (() => {
     const { colors,counts,dimensions,alpha } = rasters.colorHistogram(image,{alpha:config.alpha});
     const brightness = new Uint32Array(config.bins), saturation = new Uint32Array(config.bins);
     const hue = new Uint32Array(families.length);
+    const toneSwatches = new Uint32Array(roles.length);
     const groups = roles.map(()=>families.map(()=>({pixels:0,peak:0,color:0})));
     const push = (role,family,color,pixels)=>{
       const row = groups[role][family];
+      toneSwatches[role]++;
       row.pixels += pixels;
       if (pixels>row.peak || pixels===row.peak && color<row.color) {
         row.peak = pixels;
@@ -69,7 +71,7 @@ const PaletteDistributions = (() => {
       const present=rows.flatMap((row,k)=>row.pixels ? [{
         family:families[k][0],swatch:swatch(row.color),pixels:row.pixels,share:fraction(row.pixels,pixels)
       }] : []).sort((a,b)=>b.pixels-a.pixels);
-      return [roles[i],{pixels,share:fraction(pixels,alpha.included),families:present}];
+      return [roles[i],{pixels,share:fraction(pixels,alpha.included),swatches:toneSwatches[i],families:present}];
     }));
     return { ...dimensions, alpha, sourceSwatches:colors.length, brightness:bins(brightness),saturation:bins(saturation),
       hue:Array.from(hue,(pixels,i)=>({family:families[i][0],swatch:families[i][1],pixels,share:fraction(pixels,alpha.included)})),

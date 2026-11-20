@@ -24,6 +24,7 @@ test('distributions count visible pixels in shared bins and attribute each tonal
   assert.deepEqual(report.tones.shadows.families,[{family:'blue',swatch:'#000080',pixels:1,share:1}]);
   assert.deepEqual(report.tones.highlights.families,[{family:'yellow',swatch:'#ffff00',pixels:1,share:1}]);
   assert.equal(report.tones.midtones.pixels,2);
+  assert.equal(report.tones.midtones.swatches,2);
   assert.equal(report.tones.accents.pixels,3);
   assert.equal(total(report.tones.accents.families),3);
   assert.equal(KIT.palette.distributions(fixture,{alpha:'opaque'}).alpha.included,3);

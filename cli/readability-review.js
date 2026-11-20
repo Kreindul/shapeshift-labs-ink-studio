@@ -5,6 +5,8 @@ const FrameComposite = require('../src/frame-composite.js');
 const defaults = Object.freeze({color:.09,lightness:.055,weakShare:.25,depthBias:.05});
 const cameraFields = ['yaw','pitch','dist','zoom','target','ortho','cameraShot'];
 const lightFields = ['skyTime','skyProfiles','skyEnvironment','liveSun','areaLights'];
+const weatherFields = ['weatherBinding','retainedWeather','weatherFronts','weatherTracks','precipitation',
+  'atmosphere','shapedAtmosphere','atmosphereDepthBands'];
 const tones = ['#81dac1','#9cafff','#ffc372','#ff777f'];
 const packed = (rgb,p) => rgb[p*3]*65536 + rgb[p*3+1]*256 + rgb[p*3+2];
 const hex = color => '#'+color.toString(16).padStart(6,'0');
@@ -33,7 +35,7 @@ function list(rows, limit, validate, label) {
   });
 }
 
-function prepare(plan, time) {
+function prepareReview(plan, time) {
   fields(plan,['subjects','views','states','thresholds','matte'],'readability review plan');
   const subjects=list(plan.subjects,8,row=>{
     const {id,select}=fields(row,['id','select'],'readability subject');
@@ -50,11 +52,12 @@ function prepare(plan, time) {
     return {id,camera};
   },'views');
   const states=list(plan.states??[{id:'Current lighting',time}],24,row=>{
-    const {id,time:t=time,lighting={}}=fields(row,['id','time','lighting'],'readability lighting state');
+    const {id,time:t=time,lighting={},weather}=fields(row,['id','time','lighting','weather'],'readability state');
     fields(lighting,lightFields,'readability lighting overrides');
+    if (weather!==undefined) fields(weather,weatherFields,'review weather overrides');
     if (!Number.isFinite(t) || t<0 || lighting.skyTime!==undefined && !Number.isFinite(lighting.skyTime))
       throw new RangeError('Readability states need finite scene and sky times');
-    return {id,time:t,lighting};
+    return {id,time:t,lighting,...(weather!==undefined && {weather})};
   },'states');
   const thresholds={...defaults,...fields(plan.thresholds??{},Object.keys(defaults),'readability thresholds')};
   const {color,lightness,weakShare,depthBias}=thresholds, {matte}=plan;
@@ -163,27 +166,31 @@ function dimensions(w,h,samples,columns) {
   return { w:16+columns*cellWidth,h:69+Math.ceil(samples/columns)*cellHeight,cellWidth,cellHeight };
 }
 
-function sheet(kit, tiles, layout, columns) {
-  const {w,h,cellWidth,cellHeight}=layout, draw=[], layers=[];
+const edgeLegend = ['Clear edge','Low color','Low lightness','Both low'].map((label,i)=>[label,tones[i]]);
+
+function sheet(kit, tiles, layout, columns, {title='Subject readability',legend=edgeLegend}={}) {
+  const {w,cellWidth,cellHeight}=layout, draw=[], layers=[];
+  const across=Math.min(legend.length,Math.max(2,Math.floor(w/108)));
+  const lines=Math.ceil(legend.length/across), h=layout.h+Math.max(0,lines-2)*12;
   const label=(text,x,y,size,color='#e2ebf6')=>draw.push({type:'text',text,at:[x,y],size,color});
-  label('Subject readability',w/2,19,16);
+  label(title,w/2,19,16);
   label('Scene / edge evidence',w/2,39,10,'#a5b6ca');
   for (const [i,row] of tiles.entries()) {
     const { frame,marked,result }=row, x=8+(i%columns)*cellWidth+(cellWidth-frame.w)/2;
     const top=49+Math.floor(i/columns)*cellHeight, mid=x+frame.w/2;
-    const flags=result.subjects.flatMap(subject=>subject.flags);
+    const flags=result.findings??result.subjects.flatMap(subject=>subject.flags);
     label(result.view.slice(0,17),mid,top+8,10);
     label(result.state.slice(0,17),mid,top+24,9,'#a5b6ca');
     layers.push({source:frame,rect:[Math.floor(x),top+34,frame.w,frame.h]},
       {source:marked,rect:[Math.floor(x),top+39+frame.h,frame.w,frame.h]});
-    label(flags.length ? flags.length+(flags.length===1 ? ' flag' : ' flags') : 'Clear',mid,top+48+2*frame.h,9,
+    label(result.isBaseline ? 'Baseline' : flags.length ? flags.length+(flags.length===1 ? ' flag' : ' flags') : 'Clear',
+      mid,top+48+2*frame.h,9,
       flags.length ? '#ffb282' : '#81dac1');
   }
-  const legend=['Clear edge','Low color','Low lightness','Both low'];
-  const compact=w<430;
-  for (const [i,text] of legend.entries()) {
-    const x=compact ? (i%2+.5)*w/2 : (i+.5)*w/4;
-    label(text,x,h-(compact ? 22-Math.floor(i/2)*12 : 10),9,tones[i]);
+  for (const [i,[text,color]] of legend.entries()) {
+    const row=Math.floor(i/across), items=Math.min(across,legend.length-row*across);
+    const x=(i%across+.5)*w/items;
+    label(text,x,h-10-(lines-row-1)*12,9,color);
   }
   const plan=kit.frameComposite.prepare({layers:[...layers,{draw}]},w,h,1);
   return FrameComposite.compose({w:1,h:1,rgb:Uint8Array.of(17,24,36)},kit.frameComposite.layers(plan,{},0),w,h,'nearest');
@@ -205,8 +212,8 @@ function overview(subjects, samples) {
   });
 }
 
-function reviewSubjectReadability(world,{plan=world.readabilityReview,width=160,height=96,view={},columns,pose}={}) {
-  const {subjects,views,states,thresholds,matte}=prepare(plan,view.time??view.t??world.lookSnapshot?.time??0);
+function captureReview(world,{subjects,views,states,thresholds,matte},
+  {width=160,height=96,view={},columns,pose,fixedCameraAt}, analyze=measure) {
   const px=view.px??1, w=Math.ceil(width/px), h=Math.ceil(height/px), count=views.length*states.length;
   columns??=Math.min(views.length,4);
   if (!integer(px,1,2048) || !integer(width,1,2048) || !integer(height,1,2048) || !integer(columns,1,12) ||
@@ -216,6 +223,8 @@ function reviewSubjectReadability(world,{plan=world.readabilityReview,width=160,
   if (layout.w*layout.h>32e6) throw new RangeError('Readability review exceeds its sheet pixel budget');
   if (world.anim?.stateful && !pose) throw new TypeError('A stateful scene needs a pose callback for readability review');
   const {render}=require('./render.js'), kit=require('../index.js').load().KIT;
+  const fixed=fixedCameraAt===undefined ? {} : { cameraTime:fixedCameraAt,lockCamera:true,
+    ...(!world.cameraRig && {camera:{...world.cam,target:Array.from(world.cam.target),...view.camera}}) };
   const tiles=new Array(count), selectors=subjects.map(subject=>subject.select);
   const schedule=states.map((state,index)=>({state,index})).sort((a,b)=>a.state.time-b.state.time || a.index-b.index);
   let last;
@@ -228,19 +237,26 @@ function reviewSubjectReadability(world,{plan=world.readabilityReview,width=160,
     }
     for (const [i,shot] of views.entries()) {
       let captured;
-      const frame=render(world,{...view,...state.lighting,...shot.camera,t:time,time,w:width,h:height,px,
+      const frame=render(world,{...view,...fixed,...state.lighting,...state.weather,...shot.camera,t:time,time,w:width,h:height,px,
         composite:false,renderGraph:false,renderHistory:undefined,inspection:false,cameraGuides:false,
         samples:false,captureCoverage:false,readabilitySelectors:selectors,passes:['depth'],
         shotFrame(info) { captured=info; view.shotFrame?.(info); }});
-      const evidence=measure(frame,subjects,thresholds,matte);
-      tiles[index*views.length+i]={...evidence,result:{view:shot.id,state:state.id,time,camera:captured.camera,subjects:evidence.subjects}};
+      const {frame:scene,marked,...evidence}=analyze(frame,subjects,thresholds,matte,kit);
+      tiles[index*views.length+i]={frame:scene,marked,result:{
+        view:shot.id,state:state.id,time,camera:captured.camera,skyTime:captured.skyTime,...evidence}};
     }
   }
-  const samples=tiles.map(row=>row.result);
-  return {image:sheet(kit,tiles,layout,columns),report:{scene:world.id??null,width:w,height:h,pixelSize:px,
+  return {kit,tiles,layout,columns,frame:{width:w,height:h,pixelSize:px},samples:tiles.map(row=>row.result)};
+}
+
+function reviewSubjectReadability(world,options={}) {
+  const {plan=world.readabilityReview,view={}}=options;
+  const {subjects,views,states,thresholds,matte}=prepareReview(plan,view.time??view.t??world.lookSnapshot?.time??0);
+  const {kit,tiles,layout,columns,frame,samples}=captureReview(world,{subjects,views,states,thresholds,matte},options);
+  return {image:sheet(kit,tiles,layout,columns),report:{scene:world.id??null,...frame,
     metric:{color:'oklab-distance',lightness:'oklab-lightness-difference'},thresholds,
     ...(matte && {matte}),views,states,samples,subjects:overview(subjects,samples),
     legend:{clear:tones[0],weakColor:tones[1],weakLightness:tones[2],weakBoth:tones[3]}}};
 }
 
-module.exports = { reviewSubjectReadability,measure };
+module.exports = { reviewSubjectReadability,measure,prepareReview,captureReview,sheet,edgeLegend };
