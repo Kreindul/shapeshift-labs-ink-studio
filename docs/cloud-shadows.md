@@ -12,6 +12,8 @@ ink-studio render examples/cloud-shadows.js --t 1.5 --raw --cloud-shadow-softnes
 
 ## Authoring a field
 
+Use [cloud recipes](cloud-recipes.md) for configurable cirrus, coastal stratus, cumulus, and storm fronts.
+
 ```js
 const cloudField = K.clouds.compile({
   bounds: { min: [-12, -18], max: [12, 6] },

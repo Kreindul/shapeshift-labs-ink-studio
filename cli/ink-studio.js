@@ -293,6 +293,15 @@ function sceneExposureOption() {
     JSON.parse(fs.readFileSync(path.resolve(value), 'utf8')));
 }
 
+function cloudFieldOption() {
+  const value = opt['cloud-field'];
+  if (value === undefined) return undefined;
+  if (value === 'off') return false;
+  const clouds = require('../src/cloud-field.js');
+  return cloudOverride ??= clouds.compile(clouds.recipes.includes(value) ? value :
+    JSON.parse(fs.readFileSync(path.resolve(value), 'utf8')));
+}
+
 function lightningOption() {
   const value = opt.lightning;
   if (value === undefined) return undefined;
@@ -367,9 +376,7 @@ const view = extra =>
       skyEnvironment: opt['sky-environment'] === 'off' ? false : opt['sky-environment'] === undefined ? undefined :
         (skyOverride ??= require('../src/sky-environment.js').compile(
           JSON.parse(fs.readFileSync(path.resolve(opt['sky-environment']), 'utf8')))),
-      cloudField: opt['cloud-field'] === 'off' ? false : opt['cloud-field'] === undefined ? undefined :
-        (cloudOverride ??= require('../src/cloud-field.js').compile(
-          JSON.parse(fs.readFileSync(path.resolve(opt['cloud-field']), 'utf8')))),
+      cloudField: cloudFieldOption(),
       cloudShadows: cloudShadowOption(),
       weatherBinding: weatherOption(),
       retainedWeather: onOffOption('retained-weather'),
@@ -521,7 +528,7 @@ const CMD = {
         'any command that plays a diorama takes --poke 2:x,y,z (tap it at 2 seconds, toward that point; several with ;)',
         'sun options: --live-sun on|off --sun-direction x,y,z --sun-ambient n --sun-intensity n --shadow-map-size n --shadow-bias n --sun-shadows off',
         'bounce options: --sky-bounce color|preset|off --ground-bounce color|preset|off --sky-bounce-intensity n --ground-bounce-intensity n',
-        'cloud options: --cloud-field file.json|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',
+        'cloud options: --cloud-field cirrus|coastal-stratus|cumulus|storm-front|file.json|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',
         'sky options: --sky-environment file.json|off --sky-time seconds --sky-profile track=profile --sky-reflections scene|material',
         'weather options: --weather-binding on|off|file.json --retained-weather on|off --weather-fronts on|off --world-precipitation on|off|file.json --rain-impacts on|off|file.json',
         'wind options: --wind-field on|off|file.json',
