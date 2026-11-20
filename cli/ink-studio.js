@@ -327,6 +327,7 @@ const CMD = {
         '  pose-review <id> [--directions 8 --w 96 --h 96]  review named poses at sprite resolution',
         '  motion-review <id> [--finding kind-or-id] [--out report.json]  inspect motion findings and focused playback ranges',
         '  clip-sequence <id> [--handoff 0] [--out report.json]  inspect clip instances, retimed cues, and handoffs',
+        '  authored-contacts <id> [--at seconds] [--out report.json]  inspect contact ranges and socket transfer timing',
         '  passes <id> [--channels coverage,depth,normal,objectId,materialId,emission]  save art-pixel render pass previews',
         '  shimmer <id> [--mode orbit|zoom|pan|still --frames 24]  how many pixels flicker over a move, and a GIF of it',
         '  crisp <id ...|all> [--t 2 --map]   how crisp at its own pixel size: stray pixels, specks, flat area, finest frequencies,',
@@ -623,6 +624,21 @@ const CMD = {
     const cut = opt.handoff === undefined ? undefined : sequence.suggestCut(num('handoff'));
     const { duration, alignment, travel, steps, handoffs, keys, cues, change } = sequence;
     const report = JSON.stringify({ scene: world.id, duration, alignment, travel, steps, handoffs, keys, cues, change, cut }, null, 2) + '\n';
+    if (!opt.out) process.stdout.write(report);
+    else {
+      const file = path.resolve(opt.out);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, report);
+      console.log('wrote', file);
+    }
+  },
+  'authored-contacts'() {
+    const world = build(pos[0]), timeline = world.contactTimeline;
+    if (!timeline?.contacts || !timeline.inspect) die('authored-contacts needs a scene with an authored contact timeline');
+    const { duration, contacts, handoffs } = timeline;
+    const sample = opt.at === undefined ? undefined : timeline.inspect(num('at'));
+    const report = JSON.stringify({ scene: world.id, duration, contacts,
+      handoffs: handoffs.map(key => ({ ...key, focus: timeline.focus(key.id) })), sample }, null, 2) + '\n';
     if (!opt.out) process.stdout.write(report);
     else {
       const file = path.resolve(opt.out);
