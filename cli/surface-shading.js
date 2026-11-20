@@ -60,6 +60,7 @@ function surfaceShading(world, options, camera) {
     normal: [0, 0, 0],
     view: [0, 0, 0],
     footprint,
+    stableDetail: camera.detail,
     time,
     weather: camera.weather,
     rain: camera.rain,
@@ -138,6 +139,14 @@ function surfaceShading(world, options, camera) {
     view[0] = c * vx - s * vz;
     view[1] = parallel ? parallel[1] : eye[1] - y;
     view[2] = s * vx + c * vz;
+    if (camera.detail?.texture || camera.detail?.specular) {
+      const worldNormal = surfaceNormal(i);
+      const normalLength = Math.hypot(...worldNormal) || 1, viewLength = Math.hypot(vx, view[1], vz) || 1;
+      const facing = Math.abs(worldNormal[0]*vx+worldNormal[1]*view[1]+worldNormal[2]*vz)/(normalLength*viewLength);
+      const axial = camera.orthographic ? 1 :
+        (eye[0]-x)*forward[0]+(eye[1]-y)*forward[1]+(eye[2]-z)*forward[2];
+      sample.detailFootprint = Math.max(1e-6,axial)/(camera.pixelsPerUnit*Math.max(.12,facing));
+    }
     sample.sky = environment(i) ? sampleSky : undefined;
     if (sample.sky) {
       sample.skyView[0] = vx;

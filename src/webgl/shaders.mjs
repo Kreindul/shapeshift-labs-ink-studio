@@ -28,7 +28,7 @@ vec4 relightAt(int row) { return texelFetch(u_relight, ivec2(row & 511, row >> 9
 export function splatShaderSources(ascii, sampleCoverage, {
   water = false, airPockets = false, layered = false, atlas = false, portal = false, instances = false,
   contributions = false, masked = false, textured = false, layeredGlass = false, coverageRules, materialStyles = false,
-  environment = false, relighting = false, optical = false
+  environment = false, relighting = false, optical = false, stableDetail
 } = {}) {
   const coverageStride = coverageRules?.coverageStride ?? 4;
   const continuousMode = coverageRules?.continuousCoverage ?? 1, softMode = coverageRules?.softCoverage ?? 2;
@@ -44,6 +44,9 @@ uniform vec2 u_viewport;
 uniform float u_focal, u_time, u_scale, u_snap, u_dilate, u_near, u_ortho, u_idx;
 uniform float u_paintMarker; uniform int u_afterimageStart; flat out int v_paint;
 uniform int u_splatCoverage; uniform float u_materialGridScale; flat out int v_coverage;
+${stableDetail ? `uniform vec2 u_detailTexture, u_detailGeometry;
+flat out float v_detailGeometry, v_detailTexture;
+${stableDetail.glsl}` : ''}
 ${relighting ? relightTable + 'flat out vec4 v_relight;' : ''}
 ${layeredGlass ? 'uniform float u_glassTolerance; flat out float v_glassNearDepth;' : ''}
 ${optical ? `uniform highp sampler2D u_optical;
@@ -280,6 +283,14 @@ ${environment ? '  v_envAxial = -cam.z;' : ''}
   mat3 c2 = T * cov * transpose(T);
   float variance = continuous ? ${variance} * u_materialGridScale * u_materialGridScale : u_dilate;
   float A = c2[0][0] + variance, B = c2[0][1], C = c2[1][1] + variance;
+  ${stableDetail ? `
+  v_detailTexture = 1.0;
+  v_detailGeometry = 1.0;
+  if (u_detailGeometry.y > u_detailGeometry.x && detailStroke(kraw) && v_paint == 0
+      ${optical ? '&& v_optical.w < 0.5' : ''}) {
+    v_detailGeometry = detailWeight(u_detailGeometry,detailGeometryPixels(c2[0][0],B,c2[1][1],u_materialGridScale));
+    if (v_detailGeometry <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  }` : ''}
   float det = A * C - B * B;
   if (det <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   v_conic = vec3(C, -B, A) / det;
@@ -300,7 +311,10 @@ ${environment ? '  v_envAxial = -cam.z;' : ''}
   if (${instances ? 'a_instance == 0 && ' : ''}u_fineOn > 0.5 && plain && color == colorF) {   // (a dab that has been recoloured since it was baked, by anything, is drawn plain)
     ivec2 fq = ivec2((a_index & 511) * 3, row); vec4 f1 = texelFetch(u_fine, fq + ivec2(1, 0), 0), f2 = texelFetch(u_fine, fq + ivec2(2, 0), 0);
     if (f2.w > 0.5 && f1.w == t1.w) { vec3 pu = T * (FM * f1.xyz) * sc, pw = T * (FM * f2.xyz) * sc; float dt = pu.x * pw.y - pw.x * pu.y;
-      if (abs(dt) > 1e-4 * (abs(pu.x * pw.y) + abs(pw.x * pu.y) + 1e-9)) { v_fm = vec4(pw.y, -pw.x, -pu.y, pu.x) / dt; v_ft = texelFetch(u_fine, fq, 0); v_fk = fogk; } } }
+      if (abs(dt) > 1e-4 * (abs(pu.x * pw.y) + abs(pw.x * pu.y) + 1e-9)) {
+        ${stableDetail ? `if (u_detailTexture.y > u_detailTexture.x) v_detailTexture =
+          detailWeight(u_detailTexture,detailTexturePixels(pu.xy,pw.xy,u_materialGridScale));` : ''}
+        v_fm = vec4(pw.y, -pw.x, -pu.y, pu.x) / dt; v_ft = texelFetch(u_fine, fq, 0); v_fk = fogk; } } }
   ${materialStyles ? `
   int styleCode = int(v_pixelStyle.y);
   if (!plain || color != colorF || v_lit > 0.0 ||
@@ -317,6 +331,7 @@ ${ascii ? ascii.vsMain : ''}  gl_Position = vec4(ndc + a_corner * extN, u_geomet
   const SPLAT_FS = `#version 300 es
 precision highp float; precision highp int;
 in vec2 v_d; in vec3 v_conic; in vec4 v_color; in float v_depth; flat in int v_coverage;
+${stableDetail ? 'flat in float v_detailGeometry, v_detailTexture;' : ''}
 ${portal ? 'flat in vec3 v_portalDepth; uniform mat4 u_proj; uniform float u_ortho; uniform vec4 u_splatPlane;' :
   'flat in float v_ownerDepth;'}
 in float v_gl; in float v_as; in float v_ast;
@@ -400,21 +415,23 @@ ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + 
     float width = 0.36 * (2.0 - v_pixelStyle.x);
     a = 0.99 * (width > 0.0 ? smoothstep(0.5 - width, 0.5 + width, g) : step(0.5, g));
   }` : ''}
+  ${stableDetail ? 'a *= v_detailGeometry;' : ''}
   if (a < 0.004) discard;
   vec3 rgb = v_color.rgb;
-  if (v_fk >= 0.0) {   // inked detail: this pixel's own place on the dab's tile
-    ivec2 ij = clamp(ivec2(floor(vec2(dot(v_fm.xy, v_d), dot(v_fm.zw, v_d)) * 2.0 + 2.0)), ivec2(0), ivec2(3));
-    float f = ij.y == 0 ? v_ft.x : ij.y == 1 ? v_ft.y : ij.y == 2 ? v_ft.z : v_ft.w;
-    int ci = int(mod(floor(f / (ij.x == 0 ? 1.0 : ij.x == 1 ? 64.0 : ij.x == 2 ? 4096.0 : 262144.0)), 64.0));
-    rgb = mix(u_fpal[min(ci, 63)], u_fog, v_fk); }
 ${materialStyles ? `
-  else if ((int(v_pixelStyle.y) & 2048) != 0) {
+  if ((v_fk < 0.0${stableDetail ? ' || v_detailTexture < 1.0' : ''}) && (int(v_pixelStyle.y) & 2048) != 0) {
     float rank = pixelStyleThreshold(int(v_pixelStyle.y) & 7, ivec2(gl_FragCoord.xy / u_materialGridScale));
     float pk = fract(v_pixelStyle.y) * 2.0 > rank ? v_pixelStyle.w : v_pixelStyle.z;
     vec3 shade = vec3(mod(pk, 256.0), mod(floor(pk / 256.0), 256.0), floor(pk / 65536.0)) / 255.0;
     rgb = mix(shade, u_fog, v_pixelFog);
   }` : ''}
-  ${relighting ? 'if (v_relight.w > 0.0) rgb = mix(min(vec3(1.0), rgb * v_relight.xyz), u_fog, v_relight.w - 1.0);' : ''}
+    if (v_fk >= 0.0) {   // inked detail: this pixel's own place on the dab's tile
+    ivec2 ij = clamp(ivec2(floor(vec2(dot(v_fm.xy, v_d), dot(v_fm.zw, v_d)) * 2.0 + 2.0)), ivec2(0), ivec2(3));
+    float f = ij.y == 0 ? v_ft.x : ij.y == 1 ? v_ft.y : ij.y == 2 ? v_ft.z : v_ft.w;
+    int ci = int(mod(floor(f / (ij.x == 0 ? 1.0 : ij.x == 1 ? 64.0 : ij.x == 2 ? 4096.0 : 262144.0)), 64.0));
+    vec3 tile = mix(u_fpal[min(ci, 63)], u_fog, v_fk);
+    rgb = ${stableDetail ? 'mix(rgb, tile, v_detailTexture)' : 'tile'}; }
+${relighting ? 'if (v_relight.w > 0.0) rgb = mix(min(vec3(1.0), rgb * v_relight.xyz), u_fog, v_relight.w - 1.0);' : ''}
 ${optical ? `
   if (hasOptical) {
     rgb = (v_scatterTint.x >= 0.0 ? v_scatterTint : rgb) * v_optical.y + v_reflectTint * v_optical.z;

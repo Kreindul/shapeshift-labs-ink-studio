@@ -25,6 +25,7 @@ const MaterialPixelStyle = require('../src/material-pixel-style.js');
 const EffectPalettes = require('../src/effect-palettes.js');
 const ArtEffects = require('../src/art-effects.js');
 const ArtStability = require('../src/art-stability.js');
+const StableDetail = require('../src/stable-detail.js');
 const { footprint, sampledDepth } = require('./splat-sampling.js');
 const { createMaskResolve, applyMasks } = require('./look-mask-resolve.js');
 const { createLookPass } = require('./look-pass.js');
@@ -217,6 +218,7 @@ function renderFrame(world, o, preparedPalettes) {
   const onPaletteClip = audit && ((scope, i, r, g, b) => audit.palette(scope, world.pal[i], r, g, b));
   const transparent = !!o.transparent && !o.captureCoverage;
   const integrateFootprint = o.splatFilter === 'footprint';
+  const stableDetail = StableDetail.prepare(o.stableDetail ?? look.stableDetail);
   const coverageMode = ContributionRules.coverageMode(o.splatCoverage ?? look.splatCoverage);
   const orderMode = o.splatOrder ?? look.splatOrder ?? 'center';
   const sortedSurfaces = orderMode === 'surface';
@@ -620,6 +622,7 @@ function renderFrame(world, o, preparedPalettes) {
     skyReflectionSource,
     parallel: ortho ? [V[2], V[6], V[10]] : null,
     footprint: (dist * 2) / (tp * H),
+    detail: stableDetail, pixelsPerUnit: focal / (o.artGridScale || 1), orthographic: ortho,
     time: t,
     sun: sun?.direction,
     cloudShadow,
@@ -1107,11 +1110,17 @@ function renderFrame(world, o, preparedPalettes) {
       w0 = c00 * b0 + c01 * b1 + c02 * b2,
       w1 = c01 * b0 + c11 * b1 + c12 * b2,
       w2 = c02 * b0 + c12 * b1 + c22 * b2;
-    const A = a0 * u0 + a1 * u1 + a2 * u2 + filterVariance,
+    const geometryDetail = stableDetail?.geometry && !fieldParticle && !opticalActive && StableDetail.strokeEligible(kraw) &&
+      !(paint && d[q + 14] === paint.marker) && !world.effectParticles?.some(({first,count}) => i>=first && i<first+count);
+    const projectedA = a0 * u0 + a1 * u1 + a2 * u2, projectedC = b0 * w0 + b1 * w1 + b2 * w2;
+    const A = projectedA + filterVariance,
       Bq = b0 * u0 + b1 * u1 + b2 * u2,
-      C = b0 * w0 + b1 * w1 + b2 * w2 + filterVariance,
+      C = projectedC + filterVariance,
       det = A * C - Bq * Bq;
     if (det <= 0) continue;
+    const geometryWeight = geometryDetail ? StableDetail.weight(stableDetail.geometry,
+      StableDetail.geometryPixels(projectedA,Bq,projectedC,artScale)) : 1;
+    if (!geometryWeight) continue;
     const k0 = C / det,
       k1 = -Bq / det,
       k2 = A / det,
@@ -1185,7 +1194,8 @@ function renderFrame(world, o, preparedPalettes) {
       i00 = 0,
       i01 = 0,
       i10 = 0,
-      i11 = 0;
+      i11 = 0,
+      fineWeight = 1;
     if (!(kraw & 32768) && !liveNormal && FN && FN[i * 12 + 11] && (budgetAt?.(i)?.fine ?? defaultFine) &&
         FN[i * 12 + 7] === pk && !add[i] && kind !== 5 && kind !== 12 && kind !== 13) {
       const f = i * 12,
@@ -1196,7 +1206,9 @@ function renderFrame(world, o, preparedPalettes) {
         m11 = (b0 * FN[f + 8] + b1 * FN[f + 9] + b2 * FN[f + 10]) * sc,
         dt = m00 * m11 - m01 * m10;
       if (Math.abs(dt) > 1e-4 * (Math.abs(m00 * m11) + Math.abs(m01 * m10) + 1e-9)) {
-        fi = f;
+        fineWeight = stableDetail?.texture ? StableDetail.weight(stableDetail.texture,
+          StableDetail.texturePixels(m00,m10,m01,m11,artScale)) : 1;
+        if (fineWeight) fi = f;
         i00 = m11 / dt;
         i01 = -m01 / dt;
         i10 = -m10 / dt;
@@ -1207,7 +1219,7 @@ function renderFrame(world, o, preparedPalettes) {
     const lowStyle = materialStyles?.[jStyle + 2], highStyle = materialStyles?.[jStyle + 3];
     const shadeMode = styleKey & 7;
     const shadeFraction = (styleKey - Math.floor(styleKey)) * 2;
-    const shadeRaster = fi < 0 && (styleKey & MaterialPixelStyle.PAIR) && !pixelSurface &&
+    const shadeRaster = (fi < 0 || fineWeight < 1) && (styleKey & MaterialPixelStyle.PAIR) && !pixelSurface &&
       !liveNormal && !staged?.material && !add[i] && !wet[i] && pk === (shadeFraction >= .5 ? highStyle : lowStyle);
     const wantsDepth = probe || deferred || aerial || cloudView;
     const probeNormal = !fieldParticle && (wantsDepth || bakedCloud) ? geometrySample(i).normal : null;
@@ -1222,6 +1234,7 @@ function renderFrame(world, o, preparedPalettes) {
         let a;
         if (integrateFootprint) a = footprint(dx, dy, k0, k1, k2, al, solid && !softCoverage, edgeStyle, continuousCoverage);
         else a = ContributionRules.alpha(pw, al, solid && !softCoverage, edgeStyle, continuousCoverage);
+        a *= geometryWeight;
         if (a < ContributionRules.minimum) continue;
         lookPass?.begin(centerMark);
         let pr = r,
@@ -1246,15 +1259,11 @@ function renderFrame(world, o, preparedPalettes) {
             v = clamp(Math.floor((i10 * dx + i11 * dy) * 2 + 2), 0, 3),
             c = FPAL[Math.floor(FN[fi + v] / (u === 0 ? 1 : u === 1 ? 64 : u === 2 ? 4096 : 262144)) % 64];
           if (c) {
-            pr = c[0];
-            pg = c[1];
-            pb = c[2];
-            if (staged?.material) [pr, pg, pb] = stagedMaterial(i, staged.material, [pr, pg, pb], materialSample);
-            if (!reflectInRaster && !staged?.lit && !splatFlash && !relit && coverGain === 1) {
-              pr += (fog[0] - pr) * fogMix;
-              pg += (fog[1] - pg) * fogMix;
-              pb += (fog[2] - pb) * fogMix;
-            }
+            const tile = staged?.material ? stagedMaterial(i, staged.material, c, materialSample) : c;
+            const tileFog = !reflectInRaster && !staged?.lit && !splatFlash && !relit && coverGain === 1 ? fogMix : 0;
+            pr = (tile[0] + (fog[0] - tile[0]) * tileFog) * fineWeight + pr * (1 - fineWeight);
+            pg = (tile[1] + (fog[1] - tile[1]) * tileFog) * fineWeight + pg * (1 - fineWeight);
+            pb = (tile[2] + (fog[2] - tile[2]) * tileFog) * fineWeight + pb * (1 - fineWeight);
           }
         }
         if (liveNormal) {

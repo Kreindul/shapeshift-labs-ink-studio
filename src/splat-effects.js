@@ -315,8 +315,9 @@ const SplatEffects = (() => {
     const ramp = colors?.map(resolveColor);
     const tint = resolveColor(color);
     const result = new Float64Array(6); // RGB, amount, coverage, glint
+    const detailSize = Object.hasOwn(motifs,pattern) ? scale * (pattern === 'checker' ? .5 : width) : 0;
     return {
-      palette,
+      palette, detailSize,
       reveals: revealChannel !== undefined || Boolean(custom),
       sample(sample, base) {
         result[0] = tint[0]; result[1] = tint[1]; result[2] = tint[2];

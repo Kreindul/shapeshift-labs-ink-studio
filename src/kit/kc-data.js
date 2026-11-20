@@ -522,6 +522,11 @@
       bad('finish.look.detailBudgets', error.message);
     }
     try {
+      StableDetail.prepare(look?.stableDetail);
+    } catch (error) {
+      bad('finish.look.stableDetail', error.message);
+    }
+    try {
       ContributionRules.coverageMode(look?.splatCoverage);
     } catch (error) {
       bad('finish.look.splatCoverage', error.message);

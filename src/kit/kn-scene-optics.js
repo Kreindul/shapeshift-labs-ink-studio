@@ -3,6 +3,7 @@
   K.environmentFrame = EnvironmentFrame;
   K.horizonBands = HorizonBands;
   K.artDirection = ArtDirection;
+  K.stableDetail = StableDetail;
   K.celestialTracks = CelestialTracks;
   K.clouds = CloudField;
   K.reflection = {
