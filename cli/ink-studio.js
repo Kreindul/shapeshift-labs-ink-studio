@@ -291,6 +291,7 @@ const CMD = {
         '',
         '  inspect <scene|run>         discover fields, actions, ports and entities',
         '  probe <scene|run> --field name [--at x,y,z | --entity id]  sample world state',
+        '  inspect|validate|probe <scene|run> --select JSON   inspect, check, or sample a look target',
         '  trace <scene|run> <name>    trace a route, signal or other exposed query',
         '  field <scene|run> <name> --spec file.json  export a line, grid or time series',
         '  scene apply|stamp|remix|capture|history|promote <world> ...  edit or derive a world manifest',

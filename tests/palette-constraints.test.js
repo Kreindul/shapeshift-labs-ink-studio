@@ -111,6 +111,12 @@ function checkWebGL(createRenderer, build, targets, expected) {
   expected[2][2] = [1, 1, 2];
   check({ colored: false, colorStack, paletteConstraints });
   check({ colored: true, colorStack, paletteConstraints });
+  const selected = { targets: [{ select: { entity: 'right' }, stack: colorStack }] };
+  expected[0][2] = [128, 128, 128];
+  expected[1][2] = [8, 8, 8];
+  expected[2][2] = [16, 20, 33];
+  check({ colored: false, paletteConstraints: selected });
+  check({ colored: true, paletteConstraints: selected });
   renderer.dispose();
 }
 

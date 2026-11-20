@@ -3,6 +3,7 @@ const frameBudget = require('../src/frame-budget.js');
 // blending from far to near, low-resolution sampling, dithering and palette quantization.
 const FOV = (38 * Math.PI) / 180;
 const PixelLook = require('../src/pixel-look.js');
+const TargetSelectors = require('../src/target-selectors.js');
 const { createArtPasses, sampleFrames } = require('./art-passes.js');
 const ArtPasses = require('../src/art-passes.js');
 const ArtInk = require('../src/art-ink.js');
@@ -220,7 +221,9 @@ function render(world, o, preparedPalettes) {
     -(V[8] * V[12] + V[9] * V[13] + V[10] * V[14])
   ];
   const volumes =
-    o.atmosphere !== false && world.atmosphere?.length ? SceneOptics.prepareVolumes(world.atmosphere, world.pal) : [];
+    o.atmosphere !== false && world.atmosphere?.length ? SceneOptics.prepareVolumes(world.atmosphere, world.pal,
+      paletteRules ? volume => PixelLook.mediumTransform(paletteRules,
+        TargetSelectors.medium(volume.id, volume.mediumKind ?? volume.type, volume.tags)) : undefined) : [];
   const axialDepth = volumes.length ? new Float32Array(W * H).fill(Infinity) : null;
   const centers = captureMotion ? new Float32Array(N * 2).fill(NaN) : null;
   const motionReference = centers && { w: W, h: H, centers };

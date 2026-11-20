@@ -91,17 +91,27 @@
   }
 
   function scene(look, catalog) {
-    if (!look || !Object.hasOwn(look, 'asset')) return look;
-    const { asset, ...inline } = look, bound = bind(asset, catalog);
-    if (!bound?.strength) return inline;
+    if (!look || (!Object.hasOwn(look, 'asset') && !Object.hasOwn(look, 'targets'))) return look;
+    const { asset, targets = [], ...inline } = look, bound = bind(asset, catalog);
     if (inline.paletteConstraints !== undefined && inline.paletteConstraints !== false && !record(inline.paletteConstraints))
       throw Error('Scene palette constraints must be an object or false');
+    if (!Array.isArray(targets) || targets.length > 63) throw Error('Expected up to 63 look targets');
+    const rules = [];
+    for (const rule of targets) {
+      if (!fields(rule, ['select', 'asset']) || !Object.hasOwn(rule, 'asset')) throw Error('A look target needs select and asset');
+      const select = TargetSelectors.prepare(rule.select), target = bind(rule.asset, catalog);
+      if (target?.strength && (target.stack || target.palette))
+        rules.push({ ...target.palette, select, stack: target.stack, assetId: target.id });
+    }
+    const constraints = inline.paletteConstraints;
+    const fallback = bound?.strength && bound.palette && !Object.hasOwn(constraints || {}, 'default')
+      ? { default: bound.stack ? { ...bound.palette, source: 'graded' } : bound.palette } : {};
     return {
-      ...(bound.stack && { colorStack: bound.stack }),
+      ...(bound?.strength && bound.stack && { colorStack: bound.stack }),
       ...inline,
-      ...(bound.palette && inline.paletteConstraints !== false && !Object.hasOwn(inline.paletteConstraints ?? {}, 'default') &&
-        { paletteConstraints: { ...inline.paletteConstraints,
-          default: bound.stack ? { ...bound.palette, source: 'graded' } : bound.palette } })
+      ...(constraints !== false && (rules.length || fallback.default) && {
+        paletteConstraints: { ...constraints, ...fallback, ...(rules.length && { targets: [...(constraints?.targets ?? []), ...rules] }) }
+      })
     };
   }
 
@@ -109,6 +119,7 @@
     const bound = bind(binding, catalog);
     if (!bound?.strength || (!bound.stack && !bound.palette)) return base;
     return SurfaceLook.material(base, {
+      lookAssetId: bound.id,
       ...(bound.stack && { layers: { lookAsset: { type: 'colorStack', stack: bound.stack } } }),
       ...(bound.palette && { paletteConstraint: bound.palette })
     });

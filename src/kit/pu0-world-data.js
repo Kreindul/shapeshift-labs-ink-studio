@@ -35,6 +35,9 @@
     }
     for (const [key, item] of Object.entries(result.entities)) {
       if (item.position !== undefined) check(vector(item.position), 'Invalid position for ' + key);
+      if (item.tags !== undefined) check(Array.isArray(item.tags) && item.tags.every(TargetSelectors.name), 'Invalid tags for ' + key);
+      for (const label of ['surfaceId','material']) if (item.visual?.[label] !== undefined)
+        check(TargetSelectors.name(item.visual[label]), 'Invalid visual ' + label + ' for ' + key);
       if (item.parent !== undefined && item.parent !== null) check(own(result.entities, item.parent), 'Missing parent for ' + key);
       if (item.anchor !== undefined) check(record(item.anchor) && own(result.entities, item.anchor.entity) &&
         (item.anchor.socket === undefined || own(result.entities[item.anchor.entity].sockets, item.anchor.socket)),

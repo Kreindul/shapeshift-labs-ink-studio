@@ -1,6 +1,7 @@
 /* Fixed-grid, palette-aware resolve using coverage and cluster voting.
    No per-frame palette fitting, camera movement or black ink. */
 const PixelLook = (() => {
+  const selectors = typeof TargetSelectors === 'undefined' ? require('./target-selectors.js') : TargetSelectors;
   let curves, luts, stacks, spaces;
   try {
     curves = ColorCurves;
@@ -306,36 +307,41 @@ const PixelLook = (() => {
       throw new RangeError('Palette constraints accept up to 63 targets');
     const rules = [], palettes = [];
     const defaultSlot = fallback === undefined ? 0 : palettes.push(preparePalette(fallback, options));
-    const validName = value => Number.isSafeInteger(value) || typeof value === 'string' && value.trim().length > 0;
     for (const target of targets) {
       if (!record(target)) throw new TypeError('Expected a palette target');
-      const { object, material, ...policy } = target;
-      if ((object === undefined && material === undefined) ||
-          (object !== undefined && !validName(object)) || (material !== undefined && !validName(material)))
-        throw new TypeError('Palette targets need a named object or material');
-      rules.push({ object, material, slot: palettes.push(preparePalette(policy, options)) });
+      const { select, object, material, stack, assetId, ...policy } = target;
+      if (select !== undefined && (object !== undefined || material !== undefined))
+        throw new TypeError('Use select or legacy object and material fields on a target');
+      const filter = selectors.prepare(select ?? { ...(object !== undefined && { object }), ...(material !== undefined && { material }) });
+      const grade = stack && colorGrade(options.palette, options.roles, undefined, false, false, false, stack);
+      const mapOnly = Boolean(grade && !Object.keys(policy).length);
+      const plan = preparePalette(mapOnly ? { palette: ['#000000'] } : policy, options);
+      if (mapOnly) {
+        plan.packed = gradePalette(grade);
+        plan.swatches = plan.packed.map(unpack);
+      }
+      Object.assign(plan, { grade, mapOnly, assetId, sourceSwatches: grade ? Array.from(options.palette, unpack) : undefined });
+      rules.push({ select: filter, slot: palettes.push(plan) });
     }
     if (!palettes.length) return null;
 
+    const match = target => rules.findLast(rule => selectors.matches(rule.select, target))?.slot ?? 0;
     function slots(world) {
-      const { objectIds, materialIds, objects, materials } = world.renderMetadata ?? {};
+      const index = selectors.index(world);
       const matches = new Map(), result = new Uint8Array(world.count);
       if (!rules.length) return result;
       for (let i = 0; i < world.count; i++) {
-        const object = objectIds?.[i] || 0, material = materialIds?.[i] || 0;
-        const key = object * (materials?.length ?? 1) + material;
-        let slot = matches.get(key);
+        const target = index.row(i);
+        let slot = matches.get(target);
         if (slot === undefined) {
-          const objectName = objects?.[object], materialName = materials?.[material];
-          slot = rules.findLast(rule => (rule.object === undefined || rule.object === objectName) &&
-            (rule.material === undefined || rule.material === materialName))?.slot ?? 0;
-          matches.set(key, slot);
+          slot = match(target);
+          matches.set(target, slot);
         }
         result[i] = slot;
       }
       return result;
     }
-    return { palettes, defaultSlot, slots };
+    return { palettes, defaultSlot, slots, match, rules };
   }
 
   function outputPalettes(base, locals) {
@@ -352,19 +358,31 @@ const PixelLook = (() => {
     return { packed, rows };
   }
 
-  function localIndex(local, id, rgb, x, y, useDither) {
-    const row = id - 1;
-    const policy = local.constraints?.[row];
-    let slot;
-    if (policy?.source === 'graded' && local.grade && local.scene) {
-      slot = policy.reservedIndex(rgb);
-      if (slot === undefined) {
-        const at = nearest(rgb, local.scene, false) * 3;
-        rgb = local.grade.slice(at, at + 3);
-      }
+  function paletteIndex(policy, rgb, x, y, { scene, grade, useDither } = {}) {
+    const input = policy.sourceSwatches ?? scene;
+    const mapping = policy.grade || (policy.source === 'graded' ? grade : undefined);
+    if (input && mapping) {
+      const reserved = policy.reservedIndex(rgb);
+      if (reserved !== undefined) return reserved;
+      const at = nearest(rgb, input, false);
+      if (policy.mapOnly) return at;
+      rgb = mapping.slice(at * 3, at * 3 + 3);
     }
-    slot ??= policy?.index(rgb, x, y, useDither) ?? nearest(rgb, local.palettes[row], false);
+    return policy.index(rgb, x, y, useDither);
+  }
+
+  function localIndex(local, id, rgb, x, y, useDither) {
+    const row = id - 1, policy = local.constraints?.[row];
+    const slot = policy ? paletteIndex(policy, rgb, x, y, { scene: local.scene, grade: local.grade, useDither }) :
+      nearest(rgb, local.palettes[row], false);
     return local.output.rows[row][slot];
+  }
+
+  function mediumTransform(plan, medium) {
+    const slot = plan?.match(medium);
+    if (!slot) return undefined;
+    const policy = plan.palettes[slot - 1];
+    return rgb => unpack(policy.packed[paletteIndex(policy, rgb, 0, 0, { useDither: false })]);
   }
 
   function ink(body) {
@@ -493,7 +511,7 @@ vec3 inkToneResolve(vec3 color, ivec2 pixel) {
   return share >= mix(0.5, rank, u_inkToneAmount) ? b.rgb : a.rgb;
 }`;
   return { nearest, ink, resolve, glsl, presets, toneSettings, prepareTone, toneIndex, toneGlsl, bayerRank, outputPalettes, localIndex,
-    preparePalette, preparePaletteConstraints,
+    preparePalette, preparePaletteConstraints, paletteIndex, mediumTransform,
     prepareRemap, gradePalette, prepareColorStack, colorGrade };
 })();
 if (typeof module !== 'undefined') module.exports = PixelLook;

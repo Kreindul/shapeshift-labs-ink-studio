@@ -114,12 +114,14 @@
     return Object.freeze({change,spatial});
   }
 
-  function create(view, systems = {}, projected) {
+  const lookField = {name:'look/output',type:'record',selector:true};
+  function create(view, systems = {}, projected, visual) {
     const {world, states = {}, signals = {}, tick = 0, history = [], dropped = 0} = view;
     const fields = new Map(), traces = new Map();
     const base = {world, states, signals, tick, time:view.time ?? tick * world.dt};
     const locations = new Map(), active = new Set();
-    let spatialIndex, aliases;
+    let spatialIndex, aliases, appearance;
+    const look = () => appearance ??= W.lookQuery(visual ?? (() => W.visual({makeBuilder,makeSculpt},view,api)));
 
     function location(id) {
       if (locations.has(id)) return locations.get(id);
@@ -186,6 +188,7 @@
         return own(signals,port)?ok(signals[port]):missing('unknown signal port');
       }}
     },'read');
+    add(fields,'look',{output:{type:'record',selector:true,read:({target:site,args})=> look().output(site,args)}},'read');
     add(traces,'world',{
       signal:{run:({args}) => {
         let port = args.port;
@@ -222,8 +225,8 @@
     function execute(map,name,site,args) {
       const descriptor = resolve(map,name);
       if (!descriptor) return missing(descriptor === null ? 'ambiguous name; use system/name' : 'field or trace is not exposed');
-      const position = target(site);
-      if (!position) return missing('unknown entity or socket','missing');
+      const position = descriptor.description.selector ? site : target(site);
+      if (!position && !descriptor.description.selector) return missing('unknown entity or socket','missing');
       const guard=(map===fields?'field:':'trace:')+descriptor.system+'/'+descriptor.key;
       check(active.size<32&&!active.has(guard),'Cyclic query dependency at '+guard);
       active.add(guard);
@@ -300,13 +303,21 @@
       return {tick,time:base.time,field,units:resolve(fields,field)?.description.units ?? null,
         ...(grid ? {grid} : {}),samples:points.map(point => ({point,...api.probe(field,point,args)}))};
     }
-    const api = Object.freeze({inspect,spatial,target,
+    const api = Object.freeze({inspect,spatial,target,select:selector=>look().select(selector),
       probe:(name,at,args) => execute(fields,name,at,args),
       trace:(name,at,args) => execute(traces,name,at,args),export:exportField});
     return api;
   }
   function fromScene(w, time=0) {
-    if(typeof w.query==='function')return w.query(w,time);
+    if(typeof w.query==='function'){
+      const wrapped=w.query(w,time), appearance=W.lookQuery(()=>w);
+      return Object.freeze({...wrapped, select:appearance.select,
+        inspect(options){
+          const result=wrapped.inspect(options);
+          return {...result,fields:[...(result.fields??[]).filter(row=>row.name!==lookField.name),lookField]};
+        },
+        probe(name,site,args) {return name===lookField.name ? freeze(appearance.output(site,args)) : wrapped.probe(name,site,args);}});
+    }
     const descriptors={}, configs={};
     if(w.water?.mediumAt){
       configs.water={kind:'water-scene'};
@@ -334,7 +345,7 @@
         return value?ok(value):missing('point is outside the material grid','outside');
       }}}};
     }
-    return create({world:W.manifest({id:W.data.id(w.id)?w.id:'world',systems:configs}),tick:Math.round(time*60),time},descriptors);
+    return create({world:W.manifest({id:W.data.id(w.id)?w.id:'world',systems:configs}),tick:Math.round(time*60),time},descriptors,undefined,()=>w);
   }
   function keyedChanges(a,b) {
     const operations = [];

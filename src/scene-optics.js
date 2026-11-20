@@ -51,11 +51,12 @@ const SceneOptics = (() => {
     return [((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255];
   }
 
-  const common = ({ density = 0.2, color = '#99b1c4', near = 0, far } = {}) => {
+  const common = ({ density = 0.2, color = '#99b1c4', near = 0, far, id, tags, mediumKind } = {}) => {
     nonnegative(near, 'Volume near distance');
     if (far !== undefined && (!Number.isFinite(far) || far <= near))
       throw new RangeError('Volume far distance must exceed near');
-    return { density: nonnegative(density, 'Volume density'), color, near, far };
+    return { density: nonnegative(density, 'Volume density'), color, near, far, ...(id !== undefined && { id }),
+      ...(tags !== undefined && { tags }), ...(mediumKind !== undefined && { mediumKind }) };
   };
   function fog(options = {}) {
     const { bottom, top } = options;
@@ -101,16 +102,21 @@ const SceneOptics = (() => {
   }
 
   const volumeKinds = { fog, sphere, box, shaft, field };
-  function prepareVolumes(list, palette = []) {
+  function prepareVolumes(list, palette = [], colorFor) {
     if (!Array.isArray(list)) throw new TypeError('Atmosphere must be a list of volumes');
     return list
       .map(d => {
         if (!d || !Object.hasOwn(volumeKinds, d.type)) throw new TypeError('Unknown atmosphere volume');
         const volume = volumeKinds[d.type](d);
-        volume.rgb = volumeColor(volume.color, palette);
+        const transform = colorFor?.(volume);
+        const color = value => {
+          const rgb = volumeColor(value, palette);
+          return transform ? transform(rgb) : rgb;
+        };
+        volume.rgb = color(volume.color);
         if (volume.type === 'field') {
-          volume.ramp = volume.ramp?.map(color => volumeColor(color, palette));
-          volume.emissiveRgb = volumeColor(volume.emissive, palette);
+          volume.ramp = volume.ramp?.map(color);
+          volume.emissiveRgb = color(volume.emissive);
         }
         if (volume.type === 'shaft') {
           const span = sub(volume.to, volume.from);

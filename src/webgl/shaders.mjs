@@ -270,7 +270,7 @@ ${water ? `  vec3 mark; rgb = waterPaint(rgb, gl_FragCoord.xy, u_viewport,
 
 const paletteConstraintGlsl = `
 uniform highp sampler2D u_constraintSlots, u_constraintRows;
-uniform int u_constraintDefault;
+uniform int u_constraintDefault, u_constraintMap;
 bool g_constrained = false;
 bool constrainPalette(ivec2 p, vec3 inputColor, out vec3 color) {
   int dab = dabAt(p);
@@ -285,7 +285,8 @@ bool constrainPalette(ivec2 p, vec3 inputColor, out vec3 color) {
   const vec3 weight = vec3(0.30, 0.55, 0.15);
   vec3 gradedBytes = bytes, gradedReserve = vec3(0.0);
   bool hasGradedReserve = false;
-  if (u_toneOn < 0.5 && u_grade > 0.5 && texelFetch(u_constraintRows, ivec2(2, row), 0).a > 0.5) {
+  float mapping = texelFetch(u_constraintRows, ivec2(3, row), 0).a;
+  if (mapping > 0.5 || (u_toneOn < 0.5 && u_grade > 0.5 && texelFetch(u_constraintRows, ivec2(2, row), 0).a > 0.5)) {
     int index = 0; float nearestDistance = 1e9;
     for (int i = 0; i < 64; i++) {
       if (i >= u_n) break;
@@ -293,7 +294,8 @@ bool constrainPalette(ivec2 p, vec3 inputColor, out vec3 color) {
       float distance = dot(weight, d * d);
       if (distance < nearestDistance) { index = i; nearestDistance = distance; }
     }
-    inputColor = u_out[index];
+    inputColor = mapping > 0.5 ? texelFetch(u_constraintRows, ivec2(u_constraintMap + index, row), 0).rgb : u_out[index];
+    if (mapping > 1.5) { color = inputColor; return true; }
     gradedBytes = floor(clamp(inputColor, 0.0, 1.0) * 255.0 + 0.5);
   }
   float firstDistance = 1e9, secondDistance = 1e9;

@@ -444,3 +444,59 @@ JavaScript hosts can create a catalog with
 material. `looks.bind(binding, catalog)` returns the resolved immutable
 stack and palette. Use `assetPacks.bundle` to share packs and
 `assetPacks.reviseLook` to publish a new revision.
+
+## Shared look selectors
+
+Use `finish.look.targets` in a diorama, `visual.look.targets` on a world,
+or pass the same look object to `KIT.authoring.looks.scene` in JavaScript.
+Each rule binds an asset to a selector. The last matching rule wins.
+
+```json
+{
+  "targets": [
+    {
+      "select": { "tag": "paint-sample", "material": "bone" },
+      "asset": { "asset": "relay/glazed-enamel", "strength": 0.8 }
+    }
+  ]
+}
+```
+
+Selectors combine exact names. Every supplied field must match.
+Use `inspect <scene> --targets` to list the names in a scene or snapshot.
+
+| Field | Name to use |
+| --- | --- |
+| `entity` | Scene solid ID or simulation entity ID, such as `west.box`. |
+| `material` | Scene material role, authored material ID, or a simulation entity's `visual.material`. |
+| `surface` | A solid's `surfaceId`, an entity's `visual.surfaceId`, or a bound surface settings ID. |
+| `prefab` | A placed assembly ID. Rendered descendants also match. |
+| `tag` | A value from a solid or simulation entity's `tags` list. |
+| `medium` | A named atmosphere volume, a water body ID, or a simulation water field ID. |
+| `mediumKind` | A medium kind, such as `water` or a volume type such as `sphere`. |
+
+Use the same `select` object in `paletteConstraints.targets` to supply a
+palette or stack directly. Existing `object` and `material` rules keep
+their original syntax. JavaScript sculpts can pass `target` metadata in
+the shape options or in `B.describeSplats`. Use `entity`, `surface`,
+`tags`, `prefabs`, `medium`, and `mediumKind` to describe the splats.
+
+Scoped stacks grade the source scene swatches before an optional target
+palette. The CLI and standard WebGL use the same selectors for splats.
+Atmosphere volume tints resolve in the CLI and native water optics
+resolve in WebGL. Optical tints use the selected color without dithering.
+
+```sh
+select='{"tag":"paint-sample","material":"bone"}'
+node cli/ink-studio.js inspect examples/shared-look-selectors.js --select "$select"
+node cli/ink-studio.js validate examples/shared-look-selectors.js --select "$select"
+node cli/ink-studio.js probe examples/shared-look-selectors.js --select "$select" \
+  --args '{"rgb":[0.6,0.6,0.6],"pixel":[8,7]}'
+```
+
+JavaScript callers can use `query.select(select)` and
+`query.probe('look/output', select, args)`. The probe reports the matched
+IDs, winning rule, and output swatches. Supply normalized shaded RGB and
+optional art pixel coordinates to sample the look's palette resolve
+without a viewport. A selector with no matches reports `missing`. Validation
+checks against the requested scene or simulation tick.

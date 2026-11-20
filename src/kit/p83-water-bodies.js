@@ -134,7 +134,7 @@
     if (!name(id) || !P.verticalSpans.isGrid(grid) || grid.resolution.some(n => n > maxAxis))
       throw new TypeError('Layered water needs an ID and a span grid up to 64 × 64');
     const [nx, nz] = grid.resolution, [dx, dz] = grid.cell, { min, max } = grid.bounds;
-    const data = new Float32Array(nx * nz * 4), spans = [], labels = new Map(), spanProfiles = [], caps = [];
+    const data = new Float32Array(nx * nz * 4), spans = [], labels = new Map(), spanProfiles = [], spanMedia = [], caps = [];
     const profileFor = typeof look === 'function' ? look : null, style = optics(profileFor ? undefined : look);
     const profiles = new Map();
     let low = Infinity, high = -Infinity;
@@ -163,6 +163,7 @@
         low = Math.min(low, row.min);
         high = Math.max(high, row.max);
         spans.push(row.min, row.max, row.current[0], row.current[2]);
+        spanMedia.push(key);
         caps.push(bed, top);
         if (profileFor) {
           if (!profiles.has(key)) profiles.set(key, optics(profileFor(key, grid)));
@@ -191,7 +192,7 @@
         current: (x, y, z) => grid.at(x, y, z).current });
     }));
     const body = Object.freeze({ id, bounds, grid, media });
-    states.set(body, { nx, nz, dx, dz, data, style, spanProfiles, caps: Float32Array.from(caps),
+    states.set(body, { nx, nz, dx, dz, data, style, spanProfiles, spanMedia, caps: Float32Array.from(caps),
       empty: !spans.length, spans: Float32Array.from(spans) });
     return body;
   }
@@ -460,7 +461,35 @@
       });
       return P.data.freeze(changed);
     }
-    const result = Object.freeze({ media, mediumAt, count: active.length, layered, pack, changesFrom });
+    function mapColors(colorFor) {
+      const next = sorted.map(body => {
+        const state = states.get(body), styles = new Map();
+        function recolor(id, style) {
+          if (styles.has(id)) return styles.get(id);
+          const transform = colorFor(id, 'water');
+          const mapped = transform ? { ...style, tint: transform(style.tint), deepTint: transform(style.deepTint),
+            surfaceColor: transform(style.surfaceColor), sediment: { ...style.sediment, color: transform(style.sediment.color) } } : style;
+          styles.set(id, mapped);
+          return mapped;
+        }
+        const style = body.grid ? state.style : recolor(body.id, state.style);
+        let spanProfiles = state.spanProfiles, changed = style !== state.style;
+        if (state.spanMedia?.length) {
+          spanProfiles = state.spanMedia.map((id, i) => {
+            const before = state.spanProfiles[i] ?? state.style;
+            const after = recolor(id, before);
+            changed ||= before !== after;
+            return after;
+          });
+        }
+        if (!changed) return body;
+        const copy = Object.freeze({ ...body });
+        states.set(copy, { ...state, style, spanProfiles });
+        return copy;
+      });
+      return next.every((body, i) => body === sorted[i]) ? result : scene(next, { airPockets });
+    }
+    const result = Object.freeze({ media, mediumAt, count: active.length, layered, pack, changesFrom, mapColors });
     sceneStates.set(result, { physical, pockets });
     return result;
   }

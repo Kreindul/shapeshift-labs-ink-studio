@@ -131,10 +131,12 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     cidx = [],
     nrms = [];
   let curN = null;
-  let ownerRows, materialRows, muteEmission;
+  let ownerRows, materialRows, targetRows, muteEmission;
   let unnamedOwners = new WeakMap(), unnamedMaterials = new WeakMap();
   const ownerIds = new Map(), materialIds = new Map();
   const ownerNames = [null], materialNames = [null];
+  const targetKeys = new Map(), targetNames = [null];
+  let targetValues = new WeakMap();
   function renderId(value, labels, unnamed, names) {
     if (value == null) return 0;
     const hasLabel = typeof value === 'string' || typeof value === 'number';
@@ -148,7 +150,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     return id;
   }
   // Labels can be shared across several solids or supplied for splats built directly.
-  function describeSplats(first, end, { object, material } = {}) {
+  function describeSplats(first, end, { object, material, target } = {}) {
     if (!renderMetadata || first === end) return;
     if (!Number.isSafeInteger(first) || !Number.isSafeInteger(end) || first < 0 || end < first || end > n)
       throw new RangeError('Splat metadata range must belong to the builder');
@@ -163,6 +165,24 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     }
     ownerRows.fill(renderId(object, ownerIds, unnamedOwners, ownerNames), first, end);
     materialRows.fill(renderId(material, materialIds, unnamedMaterials, materialNames), first, end);
+    if (target) {
+      let id = targetValues.get(target);
+      if (id === undefined) {
+        const key = JSON.stringify(TargetSelectors.describe(target));
+        if (!targetKeys.has(key)) {
+          targetKeys.set(key, targetNames.length);
+          targetNames.push(JSON.parse(key));
+        }
+        id = targetKeys.get(key);
+        targetValues.set(target, id);
+      }
+      if (!targetRows || targetRows.length < cap) {
+        const next = new Uint32Array(cap);
+        if (targetRows) next.set(targetRows);
+        targetRows = next;
+      }
+      targetRows.fill(id, first, end);
+    } else if (targetRows) targetRows.fill(0, first, end);
   }
 
   function renderRows() {
@@ -174,6 +194,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
       muteEmission: muteEmission?.slice(0, n),
       objectIds: ownerRows?.slice(0, n),
       materialIds: materialRows?.slice(0, n),
+      ...(targetRows && { targetIds: targetRows.slice(0, n), targets: targetNames.slice() }),
       objects: ownerNames.slice(),
       materials: materialNames.slice()
     };
@@ -991,6 +1012,10 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     unnamedMaterials = new WeakMap();
     ownerIds.clear();
     materialIds.clear();
+    targetRows = undefined;
+    targetKeys.clear();
+    targetNames.length = 1;
+    targetValues = new WeakMap();
     ownerNames.length = materialNames.length = 1;
     moving.length = 0;
     back.length = 0;

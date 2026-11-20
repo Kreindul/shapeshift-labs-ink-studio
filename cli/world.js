@@ -21,6 +21,10 @@ function write(file,value) {
   }
 }
 function target(opt) {
+  if (opt.select !== undefined) {
+    ensure(opt.at === undefined && opt.entity === undefined && opt.socket === undefined, 'Use --select by itself');
+    return parse(opt.select);
+  }
   if (opt.at !== undefined) return {point:numbers(opt.at)};
   if (opt.entity !== undefined) return {entity:opt.entity,...(opt.socket?{socket:opt.socket}:{})};
   return {};
@@ -279,13 +283,21 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
     switch (command) {
       case 'inspect': {
         const query=view(file), where=opt.where?parse(opt.where):undefined;
+        if (opt.select !== undefined || opt.targets) {
+          ensure(opt.near===undefined && opt.where===undefined,'Use --select by itself');
+          respond({targets:query.select(opt.select===undefined?undefined:target(opt))});
+          break;
+        }
         respond(opt.near?query.spatial({point:numbers(opt.near),radius:Number(opt.radius),where}):query.inspect({where}));
         break;
       }
-      case 'probe':
-        ensure(typeof opt.field==='string','Use --field to select a query');
-        respond(view(file).probe(opt.field,target(opt),args()));
+      case 'probe': {
+        ensure(typeof opt.field==='string'||opt.select!==undefined,'Use --field to select a query');
+        const field=opt.field??'look/output';
+        const site=field==='look/output'&&opt.select===undefined&&opt.at===undefined&&opt.entity===undefined?undefined:target(opt);
+        respond(view(file).probe(field,site,args()));
         break;
+      }
       case 'trace':
         ensure(typeof name==='string','Supply a named trace');
         respond(view(file).trace(name,target(opt),args()));
@@ -322,6 +334,12 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
     }
   }
   function validate(file) {
+    if (opt.select !== undefined) {
+      const selector=target(opt), targets=view(file).select(selector);
+      ensure(targets.length>0,'No render target matches '+JSON.stringify(selector));
+      respond({valid:true,selector,targets});
+      return true;
+    }
     if(opt.world){
       const input=load(opt.world);
       ensure(input.world||input.document,'Provide a scene, world or checkpoint with --world');
@@ -348,7 +366,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
       return true;
     }
     if (raw.format!==W.format && raw.format!==R.checkpointFormat && raw.format!==R.runFormat) return false;
-    if (raw.format===W.format) R.validate(raw);
+    if (raw.format===W.format) R.validate(document(raw).world);
     else if (raw.format===R.checkpointFormat) R.create(raw.world,{checkpoint:raw});
     else R.replay(raw);
     respond({valid:true,format:raw.format});

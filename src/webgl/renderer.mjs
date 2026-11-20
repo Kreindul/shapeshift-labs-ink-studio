@@ -94,11 +94,12 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     let wetGeometry, wetContours, waterTexture, packedWater;
     let portalSource, portalDestination, portalMask, portalSpriteLayer, portalProgram;
     let lastWater, lastWaterTime, waterWidth = 0, waterHeight = 0;
+    let waterLookSource, waterLookPlan, mappedWater;
     const cleaned = target(), finished = target(), history = [target(), target()];
     const data = table(2048, 0, maxSize), bones = table(768, 4, maxSize);
     const fine = table(1536, 7, maxSize), pattern = table(2048, 10, maxSize);
     const toneStops = resources.texture(), toneRanks = resources.texture();
-    let constraintRows, constraintSlots, constraintPlan, constraintKey, constraintWorld, constraintMetadata, constraintCount;
+    let constraintRows, constraintSlots, constraintPlan, constraintKey, constraintWorld, constraintMetadata, constraintCount, constraintMap;
     let constrainedPost;
     const sort = createDepthSorter();
     let simple, simpleUnavailable = false, keyProgram, damp, copy, spriteProgram, spriteLayer, spriteTable, anchors;
@@ -182,15 +183,19 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       if (plan) {
         constraintRows ??= resources.texture();
         constraintSlots ??= table(1024, 4, maxSize);
-        const width = 49 + Math.ceil(Math.max(...plan.palettes.map(row => row.ranks.length)) / 4);
+        constraintMap = 49 + Math.ceil(Math.max(...plan.palettes.map(row => row.ranks.length)) / 4);
+        const width = constraintMap + Math.max(...plan.palettes.map(row => (row.grade?.length ?? 0) / 3));
         const rows = new Float32Array(width * 4 * plan.palettes.length);
         plan.palettes.forEach((palette, i) => {
           const offset = i * width * 4;
           rows.set([palette.count, palette.packed.length, palette.width, palette.height], offset);
-          palette.swatches.forEach((swatch, j) => rows.set(swatch, offset + (j + 1) * 4));
+          if (!palette.mapOnly) palette.swatches.forEach((swatch, j) => rows.set(swatch, offset + (j + 1) * 4));
           rows[offset + 7] = palette.amount;
           rows[offset + 11] = Number(palette.source === 'graded');
+          rows[offset + 15] = palette.mapOnly ? 2 : Number(Boolean(palette.grade));
           rows.set(palette.ranks, offset + 49 * 4);
+          if (palette.grade) for (let j = 0; j < palette.grade.length / 3; j++)
+            rows.set(palette.grade.subarray(j * 3, j * 3 + 3), offset + (constraintMap + j) * 4);
         });
         textureUnit(8, constraintRows);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, plan.palettes.length, 0, gl.RGBA, gl.FLOAT, rows);
@@ -339,7 +344,15 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const { raw = false, outline = true, dither = 0.35, scale = 1 } = frame;
       const look = world.look ?? {};
       const constraints = !raw && prepareConstraints(world, frame.paletteConstraints ?? look.paletteConstraints);
-      const waterScene = frame.water !== false && world.water?.count ? world.water : null;
+      const sourceWater = frame.water !== false && world.water?.count ? world.water : null;
+      if (sourceWater !== waterLookSource || constraints !== waterLookPlan) {
+        waterLookSource = sourceWater;
+        waterLookPlan = constraints;
+        mappedWater = constraints && sourceWater?.mapColors ?
+          sourceWater.mapColors((medium, mediumKind) => toolkit.PixelLook.mediumTransform(constraints, { medium, mediumKind })) :
+          sourceWater;
+      }
+      const waterScene = mappedWater;
       if (waterScene) {
         wetGeometry ??= target(3);
         wetContours ??= target(3);
@@ -503,7 +516,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       if (water) textureUnit(11, (colored ? contours : geometry).textures[2]);
       fullscreen(resolve, cleaning ? cleaned.framebuffer : destination, width, height, {
         ...patternedUniforms, ...glassUniforms, ...prepareTone(definition), ...water, u_waterMask: 11,
-        ...(constraints ? { u_constraintSlots: 4, u_constraintRows: 8, u_constraintDefault: constraints.defaultSlot, u_idxTex: 9 } : {}),
+        ...(constraints ? { u_constraintSlots: 4, u_constraintRows: 8, u_constraintDefault: constraints.defaultSlot,
+          u_constraintMap: constraintMap, u_idxTex: 9 } : {}),
         u_scene: 1, u_depth: 2, u_crispScene: 5, u_crispDepth: 6, u_keyTex: 15,
         u_pixOn: +patterned, u_keyOn: +patterned, u_sprOn: +sprites,
         u_sprLayer: 13, u_markA: +cleaning, u_pal: pal, u_n: palCount, u_luma: 0,

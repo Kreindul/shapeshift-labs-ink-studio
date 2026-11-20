@@ -81,6 +81,7 @@ function makeSculpt(B, rest) {
     p.bump = o.bump || null;
     p.tag = o.tag || null;
     p.renderOwner = o.objectId ?? p.tag;
+    p.renderTarget = o.target;
     p.model = o.model;
     if (p.bump) p.br += p.bump[0];
     p.reach = o.reach || 0;
@@ -1565,7 +1566,8 @@ function makeSculpt(B, rest) {
     light(material, ...sample);
     B.describeSplats(first, B.count(), {
       object: owner?.renderOwner ?? owner,
-      material: material.materialId ?? material
+      material: material.materialId ?? material,
+      target: owner?.renderTarget
     });
   }
   S.bake = () => {

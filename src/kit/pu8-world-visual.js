@@ -43,7 +43,7 @@
       return binding;
     }
     function validate() {
-      if (Object.hasOwn(config.look ?? {}, 'asset')) {
+      if (Object.hasOwn(config.look ?? {}, 'asset') || Object.hasOwn(config.look ?? {}, 'targets')) {
         PixelLook.prepareColorStack(look.colorStack, paletteOptions.palette, paletteOptions.roles);
         PixelLook.preparePaletteConstraints(look.paletteConstraints, paletteOptions);
       }
@@ -71,6 +71,20 @@
     const B=makeBuilder(view.world.seed,config.palette??palette), S=K.sculpt(makeSculpt(B));
     const catalog = view.world.assetPacks?.length ? K.authoring.assetPacks.create({ packs: view.world.assetPacks }) : undefined;
     const looks = visualLooks(view.world, catalog);
+    const entities = view.world.entities, targets = new Map();
+    function targetFor(id) {
+      if (targets.has(id)) return targets.get(id);
+      const entity = entities[id], prefabs = [];
+      for (let current = id; current != null && Object.hasOwn(entities, current);) {
+        const row = entities[current];
+        if (row.kind === 'assembly' && row.prefab) prefabs.push(current);
+        current = row.anchor?.entity ?? row.parent;
+      }
+      const target = { ...(id != null && { entity: id }), ...(entity?.visual?.surfaceId && { surface: entity.visual.surfaceId }),
+        ...(entity?.tags?.length && { tags: entity.tags }), ...(prefabs.length && { prefabs }) };
+      targets.set(id, target);
+      return target;
+    }
     if(looks.look?.pixel)S.pixel=true;
     const mid=min.map((n,i)=>(n+max[i])/2);
     const fields=config.fields??{}, terrain=fields.bed, water=fields.water, wear=fields.wear;
@@ -87,7 +101,7 @@
     function groundDistance(x,y,z) {
       return Math.max(y-height(x,z), min[1]-y, min[0]-x, x-max[0], min[2]-z, z-max[2]);
     }
-    S.implicitForm({bounds:{min,max},sd:groundDistance},earth,{res:resolution});
+    S.implicitForm({bounds:{min,max},sd:groundDistance},earth,{res:resolution,target:{surface:'terrain'}});
     let bodies=[];
     if (fields.bodies) {
       const reading=query.probe(fields.bodies);
@@ -101,16 +115,16 @@
       const finish=looks.material({r:ramp,materialId:entry.material??'body'},looks.forEntity(entry.entity??entry.id));
       hasSurface ||= Boolean(finish.surface);
       S.box(entry.position,entry.half,finish,{ax:axis,res:resolution*.72,
-        rd:Math.min(.055,...entry.half)*.4,tag:entry.id});
+        rd:Math.min(.055,...entry.half)*.4,tag:entry.id,target:targetFor(entry.entity??entry.id)});
     }
     for (const [id,entity] of Object.entries(view.world.entities)) {
       if (!entity.visual?.half) continue;
       const pose=query.target({entity:id}), point=pose?.point;
       if (!point) continue;
       const {half,ramp,surface}=entity.visual;
-      const finish=looks.material({r:ramp??[19,20,21,22,23],surface,materialId:'entity'},looks.forEntity(id));
+      const finish=looks.material({r:ramp??[19,20,21,22,23],surface,materialId:entity.visual.material??'entity'},looks.forEntity(id));
       hasSurface ||= Boolean(finish.surface);
-      S.box(point,half,finish,{res:resolution*.72,tag:id});
+      S.box(point,half,finish,{res:resolution*.72,tag:id,target:targetFor(id)});
     }
     for (const field of fields.agents??[]) {
       const reading=query.probe(field);
@@ -122,12 +136,13 @@
         const body=looks.material({r:agent.look??[4,5,6,24],materialId:'agent'},binding);
         const head=looks.material({r:[19,20,23],materialId:'agent'},binding);
         hasSurface ||= Boolean(body.surface);
-        S.ball(V.add(p,[0,r*.7,0]),[r*1.27,r*.78,r*.76],body,{objectId:id,res:resolution*.64});
-        S.ball(V.mad(V.add(p,[0,r,0]),face,r),r*.48,head,{objectId:id,res:resolution*.64});
+        const target=targetFor(agent.entity??id);
+        S.ball(V.add(p,[0,r*.7,0]),[r*1.27,r*.78,r*.76],body,{objectId:id,target,res:resolution*.64});
+        S.ball(V.mad(V.add(p,[0,r,0]),face,r),r*.48,head,{objectId:id,target,res:resolution*.64});
         const toes=looks.material({r:[19,20,21,22],materialId:'agent'},binding);
         for(const limb of agent.limbs??[]){
           const top=V.add(limb.point,[0,r*.42,0]);
-          S.tube([limb.point,top],r*.18,r*.18,toes,{objectId:id,res:resolution*.6});
+          S.tube([limb.point,top],r*.18,r*.18,toes,{objectId:id,target,res:resolution*.6});
         }
       }
     }
@@ -143,7 +158,7 @@
         B.disc(x,surface+.013,z,[0,1,0],resolution*.66,resolution*.16,B.P[color],1);
         if (speed>.12 && glow<.063) B.disc(x,surface+.032,z,[0,1,0],resolution*.4,resolution*.14,B.P[18],1);
       }
-      B.describeSplats?.(first,B.count(),{material:'water'});
+      B.describeSplats?.(first,B.count(),{material:'water',target:{medium:water,mediumKind:'water',surface:'water'}});
     }
     return B.finish({cam:config.camera??{target:[mid[0],.05,mid[2]],dist:span*1.48,yaw:.62,pitch:.8},
       radius:span,detail:30,dither:.22,look:looks.look,paletteRoles:config.paletteRoles,

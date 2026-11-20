@@ -106,6 +106,8 @@
   // ---------------- what may be written ----------------
   const COMMON = {
     id: 'str',
+    surfaceId: 'str',
+    tags: 'list',
     mat: 'mat',
     res: 'pos',
     part: 'str',
@@ -539,6 +541,10 @@
         ids.add(s.id);
       }
       if (s.part && !inner) parts.add(s.part);
+      if (s.tags !== undefined && (!Array.isArray(s.tags) || !s.tags.every(TargetSelectors.name)))
+        bad(path + '.tags', 'tags must be a list of names');
+      if (s.surfaceId !== undefined && !TargetSelectors.name(s.surfaceId))
+        bad(path + '.surfaceId', 'surfaceId must be a name');
       if (s.part && inner)
         bad(path + '.part', 'a solid inside another cannot be a part of its own', 'put "part" on the outer one');
       if (s.group !== undefined && !groups[s.group])
@@ -780,6 +786,9 @@
     const made = {},
       make = (s, held) => {
         const o = { res: s.res, objectId: s.part ?? s.id };
+        if (s.id || s.surfaceId || s.tags?.length) o.target = {
+          ...(s.id && { entity: s.id }), ...(s.surfaceId && { surface: s.surfaceId }), ...(s.tags?.length && { tags: s.tags })
+        };
         if (s.res === undefined) delete o.res;
         if (s.part) {
           o.tag = s.part;
@@ -845,7 +854,7 @@
         } else if (k === 'bubbles') p = S.bubbles(sub(s.of), Object.assign({ cell: s.cell || 0.5, h: s.h || 0.12 }, o));
         else {
           const mats = { stone: m, post: m, rail: m, metal: m },
-            oo = Object.assign({}, s, { mats, tag: s.part, res: s.res, objectId: o.objectId });
+            oo = Object.assign({}, s, { mats, tag: s.part, res: s.res, objectId: o.objectId, target: o.target });
           p =
             k === 'pillar'
               ? K.build.pillar(S, s.at, s.h, oo)
