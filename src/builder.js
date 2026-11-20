@@ -1009,6 +1009,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
       world.look = { ...world.look, colorLut: ColorLUT.normalize(world.look.colorLut) };
     if (world.look?.colorStack !== undefined && world.look.colorStack !== false)
       world.look = { ...world.look, colorStack: ColorStack.normalize(world.look.colorStack) };
+    if (world.celestialTracks) world.celestialTracks = CelestialTracks.compile(world.celestialTracks);
     if (world.splatFields) world.splatFields = KIT.splatFields.compile(world.splatFields);
     if (world.surfaceEffects) world.surfaceEffects = KIT.splatEffects.context(world.surfaceEffects);
     return world;

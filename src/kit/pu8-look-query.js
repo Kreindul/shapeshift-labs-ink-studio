@@ -208,9 +208,13 @@
           [dist * Math.cos(pitch) * Math.sin(yaw), dist * Math.sin(pitch), dist * Math.cos(pitch) * Math.cos(yaw)]), worldPosition) : [0, 1, 0];
         const tangent = Array.from(surface.subarray(surfaceOffset + 5, surfaceOffset + 8));
         const layers = [], prepared = surfaces.get(slot);
-        const sky = world.skyEnvironment && prepared.layers.some(layer =>
-          layer.type === 'reflection' && (world.skyReflections ?? layer.source) === 'scene') &&
-          SkyEnvironment.compile(world.skyEnvironment).frame(site.time).sky;
+        const reflectsScene = prepared.layers.some(layer =>
+          layer.type === 'reflection' && (world.skyReflections ?? layer.source) === 'scene');
+        const environment = reflectsScene && world.skyEnvironment && SkyEnvironment.compile(world.skyEnvironment).frame(site.time).sky;
+        const celestial = reflectsScene && CelestialTracks.settings(world.celestialTracks)?.frame(site.time);
+        const sky = reflectsScene && SkyEnvironment.withCelestials(environment, celestial, celestial && [
+          (world.pal[0] >> 16 & 255) / 255, (world.pal[0] >> 8 & 255) / 255, (world.pal[0] & 255) / 255
+        ]);
         const shaded = SurfaceLook.shade(prepared, { ...site, normal, view, ...(tangent.some(Boolean) && { tangent }),
           ...(sky && { sky: (direction, output) => SkyEnvironment.shade(sky, direction, output), skyReflectionSource: world.skyReflections }),
           depth: Math.hypot(...view),

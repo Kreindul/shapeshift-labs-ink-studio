@@ -19,14 +19,14 @@ const VolumeLight = (() => {
     return direction.map(v => v / length);
   }
 
-  function lighting(settings, color, palette, { time = 0, localLights = true, localShadows = true } = {}) {
+  function lighting(settings, color, palette, { time = 0, localLights = true, localShadows = true, celestialSun } = {}) {
     const { ambient = .35, sun, point, points = [], spots = [], shadow } = settings || {};
     if (shadow !== undefined && typeof shadow !== 'function') throw new TypeError('Atmosphere shadow must be a ray query');
     if (!Array.isArray(points) || !Array.isArray(spots)) throw new TypeError('Volume points and spots must be arrays');
     let directional = null, animatedLocals = false;
     if (sun) {
-      directional = { direction: unit(sun.direction, 'Sun direction'), rgb: color(sun.color ?? '#fff3dc', palette),
-        intensity: number(sun.intensity ?? .7, 0, 64, 'Sun intensity'),
+      directional = { direction: unit(celestialSun?.direction ?? sun.direction, 'Sun direction'), rgb: color(sun.color ?? '#fff3dc', palette),
+        intensity: number(sun.intensity ?? .7, 0, 64, 'Sun intensity') * (celestialSun?.gain ?? 1),
         distance: number(sun.distance ?? 20, .001, 1000, 'Sun shadow distance') };
     }
 

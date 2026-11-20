@@ -224,7 +224,7 @@ function pose(w, t) {
 const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
 if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
   die('--px needs a positive integer');
-let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, splatFieldsOverride, inputSpriteAtlas;
+let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, celestialOverride, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, splatFieldsOverride, inputSpriteAtlas;
 function skyProfileOverrides(value) {
   if (typeof value !== 'string') die('--sky-profile expects track=profile pairs');
   const pairs = value.split(',').map(entry => entry.split('=').map(part => part.trim()));
@@ -302,6 +302,14 @@ function sceneExposureOption() {
   if (value === true || value === 'on') return true;
   return sceneExposureOverride ??= require('../src/scene-exposure.js').compile(
     JSON.parse(fs.readFileSync(path.resolve(value), 'utf8')));
+}
+
+function celestialOption() {
+  const value = opt['celestial-tracks'];
+  if (value === undefined) return undefined;
+  if (value === 'off') return false;
+  if (value === 'on' || value === true) return true;
+  return celestialOverride ??= require('../src/celestial-tracks.js').compile(JSON.parse(fs.readFileSync(path.resolve(value), 'utf8')));
 }
 
 function splatFieldsOption() {
@@ -427,6 +435,7 @@ const view = extra =>
       skyEnvironment: opt['sky-environment'] === 'off' ? false : opt['sky-environment'] === undefined ? undefined :
         (skyOverride ??= require('../src/sky-environment.js').compile(
           JSON.parse(fs.readFileSync(path.resolve(opt['sky-environment']), 'utf8')))),
+      celestialTracks: celestialOption(),
       cloudField: cloudFieldOption(),
       cloudRepresentation: opt['cloud-representation'],
       cloudShadows: cloudShadowOption(),
@@ -586,6 +595,7 @@ const CMD = {
         'sun options: --live-sun on|off --sun-direction x,y,z --sun-ambient n --sun-intensity n --shadow-map-size n --shadow-bias n --sun-shadows off',
         'bounce options: --sky-bounce color|preset|off --ground-bounce color|preset|off --sky-bounce-intensity n --ground-bounce-intensity n',
         'cloud options: --cloud-field cirrus|coastal-stratus|cumulus|storm-front|file.json|off --cloud-representation auto|card|impostor|volume|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',
+        'celestial options: --celestial-tracks on|off|file.json',
         'sky options: --sky-environment file.json|off --sky-time seconds --sky-profile track=profile --sky-reflections scene|material',
         'weather options: --weather-binding on|off|file.json --retained-weather on|off --weather-fronts on|off --world-precipitation on|off|file.json --rain-impacts on|off|file.json',
         'wind options: --wind-field on|off|file.json',

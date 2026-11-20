@@ -15,6 +15,8 @@ For moving directional light and cast shadows on solid geometry, see [Live sun l
 
 Use [Animated splat fields](animated-splat-fields.md) for drifting particles, aurora curtains, dust walls, and wakes that follow a route.
 
+Use [Celestial tracks](celestial-tracks.md) to key authored suns, moons, stars, and eclipses on the same clock as sky profiles.
+
 ## Planar reflections
 
 ```js

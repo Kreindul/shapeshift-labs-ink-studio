@@ -210,6 +210,17 @@ const SkyEnvironment = (() => {
     return Object.freeze({ [compiled]: true, sample, frame, profile });
   }
 
+  function withCelestials(sky, celestial, background = [0, 0, 0]) {
+    if (!celestial || (!celestial.visible && !celestial.replacesSun)) return sky;
+    if (!sky && !celestial.visible) return sky;
+    const backdrop = sky ?? { orthoFov: Math.PI / 3, sun: [0, 1, 0], sunStrength: 0, sunColor: background,
+      sunEdge: 0, sunCore: 1, horizon: background, zenith: background, ground: background, splats: [] };
+    if (!celestial.replacesSun) return { ...backdrop, celestial };
+    const sun = celestial.sun;
+    return { ...backdrop, celestial, sun: sun?.direction ?? backdrop.sun, sunColor: sun?.color ?? backdrop.sunColor,
+      sunStrength: sun ? backdrop.sunStrength * sun.gain : 0 };
+  }
+
   function aerial(authored, override, profile = {}) {
     const enabled = override ?? authored;
     if (enabled === false || enabled === undefined) return null;
@@ -235,7 +246,7 @@ const SkyEnvironment = (() => {
     const height = ray[1], horizon = height > 0 ? sky.zenith : sky.ground;
     const fade = height > 0 ? Math.sqrt(height) : clamp(-height * 3);
     const angle = dot(ray, sky.sun);
-    const disk = diskVisible && height >= 0 ? .92 * clamp((angle - sky.sunEdge) / (sky.sunCore - sky.sunEdge)) : 0;
+    const disk = diskVisible && !sky.celestial?.replacesSun && height >= 0 ? .92 * clamp((angle - sky.sunEdge) / (sky.sunCore - sky.sunEdge)) : 0;
     const glow = angle > 0 && height >= 0 ? .22 * Math.exp(-19 * (1 - angle)) : 0;
     const sunlight = clamp((disk + glow) * sky.sunStrength);
     for (let c = 0; c < 3; c++) output[c] = mix(mix(sky.horizon[c], horizon[c], fade), sky.sunColor[c], sunlight);
@@ -263,8 +274,8 @@ const SkyEnvironment = (() => {
       const alpha = splat.opacity * Math.exp(-radius / 2);
       for (let c = 0; c < 3; c++) output[c] = mix(output[c], splat.color[c], alpha);
     }
-    return output;
+    return sky.celestial ? sky.celestial.shade(ray, output) : output;
   }
-  return Object.freeze({ compile, shade, aerial, airTransmission, scattering });
+  return Object.freeze({ compile, shade, aerial, airTransmission, scattering, withCelestials });
 })();
 if (typeof module !== 'undefined') module.exports = SkyEnvironment;

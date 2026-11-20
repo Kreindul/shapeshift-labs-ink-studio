@@ -1,5 +1,6 @@
 (function (K) {
   K.skyEnvironment = SkyEnvironment;
+  K.celestialTracks = CelestialTracks;
   K.clouds = CloudField;
   K.reflection = {
     plane: SceneOptics.plane,

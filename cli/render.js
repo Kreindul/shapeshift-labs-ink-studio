@@ -34,6 +34,7 @@ const LiveSun = require('./live-sun.js');
 const surfaceShading = require('./surface-shading.js');
 const SceneOptics = require('../src/scene-optics.js');
 const SkyEnvironment = require('../src/sky-environment.js');
+const CelestialTracks = require('../src/celestial-tracks.js');
 const CloudField = require('../src/cloud-field.js');
 const Lightning = require('../src/lightning.js');
 const SceneExposure = require('../src/scene-exposure.js');
@@ -331,10 +332,11 @@ function render(world, o, preparedPalettes) {
   const motionReference = centers && { w: W, h: H, centers, ...(birthIds && { birthIds, baseCount, splatSource }) };
   const art = createArtPasses([...passSelection].filter(name => name !== 'target' && name !== 'mask'), W, H);
   const rayAt = cameraRays(V, eye, W, H, focal, ortho);
-  const sky = environment?.sky;
+  const celestial = CelestialTracks.settings(world.celestialTracks, o.celestialTracks)?.frame(skyTime);
+  const sky = SkyEnvironment.withCelestials(environment?.sky, celestial, celestial && hex(0));
   const aerial = o.atmosphere !== false && !o.captureCoverage ?
     SkyEnvironment.aerial(world.aerialPerspective, o.aerialPerspective, environment?.parameters) : null;
-  const sun = LiveSun.prepare(world.liveSun, o.liveSun, t);
+  const sun = LiveSun.prepare(world.liveSun, o.liveSun, t, celestial?.sun);
   const cloudSource = o.cloudField ?? world.cloudField;
   const cloudSettings = cloudSource === false ? null :
     CloudField.shadowSettings(world.cloudShadows, o.cloudShadows, environment?.parameters);
@@ -343,7 +345,7 @@ function render(world, o, preparedPalettes) {
     ? flow.cloudTravel(0,skyTime).map(n => n*windConfig.clouds) : undefined;
   const flash = Lightning.settings(world.lightning, o.lightning)?.frame(t);
   const clouds = cloudSource ? CloudField.compile(cloudSource).frame(skyTime, cloudSettings,
-    sun?.direction ?? sky?.sun ?? (o.volumeLighting ?? world.volumeLighting)?.sun?.direction,
+    sun?.direction ?? celestial?.sun?.direction ?? environment?.sky?.sun ?? (o.volumeLighting ?? world.volumeLighting)?.sun?.direction,
     cloudDisplacement, o.cloudRepresentation ?? world.cloudRepresentation, flash?.light, cutouts?.cloud) : null;
   const cloudShadow = clouds?.shadow;
   const spriteAtlases=AtlasSprites.placements(world.spriteAtlases,o.spriteAtlases);
@@ -383,7 +385,7 @@ function render(world, o, preparedPalettes) {
   const volumeLighting = o.volumeLighting ?? world.volumeLighting;
   let localLighting;
   const prepareVolumeLight = () => volumeLighting ? (localLighting ??= SceneOptics.lighting(volumeLighting, world.pal,
-    { time: t, localLights: o.volumeLocalLights, localShadows: o.volumeLocalShadows })) : undefined;
+    { time: t, localLights: o.volumeLocalLights, localShadows: o.volumeLocalShadows, celestialSun: celestial?.sun })) : undefined;
   const daylight = o.lightDaylight ?? o.environment?.daylight ?? an.daylight ?? 1;
   const dusk = LightSchedule.gain(daylight);
   const lampEye = [

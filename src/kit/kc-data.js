@@ -295,6 +295,11 @@
       }
     }
     try {
+      CelestialTracks.settings(st.finish.celestialTracks);
+    } catch (error) {
+      bad('finish.celestialTracks', error.message);
+    }
+    try {
       K.splatFields.settings(st.finish.splatFields);
     } catch (error) {
       bad('finish.splatFields', error.message);

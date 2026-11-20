@@ -40,7 +40,7 @@ function bounce(authored, override, fallback, time) {
   return intensity && rgb.some(Boolean) ? rgb.map(c => c * intensity) : null;
 }
 
-function prepare(authored, override, time) {
+function prepare(authored, override, time, celestialSun) {
   const enabled = override ?? authored;
   if (enabled === undefined || enabled === false) return null;
   const settings = value => {
@@ -53,14 +53,14 @@ function prepare(authored, override, time) {
     shadows = true, mapSize = 512, bias = .02, filter = 1 } = { ...base, ...selected };
   const sky = bounce(base.skyBounce, selected.skyBounce, 'clear-sky', time);
   const ground = bounce(base.groundBounce, selected.groundBounce, 'sand', time);
-  const directionAt = typeof direction === 'function' ? direction(time) : direction;
+  const directionAt = celestialSun?.direction ?? (typeof direction === 'function' ? direction(time) : direction);
   if (!Array.isArray(directionAt) || directionAt.length !== 3 || !Array.from(directionAt).every(Number.isFinite) ||
       !Number.isFinite(Math.hypot(...directionAt)) || Math.hypot(...directionAt) === 0)
     throw new TypeError('Live sun direction needs a finite nonzero XYZ vector');
   if (!range(ambient, 0, 4) || !range(intensity, 0, 4) || !range(bias, 0, 10) || !range(mapSize, 32, 2048) ||
       !Number.isInteger(mapSize) || !Number.isInteger(filter) || !range(filter, 0, 2) || typeof shadows !== 'boolean')
     throw new RangeError('Invalid live sun lighting or shadow map settings');
-  return { direction: unit(directionAt), ambient, intensity, shadows, mapSize, bias, filter, sky, ground };
+  return { direction: unit(directionAt), ambient, intensity: intensity * (celestialSun?.gain ?? 1), shadows, mapSize, bias, filter, sky, ground };
 }
 
 function covariance(data, i, a, b) {
