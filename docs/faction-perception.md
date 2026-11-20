@@ -17,7 +17,7 @@ checkpoint, fork, and replay.
   the listener and sight origin along world Y.
 - `proximity.range` detects nearby subjects by world distance.
   `hearing.range` and `hearing.thresholdDb` define audibility. Bind
-  `hearing.field` to a qualified acoustic query such as `acoustics/hearing`
+  `hearing.field` to a qualified acoustic query such as `acoustics/audible`
   to use rooms and portals. Without a field, hearing uses distance attenuation.
 - Each entry in `factions.<name>.observers` names an `at` and a `profile`.
   An observer can be a world point, an entity or socket, or an agent handle
@@ -82,5 +82,5 @@ Use `ink-studio inspect examples/world-lookout-memory.json` to discover the
 fields and trace providers. A batch probe can mix points and named objects.
 
 ```sh
-ink-studio probe lookout.run.json --ticks 24 --field intel/batch --args '{"queries":[{"id":"crossing","profile":"scout","from":[-3,0.1,0],"to":[3,0.8,0]},{"id":"bell","profile":"scout","from":[-3,0.1,0],"to":[3,0.8,0],"sound":{"levelDb":98,"band":"low"}}]}' --json
+ink-studio probe lookout.run.json --ticks 24 --field intel/batch --args '{"queries":[{"id":"crossing","profile":"watch","from":[-3,0.1,0],"to":[3,0.8,0]},{"id":"bell","profile":"watch","from":[-3,0.1,0],"to":[3,0.8,0],"sound":{"levelDb":98,"band":"low"}}]}' --json
 ```
