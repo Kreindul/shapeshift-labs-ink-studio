@@ -646,7 +646,7 @@
         if(O.holding(book)){
           const profile=profileFor(agent), exit=group?.exitGoal(agent);
           function drive(row,goal,task,priority,direction){
-            const nextPriority=row.routing?(priority??book.priorPriority):undefined;
+            const nextPriority=row.routing?(priority??book.priorPriority??row.routePriority):undefined;
             const changed=!S.sameVector(goal,row.goal)||row.routePriority!==nextPriority;
             const directed=changed?{...row,goal,route:emptyList,cursor:0,retry:0,
               ...(row.routing&&{routing:RQ.idle,routePriority:nextPriority})}:row;

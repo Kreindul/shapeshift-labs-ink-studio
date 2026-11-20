@@ -99,8 +99,9 @@
         sequence:order.sequence,order:order.id??null,task:order.task,at:agent.position,...detail});
     }
     function finish(book,order,phase,reason,agent,ctx){
-      const entry={...order,phase,reason,ended:ctx.tick};
-      emit(ctx,agent,'order-'+phase,entry,{reason,results:entry.results});
+      const lastBlocker=reason==='timeout'&&order.reason?{lastBlocker:order.reason}:{};
+      const entry={...order,phase,reason,ended:ctx.tick,...lastBlocker};
+      emit(ctx,agent,'order-'+phase,entry,{reason,results:entry.results,...lastBlocker});
       return {...book,outcomes:[...book.outcomes,entry].slice(-historyLimit)};
     }
     function cancel(book,selection,agent,ctx,reason='cancelled'){
@@ -228,7 +229,8 @@
           (row.lastTick===null?row.started===null:tick(row.lastTick)&&row.started!==null&&row.lastTick>=row.started)&&
           (terminal?outcomes.includes(row.phase)&&tick(row.ended)&&row.ended>=(row.lastTick??row.issued):
             phases.includes(row.phase)&&!outcomes.includes(row.phase)&&!own(row,'ended'))&&
-          (row.reason===null||id(row.reason))&&tick(row.elapsed)&&integer(row.entered,0,row.elapsed)&&
+          (row.reason===null||id(row.reason))&&(row.lastBlocker===undefined||row.reason==='timeout'&&id(row.lastBlocker))&&
+          tick(row.elapsed)&&integer(row.entered,0,row.elapsed)&&
           Array.isArray(row.results),'Invalid saved order entry');
         orderShape(row);
         const steps=catalog.get(row.task).steps;

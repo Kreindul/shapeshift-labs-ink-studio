@@ -93,6 +93,7 @@ test('a moving socket is resolved on each step, and a missing target times out w
   assert(arrival.results[0].at[0]>5.9);
   assert.equal(missing.phase,'failed');
   assert.equal(missing.reason,'timeout');
+  assert.equal(missing.lastBlocker,'target-missing');
   assert.equal(missing.results.length,0);
   assert(actor(run).position[0]>5.9);
 });
@@ -126,6 +127,16 @@ test('settlement is exactly once across restore, skipped solver ticks and cancel
   assert.deepEqual(failure.results[0].receipt.limitedBy,['destination']);
   assert.equal(balance(blocked,'inventory/supply'),5);
   assert.equal(balance(blocked,'inventory/cargo'),0);
+
+  scene.systems.crew.config.orders.tasks.load.steps[0].mode='partial';
+  const partial=W.runtime.create(scene);
+  partial.schedule([issue(1,{task:'load',params:{amount:3}})]);
+  partial.advance(8);
+  const [delivery]=orders(partial).outcomes;
+  assert.equal(delivery.phase,'succeeded');
+  assert.equal(delivery.results[0].receipt.status,'partial');
+  assert.equal(delivery.results[0].receipt.applied,2);
+  assert.equal(balance(partial,'inventory/supply'),3);
 });
 
 test('cohort LOD pauses prepared transfers and leaves unrelated cohort walkers moving',()=>{
