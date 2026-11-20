@@ -1102,6 +1102,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
       world.look = { ...world.look, colorStack: ColorStack.normalize(world.look.colorStack) };
     if (world.celestialTracks) world.celestialTracks = CelestialTracks.compile(world.celestialTracks);
     if (world.areaLights !== undefined) AreaLights.prepare(world.areaLights);
+    if (world.bounceProbes !== undefined && world.bounceProbes !== false) world.bounceProbes = KIT.bounceProbes.bake(world);
     if (world.relighting !== undefined) SplatRelighting.settings(world.relighting);
     if (world.atmosphereEmitters) world.atmosphereEmitters = KIT.atmosphere.emitters.compile(world.atmosphereEmitters);
     if (world.splatFields) world.splatFields = KIT.splatFields.compile(world.splatFields);
