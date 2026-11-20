@@ -13,6 +13,7 @@ const ArtEffects = require('../src/art-effects.js');
 const ArtStability = require('../src/art-stability.js');
 const { footprint, sampledDepth } = require('./splat-sampling.js');
 const { createMaskResolve, applyMasks } = require('./look-mask-resolve.js');
+const { createLookPass } = require('./look-pass.js');
 const { contributionLook, contributionLayers } = require('./look-contributions.js');
 const blueNoiseTiles = new WeakMap();
 function blueNoise(world, { seed }) {
@@ -122,6 +123,7 @@ function render(world, o, preparedPalettes) {
   const anchoring = legacyLook && stable && stable.dither !== 'screen';
   const requestedPasses = ArtPasses.select(o.passes);
   const passSelection = new Set(requestedPasses);
+  let lookPass;
   if (styled && stages?.owner) passSelection.add('splatId');
   if (styled && stages?.postMask) {
     for (const channel of ['position', 'objectPosition', 'normal']) passSelection.add(channel);
@@ -141,7 +143,7 @@ function render(world, o, preparedPalettes) {
     if (effects) frame = ArtEffects.apply(frame, passes, effects, t, {
       history: o.artHistory, world, palette: world.pal, motionReference: frame.motionReference
     });
-    if (styled && stages?.post) RenderStages.finish(frame, stages, passes, t);
+    if (styled && stages?.post) RenderStages.finish(frame, stages, passes, t, lookPass?.post);
     if (!o.captureMotion) delete frame.motionReference;
     if (requestedPasses.length) frame.passes = ArtPasses.subset(passes, requestedPasses);
     return frame;
@@ -153,11 +155,14 @@ function render(world, o, preparedPalettes) {
     palette: world.pal, roles: world.paletteRoles, blueNoise: settings => blueNoise(world, settings),
     context: world.surfaceEffects, skipMasks: o.lookMasks === false, skipMaskedStacks: o.colorStack === false
   }) : preparedPalettes;
-  const colorGrade = (legacyLook || coverageAware) && !tone && PixelLook.colorGrade(world.pal, world.paletteRoles, an.grade,
+  const animationGrade = o.ignoreLookGrade ? undefined : an.grade;
+  const colorGrade = (legacyLook || coverageAware) && !tone && PixelLook.colorGrade(world.pal, world.paletteRoles, animationGrade,
     o.paletteRemap ?? look.paletteRemap, o.colorCurves ?? look.colorCurves, o.colorLut ?? look.colorLut,
     o.colorStack ?? look.colorStack);
-  const grade = colorGrade || an.grade;
+  const grade = colorGrade || animationGrade;
   const evaluatedPalette = colorGrade ? PixelLook.gradePalette(grade) : undefined;
+  const globalPaletteMark = passSelection.has('target') && (tone || grade) ?
+    { assetId: look.colorStackAssetId, stackName: tone ? 'Tone' : (o.colorStack ?? look.colorStack)?.name } : null;
   const rel = c.dist / dist0,
     rho = world.detail * Math.pow(rel, rel > 1 ? 0.5 : 0.25),
     preferred = look.pixelSize || clamp(Math.round(ch / (2 * tangent * rho * dist0)), 1, 18),
@@ -171,6 +176,7 @@ function render(world, o, preparedPalettes) {
   if (legacyLook && (specializedResolve || (o.colored && !tone))) {
     const native = render(world, Object.assign({}, o, { colored: false, samples: true, worked: true, px, passes: [...passSelection], artInkActive: !!ink,
       captureMotion, motionFrom, maskGrade: !tone && grade, reflectionTint: effects?.reflection,
+      previewPalette: globalPaletteMark,
       captureFog: o.captureFog || ink?.ramps.has('fog') }), paletteRules);
     const samples = render(
       world,
@@ -215,6 +221,7 @@ function render(world, o, preparedPalettes) {
       native.volumeStats && { volumeStats: native.volumeStats },
       o.captureFog && native.fog && { fog: native.fog }), native.passes, native.fog);
   }
+  lookPass = createLookPass(W, H, passSelection, o.lookPassRegistry);
   /* orthographic (o.ortho): no perspective, every ray parallel, the picture as big as the perspective one is at the target. The eye
      is set well back, so nothing comes behind it however far in the camera zooms; the zoom is the size of the view */
   const ortho = !!o.ortho,
@@ -256,7 +263,7 @@ function render(world, o, preparedPalettes) {
   const glassLooks = glassIndex && new Map();
   const centers = captureMotion ? new Float32Array(N * 2).fill(NaN) : null;
   const motionReference = centers && { w: W, h: H, centers };
-  const art = createArtPasses([...passSelection], W, H);
+  const art = createArtPasses([...passSelection].filter(name => name !== 'target' && name !== 'mask'), W, H);
   const rayAt = cameraRays(V, eye, W, H, focal, ortho);
   const horizon = eyeD + 2 * R;
   const atmosphereOptions = () => {
@@ -487,7 +494,7 @@ function render(world, o, preparedPalettes) {
   }
   function stagedMaterial(i, rules, rgb, sample) {
     const reference = world.materialAlbedo?.[i];
-    return RenderStages.material(rules, rgb, reference ? reference - 1 : undefined, sample);
+    return RenderStages.material(rules, rgb, reference ? reference - 1 : undefined, sample, undefined, lookPass?.stage);
   }
   let pixed = null,
     sprM = null;
@@ -495,7 +502,7 @@ function render(world, o, preparedPalettes) {
       (o.fine || (world.look && world.look.fine)) && world.fine && world.fine.length >= N * 12 ? world.fine : null,
     FPAL = FN ? world.pal.map((h, i) => hex(i)) : null;
   let deferred = sortedSurfaces ? new Map() : null, deferredCount = 0, orderFallback = false;
-  function composite(p, i, z, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass) {
+  function composite(p, i, z, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, mark) {
     const p3 = p * 3, ia = 1 - a;
     if (rayMedia) [pr, pg, pb] = rayMedia.shade(p, z, [pr, pg, pb]);
     if (retainLayers && glass && bend && !contributions) contributions = contributionLayers(col, captured, W, H, false, bend);
@@ -505,6 +512,10 @@ function render(world, o, preparedPalettes) {
     col[p3 + 2] = pb * a + col[p3 + 2] * ia;
     if (captured) captured[p] = a + captured[p] * ia;
     if (art) art.fragment(p, i, a, wd, z, emits, pr, pg, pb);
+    if (lookPass) {
+      const redraw = PIX?.[i * 8] && wd && a > .5 && !surface?.reveals(i);
+      lookPass.fragment(p, a, redraw ? undefined : mark);
+    }
     if (surfaceGlint && a > 0.5) surfaceGlint[p] = highlight > 0.22 || detailParticle;
     if (localAt && a > 0.5) localAt[p] = localSlot(i, paletteId, p);
     if (detail) {
@@ -571,6 +582,7 @@ function render(world, o, preparedPalettes) {
       s2 = SC[i] * SC[i],
       pk = d[q + 7];
     const staged = stages ? stages.at(i) : null;
+    lookPass?.begin();
     const materialSample = staged?.material?.some(rule => rule.mask) ? stageSample(i, [x, y, z]) : undefined;
     const litMask = staged?.lit?.some(rule => rule.mask);
     const litNormal = litMask ? stageFrame(i).normal : null;
@@ -647,7 +659,7 @@ function render(world, o, preparedPalettes) {
     const fragmentSurface = !pixelSurface && (planar || projected);
     const detailParticle = world.effectParticles?.some(({ first, count }) => i >= first && i < first + count);
     if (hasSurface && !pixelSurface && !fragmentSurface) {
-      [r, g, b, coverage, glint, centerPalette] = surface.shade(i, x, y, z, x, y, z, r, g, b);
+      [r, g, b, coverage, glint, centerPalette] = surface.shade(i, x, y, z, x, y, z, r, g, b, undefined, undefined, lookPass?.surface);
     }
     const fogMix =
       !(flags & 2) && world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dn) * world.fog.max : 0;
@@ -703,6 +715,7 @@ function render(world, o, preparedPalettes) {
     const wantsDepth = probe || deferred;
     const probeNormal = wantsDepth ? geometrySample(i).normal : null, probeCenter = wantsDepth && [x, y, z];
     const probeReach = wantsDepth ? 3 * Math.sqrt(c00 + c11 + c22) : 0;
+    const centerMark = lookPass && { ...lookPass.mark };
     for (let iy = y0; iy <= y1; iy++) {
       const dy = iy + 0.5 - sy;
       for (let ix = x0; ix <= x1; ix++) {
@@ -716,6 +729,7 @@ function render(world, o, preparedPalettes) {
           a = !o.soft && solid ? 0.99 * sstep(0.38, 0.62, gg) : Math.min(0.99, gg);
         }
         if (a < 0.004) continue;
+        lookPass?.begin(centerMark);
         let pr = r,
           pg = g,
           pb = b,
@@ -748,7 +762,7 @@ function render(world, o, preparedPalettes) {
         let hit;
         if (fragmentSurface) {
           hit = surfacePoint(rayAt(ix + 0.5, iy + 0.5), normal, x, y, z, -cz, R);
-          [pr, pg, pb, alpha, highlight, paletteId] = surface.shade(i, ...hit, x, y, z, pr, pg, pb, ix + 0.5, iy + 0.5);
+          [pr, pg, pb, alpha, highlight, paletteId] = surface.shade(i, ...hit, x, y, z, pr, pg, pb, ix + 0.5, iy + 0.5, lookPass?.surface);
         }
         const scoped = contribution?.applies(i, paletteId);
         if (staged?.lit || scoped || glassLook) {
@@ -760,9 +774,9 @@ function render(world, o, preparedPalettes) {
             sample = stageSample(i, point);
           }
           let rgb = [pr, pg, pb];
-          if (scoped) rgb = contribution.shade(i, paletteId, rgb, ix, H - 1 - iy, sample, highlight <= .22);
-          if (staged?.lit) rgb = RenderStages.apply(staged.lit, rgb, sample);
-          [pr, pg, pb] = glassLook ? glassLook(rgb) : rgb;
+          if (scoped) rgb = contribution.shade(i, paletteId, rgb, ix, H - 1 - iy, sample, highlight <= .22, lookPass?.palette);
+          if (staged?.lit) rgb = RenderStages.apply(staged.lit, rgb, sample, lookPass?.stage);
+          [pr, pg, pb] = glassLook ? glassLook(rgb, lookPass?.optics) : rgb;
         }
         if (staged?.lit || (fragmentSurface && reflectInRaster)) {
           pr += (fog[0] - pr) * fogMix;
@@ -782,11 +796,12 @@ function render(world, o, preparedPalettes) {
         if (deferred) {
           const entry = { sort: flags & 4 ? Infinity : surfaceZ, index: n, center: -cz,
             sample: [i, surfaceZ, clamp((surfaceZ - (eyeD - R)) / (2 * R), 0, 1), a, pr, pg, pb,
-              wd, emits, highlight, paletteId, detailParticle, projected, coat, glass] };
+              wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, lookPass && { ...lookPass.mark }] };
           if (!deferred.has(p)) deferred.set(p, []);
           deferred.get(p).push(entry);
           deferredCount++;
-        } else composite(p, i, -cz, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass);
+        } else composite(p, i, -cz, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass,
+          lookPass?.mark);
       }
     }
   }
@@ -1033,16 +1048,19 @@ function render(world, o, preparedPalettes) {
         }
         if (!PALC[ci]) continue;
         const staged = stages ? stages.at(i) : null;
+        lookPass?.begin();
         const masked = staged?.material?.some(rule => rule.mask) || staged?.lit?.some(rule => rule.mask);
         const sample = masked ? stageSample(i, [HX[p], HY[p], HZ[p]]) : undefined;
         const base = staged?.material ? stagedMaterial(i, staged.material, PALC[ci], sample) : PALC[ci];
-        const c = surface?.has(i) ? surface.shade(i, HX[p], HY[p], HZ[p], X[i], Y[i], Z[i], ...base, x + 0.5, y + 0.5) : base;
+        const c = surface?.has(i) ? surface.shade(i, HX[p], HY[p], HZ[p], X[i], Y[i], Z[i], ...base, x + 0.5, y + 0.5, lookPass?.surface) : base;
         let rgb = c;
         if (contribution?.applies(i, c[5])) {
           const site = sample ?? (contribution.masked(i, c[5]) ? stageSample(i, [HX[p], HY[p], HZ[p]]) : undefined);
-          rgb = contribution.shade(i, c[5], c, x, H - 1 - y, site, !(c[4] > .22));
+          rgb = contribution.shade(i, c[5], c, x, H - 1 - y, site, !(c[4] > .22), lookPass?.palette);
         }
-        const lit = staged?.lit ? RenderStages.apply(staged.lit, rgb, sample) : rgb;
+        const lit = staged?.lit ? RenderStages.apply(staged.lit, rgb, sample, lookPass?.stage) : rgb;
+        if (lookPass) lookPass.fragment(p, retainLayers ? contributions.weight(p) : 1 - (surfaceOverlay?.[p * 4 + 3] || 0),
+          lookPass.mark, true);
         const kf = world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dep[p]) * world.fog.max : 0;
         if (surfaceGlint) surfaceGlint[p] = c[4] > 0.22;
         if (retainLayers) {
@@ -1187,6 +1205,7 @@ function render(world, o, preparedPalettes) {
         if (transparent) captured[q] = 1;
         if (axialDepth) axialDepth[q] = eyeD - R + sprD[q] * 2 * R;
         if (art) art.sprite(q, sprOwner[q], eyeD - R + sprD[q] * 2 * R);
+        lookPass?.fragment(q, 1);
         if (localAt) localAt[q] = 0;
         if (overlay) overlay.slots[q] = 0;
         if (detail) detail[(H - 1 - Math.floor(q / W)) * W + q % W] = 0;
@@ -1212,7 +1231,7 @@ function render(world, o, preparedPalettes) {
       o.volumeHistory && [W, H, focal, ortho, ...V].join('/'));
     if (quality.stats) volumeStats = atmosphere.stats;
   }
-  const passes = art?.finalize(world, t, { x: X, y: Y, z: Z, rayAt, span: R,
+  let passes = art?.finalize(world, t, { x: X, y: Y, z: Z, rayAt, span: R,
     detail, sprM, surfaceGlint, centers, motionFrom });
   if (o.captureCoverage) {
     if (reflectionTint && passes?.emission) ArtEffects.tintReflection(col, captured, passes.emission, W, H, reflectionTint, t);
@@ -1237,7 +1256,8 @@ function render(world, o, preparedPalettes) {
     }
   }
   const masks = overlay && createMaskResolve(world, { w: W, h: H, time: t, x: X, y: Y, z: Z, depth, rayAt, span: R },
-    overlay, localConstraints, o.maskGrade ?? (!tone && grade));
+    overlay, localConstraints, o.maskGrade ?? (!tone && grade), lookPass?.local);
+  if (lookPass) passes = lookPass.finish(passes);
   if (o.samples) {
     // (the picture the contour look takes its insides from is worked on first, as the page does: glass bends it, contact shade darkens it)
     let c2 = col;
@@ -1268,7 +1288,11 @@ function render(world, o, preparedPalettes) {
           c2[p * 3 + 2] = col[q * 3 + 2] * k;
         }
     }
-    if (masks) for (let p = 0; p < W * H; p++) {
+    if (masks || lookPass && (localAt || o.previewPalette)) for (let p = 0; p < W * H; p++) {
+      const policy = localConstraints?.[(localAt?.[p] || 0) - 1];
+      if (lookPass && o.previewPalette && (!localAt?.[p] || policy?.source === 'graded')) lookPass.local(p, o.previewPalette);
+      if (lookPass && policy) lookPass.local(p, policy);
+      if (!masks) continue;
       if (!overlay.slots[p]) continue;
       const q = p * 3, x = p % W, y = H - 1 - Math.floor(p / W);
       const [dx, dy] = passes?.splatId && stable ? ArtStability.ditherCoordinates(stable, passes, y * W + x, x, y) : [x, y];
@@ -1385,6 +1409,9 @@ function render(world, o, preparedPalettes) {
       let ditherX = x, ditherY = y;
       if (anchoring) [ditherX, ditherY] = ArtStability.ditherCoordinates(stable, passes, yo * W + x, x, y);
       const localY = anchoring && passes.splatId[yo * W + x] ? ditherY : yo;
+      if (lookPass && globalPaletteMark && (!localId || localConstraints?.[localId - 1]?.source === 'graded'))
+        lookPass.local(p, globalPaletteMark);
+      if (lookPass && localId && localConstraints?.[localId - 1]) lookPass.local(p, localConstraints[localId - 1]);
       if (masks && !outlined) masks.record(p, r, g, b, ditherX, localY);
       if (tone || localId) {
         const index = localId ? PixelLook.localIndex(local, localId, [r, g, b], ditherX, localY, !surfaceGlint?.[p]) :

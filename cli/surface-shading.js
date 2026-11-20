@@ -40,6 +40,8 @@ function surfaceShading(world, options, camera) {
     }
     if (material.paletteConstraint) {
       const policy = material.paletteConstraint;
+      policy.scope = 'surface';
+      policy.assetId ??= material.settings.lookAssetId;
       constraints[palettes.length] = policy;
       ids.set(policy.swatches, palettes.push(policy.swatches));
     }
@@ -84,7 +86,7 @@ function surfaceShading(world, options, camera) {
     return normalAt(i, frame ? frame.apply(frame.normal, normal) : normal);
   }
 
-  function shade(i, x, y, z, centerX, centerY, centerZ, r, g, b, sx, sy) {
+  function shade(i, x, y, z, centerX, centerY, centerZ, r, g, b, sx, sy, visit) {
     const offset = i * STRIDE;
     const { position, normal, view } = sample;
     const prepared = materials[surfaceData[offset] - 1];
@@ -142,7 +144,7 @@ function surfaceShading(world, options, camera) {
     rgb[0] = r;
     rgb[1] = g;
     rgb[2] = b;
-    SurfaceLook.shade(prepared, sample, rgb, result);
+    SurfaceLook.shade(prepared, sample, rgb, result, undefined, visit);
     if (ids.size) result[5] = ids.get(result[5]) || 0;
     return result;
   }

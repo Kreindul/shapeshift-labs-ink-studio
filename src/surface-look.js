@@ -454,7 +454,7 @@ const SurfaceLook = (() => {
   /* Inputs are RGB in 0..1 and a world-space sample. Output packs RGB, the opacity
      multiplier, a glint mask and, for projected paint, an optional local palette.
      Supply a normal Array when you want to retain the palette reference. */
-  function shade(prepared, sample, base, output = [0, 0, 0, 1, 0], trace) {
+  function shade(prepared, sample, base, output = [0, 0, 0, 1, 0], trace, visit) {
     const { settings, layers } = prepared;
     const sun = sample.lightDirection ?? prepared.sun;
     const { position, normal, view } = sample;
@@ -535,6 +535,7 @@ const SurfaceLook = (() => {
           output[i] = clamp(mix(output[i], next, amount));
         }
         if (step) Object.assign(step, { applied: amount > 0, effectiveWeight: amount, output: output.slice(0, 3) });
+        if (amount && visit) visit(layer, layer.mask ? maskWeight : null, amount, settings);
         continue;
       }
       const { cosine: c, sine: s } = layer;

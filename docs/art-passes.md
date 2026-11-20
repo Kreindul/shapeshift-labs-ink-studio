@@ -10,6 +10,8 @@ In Node, call the library's `render(world, { passes: true })` or supply an array
 | `depth` | One float per pixel. Camera-axis distance to the owning splat's center, in scene units. Empty pixels use infinity. |
 | `normal` | Three floats per pixel. The owning sample's normalized world-space surface normal. Samples with no surface normal use zeros. |
 | `objectId`, `materialId` | Unsigned integers. Zero means unassigned. The `objects` and `materials` arrays give authored labels, where supplied. |
+| `target` | Index into `targets` for the dominant splat or frame look at each pixel. Scoped bindings take precedence over scene-wide grades. Zero means no recorded binding. The table identifies the asset, stage, and selector when available. |
+| `mask` | A scalar between zero and one. The pass shows sampled spatial mask weights composited with surface coverage, including transparent splats, followed by applied frame and palette masks. |
 | `emission` | Three floats per pixel. Premultiplied visible emissive RGB. Nearer layers attenuate emission. |
 | `splatId` | Unsigned integers. One-based splat index of the owner, with zero for an empty pixel. Stable while the world preserves its splat slots. |
 | `position`, `objectPosition` | Three floats per pixel for the owned point in world or rest-space coordinates. |

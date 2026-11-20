@@ -1,6 +1,6 @@
 /* Shared art-pixel buffer names and splat ownership rules for CPU and shader hosts. */
 const ArtPasses = (() => {
-  const channels = Object.freeze(['coverage', 'depth', 'normal', 'objectId', 'materialId', 'emission', 'splatId', 'position', 'objectPosition', 'protected', 'emissionDepth', 'motion', 'emissionMotion']);
+  const channels = Object.freeze(['coverage', 'depth', 'normal', 'objectId', 'materialId', 'emission', 'splatId', 'position', 'objectPosition', 'protected', 'emissionDepth', 'motion', 'emissionMotion', 'target', 'mask']);
   const cutoff = 0.5;
   const ownsSurface = (alpha, writesDepth, depth, nearest) => writesDepth && alpha > cutoff && depth <= nearest;
   const over = (value, below, alpha) => value * alpha + below * (1 - alpha);
@@ -18,6 +18,7 @@ const ArtPasses = (() => {
     for (const channel of selected) output[channel] = passes[channel];
     if (output.objectId) output.objects = passes.objects;
     if (output.materialId) output.materials = passes.materials;
+    if (output.target) output.targets = passes.targets;
     return output;
   }
 

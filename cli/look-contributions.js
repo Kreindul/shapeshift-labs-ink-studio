@@ -2,12 +2,13 @@ const PixelLook = require('../src/pixel-look.js');
 
 function contributionLook(palettes, policies, targets, targetOffset, fallback, scene, grade) {
   const slot = (i, layer) => targets?.[i] ? targetOffset + targets[i] : layer || fallback;
-  function shade(i, layer, rgb, x, y, sample, dither) {
+  function shade(i, layer, rgb, x, y, sample, dither, visit) {
     const id = slot(i, layer);
     if (!id) return rgb;
     const policy = policies?.[id - 1];
     if (!policy) return palettes[id - 1][PixelLook.nearest(rgb, palettes[id - 1], false)];
     const amount = policy.mask ? sample ? policy.mask(sample) : 0 : 1;
+    if (amount && visit) visit(policy, policy.mask ? amount : null, amount);
     const options = { scene, grade, useDither: dither };
     const index = plan => PixelLook.paletteIndex(plan, rgb, x, y, options);
     if (amount === 1) return policy.swatches[index(policy)];
@@ -15,6 +16,7 @@ function contributionLook(palettes, policies, targets, targetOffset, fallback, s
     // A soft mask reveals the underlying material or default look in the same fragment.
     const under = [layer, fallback].find(id => id && !policies?.[id - 1]?.mask);
     const underlying = policies?.[under - 1];
+    if (!amount && underlying && visit) visit(underlying, null, 1);
     const base = underlying ? underlying.swatches[index(underlying)] : under ?
       palettes[under - 1][PixelLook.nearest(rgb, palettes[under - 1], false)] : rgb;
     if (!amount) return base;
@@ -86,7 +88,7 @@ function contributionLayers(col, alpha, w, h, patterned, bend) {
     }
   }
 
-  return { before, replacePattern, refract };
+  return { before, replacePattern, refract, weight: pixel => pattern?.[pixel * 4 + 3] || 0 };
 }
 
 module.exports = { contributionLook, contributionLayers };

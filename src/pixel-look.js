@@ -339,7 +339,7 @@ const PixelLook = (() => {
         throw new TypeError('Use select or legacy object and material fields on a target');
       const filter = selectors.prepare(select ?? { ...(object !== undefined && { object }), ...(material !== undefined && { material }) });
       const prepared = options?.skipMasks && policy.mask ? null : prepareLookPolicy(policy, options);
-      if (prepared) rules.push({ select: filter, slot: palettes.push(prepared) });
+      if (prepared) rules.push({ select: filter, slot: palettes.push(Object.assign(prepared, { select: filter })) });
     }
     if (!palettes.length) return null;
 

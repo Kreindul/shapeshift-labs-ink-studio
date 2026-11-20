@@ -588,6 +588,38 @@ has `swatch: null`. Art pixel coordinates for palette dithering can
 be passed in `--args '{"pixel":[8,7]}'`. Use `look/output` to supply
 your own RGB for an individual stage.
 
+## Render look previews and diagnostic passes
+
+`render`, `sheet`, and `clip` accept `--look pack/look` to preview a
+named asset in place of the scene-wide color look. Supply the pack
+with `--asset-pack` or use an asset already installed in a JSON scene.
+Use `--look-select JSON` to apply the asset only to matching targets.
+`--look-params JSON` and `--look-strength N` override that binding.
+
+`--look file.json` accepts a scene look object with fields such as
+`asset`, `targets`, `renderStages`, or `paletteConstraints`. Fields
+you supply replace the corresponding scene settings for the preview.
+With an `asset` binding the preview starts with a fresh scene-wide
+color look. `--look off` bypasses authored scene and surface color
+looks for a baseline.
+
+```sh
+node cli/ink-studio.js render examples/wet-spillway.js \
+  --passes target,mask,materialId --out spillway.png
+node cli/ink-studio.js sheet examples/look-assets.json \
+  --asset-pack examples/relay-look-pack.json --look relay/glazed-enamel \
+  --look-select '{"entity":"sea-glaze"}' --t 0,0.5,1 \
+  --passes target,materialId --out relay-sheet.png
+node cli/ink-studio.js clip examples/look-blending.js \
+  --to 1 --fps 12 --passes mask --out runoff.png
+```
+
+Each pass is saved beside the color output with the pass name in its
+filename. Sheets use the color sheet's time grid. Clips write an
+animated PNG for each pass at the same frame rate. The `-passes.json`
+file lists the outputs and maps false colors to the bindings and
+material IDs. See [art pass formats](art-passes.md).
+
 ## Shared look selectors
 
 Use `finish.look.targets` in a diorama, `visual.look.targets` on a world,

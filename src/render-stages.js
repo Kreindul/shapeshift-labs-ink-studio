@@ -71,6 +71,7 @@ const RenderStages = (() => {
         name, order, weight: weight * strengthWeight, stackAmount,
         ...(sampled && { inputValues: { strength: sampled.strength, params: sampled.params } }), mask, disabled: Boolean(options.skipMasks && mask),
         select: entry.select === undefined ? null : targets.prepare(entry.select),
+        ...(options.surface && { scope: 'surface' }),
         assetId: entry.assetId,
         stack: isPalette ? null : stacks.prepare({ ...entry.stack, amount: 1 }, {
           resolveColor: value => unpack(albedo(value, options.palette))
@@ -98,7 +99,7 @@ const RenderStages = (() => {
     }
     return Object.freeze({ matching, transform(target) {
       const layers = matching(target);
-      if (layers.length) return rgb => apply(layers, rgb).map(value => Math.max(0, Math.min(1, value)));
+      if (layers.length) return (rgb, visit) => apply(layers, rgb, undefined, visit).map(value => Math.max(0, Math.min(1, value)));
     } });
   }
 
@@ -108,7 +109,7 @@ const RenderStages = (() => {
         !world.surfaces?.some(({ settings }) => settings.renderStages !== undefined && settings.renderStages !== false)) return null;
     const context = { palette: world.pal, roles: world.paletteRoles, context: world.surfaceEffects, ...options };
     const scene = prepare(entries, context);
-    const surfaces = world.surfaces?.map(({ settings }) => prepare(settings.renderStages, context)) ?? [];
+    const surfaces = world.surfaces?.map(({ settings }) => prepare(settings.renderStages, { ...context, surface: true })) ?? [];
     const rules = [...scene, ...surfaces.flat()];
     if (!rules.length) return null;
     const all = rules.filter(rule => !rule.disabled);
@@ -158,7 +159,7 @@ const RenderStages = (() => {
     };
   }
 
-  function evaluate(rules, rgb, sample, x, y, contributions) {
+  function evaluate(rules, rgb, sample, x, y, contributions, visit) {
     if (!rules) return rgb;
     let result = rgb;
     for (const rule of rules) {
@@ -176,12 +177,13 @@ const RenderStages = (() => {
       if (contributions) contributions.push({
         ...describe(rule, sample, maskWeight), applied, input, ...(transformed && { transformed }), output: result
       });
+      if (applied && visit) visit(rule, rule.mask ? maskWeight : null, amount);
     }
     return result;
   }
 
-  function apply(rules, rgb, sample) {
-    return evaluate(rules, rgb, sample);
+  function apply(rules, rgb, sample, visit) {
+    return evaluate(rules, rgb, sample, undefined, undefined, undefined, visit);
   }
 
   function trace(rules, rgb, sample, pixel = [0, 0]) {
@@ -191,9 +193,9 @@ const RenderStages = (() => {
     return { rgb: output, contributions };
   }
 
-  function material(rules, shaded, reference, sample, contributions) {
-    if (!rules || reference === undefined) return evaluate(rules, shaded, sample, undefined, undefined, contributions);
-    const base = unpack(reference), painted = evaluate(rules, base, sample, undefined, undefined, contributions);
+  function material(rules, shaded, reference, sample, contributions, visit) {
+    if (!rules || reference === undefined) return evaluate(rules, shaded, sample, undefined, undefined, contributions, visit);
+    const base = unpack(reference), painted = evaluate(rules, base, sample, undefined, undefined, contributions, visit);
     if (painted.every((value, i) => value === base[i])) return shaded;
     const unlit = linear(base), lit = linear(shaded), changed = linear(painted);
     const baseLuma = luma(unlit);
@@ -210,7 +212,7 @@ const RenderStages = (() => {
     return evaluate(rules, rgb, sample, x, y);
   }
 
-  function finish(frame, plan, passes, time) {
+  function finish(frame, plan, passes, time, visitPixel) {
     const { w, h, rgb } = frame;
     const swatches = new Map(plan.palettes.map((color, i) => [color, i]));
     const use = new Uint32Array(swatches.size);
@@ -229,7 +231,9 @@ const RenderStages = (() => {
         normal: Array.from(passes.normal.subarray(offset, offset + 3)), time
       } : null;
       const original = [rgb[offset] / 255, rgb[offset + 1] / 255, rgb[offset + 2] / 255];
-      const color = quantize(rules.palette, apply(rules.frame, original, sample), p % w, Math.floor(p / w), sample);
+      const visit = visitPixel && visitPixel(p);
+      const graded = apply(rules.frame, original, sample, visit);
+      const color = evaluate(rules.palette, graded, sample, p % w, Math.floor(p / w), undefined, visit);
       const index = swatches.get(pack(color));
       if (index !== undefined) use[index]++;
       if (color !== original) for (let k = 0; k < 3; k++) rgb[offset + k] = byte(color[k]);

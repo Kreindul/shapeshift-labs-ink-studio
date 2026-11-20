@@ -2,7 +2,7 @@ const PixelLook = require('../src/pixel-look.js');
 const { sampleFrames } = require('./art-passes.js');
 const { surfacePoint } = require('./scene-optics.js');
 
-function createMaskResolve(world, grid, overlay, policies, grade) {
+function createMaskResolve(world, grid, overlay, policies, grade, visit) {
   const { w, h, time, x, y, z, depth, rayAt, span } = grid;
   const sample = sampleFrames(world, time), frames = new Map();
   const scene = Array.from(world.pal, color => [color >> 16, color >> 8 & 255, color & 255].map(n => n / 255));
@@ -19,6 +19,7 @@ function createMaskResolve(world, grid, overlay, policies, grade) {
     const position = [frame.rest[0] + offset[0], frame.rest[1] + offset[1], frame.rest[2] + offset[2]];
     const amount = policy.mask({ position, worldPosition: point, normal: frame.normal, time });
     if (!amount) return;
+    if (visit) visit(pixel, policy, amount);
     const out = (h - 1 - py) * w + px;
     weights[out] = amount;
     colors[out] = policy.packed[PixelLook.paletteIndex(policy, [r, g, b], dx, dy, { grade, scene })];

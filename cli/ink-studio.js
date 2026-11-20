@@ -99,7 +99,7 @@ function dataScene(file, override, { installedPacks = false } = {}) {
   if (problems.length) console.error(K.diorama.report(problems));
   if (problems.some(p => p.level === 'error'))
     die('not built: ' + problems.filter(p => p.level === 'error').length + ' mistake(s) in ' + file);
-  return K.diorama.scene(spec, { assets });
+  return { ...K.diorama.scene(spec, { assets }), lookPreviewPacks: spec.assetPacks };
 }
 function scene(id) {
   if (!id) die('which diorama? try: ink-studio scenes');
@@ -144,6 +144,7 @@ function build(id, seedOverride) {
       (w.pixAnchors = lib().KIT.pixel.anchors)); // (colour per pixel: its patterns, to be called for each pixel; where edge sprites stand)
   w.buildMs = Date.now() - t0;
   w.id = s.id;
+  if (s.lookPreviewPacks !== undefined) w.lookPreviewPacks = s.lookPreviewPacks;
   w.name = s.name;
   w.clock = 0;
   if (w.anim && w.anim.stateful) w.anim.update(0, 0);
@@ -237,6 +238,7 @@ const view = extra =>
         (constraintsOverride ??= require('./palette-constraints.js').override(opt['palette-constraints'])),
       coverageAware: opt['coverage-aware'] === undefined ? undefined : opt['coverage-aware'] !== 'off',
       lookMasks: opt['look-masks'] === 'off' ? false : undefined,
+      ignoreLookGrade: opt.look === 'off',
       raw: !!opt.raw,
       colored: !!opt.colored,
       splatOrder: opt['splat-order'],
@@ -257,8 +259,8 @@ const view = extra =>
     extra
   );
 const save = (name, img) => {
-  fs.mkdirSync(OUT, { recursive: true });
   const f = opt.out ? path.resolve(opt.out) : path.join(OUT, name);
+  fs.mkdirSync(path.dirname(f), { recursive: true });
   PNG.write(f, img.w, img.h, img.rgb);
   console.log('wrote', f, img.w + 'x' + img.h);
   return f;
@@ -271,6 +273,16 @@ const asciiFrame = (image, world) => lib().KIT.ascii.draw(image, {
   pal: image.palette || world.pal
 });
 const displayFrame = (image, world) => opt.text ? asciiFrame(image, world) : R.upscale(image, opt.px1 ? 1 : image.px);
+function buildPreview() {
+  const prior = globalThis.INK_LOOK_ALBEDO;
+  if (opt.look !== undefined && opt.look !== 'off') globalThis.INK_LOOK_ALBEDO = true;
+  try {
+    return require('./look-preview.js').override(build(pos[0]), opt, lib());
+  } finally {
+    globalThis.INK_LOOK_ALBEDO = prior;
+  }
+}
+const previewPasses = () => require('./look-preview.js').preview(opt);
 const textSidecar = file => file.replace(/\.(?:a?png)$/i, '') + '.txt';
 const times = () =>
   opt.t !== undefined
@@ -359,6 +371,8 @@ const CMD = {
         '    [--bake clip.json] [--preview directory] [--at seconds|--frames count] [--direction index] [--out report.json]',
         '  retarget --profiles  show built-in role templates',
         '  passes <id> [--channels coverage,depth,normal,objectId,materialId,emission]  save art-pixel render pass previews',
+        '  render|sheet|clip <id> --look pack/look|file.json|off [--passes target,mask,materialId]',
+        '    --look-select JSON --look-params JSON --look-strength N   override an asset binding for the preview',
         '  shimmer <id> [--mode orbit|zoom|pan|still --frames 24]  how many pixels flicker over a move, and a GIF of it',
         '  crisp <id ...|all> [--t 2 --map]   how crisp at its own pixel size: stray pixels, specks, flat area, finest frequencies,',
         '                              against the pixel-art references (--map: where the stray pixels and drawn edges are)',
@@ -570,20 +584,23 @@ const CMD = {
     console.log(warn.length ? 'warnings:\n  ' + warn.join('\n  ') : 'no warnings');
   },
   render() {
-    const w = build(pos[0]),
+    const w = buildPreview(), diagnostics = previewPasses(),
       t = num('t', 0);
     pose(w, t);
     const t0 = Date.now(),
-      im = R.render(w, view({ t }));
+      im = R.render(w, view({ t, ...diagnostics?.settings }));
+    diagnostics?.capture(im, opt.px1 ? 1 : im.px);
     console.log('drawn in', Date.now() - t0, 'ms');
     /* --text [ascii|symbols|braille|blocks]: drawn as text (K.ascii.draw), --tg screen pixels a font pixel (2), --tcolour scene|ink|mono;
        the characters themselves are written beside it, as <id>.txt */
     if (opt.text) {
       const T = asciiFrame(im, w);
       const f = save(w.id + '.png', T), ft = textSidecar(f); fs.writeFileSync(ft, T.text + '\n'); console.log('wrote', ft); console.log('as text:', T.cols, 'x', T.rows, 'characters');
+      diagnostics?.write(f, { times: [t] });
       return;
     }
-    save(w.id + '.png', R.upscale(im, opt.px1 ? 1 : im.px));
+    const output = save(w.id + '.png', R.upscale(im, opt.px1 ? 1 : im.px));
+    diagnostics?.write(output, { times: [t] });
   },
   variants() {
     const seeds = list('seeds', [3, 7, 12, 19, 22, 27]), group = opt.group || 'silhouette';
@@ -801,7 +818,7 @@ const CMD = {
     require('./retarget.js').run({ K: lib().KIT, build, pos, options: opt, view: view() });
   },
   passes() {
-    const w = build(pos[0]), t = num('t', 0);
+    const w = buildPreview(), t = num('t', 0);
     pose(w, t);
     const passes = opt.channels ? String(opt.channels).split(',') : true;
     const im = R.render(w, view({ t, passes }));
@@ -931,22 +948,25 @@ const CMD = {
   sheet() {
     const artHistory = require('../src/art-effects.js').history({ frames: 24 });
     const volumeHistory = lib().KIT.atmosphere.history();
-    const w = build(pos[0]),
+    const w = buildPreview(), diagnostics = previewPasses(),
       ts = times(),
+      cols = num('cols', Math.min(4, ts.length)),
       imgs = [];
     for (const t of ts) {
       pose(w, t);
-      const im = R.render(w, view({ t, artHistory, volumeHistory, w: num('w', 600), h: num('h', 420) }));
+      const im = R.render(w, view({ t, artHistory, volumeHistory, w: num('w', 600), h: num('h', 420), ...diagnostics?.settings }));
+      diagnostics?.capture(im, opt.px1 ? 1 : im.px);
       imgs.push(displayFrame(im, w));
     }
-    save(
+    const output = save(
       w.id + '-sheet.png',
       R.grid(
         imgs,
-        num('cols', Math.min(4, ts.length)),
+        cols,
         ts.map(t => t + 's')
       )
     );
+    diagnostics?.write(output, { times: ts, cols });
     console.log('times', ts.join(' '));
   },
   /* one picture with the moments either side laid faintly over it: what moved, and how far, at a glance */
@@ -1106,21 +1126,24 @@ const CMD = {
   clip() {
     const artHistory = require('../src/art-effects.js').history({ frames: 24 });
     const volumeHistory = lib().KIT.atmosphere.history();
-    const w = build(pos[0]),
+    const w = buildPreview(), diagnostics = previewPasses(),
       fps = num('fps', 12),
       from = num('from', 0),
       to = num('to', 6),
       n = Math.max(2, Math.round((to - from) * fps)),
-      frames = [];
+      frames = [], ts = [];
     for (let k = 0; k < n; k++) {
       const t = from + k / fps;
       pose(w, t);
-      const im = R.render(w, view({ t, artHistory, volumeHistory, w: num('w', 600), h: num('h', 420) }));
+      const im = R.render(w, view({ t, artHistory, volumeHistory, w: num('w', 600), h: num('h', 420), ...diagnostics?.settings }));
+      diagnostics?.capture(im, opt.px1 ? 1 : im.px);
+      ts.push(t);
       frames.push(displayFrame(im, w));
     }
     const f = opt.out ? path.resolve(opt.out) : path.join(OUT, w.id + '-clip.png');
-    fs.mkdirSync(OUT, { recursive: true });
+    fs.mkdirSync(path.dirname(f), { recursive: true });
     PNG.animate(f, frames, fps);
+    diagnostics?.write(f, { times: ts, fps });
     if (opt.text) {
       const textFile = textSidecar(f);
       fs.writeFileSync(textFile, frames.map(frame => frame.text).join('\n\f\n') + '\n');
