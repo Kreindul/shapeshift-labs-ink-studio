@@ -122,12 +122,14 @@ const SplatOrder = (() => {
     if (value === undefined || value === false) return null;
     if (value === true) return { depthTolerance: 0.04 };
     if (!value || typeof value !== 'object' || Array.isArray(value) ||
-        Object.keys(value).some(key => key !== 'depthTolerance'))
-      throw new TypeError('Stable transparency expects a boolean or depthTolerance');
-    const depthTolerance = value.depthTolerance ?? 0.04;
+        Object.keys(value).some(key => key !== 'depthTolerance' && key !== 'mode'))
+      throw new TypeError('Stable transparency expects a boolean or settings with mode and depthTolerance');
+    const { mode = 'hold' } = value;
+    const depthTolerance = value.depthTolerance ?? .04;
+    if (!['hold', 'blend'].includes(mode)) throw new TypeError('Stable transparency mode needs hold or blend');
     if (!Number.isFinite(depthTolerance) || depthTolerance < 0)
       throw new RangeError('Transparency depthTolerance must be finite and nonnegative');
-    return depthTolerance ? { depthTolerance } : null;
+    return depthTolerance ? { depthTolerance, ...(mode === 'blend' && { mode }) } : null;
   }
 
   function isTransparent(data, index, opacity, optical, back) {

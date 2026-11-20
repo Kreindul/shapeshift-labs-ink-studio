@@ -142,6 +142,36 @@ the baked splat indices to resolve nearby layers deterministically. The CPU's su
 applies the tolerance to the local fragment depths. The CLI carries history through clips, sheets
 and turntables. Use `--stable-transparency on` or `off` to override the scene setting.
 
+For shots where translucent surfaces cross rain or other translucent layers, select
+`look.stableTransparency: { mode: 'blend', depthTolerance: 0.10 }` in the headless
+renderer. Node and JSON dioramas use the same settings. Blending spreads each
+fragment's optical depth between two adjacent slices. Nearby layers mix through
+the crossing and clearly separated layers composite in depth order. Opaque
+geometry remains an ordering boundary. The renderer evaluates bounded mist and
+water at each fragment's depth and eases in water-surface reflection across the
+same tolerance as fragments pass behind the interface. Glass refraction samples
+between neighboring art pixels and eases where translucent layers meet. Give
+each pane its own object ID to keep its splats together for refraction. The blend
+is deterministic at a given time and camera and needs no frame history.
+
+`depthTolerance` is the slice spacing in world units along the camera axis.
+Layers separated by at least twice this spacing have independent coverage.
+Use a small value for closely stacked panes. Per-fragment sorting and medium
+sampling cost more than the center-order path. Blended exports report an error if
+they exceed the fragment budget. Set `--fragment-budget N` or use fewer art pixels
+for dense scenes. The existing WebGL renderer uses its history-based hold mode.
+
+```sh
+node cli/ink-studio.js clip examples/layered-transparency.js \
+  --w 160 --h 104 --px 1 --from 0 --to 2 --fps 16 --raw --out gauge.png
+node cli/ink-studio.js clip examples/layered-transparency.js \
+  --w 160 --h 104 --px 1 --from 0 --to 2 --fps 16 --raw --splat-order surface --stable-transparency off --out gauge-hard.png
+```
+
+Use `--stable-transparency blend` to turn on blending with the default 0.04 spacing
+for a scene without an authored setting. The tide gauge scene provides a colored
+pane that moves through bounded mist, world-space rain, and a reflective basin.
+
 ## Measured render budgets
 
 Run the headless benchmark from the repository root. It covers the fog observatory, the shaped-mist ravine, sparse illuminated mist pockets, and the lens workshop's transparent layers.
