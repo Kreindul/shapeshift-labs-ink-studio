@@ -1,4 +1,4 @@
-module.exports=({makeBuilder,makeSculpt,KIT:K})=>({
+module.exports=({makeBuilder,makeSculpt,SplatProvenance,KIT:K})=>({
   id:'preview-lod',
   name:'Original and reduced splat shields',
   seed:11,
@@ -23,7 +23,7 @@ module.exports=({makeBuilder,makeSculpt,KIT:K})=>({
         pick=palette[(band?10:5)+Math.min(4,Math.floor(shade*4.3))],
         tex=0.92+0.07*K.hash(ix,iy,seed);
       samples.push({id:'stroke/'+ix+'/'+iy,position:[x,y+1.16,z],normal:n,radius:0.041,
-        color:rgb(pick).map(v=>v*tex),opacity:0.71,owner:'shield',material:band?'clay':'glaze',protect:d>0.948});
+        color:rgb(pick).map(v=>v*tex),opacity:0.71,owner:'shield',material:band?'clay':'glaze',surface:'shield-face',protect:d>0.948});
     }
     const options={maxDistance:0.091,maxRadius:0.14,minNormal:0.96,maxColor:0.1,
       viewDirections:[[0,0.21,1]],lockSeams:true},
@@ -34,13 +34,11 @@ module.exports=({makeBuilder,makeSculpt,KIT:K})=>({
       const x=i?1.37:-1.37;
       S.box([x,-0.015,0],[1.08,0.11,0.78],{r:[1,2,3,4]},{rd:0.087,res:0.074});
       S.box([x,0.153,0.14],[0.61,0.082,0.41],{r:[15,16,17]},{rd:0.034,res:0.071});
-      for(const p of splats)row.push({...p,position:[p.position[0]+x,p.position[1],p.position[2]]});
+      const owner=i?'reduced-shield':'original-shield';
+      for(const p of splats)row.push({...p,id:owner+'/'+p.id,owner,position:[p.position[0]+x,p.position[1],p.position[2]]});
     }
     S.bake();
-    const world=B.finish({cam:{target:[0,1.03,0],dist:7.45,pitch:0.23,yaw:0.075},detail:20,radius:3.3,dither:0.13}),
-      added=L.packSplats(row), data=new Float32Array(world.data.length+added.data.length);
-    data.set(world.data);
-    data.set(added.data,world.data.length);
-    return {...world,data,count:world.count+added.count};
+    const world=B.finish({cam:{target:[0,1.03,0],dist:7.45,pitch:0.23,yaw:0.075},detail:20,radius:3.3,dither:0.13});
+    return SplatProvenance.join([world,L.packSplats(row)],world);
   }
 });
