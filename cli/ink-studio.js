@@ -847,6 +847,7 @@ const CMD = {
         '  hierarchy <graph.json> [--node id] [--parent id|world] [--out file.json]   inspect or reparent live scene nodes',
         '  curve <family.json> [--distance n] [--text INK] [--out file.json]   sample reusable curve families',
         '  ornament <pattern.json> [--format pigment|relief|tiles] [--out file]   export a wallpaper or frieze pattern',
+        '  palette plot <plot.json> [--space rgb|oklab] [--orbit degrees] [--format png|data]   render a palette in 3D',
         '  palette field <field.json> [--saturation 0–1] [--w 192 --h 96]   render a rectangular or polar palette field',
         '  palette <recipe.json> [--t seconds] [--out palette.json]   sample palette recipes, paths and animation',
         '  inspect <scene|run>         discover fields, actions, ports and entities',
@@ -1012,6 +1013,7 @@ const CMD = {
     return require('./ornament.js')(pos, opt, lib(), outputFile);
   },
   palette() {
+    if (pos[0] === 'plot') return require('./palette-plot.js')(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'field') {
       if (pos.length !== 2 || ['w', 'h', 'saturation', 'out'].some(key => opt[key] === true))
         die('Use palette field <field.json> [--saturation 0–1] [--w width --h height --out field.png]');

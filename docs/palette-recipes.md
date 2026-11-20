@@ -198,3 +198,22 @@ ink-studio render examples/polar-colour.js --w 248 --h 146 --px 1 --out observat
 ```
 
 The [chromatic observatory](../examples/polar-colour.js) uses both radial modes as [projected material fields](projected-effects.md#polar-colour-fields).
+
+## RGB and OKLab plots
+
+Use `KIT.palette.plot({ palette, space, size, radius, frame })` with 1–256 swatches. Accepts six-digit hex strings, packed RGB integers and normalized RGB triples. RGB uses X=R, Y=G, Z=B. OKLab uses X=a, Y=L, Z=b with a common world scale on all three axes, so spatial distance is proportional to OKLab distance. The RGB frame spans the unit cube. OKLab axes span L in `[0, 1]` and a and b in `[-0.35, 0.35]`.
+
+- `space` defaults to `'rgb'`. `frame` takes `'box'`, `'axes'` or `'off'`. It defaults to a box for RGB and axes for OKLab.
+- `size` is world units per colour-space unit and defaults to 4. `radius` is each swatch splat's radius as a fraction of size and defaults to 0.023.
+- `points` gives input order, hex swatches, native coordinates (RGB or `[L,a,b]`), and 3D positions. `axes` gives labels, ranges, colours and endpoints.
+- `plot.emit(builder, { origin, scale, id, frameColor })` places the plot as actual splat geometry. It returns world anchors for optional axis labels. Use the plot swatches in the scene palette or render raw to retain the source colours. The [colour archive example](../examples/palette-space-plots.js) mounts two plots in one scene and attaches labels with the existing annotation layer.
+
+```sh
+ink-studio palette plot examples/palette-space-plot.json --space rgb --out rgb-cube.png
+ink-studio palette plot examples/palette-space-plot.json --space oklab \
+  --orbit 360 --duration 4 --fps 18 --out oklab-orbit.png
+ink-studio palette plot examples/palette-space-plot.json --space oklab \
+  --format data --out oklab-points.json
+```
+
+The still render defaults to an isometric camera. Adjust `--yaw` and `--pitch` in radians, use `--ortho off` for perspective, and use `--labels off` to hide axis labels. `--orbit` is in degrees and writes an animated PNG. Full turns omit the duplicate end frame. Image output fits the plot to the viewport. JSON and embedded geometry keep the specified world scale.
