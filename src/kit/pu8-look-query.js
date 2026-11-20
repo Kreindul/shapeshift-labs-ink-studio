@@ -3,7 +3,7 @@
   const W = K.world, { check } = W.data;
   const rgb = packed => [packed >> 16, packed >> 8 & 255, packed & 255].map(n => n / 255);
   W.lookQuery = function (visual, time = 0) {
-    let world, index, media, plan, stages, optics;
+    let world, index, media, plan, stages, optics, lookInputs;
     const blueNoise = K.procedural.materials.blueNoise, surfacePalettes = new Map();
     function setup() {
       if (world) return;
@@ -33,8 +33,10 @@
         Number.isSafeInteger(limit) && limit >= 1 && limit <= 4096, 'Expected an integer art pixel and a bounded result limit');
       const selected = groups(selector);
       if (!selected.length) return W.query.missing('no render target matches the selector','missing');
+      lookInputs ??= LookInputs.session(world.lookSnapshot?.time ?? time, () =>
+        world.lookSnapshot?.query ?? world.surfaceEffects?.query ?? W.query.fromScene(world, time));
       if (stage === 'optics') {
-        optics ??= RenderStages.optics(world.look?.optics, { palette: world.pal, roles: world.paletteRoles, blueNoise }) ?? false;
+        optics ??= RenderStages.optics(world.look?.optics, { palette: world.pal, roles: world.paletteRoles, blueNoise, lookInputs }) ?? false;
         return W.query.ok({ matched: selected.length, targets: selected.slice(0, limit).map(({ target, count }) => {
           const rules = optics ? optics.matching(target) : [];
           const transform = rules.length && optics.transform(target);
@@ -42,7 +44,7 @@
             ...(input && { rgb: transform ? transform(input) : input.slice() }) };
         }) });
       }
-      stages ??= RenderStages.plan(world, { blueNoise }) ?? false;
+      stages ??= RenderStages.plan(world, { blueNoise, lookInputs }) ?? false;
       if (stages) {
         const sample = at || rest ? { position: rest, worldPosition: at, time } : null;
         const rows = selected.slice(0, limit).map(({ target, count, first }) => {

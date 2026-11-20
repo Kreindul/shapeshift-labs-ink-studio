@@ -7,32 +7,11 @@
   const fields = (value, allowed) => record(value) && Object.keys(value).every(key => allowed.includes(key));
   const fraction = value => Number.isFinite(value) && value >= 0 && value <= 1;
   const stageRuleFields = ['asset', 'select', 'mask', 'stage', 'order', 'weight'];
-  const hasBlend = value => value?.order !== undefined || value?.weight !== undefined;
+  const hasBlend = value => value?.order !== undefined || value?.weight !== undefined || Boolean(value?.driver);
+  const active = bound => bound && (bound.strength || bound.driver?.inputs.strength !== undefined);
   const type = value => value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
 
-  function substitute(value, params) {
-    if (Array.isArray(value)) {
-      let output;
-      for (let i = 0; i < value.length; i++) {
-        const next = substitute(value[i], params);
-        if (next !== value[i]) (output ??= value.slice())[i] = next;
-      }
-      return output ?? value;
-    }
-    if (!record(value)) return value;
-    if (Object.hasOwn(value, '$param')) {
-      const name = value.$param;
-      if (Object.keys(value).length !== 1 || typeof name !== 'string' || !Object.hasOwn(params, name))
-        throw Error('Unknown or invalid look parameter: ' + name);
-      return params[name];
-    }
-    let output;
-    for (const [key, item] of Object.entries(value)) {
-      const next = substitute(item, params);
-      if (next !== item) (output ??= { ...value })[key] = next;
-    }
-    return output ?? value;
-  }
+  const { substitute } = LookInputs;
 
   function definition(value, packId) {
     if (!fields(value, ['id', 'label', 'params', 'stack', 'palette', 'mask', 'stage', 'order', 'weight']) || typeof value.id !== 'string' ||
@@ -62,7 +41,7 @@
   function bind(binding, catalog) {
     if (binding === undefined || binding === false) return null;
     const value = typeof binding === 'string' ? { asset: binding } : binding;
-    if (!fields(value, ['asset', 'revision', 'strength', 'palette', 'params', 'mask', 'stage', 'order', 'weight']) || typeof value.asset !== 'string' ||
+    if (!fields(value, ['asset', 'revision', 'strength', 'palette', 'params', 'mask', 'stage', 'order', 'weight', 'inputs']) || typeof value.asset !== 'string' ||
         !assetId.test(value.asset) || (value.revision !== undefined &&
           (!Number.isSafeInteger(value.revision) || value.revision < 1)))
       throw Error('Expected a look asset ID and optional positive pack revision');
@@ -71,7 +50,7 @@
     const { look, revision } = entry;
     if (value.revision !== undefined && revision !== value.revision)
       throw Error('Look asset ' + value.asset + ' requires pack revision ' + value.revision + ', installed ' + revision);
-    const { strength = 1, params = {}, palette, stage = look.stage, order = look.order, weight = look.weight } = value;
+    const { strength = 1, params = {}, palette, stage = look.stage, order = look.order, weight = look.weight, inputs } = value;
     RenderStages.blend({ order, weight });
     if (stage !== undefined) RenderStages.stage(stage);
     if (!fraction(strength) || !record(params) || (palette !== undefined && palette !== false && !Array.isArray(palette)))
@@ -81,13 +60,19 @@
       if (type(item) !== type(look.params[name])) throw Error('Look parameter ' + name + ' must be ' + type(look.params[name]));
     }
     const values = { ...look.params, ...clone(params) };
+    if (inputs !== undefined) LookInputs.validate(inputs, values);
+    const driver = inputs === undefined ? undefined : {
+      inputs: clone(inputs), values, strength, stack: look.stack, palette: palette === false ? false : look.palette,
+      ...(palette !== undefined && palette !== false && { swatches: clone(palette) }),
+      mask: look.mask, maskOverride: value.mask === undefined ? undefined : clone(value.mask)
+    };
     const stack = look.stack === undefined ? undefined : ColorStack.normalize(substitute(look.stack, values));
     const policy = palette !== false && (look.palette !== undefined || palette !== undefined)
       ? { ...substitute(look.palette, values), ...(palette !== undefined && { palette: clone(palette) }) } : undefined;
     const mask = value.mask === undefined ? substitute(look.mask, values) : clone(value.mask);
     SplatEffects.prepareMask(mask, undefined, { validateOnly: true });
     if (stage === 'palette' && !policy) throw Error('A palette stage needs a look palette');
-    return freeze({ id: look.id, revision, strength, ...(stage && { stage }),
+    return freeze({ id: look.id, revision, strength, ...(stage && { stage }), ...(driver && { driver }),
       ...(order !== undefined && { order }), ...(weight !== undefined && { weight }),
       ...(stack && { stack: { ...stack, amount: strength * (stack.amount ?? 1) } }),
       ...(policy && { palette: policy }), ...(mask && { mask }) });
@@ -100,14 +85,16 @@
     const prior = typeof base === 'string' ? { asset: base } : base;
     if (changes.asset !== undefined && changes.asset !== prior.asset) return changes;
     return { ...prior, ...changes, ...(changes.params !== undefined && record(changes.params) &&
-      { params: { ...prior.params, ...changes.params } }) };
+      { params: { ...prior.params, ...changes.params } }),
+      ...(record(changes.inputs) && { inputs: { ...prior.inputs, ...changes.inputs,
+        ...(record(changes.inputs.params) && { params: { ...prior.inputs?.params, ...changes.inputs.params } }) } }) };
   }
 
   function stageRules(bound, select, fallback) {
-    if (!bound?.strength) return [];
-    const { id, stack, palette, mask, order, weight, stage = hasBlend(bound) ? 'lit' : fallback } = bound;
+    if (!active(bound)) return [];
+    const { id, stack, palette, mask, order, weight, driver, stage = hasBlend(bound) ? 'lit' : fallback } = bound;
     if (stage === undefined) return [];
-    const scope = { assetId: id, ...(select && { select }), ...(mask && { mask }),
+    const scope = { assetId: id, ...(driver && { driver }), ...(select && { select }), ...(mask && { mask }),
       ...(order !== undefined && { order }), ...(weight !== undefined && { weight }) };
     const rules = [];
     if (stage !== 'palette' && stack) rules.push({ ...scope, stage, stack });
@@ -132,10 +119,10 @@
       if (!fields(rule, ['asset', 'select', 'order', 'weight']) || !rule.select)
         throw Error('An optical binding needs an asset and selector, and optional order or weight');
       const { target, select } = ruleBinding(rule, catalog, true);
-      if (!target?.strength) return [];
-      const { id, mask, stack, palette, order, weight } = target;
+      if (!active(target)) return [];
+      const { id, mask, stack, palette, order, weight, driver } = target;
       if (mask) throw Error('Optical look coefficients need a uniform binding; set mask to false on the asset binding');
-      return [{ select, assetId: id, ...(stack && { stack }), ...(palette && { palette }),
+      return [{ select, assetId: id, ...(driver && { driver }), ...(stack && { stack }), ...(palette && { palette }),
         ...(order !== undefined && { order }), ...(weight !== undefined && { weight }) }];
     });
   }
@@ -180,7 +167,7 @@
 
   function material(base, binding, catalog) {
     const bound = bind(binding, catalog);
-    if (!bound?.strength || (!bound.stack && !bound.palette)) return base;
+    if (!active(bound)) return base;
     const staged = stageRules(bound);
     if (staged.length) return SurfaceLook.material(base, {
       lookAssetId: bound.id,

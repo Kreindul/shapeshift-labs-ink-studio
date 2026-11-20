@@ -170,6 +170,18 @@ async function browserProbe(createRenderer, compileSprites, coastline, floodVall
   } };
   draw({ ...stacked, water: watched, look: { optics: [{ select: { medium: 'front' }, palette: ['#00ff00'] }] } }, { raw: false });
   close(opticalTint, [0, 1, 0], 'the bound optical palette reaches native water', 0);
+  const pack = { format: 'ink-studio/asset-pack', id: 'water', title: 'Water', version: 1, revision: 1,
+    looks: [{ id: 'water/spring', label: 'Spring', palette: { palette: ['#00ff00'] } }] };
+  const catalog = KIT.authoring.assetPacks.create({ packs: [pack] });
+  const animated = { ...stacked, water: watched, look: KIT.authoring.looks.scene({
+    optics: [{ select: { medium: 'front' }, asset: { asset: 'water/spring', strength: 0,
+      inputs: { strength: { source: 'time', keys: [[0, 0], [2, 1]] } } } }]
+  }, catalog) };
+  draw(animated, { raw: false, time: 0 });
+  close(opticalTint, [1, 0, 0], 'cold optical binding keeps its original tint', 0);
+  draw(animated, { raw: false, time: 2 });
+  close(opticalTint, [0, 1, 0], 'optical binding is resampled when the same render world advances', 0);
+
 
 
   const styled = waterBodies.scene([volume({ optics: { ...blackWater, surface: 0.65, refraction: 4, foam: 1, caustics: 1 },

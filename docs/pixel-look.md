@@ -711,3 +711,58 @@ node cli/ink-studio.js render examples/coverage-aware-glass.js --ortho --out gla
 node cli/ink-studio.js render examples/coverage-aware-glass.js --ortho \
   --params '{"glass":"clear"}' --out clear.png
 ```
+
+## Animation and simulation inputs
+
+A look asset binding can drive its strength and named parameters
+with an `inputs` object. This works in scene, target, material, and
+optical bindings. Give the asset defaults for each driven parameter,
+then use `inputs.params` to say where its value comes from.
+
+```json
+{
+  "asset": "forge/hot-steel",
+  "strength": 0,
+  "inputs": {
+    "strength": { "source": "signal", "port": "heater/value" },
+    "params": {
+      "red": {
+        "source": "query",
+        "field": "forge/temperature",
+        "target": { "entity": "billet" },
+        "keys": [[20, 0.08], [420, 0.52], [1080, 0.88]]
+      }
+    }
+  }
+}
+```
+
+- `time` reads elapsed render seconds, such as CLI `--t`.
+- `signal` reads a typed port or its public alias through `world/signal`.
+- `query` uses the same field name and arguments as `probe`. Set an
+  optional `target` point or entity/socket selector, `args`, and a
+  `path` through a returned record or array.
+
+Use `keys` for an input-to-value mapping. Keys are strictly increasing
+in their first column. Linear interpolation is the default for numbers.
+Set `interpolation: "step"` for discrete values, including boolean,
+color strings, or JSON arrays. Values hold at the ends of the table.
+Without keys, the source value supplies the parameter directly.
+Missing reads and values of the wrong type use the binding's static
+value or the asset default. Strength is clamped to `[0, 1]`. A driven
+palette strength multiplies the palette rule's coverage weight.
+
+A driven binding with no stage uses `lit`. Use `stage: "frame"` for a
+whole-frame grade. Simulation rendering samples the clock, signals, and
+fields from the rendered tick. Previewing other frames in between
+does not affect these values. The `look/output` probe lists the sampled
+strength and parameters under each rule's `inputs`. Driven optical
+water also works in WebGL with the bundled render-stage toolkit.
+
+```sh
+node cli/ink-studio.js sim run examples/driven-look-forge.json \
+  --actions examples/driven-look-forge-actions.json --ticks 64 --checkpoint hot.json
+node cli/ink-studio.js sim render hot.json --w 1800 --h 1240 --out forge-hot.png
+node cli/ink-studio.js probe hot.json --select '{"surface":"heated-workpiece"}' \
+  --args '{"stage":"lit","rgb":[0.6,0.6,0.6]}'
+```

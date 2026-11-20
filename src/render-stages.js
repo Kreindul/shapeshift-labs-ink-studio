@@ -1,18 +1,20 @@
 /* Color operations ordered by their place in the render pipeline. */
 const RenderStages = (() => {
-  let stacks, space, pixels, targets, effects;
+  let stacks, space, pixels, targets, effects, inputs;
   try {
     stacks = ColorStack;
     space = ColorSpace;
     pixels = PixelLook;
     targets = TargetSelectors;
     effects = SplatEffects;
+    inputs = LookInputs;
   } catch {
     stacks = require('./color-stack.js');
     space = require('./color-space.js');
     pixels = require('./pixel-look.js');
     targets = require('./target-selectors.js');
     effects = require('./splat-effects.js');
+    inputs = require('./look-inputs.js');
   }
   const names = Object.freeze(['material', 'lit', 'frame', 'palette']);
   const linear = space.prepare('srgb', 'srgb-linear'), encode = space.prepare('srgb-linear', 'srgb');
@@ -45,9 +47,14 @@ const RenderStages = (() => {
     if (!Array.isArray(entries) || entries.length > 64) throw new TypeError('Expected up to 64 render stage rules');
     return Array.from(entries, (entry, i) => {
       if (!entry || Object.getPrototypeOf(entry) !== Object.prototype ||
-          Object.keys(entry).some(key => !['stage', 'stack', 'palette', 'select', 'mask', 'assetId', 'order', 'weight'].includes(key)))
+          Object.keys(entry).some(key => !['stage', 'stack', 'palette', 'select', 'mask', 'assetId', 'order', 'weight', 'driver'].includes(key)))
         throw new TypeError('Invalid render stage rule at index ' + i);
       const name = stage(entry.stage), isPalette = name === 'palette';
+      const sampled = entry.driver && !options.validateOnly && inputs.resolve(entry.driver, options.lookInputs);
+      const { order, weight } = blend(entry);
+      const strengthWeight = isPalette && entry.driver?.inputs?.strength !== undefined ? sampled?.strength ?? entry.driver.strength : 1;
+      if (sampled) entry = { ...entry, ...(isPalette ? { palette: sampled.palette } : { stack: sampled.stack }), mask: sampled.mask };
+      if (options.optical && entry.mask) throw new TypeError('Optical look inputs need a uniform binding');
       if (isPalette ? !entry.palette || entry.stack !== undefined : !entry.stack || entry.palette !== undefined)
         throw new TypeError('The ' + name + ' stage needs ' + (isPalette ? 'a palette policy' : 'a color stack'));
       if (!isPalette && Object.getPrototypeOf(entry.stack) !== Object.prototype)
@@ -56,13 +63,13 @@ const RenderStages = (() => {
         throw new TypeError('Render stage stacks operate on RGB and require RGB color transforms');
       if (isPalette && entry.palette.source !== undefined)
         throw new TypeError('The palette stage samples the resolved frame');
-      const { order, weight } = blend(entry);
       const { amount: stackAmount = 1 } = entry.stack ?? {};
       if (!Number.isFinite(stackAmount) || stackAmount < 0 || stackAmount > 1)
         throw new RangeError('Color stack amount must be in [0, 1]');
       const mask = effects.prepareMask(entry.mask, options.context, { validateOnly: options.validateOnly || options.skipMasks });
       return {
-        name, order, weight, stackAmount, mask, disabled: Boolean(options.skipMasks && mask),
+        name, order, weight: weight * strengthWeight, stackAmount,
+        ...(sampled && { inputValues: { strength: sampled.strength, params: sampled.params } }), mask, disabled: Boolean(options.skipMasks && mask),
         select: entry.select === undefined ? null : targets.prepare(entry.select),
         assetId: entry.assetId,
         stack: isPalette ? null : stacks.prepare({ ...entry.stack, amount: 1 }, {
@@ -78,13 +85,14 @@ const RenderStages = (() => {
     if (!Array.isArray(entries) || entries.length > 32) throw new TypeError('Expected up to 32 optical look rules');
     const definitions = Array.from(entries).flatMap(entry => {
       if (!entry || Object.getPrototypeOf(entry) !== Object.prototype || !entry.select ||
-          Object.keys(entry).some(key => !['select', 'stack', 'palette', 'order', 'weight', 'assetId'].includes(key)) ||
+          Object.keys(entry).some(key => !['select', 'stack', 'palette', 'order', 'weight', 'assetId', 'driver'].includes(key)) ||
           (!entry.stack && !entry.palette)) throw new TypeError('An optical look needs a selector and a stack or palette');
       const { stack, palette, ...scope } = entry;
       return [...(stack ? [{ ...scope, stage: 'lit', stack }] : []),
         ...(palette ? [{ ...scope, stage: 'palette', palette: Array.isArray(palette) ? { palette } : palette }] : [])];
     });
-    const rules = prepare(definitions, options).sort((a, b) => a.order - b.order);
+    const lookInputs = options.lookInputs ?? (options.time === undefined ? undefined : inputs.session(options.time, options.query));
+    const rules = prepare(definitions, { ...options, lookInputs, optical: true }).sort((a, b) => a.order - b.order);
     function matching(target) {
       return rules.filter(rule => targets.matches(rule.select, target));
     }
@@ -142,6 +150,7 @@ const RenderStages = (() => {
   function describe(rule, sample, maskWeight = coverage(rule, sample)) {
     return {
       asset: rule.assetId ?? null, select: rule.select, order: rule.order, weight: rule.weight,
+      ...(rule.inputValues && { inputs: rule.inputValues }),
       ...(rule.stack && { stack: rule.stack.name, stackAmount: rule.stackAmount }),
       ...(rule.mask && { maskWeight }),
       effectiveWeight: maskWeight === null ? null : rule.weight * rule.stackAmount * maskWeight,

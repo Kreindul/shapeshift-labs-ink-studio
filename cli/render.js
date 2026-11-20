@@ -4,6 +4,7 @@ const frameBudget = require('../src/frame-budget.js');
 const FOV = (38 * Math.PI) / 180;
 const PixelLook = require('../src/pixel-look.js');
 const RenderStages = require('../src/render-stages.js');
+const LookInputs = require('../src/look-inputs.js');
 const TargetSelectors = require('../src/target-selectors.js');
 const { createArtPasses, sampleFrames } = require('./art-passes.js');
 const ArtPasses = require('../src/art-passes.js');
@@ -81,7 +82,7 @@ function render(world, o, preparedPalettes) {
   if (!Number.isFinite(lensScale) || lensScale <= 0) throw new RangeError('Lens scale must be finite and positive');
   const tangent = Math.tan(FOV / 2) / lensScale;
   const c = world.cam,
-    t = o.t || 0,
+    t = o.t ?? world.lookSnapshot?.time ?? 0,
     yaw = o.yaw === undefined ? c.yaw : o.yaw,
     pitch = o.pitch === undefined ? c.pitch : o.pitch,
     an = world.anim || {},
@@ -103,7 +104,9 @@ function render(world, o, preparedPalettes) {
     throw new RangeError('Invalid splat order or fragment budget');
   const probe = typeof o.fragmentProbe === 'function' ? o.fragmentProbe : null;
   const styled = !o.raw && !o.samples && !o.captureCoverage;
-  const lookOptions = { palette: world.pal, roles: world.paletteRoles, context: world.surfaceEffects,
+  const lookInputs = !o.raw && (o.lookInputSession ?? LookInputs.session(t, () =>
+    world.lookSnapshot?.query ?? world.surfaceEffects?.query ?? require('../index.js').load().KIT.world.query.fromScene(world, t)));
+  const lookOptions = { palette: world.pal, roles: world.paletteRoles, context: world.surfaceEffects, lookInputs,
     blueNoise: settings => blueNoise(world, settings), skipMasks: o.lookMasks === false };
   const stages = !o.raw && RenderStages.plan(world, lookOptions);
   const optics = !o.raw && RenderStages.optics(look.optics, lookOptions);
@@ -277,6 +280,7 @@ function render(world, o, preparedPalettes) {
               colored: false,
               worked: false,
               pick: undefined,
+              lookInputSession: lookInputs,
               reflectionPlane: plane,
               captureCoverage: true,
               passes: reflectionTint ? ['emission'] : false,

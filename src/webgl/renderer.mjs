@@ -95,7 +95,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     let portalSource, portalDestination, portalMask, portalSpriteLayer, portalProgram;
     let lastWater, lastWaterTime, waterWidth = 0, waterHeight = 0;
     let waterLookSource, waterLookPlan, waterOpticalPlan, mappedWater;
-    let opticsDefinition, opticsWorld, opticsPlan;
+    let opticsDefinition, opticsWorld, opticsPlan, opticsTime;
     const cleaned = target(), finished = target(), history = [target(), target()];
     const data = table(2048, 0, maxSize), bones = table(768, 4, maxSize);
     const fine = table(1536, 7, maxSize), pattern = table(2048, 10, maxSize);
@@ -346,10 +346,15 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const look = world.look ?? {};
       const constraints = !raw && prepareConstraints(world, frame.paletteConstraints ?? look.paletteConstraints);
       const sourceWater = frame.water !== false && world.water?.count ? world.water : null;
-      if (!raw && sourceWater && (look.optics !== opticsDefinition || world !== opticsWorld)) {
+      const drivenOptics = Array.isArray(look.optics) && look.optics.some(rule => rule.driver);
+      const inputTime = drivenOptics ? frame.time ?? world.lookSnapshot?.time ?? 0 : undefined;
+      if (!raw && sourceWater && (look.optics !== opticsDefinition || world !== opticsWorld || inputTime !== opticsTime)) {
         opticsDefinition = look.optics;
         opticsWorld = world;
+        opticsTime = inputTime;
         opticsPlan = toolkit.RenderStages?.optics(look.optics, { palette: world.pal, roles: world.paletteRoles,
+          time: inputTime, query: () => world.lookSnapshot?.query ?? world.surfaceEffects?.query ??
+            toolkit.KIT?.world?.query.fromScene(world, inputTime),
           blueNoise: toolkit.KIT?.procedural?.materials?.blueNoise });
       }
       const optical = raw ? null : opticsPlan;
@@ -397,7 +402,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
 
       const camera = cameraOverride ?? makeCamera(world, frame, width, height);
       const clip = plane === zero ? zero : planeInView(plane, camera);
-      const t = frame.time ?? 0;
+      const t = frame.time ?? world.lookSnapshot?.time ?? 0;
       const water = waterUniforms(waterScene, camera, t, plane);
       const wet = water && wetVariant(water);
       const time = frame.stepAnimation !== false && look.pixel ? Math.floor(t * 10) / 10 : t;

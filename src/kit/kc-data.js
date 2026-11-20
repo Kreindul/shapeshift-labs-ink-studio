@@ -393,7 +393,7 @@
       bad('finish.look.renderStages', error.message);
     }
     try {
-      RenderStages.optics(look?.optics, { palette: pal, roles: st.roles, blueNoise: K.procedural.materials.blueNoise });
+      RenderStages.optics(look?.optics, { palette: pal, roles: st.roles, blueNoise: K.procedural.materials.blueNoise, validateOnly: true });
     } catch (error) {
       bad('finish.look.optics', error.message);
     }
