@@ -13,7 +13,7 @@ world's transfer ledger.
 
 ## Define pools and jobs
 
-Add a world system of kind `reservations`:
+Declare the board as a world system of kind `reservations`.
 
 ```json
 {
@@ -37,8 +37,8 @@ Each pool has an integer `capacity`. Jobs have one place and can be posted
 at runtime with `board/post-job`, where `board` is the system name. Pass
 `job` and any optional `at`, `metadata`, `leaseTicks`, or `expires`
 properties. The absolute `expires` world tick closes an uncompleted job.
-`board/withdraw-job` removes a job by ID. A reposted ID has a new revision,
-so an order holding a claim from the previous posting cannot complete it.
+`board/withdraw-job` removes a job by ID. A reposted ID has a new revision.
+A holder from the previous posting must claim the new revision with a new order.
 
 ## Attach claims to orders
 
@@ -78,10 +78,10 @@ that interval, the original order fails when it tries to reacquire it.
 
 Leases use world ticks and expire before pending transfers settle.
 New acquisitions pause in sleeping and cohort simulation. An existing
-lease still expires at its wall-clock simulation tick. An order's
+lease still expires at its designated world tick. An order's
 timeout can count time waiting for a claim. Its task-step waits count
-only time with the required claims in hand. A claim reserves access;
-a transfer step posts actual stock movement.
+only time with the required claims in hand. A claim reserves access.
+A transfer step posts actual stock movement.
 
 ## Inspect and replay
 

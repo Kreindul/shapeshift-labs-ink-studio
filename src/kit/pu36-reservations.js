@@ -291,7 +291,7 @@
         }
       },fields:{
         pools:table('pool',()=>pools), jobs:table('job',state=>state.jobs),
-        claims:{type:'record',qualified:true,selector:true,read({state,args}){
+        claims:{type:'records',qualified:true,selector:true,read({state,args}){
           const rows=Object.values(state.sessions).filter(row=>(args.pool===undefined||row.grants.some(grant=>grant.pool===args.pool))&&
             Q.condition(args.where,row)).sort(byAge);
           return Q.ok(rows);
