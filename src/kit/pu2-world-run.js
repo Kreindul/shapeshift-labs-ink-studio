@@ -100,8 +100,9 @@
       }
     }
     check(order.length === names.length, 'Instantaneous signal cycle; use a delay or a stateful system');
+    const causePolicy = W.causality.policy(world.causality);
     const rates = schedule.active ? W.rates.bind(schedule,systems,ports,incoming,order) : null;
-    return {world,systems,ports,incoming,order,names,transfers,dependencies,rates};
+    return {world,systems,ports,incoming,order,names,transfers,dependencies,rates,causePolicy};
   }
   function actionCheck(raw, plan, min = 1) {
     check(record(raw) && tickOK(raw.tick) && raw.tick >= min && record(raw.args ?? {}) &&
@@ -184,7 +185,7 @@
       world=result.world;
     }
     const {plan}=result;
-    const {systems,ports,incoming,order,names,transfers,dependencies,rates} = plan;
+    const {systems,ports,incoming,order,names,transfers,dependencies,rates,causePolicy} = plan;
     const projection = Q.projection(systems);
     const slowReaders = new Map(rates ? dependencies.describe.filter(({id,reads})=>reads.length&&rates.rates[id].every>1)
       .map(({id})=>[id,rates.rates[id].every]) : []);
@@ -199,19 +200,20 @@
     let tick = 0, states = {}, outputs = rootOutputs, manual = rootInputs, delays = rootDelays,
       history = [], dropped = 0, lastEvents = [], scenario = {status:'running',score:0,matched:{},metrics:{}};
     let pendingWrites = [], lastDependencies = null, sampling = rates?.initial, spatialSampling = {};
+    let causalState;
     let currentQuery, lastTransfers = [], lastSignals = {...rootInputs,...rootOutputs};
 
-    function view(worldValue = world, statesValue = states, signals = lastSignals, tickValue = tick, receipts = lastTransfers) {
+    function view(worldValue = world, statesValue = states, signals = lastSignals, tickValue = tick, receipts = lastTransfers, causes = causalState) {
       return Object.freeze({world:worldValue,states:statesValue,signals,tick:tickValue,time:tickValue*worldValue.dt,history,dropped,
-        ...(receipts.length && {transfers:receipts})});
+        ...(receipts.length && {transfers:receipts}),...(causes && {causality:causes})});
     }
-    function context(name, worldValue, statesValue, at, input, emit, query, spatial, timing) {
+    function context(name, worldValue, statesValue, at, input, emit, query, spatial, timing, causal) {
       const baseDt = worldValue.dt, substeps = timing?.substeps ?? 1;
       const time = timing && timing.end !== 1 ? (at-1+timing.end)*baseDt : at*baseDt;
       const dt = timing ? baseDt*timing.every/substeps : baseDt;
       const randomTick = substeps>1 ? at+'.'+timing.substep : at;
       return Object.freeze({world:worldValue,query,id:name,states:statesValue,tick:at,time,dt,input,emit,
-        ...(timing && {baseDt,every:timing.every,substep:timing.substep,substeps}),...(spatial && {spatial}),
+        ...(timing && {baseDt,every:timing.every,substep:timing.substep,substeps}),...(spatial && {spatial}),...(causal && {causal}),
         random:key => P.data.hash(name+'/'+randomTick+'/'+String(key),worldValue.seed)/4294967296});
     }
     function rootedState(value) {
@@ -262,7 +264,7 @@
         signals:lastSignals,events:lastEvents,pending:packCommands(),scenario,
         ...(lastTransfers.length && {transfers:lastTransfers}),
         ...(pendingWrites.length && {dependencyWrites:pendingWrites}),...(rates && {sampling}),
-        ...(Object.keys(spatialSampling).length && {spatialSampling})});
+        ...(Object.keys(spatialSampling).length && {spatialSampling}),...(causalState && {causality:causalState})});
     }
     function restore(saved) {
       check(record(saved) && saved.format === checkpointFormat && saved.version === 1 && equal(saved.world,world) && tickOK(saved.tick),
@@ -301,6 +303,10 @@
         }
         spatialSampling = payload.spatialSampling;
       }
+      if (causePolicy) {
+        W.causality.validate(payload.causality,payload.tick,ports,incoming,systems,causePolicy);
+        causalState = payload.causality;
+      } else check(!own(payload,'causality'),'Unexpected causal checkpoint data');
       ({tick,states,outputs,manual,delays,history,dropped,scenario,signals:lastSignals,events:lastEvents} = payload);
       enqueue(payload.pending,false);
     }
@@ -315,6 +321,7 @@
       const initialOutputs = {};
       for (const name of names) readOutputs(name,states[name],context(name,world,states,0,{},() => {},startQuery),initialOutputs);
       outputs = freeze(initialOutputs);
+      if (causePolicy) causalState = W.causality.initial(ports,incoming,outputs,causePolicy);
       lastSignals = freeze({...manual,...outputs});
       const past=world.history?.enabled===false?[]:(world.history?.past??[]).filter(event=>Q.condition(world.history?.where,event));
       history=freeze(copy(past.slice(-historyLimit)));
@@ -371,17 +378,23 @@
           rebuilt:(kind,detail,bounds)=>activeTrace().recordWork(name,kind,detail,bounds)
         });
       }
-      const makeEmit = system => (kind,detail = {}) => {
+      const causal = causePolicy && W.causality.begin(causalState,at,ports,incoming,causePolicy);
+      const makeEmit = (system,scope,root) => (kind,detail = {},parents) => {
         check(id(kind) && record(detail) && events.length < 10000, 'Invalid event or per-tick event budget exceeded');
-        events.push(freeze({...copy(detail),kind,system,tick:at,id:at+'.'+events.length}));
+        const row=freeze({...copy(detail),kind,system,tick:at,id:at+'.'+events.length});
+        events.push(row);
+        if (causal) causal.event(row,parents??scope?.emitParents()??(root?[root]:[]),scope?.location,
+          parents?'declared':root?'command':'observed-inputs');
       };
       for (const item of commands) {
         const [name,key] = endpoint(item.action);
-        const emit = makeEmit(name);
+        const root = causal?.command(name,item), emit = makeEmit(name,undefined,root);
         if (name === 'world') {
           if (key === 'input') {
             const {port,value} = item.args, descriptor = ports.inputs[port];
             const next = portValue(descriptor,value,port);
+            if (causal && (!rates || descriptor.type!=='event' || next.length))
+              causal.manual(port,root,rates && descriptor.type==='event' && nextManual[port].length>0);
             nextManual[port] = rates && descriptor.type==='event' ?
               W.rates.add(nextManual[port],next,'event') : next;
           }
@@ -401,10 +414,13 @@
             const {kind,...detail} = item.args;
             emit(kind,detail);
           }
-          if (key === 'transfer') requests.push({name,request:item.args});
+          if (key === 'transfer') requests.push({name,request:item.args,root});
         } else {
           const actionQuery = Q.create(view(nextWorld,{...drafts}),systems,projection);
-          const ctx = context(name,nextWorld,Object.freeze({...drafts}),at,{},emit,actionQuery,spatial(name,false));
+          const scope=causal?.scope(name,{}, {},actionQuery,{root,queryTick:tick,queryTime:tick*nextWorld.dt});
+          causal?.action(name,root);
+          const ctx = context(name,nextWorld,Object.freeze({...drafts}),at,{},makeEmit(name,scope,root),actionQuery,
+            spatial(name,false),undefined,scope?.api);
           drafts[name] = rootedState(systems[name].actions[key](drafts[name],item.args,ctx));
         }
       }
@@ -422,9 +438,9 @@
         }
       }
       check(requests.length <= W.transfers.limit,'Transfer request budget exceeded');
-      const receipts = requests.length ? rootedState(requests.map(({name,request})=>{
+      const receipts = requests.length ? rootedState(requests.map(({name,request,root})=>{
         const receipt = transfers.settle(drafts,request,at,name,rootedState);
-        makeEmit(name)('transfer',receipt);
+        makeEmit(name,undefined,root)('transfer',receipt);
         return receipt;
       })) : [];
       let nextSpatial = spatialSampling;
@@ -448,17 +464,27 @@
       const committed = freeze(drafts);
       const spent = {};
       let phaseQuery, phaseStart;
-      function integrate(name, snapshot, input, timing, target) {
+      function integrate(name, snapshot, input, timing, target, sources, priorOutputs) {
         if (!phaseQuery || phaseStart !== timing?.start) {
           phaseStart = timing?.start;
           const base = view(nextWorld,snapshot,timing?.signals??lastSignals,tick,receipts);
           phaseQuery = Q.create(timing ? {...base,time:(tick+timing.start)*nextWorld.dt} : base,systems,projection);
         }
         const system = systems[name], state = snapshot[name];
-        const ctx = context(name,nextWorld,snapshot,at,input,makeEmit(name),phaseQuery,spatial(name,true),timing);
+        const scope=causal?.scope(name,input,sources,phaseQuery,{substep:timing?.substeps>1?timing.substep:undefined,
+          queryTick:tick,queryTime:(tick+(timing?.start??0))*nextWorld.dt});
+        if (scope) for (const key of Object.keys(input)) scope.api.input(key);
+        const ctx = context(name,nextWorld,snapshot,at,input,makeEmit(name,scope),phaseQuery,spatial(name,true),timing,scope?.api);
         const start = profile ? clock() : 0;
         const next = system.step ? rootedState(system.step(state,ctx)) : state;
         readOutputs(name,next,ctx,target);
+        if (causal) {
+          for (const key of Object.keys(system.outputs??{})) {
+            const port=name+'/'+key;
+            causal.output(name,key,target[port],scope,priorOutputs[port]);
+          }
+          causal.ran(name);
+        }
         if (profile) {
           const cost = spent[name] ??= {calls:0,ms:0};
           cost.calls++;
@@ -469,7 +495,7 @@
 
       let nextStates, nextOutputs, publishedSignals, nextSampling, delayedSamples;
       if (rates) {
-        const frame = rates.advance(at,committed,outputs,nextManual,delays,lastSignals,sampling,integrate);
+        const frame = rates.advance(at,committed,outputs,nextManual,delays,lastSignals,sampling,integrate,causal);
         ({states:nextStates,outputs:nextOutputs,signals:publishedSignals,buffers:nextSampling,delayedSamples}=frame);
       } else {
         nextStates = {}; nextOutputs = {};
@@ -477,7 +503,11 @@
         for (const name of order) {
           const input = currentValues(name,nextManual,immediate,outputs,delays);
           for (const [key,value] of Object.entries(input)) observed[name+'/'+key] = value;
-          nextStates[name] = integrate(name,committed,input,undefined,nextOutputs);
+          const sources=causal && Object.fromEntries(Object.keys(input).map(key=>{
+            const port=name+'/'+key, edge=incoming.get(port);
+            return [key,{parents:causal.held(port,edge,own(immediate,edge?.from)),source:edge?.from,delay:edge?.delay}];
+          }));
+          nextStates[name] = integrate(name,committed,input,undefined,nextOutputs,sources,outputs);
           if (systems[name].combinational) for (const key of Object.keys(systems[name].outputs ?? {}))
             immediate[name+'/'+key] = nextOutputs[name+'/'+key];
         }
@@ -488,7 +518,8 @@
       publishedSignals = freeze(publishedSignals);
       const memory = historyWith(events,nextWorld.history);
       const dependencyReport = trace && trace.report();
-      const nextScenario = evaluateScenario({...view(nextWorld,freeze(nextStates),publishedSignals,at,receipts),...memory},events);
+      const nextCausal = causal?.finish();
+      const nextScenario = evaluateScenario({...view(nextWorld,freeze(nextStates),publishedSignals,at,receipts,nextCausal),...memory},events);
       tick = at;
       world = nextWorld;
       states = nextStates;
@@ -500,6 +531,7 @@
       dropped = memory.dropped;
       lastEvents = freeze(events);
       lastTransfers = receipts;
+      causalState = nextCausal;
       sampling = nextSampling;
       spatialSampling = nextSpatial;
       pendingWrites = freeze(nextWrites);

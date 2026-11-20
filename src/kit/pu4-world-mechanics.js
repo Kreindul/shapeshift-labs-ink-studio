@@ -160,7 +160,7 @@
       }
     }
     function advanceJoints(state,ctx) {
-      const next={}, ratios={}, roots={}, demand={};
+      const next={}, ratios={}, roots={}, demand={}, loading=ctx.causal?{}:null, transitions=ctx.causal?{}:null;
       for(const key of driveOrder){
         const spec=jointSpecs[key], s=state.joints[key];
         const coupled=s.active&&spec.drive&&next[spec.drive]?.active;
@@ -170,6 +170,10 @@
         const staticLoad=spec.load??0, linked=spec.loadField?ctx.query.probe(spec.loadField,{entity:state.bodies[spec.child]?.entity}):null;
         const load=staticLoad+(linked?.status==='ok'&&Number.isFinite(linked.value)?Math.max(0,linked.value):0);
         demand[root]=(demand[root]??0)+(s.active?load*Math.abs(ratio):0);
+        if (loading && s.active) {
+          (loading[root]??=[]).push({joint:key,ratio,load,staticLoad,...(spec.loadField && {field:spec.loadField,
+            status:linked?.status??'unavailable',reading:Number.isFinite(linked?.value)?linked.value:null})});
+        }
         next[key]={...s,load};
       }
       for(const key of driveOrder){
@@ -183,9 +187,34 @@
             speed=clamp((ctx.input['drive.'+key]-s.value)/ctx.dt,-limit,limit);
           }else speed=ctx.input['drive.'+key];
         }
-        const value=clamp(s.value+speed*ctx.dt,min,max);
-        if(stalled&&!s.stalled) ctx.emit('machine-stall',{joint:key,load:demand[root],capacity:motor.capacity??1e9});
-        next[key]={...s,value,speed:(value-s.value)/ctx.dt,stalled,networkLoad:demand[root]};
+        const proposed=s.value+speed*ctx.dt, value=clamp(proposed,min,max);
+        const measuredSpeed=(value-s.value)/ctx.dt;
+        if(stalled&&!s.stalled) {
+          const capacity=motor.capacity??1e9;
+          let cause;
+          if(ctx.causal) {
+            cause=ctx.causal.record('load-exceeded',{entity:state.bodies[spec.child]?.entity??spec.child,
+              joint:key,load:demand[root],capacity,comparison:'>',contributors:loading[root]},
+            {outputs:['speed.'+key,'stalled.'+key]});
+            transitions[key]=cause;
+          }
+          ctx.emit('machine-stall',{joint:key,load:demand[root],capacity},cause?[cause]:undefined);
+        } else if(ctx.causal && s.active && !stalled && s.speed!==0 && measuredSpeed===0) {
+          const port='drive.'+root, drive=ctx.input[port], entity=state.bodies[spec.child]?.entity??spec.child;
+          const driver=root!==key?spec.drive:null;
+          const upstream=driver&&next[driver].speed===0;
+          const reason=upstream?'upstream-stopped':motor.mode!=='position'&&drive===0?'drive-zero':
+            root===key&&motor.mode==='position'&&drive===s.value?'target-reached':
+            value!==proposed?'travel-limit':'no-motion';
+          const detail={entity,joint:key,previousSpeed:s.speed,speed:0,drive,reason,
+            position:value,requestedSpeed:speed,range:[min,max],...(driver && {driver,driverSpeed:next[driver].speed})};
+          const parent=upstream&&own(transitions,driver)?transitions[driver]:null;
+          const cause=ctx.causal.record('shaft-stopped',detail,{inputs:parent?[]:[port],
+            causes:parent?[parent]:[],outputs:['speed.'+key]});
+          transitions[key]=cause;
+          ctx.emit('machine-stop',detail,[cause]);
+        }
+        next[key]={...s,value,speed:measuredSpeed,stalled,networkLoad:demand[root]};
       }
       return next;
     }

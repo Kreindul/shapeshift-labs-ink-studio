@@ -383,12 +383,60 @@ ink-studio probe yard.run.json --field world/signal --args '{"port":"trail/conta
 ink-studio sim replay yard.run.json
 ```
 
+## Causal traces
+
+Enable `"causality": true` on a world to record causal evidence during
+simulation. `"causality": {"limit": 4096}` sets the retained node count.
+The default is 2048 and the maximum is 20000. Causal recording has its
+own retention and captures emitted events even if the world timeline
+filters them out.
+
+The [mill example](../examples/world-causal-mill.json) records a pump
+load of 12 at tick 3. The breaker trips at its threshold of 8 on tick 4,
+the motor sets drive to zero on tick 5, and the shaft stops on tick 6.
+
+```sh
+ink-studio sim run examples/world-causal-mill.json --ticks 8 --record mill.run.json
+ink-studio trace mill.run.json world/cause --entity mill-wheel --args '{"kind":"machine-stop","system":"mill"}'
+ink-studio trace mill.run.json world/cause --args '{"event":"6.0"}'
+ink-studio trace mill.run.json world/cause --args '{"port":"mill/speed.shaft","atTick":5}'
+ink-studio sim replay mill.run.json
+```
+
+Select a trace root by causal node `id`, timeline `event` ID, signal
+`port`, or event or decision `kind`. The port and kind lookups choose
+the latest matching node at or before `atTick`. Filter by `system` or
+entity where applicable. A port lookup prefers its output when both
+directions exist. Set `"direction":"input"` to trace the input sample.
+Edges point from effects to their recorded causes. The report gives
+each node's tick, readings and details. A
+`partial` status and `gaps` identify missing evidence when retention,
+`maxDepth`, or the returned node `limit` cuts off a branch.
+
+Signal traces carry the actual samples a solver used, including delayed
+samples and the publications behind multi-rate averages, sums, and
+event batches. An output or event may be attributed to a declared
+decision, the current command, observed solver inputs, or a held
+publication. The `basis` identifies that attribution. Observed inputs
+establish what was available to the solver. Systems can record exactly
+which evidence contributed to a decision. Checkpoints and run recordings
+preserve causal evidence through resume, replay, and forks.
+
+In an opted-in world, custom systems can use `ctx.causal.input(key)`
+and `ctx.causal.previous(key)` to reference an input sample or previous
+output. `ctx.causal.read(field, at, args)` returns the query `result`
+and a `cause` ID, recording the measured value and available provenance.
+Call `ctx.causal.record(kind, detail, {inputs, causes, outputs})` to
+record a decision with its selected input keys, evidence IDs, and output
+keys. Pass the returned decision ID in `ctx.emit(kind, detail, [id])`
+to explain a specific event.
+
 ## Author a world
 
 A manifest has `format: "ink-studio/world"`, `version: 1`, a stable `id`,
 `seed`, `dt`, and tables of `entities` and `systems`. A system record
 declares a `kind`, a `config`, and optionally a [solver schedule](#multi-rate-simulation). Optional sections include `connections`,
-`prefabs`, `assetPacks`, `commands`, `history`, `metadata` and
+`prefabs`, `assetPacks`, `commands`, `history`, `causality`, `metadata` and
 `scenario`. See [the watershed](../examples/world-watershed.json) and
 [the quarry crossing](../examples/world-crossing.json) for working manifests.
 

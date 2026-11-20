@@ -81,17 +81,23 @@
       }
     }
 
-    function advance(at,committed,previous,manual,delays,signals,saved,visit) {
+    function advance(at,committed,previous,manual,delays,signals,saved,visit,causal) {
       const buffers = {...saved}, delayedSamples = {}, eventValues = {}, observed = {};
       for (const port of Object.keys(ports.inputs))
         observed[port] = ports.inputs[port].type==='event'?[]:signals[port];
       for (const port of eventOutputs) eventValues[port] = [];
       for (const {port,edge,type} of receiving) {
-        if (!edge || edge.delay) buffers[port] = add(buffers[port],edge?delays[port][0]:manual[port],type);
+        if (!edge || edge.delay) {
+          const value=edge?delays[port][0]:manual[port];
+          buffers[port]=add(buffers[port],value,type);
+          if (causal && (type==='event'?value.length>0:type==='vec3'?value.some(Boolean):value!==0))
+            causal.collect(port,causal.held(port,edge,false));
+        }
       }
       for (const {to,type} of delayed) delayedSamples[to] = zero(type);
 
       function publish(port,value) {
+        causal?.publish(port,value);
         if (own(eventValues,port)) eventValues[port] = add(eventValues[port],value,'event');
         for (const {to,delay,type} of bySource.get(port) ?? []) {
           const destination = delay?delayedSamples:buffers;
@@ -104,13 +110,14 @@
         for (const {to,from,delay,type} of averages) {
           const row=buffers[to], held=delay?delays[to][0]:outputs[from];
           buffers[to]={value:add(row.value,scale(held,elapsed,type),type),quanta:row.quanta+elapsed};
+          if (causal) causal.collect(to,causal.held(to,{from,delay},false));
         }
         const staged={}, changed={}, live={};
         const snapshotSignals=freeze({...observed,...outputs,...eventValues});
         for (const name of names) {
           const {every,substeps}=rates[name];
           if (at%every) continue;
-          const input={};
+          const input={}, sources=causal?{}:undefined;
           for (const key of Object.keys(systems[name].inputs ?? {})) {
             const port=name+'/'+key, edge=incoming.get(port), type=ports.inputs[port].type;
             let value;
@@ -123,10 +130,15 @@
               buffers[port]=zero(type);
             } else value=!edge?manual[port]:edge.delay?delays[port][0]:live[edge.from]??outputs[edge.from];
             input[key]=value;
+            if (sources) {
+              const queued=edge?.sample==='average'||edge&&buffered(edge)||!edge&&type==='event';
+              sources[key]={parents:queued?causal.consume(port):causal.held(port,edge,own(live,edge?.from)),
+                source:edge?.from,delay:edge?.delay,mode:edge?.sample??(queued?'events':'hold')};
+            }
             observed[port]=type==='event'?add(observed[port],value,type):value;
           }
           changed[name]=visit(name,states,freeze(input),{start:last/subdivision,end:slice/subdivision,
-            every,substeps,substep:slice/(subdivision/substeps),signals:snapshotSignals},staged);
+            every,substeps,substep:slice/(subdivision/substeps),signals:snapshotSignals},staged,sources,outputs);
           if (systems[name].combinational) for (const key of Object.keys(systems[name].outputs ?? {})) {
             const port=name+'/'+key;
             live[port]=staged[port];
@@ -134,6 +146,7 @@
           }
         }
         for (const [port,value] of Object.entries(staged)) if (!own(live,port)) publish(port,value);
+        causal?.completePhase();
         if (Object.keys(changed).length) states=freeze({...states,...changed});
         if (Object.keys(staged).length) outputs=freeze({...outputs,...staged});
         last=slice;

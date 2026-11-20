@@ -360,6 +360,7 @@ const CMD = {
         '  inspect|validate|probe <scene|run> --select JSON   inspect, check, or sample a look target',
         '  probe <scene|run> --field look/sample [--select JSON | --entity ID] [--at x,y,z]   explain a baked splat',
         '  trace <scene|run> <name>    trace a route, signal or other exposed query',
+        '    trace <scene|run> world/cause --args JSON   follow recorded decisions, inputs and events',
         '  field <scene|run> <name> --spec file.json [--explain]  export a line, grid or time series',
         '  scene apply|stamp|remix|capture|history|promote <world> ...  edit or derive a world manifest',
         '    scene apply <scene> <edits.json> --dry-run   preview edited paths and look targets',

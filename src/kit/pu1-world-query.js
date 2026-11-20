@@ -208,6 +208,9 @@
       return [key,{type,selector,read:({target:site,args}) => look()[key](site,args)}];
     })),'read');
     add(traces,'world',{
+      cause:{selector:true,run:({target,args}) => view.causality ?
+        W.causality.trace(view.causality,world,tick,args,target?.entity??args.entity) :
+        missing('causal recording is not enabled for this snapshot')},
       signal:{run:({args}) => {
         let port = args.port;
         if (typeof port !== 'string') return missing('signal port required');

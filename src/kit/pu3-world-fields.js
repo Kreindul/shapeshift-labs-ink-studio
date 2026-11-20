@@ -107,23 +107,60 @@
       'Invalid control parameters');
     const {inputs,outputs} = specs[kind];
     const stateless = !['pulse','latch','timer','hysteresis'].includes(kind);
-    function step(state,{input,tick}) {
+    function step(state,{input,tick,causal}) {
       let value, done;
       switch (kind) {
         case 'pass': value = input.value; break;
-        case 'threshold': value = input.value >= (config.threshold ?? 0); break;
+        case 'threshold': {
+          const threshold=config.threshold??0;
+          value=input.value>=threshold;
+          if (value!==state.value) causal?.record(value?'threshold-crossed':'threshold-cleared',
+            {reading:input.value,threshold,comparison:'>=',result:value},{inputs:['value'],outputs:['value']});
+          break;
+        }
         case 'sum': value = input.a+input.b; break;
         case 'scale': value = input.value*(config.scale??1)+(config.offset??0); break;
-        case 'choose': value = input.enabled ? input.b : input.a; break;
+        case 'choose': {
+          const branch=input.enabled?'b':'a';
+          value=input[branch];
+          if (value!==state.value) causal?.record('branch-selected',
+            {enabled:input.enabled,branch,result:value},{inputs:['enabled',branch],outputs:['value']});
+          break;
+        }
         case 'and': value = input.a && input.b; break;
         case 'not': value = !input.value; break;
-        case 'pulse': return {value:input.value && !state.last ? [{tick}] : [],last:input.value};
-        case 'latch': value = input.reset.length ? false : input.set.length ? true : state.value; break;
-        case 'timer':
-          value = input.enabled ? Math.min(config.ticks??1,state.value+1) : 0;
-          done = value >= (config.ticks??1);
+        case 'pulse': {
+          const rising=input.value&&!state.last;
+          if (rising) causal?.record('rising-edge',{previous:!!state.last,reading:input.value},
+            {inputs:['value'],outputs:['value']});
+          return {value:rising?[{tick}]:[],last:input.value};
+        }
+        case 'latch': {
+          const trigger=input.reset.length?'reset':input.set.length?'set':null;
+          value=trigger?trigger==='set':state.value;
+          if (value!==state.value) causal?.record('latch-changed',{trigger,result:value},
+            {inputs:[trigger],outputs:['value']});
+          break;
+        }
+        case 'timer': {
+          const threshold=config.ticks??1;
+          value=input.enabled?Math.min(threshold,state.value+1):0;
+          done=value>=threshold;
+          if (causal && (value!==state.value||done!==state.done)) {
+            const previous=causal.previous('value');
+            causal.record('timer-updated',{count:value,threshold,enabled:input.enabled,done},
+              {inputs:['enabled'],causes:input.enabled&&previous?[previous]:[],
+                outputs:['value',...(done!==state.done?['done']:[])]});
+          }
           return {value,done};
-        case 'hysteresis': value = state.value ? input.value > (config.low??0) : input.value >= (config.high??1); break;
+        }
+        case 'hysteresis': {
+          const threshold=state.value?config.low??0:config.high??1, comparison=state.value?'>':'>=';
+          value=state.value?input.value>threshold:input.value>=threshold;
+          if (value!==state.value) causal?.record('hysteresis-changed',
+            {reading:input.value,threshold,comparison,result:value},{inputs:['value'],outputs:['value']});
+          break;
+        }
       }
       return {value};
     }
