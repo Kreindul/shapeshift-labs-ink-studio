@@ -964,3 +964,57 @@ shot. Use `--ticks` or `--t` to select a simulation snapshot, or omit
 both to use the saved tick on a checkpoint or recording. In Node, use
 `ink.compareShotPalettes(world, { palettes, w, h, px, t })` with a
 world already posed or sampled at the desired simulation state.
+## Save approved findings as look assets
+
+```sh
+ink-studio palette lighting lighting-draft.json --approve --out lighting-roles.json
+ink-studio palette save-look approved-stone.json --out workshop-pack.json
+```
+
+The approval file declares the findings to keep. This example uses a
+named lighting ramp, a hand-approved palette and a protected accent.
+Any of those can be saved on its own.
+
+```json
+{
+  "id": "workshop/stone",
+  "label": "Stone and lantern accents",
+  "ramp": {"approved": "lighting-roles.json", "role": "stone"},
+  "palette": ["#242b36", "#56677c", "#93a4a5", "#e9cf9e"],
+  "reserved": [{"color": "#ffbb58", "match": false, "dither": false}]
+}
+```
+
+- For a reference-derived palette, use `"palette": {"reference":
+  "reference-report.json"}` with a `palette extract` report. By default
+  this keeps swatches with pixels included by the extraction's alpha
+  settings. Add `"indices": [2, 8, 1]` to choose and order specific
+  report swatches. The look stores up to 48 output swatches including
+  reserved accents.
+- For a ramp spacing review, use `"ramp": {"review": "ramp-review.json",
+  "interpolation": "smooth"}`. It takes the authored stops, with their
+  positions. You can also supply explicit `stops` and optional
+  `interpolation` and `weights`. Approved lighting roles are converted
+  to explicit RGB stops so a different scene's indices cannot change them.
+- For a dither review, add `"dither": {"review": "dither-review/review.json",
+  "approved": [0], "strength": 0.65}`. Indices refer to measured pairs
+  and are zero-based. The saved table keeps those pairs' lightness
+  ranges from the report. Use `{"index": 0, "lightness": [0.36, 0.56]}`
+  to author a range explicitly or restore it from an older report.
+  You can also supply ordinary `dither` settings with an edited
+  `pairs` table. Pair tables use an explicit candidate palette so
+  all endpoints resolve in another scene.
+
+Install the result with `--asset-pack workshop-pack.json` or embed
+it in the scene's `assetPacks`. Bind `"lookAsset":
+{"asset": "workshop/stone", "revision": 1}` on a material or on
+a simulation entity's visual. The ramp supplies a diffuse finish
+before the other lit finish layers. A palette policy can also bind at
+`finish.look.asset` or `visual.look.asset` for scene-wide resolution.
+Material lighting ramps use the headless renderer.
+
+Pass `--pack workshop-pack.json` when saving another look in the pack
+or updating an existing one. Updates keep the look ID and carry over
+omitted components. The pack revision increments on content changes.
+Use `K.authoring.assetPacks.savePaletteLook(approval, pack)` in the library,
+passing the report objects directly where the CLI accepts paths.

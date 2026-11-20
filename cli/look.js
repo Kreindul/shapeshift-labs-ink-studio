@@ -111,6 +111,7 @@ function select(source, options, authoring, report) {
     if (Object.keys(look.params).length) note(report, 'parameterized', 'The look was evaluated with its selected parameter values.');
     for (const key of ['stage', 'mask', 'order', 'weight']) if (bound[key] !== undefined)
       note(report, 'look-' + key, 'The external format omits the look ' + key + '.');
+    if (bound.lightingRamp) note(report, 'material-lighting-ramp', 'The external format omits the material lighting ramp.');
   }
   return { ...bound, label: look.label };
 }
@@ -383,6 +384,8 @@ function sample(file, options, kit) {
   const authoring = kit.KIT.authoring;
   const source = read(file, authoring.assetPacks);
   const look = select(source, options, authoring);
+  if (look.lightingRamp && !look.stack && !look.palette)
+    throw new TypeError('Sample a lighting ramp with a material lookAsset in a rendered scene');
   const reference = bakeReference(look.stack, options.swatches ? readReference(options.swatches, authoring.assetPacks) : undefined);
   return require('./look-sample.js')({ file, options, source: source.source, look, reference, kit, report, compile });
 }
@@ -411,4 +414,4 @@ async function bake(file, options, kit) {
   await write([JSON.stringify(result.bundle) + '\n'], options.out);
 }
 
-module.exports = { run, isSource, inspectSource, assertValid, report, sample, bake };
+module.exports = { run, isSource, inspectSource, assertValid, report, sample, bake, write };

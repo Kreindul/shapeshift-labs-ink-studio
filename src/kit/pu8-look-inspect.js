@@ -54,11 +54,12 @@
   }
 
   function definitionInfo(definition, params) {
-    const { assetId, stack, lut, palette, mask, driver, type, source, remap, curves, tone } = definition;
+    const { assetId, stack, lut, palette, mask, driver, type, source, remap, curves, tone, lightingRamp } = definition;
     return { ...(assetId && { asset: assetId }), ...(stack && { stack: stackInfo(stack) }),
       ...(lut && { lut: lutInfo(lut) }), ...(palette && { palette }), mask: maskInfo(mask),
       ...(type && { type }), ...(source && { source }), ...(remap && { remap }),
       ...(curves && { curves }), ...(tone && { tone }),
+      ...(lightingRamp && { lightingRamp }),
       ...(params && { parameters: params }), ...(driver && { inputs: driver.inputs }), dependencies: dependencies(definition) };
   }
 
@@ -183,13 +184,14 @@
       const roles = check(base + '.paletteRoles', () => PixelLook.bindRoles(world.pal, world.paletteRoles, settings.paletteRoles));
       if (!roles) continue;
       staged(base + '.renderStages', settings.renderStages, eligible, surface, { ...context, roles });
-      const layers = Object.entries(settings.layers ?? {}).filter(([, layer]) => rgbLayer(layer?.type));
+      const layers = Object.entries(settings.layers ?? {}).filter(([id, layer]) => rgbLayer(layer?.type) ||
+        (id === 'lookAssetRamp' && settings.lookAssetId && layer?.lightingRamp));
       if (!layers.length && settings.paletteConstraint === undefined) continue;
       check(base, () => SurfaceLook.prepare(settings, world.pal, undefined, world.surfaceEffects, {
         paletteRoles: world.paletteRoles, blueNoise: context.blueNoise
       }));
       for (const [id, layer] of layers) add(base + '.layers.' + id, 'lit',
-        { ...layer, assetId: id === 'lookAsset' ? settings.lookAssetId : undefined }, eligible, { mode: 'surface', surface });
+        { ...layer, assetId: ['lookAsset','lookAssetRamp'].includes(id) ? settings.lookAssetId : undefined }, eligible, { mode: 'surface', surface });
       if (settings.paletteConstraint !== undefined) {
         const { stack, mask, assetId = settings.lookAssetId, ...palette } = settings.paletteConstraint;
         add(base + '.paletteConstraint', 'palette', { stack, mask, assetId, palette }, eligible, { mode: 'surface', surface });
@@ -223,7 +225,9 @@
     }
     SplatEffects.prepareMask(mask, undefined, { validateOnly: true });
     const issues = [];
-    if (stage !== undefined && renderer === 'webgl')
+    if (definition.lightingRamp && renderer === 'webgl')
+      issues.push({ code: 'unsupported-renderer', message: 'webgl does not evaluate material lighting ramps' });
+    else if (stage !== undefined && renderer === 'webgl')
       issues.push({ code: 'unsupported-renderer', message: 'webgl does not evaluate explicit ' + stage + ' stages' });
     else if (mask && renderer === 'webgl')
       issues.push({ code: 'unsupported-renderer', message: 'webgl does not evaluate spatial look masks' });

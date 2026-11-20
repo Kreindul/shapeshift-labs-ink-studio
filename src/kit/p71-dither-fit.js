@@ -39,8 +39,10 @@
     const byPair = new Map();
     for (const { slots, lightness: range } of plan.pairs) {
       const a = Math.min(...slots), b = Math.max(...slots), key = a * swatches.length + b;
-      if (!byPair.has(key)) byPair.set(key, { slots:[a,b], matchesLightness:false });
-      if (!range || lightness >= range[0] && lightness <= range[1]) byPair.get(key).matchesLightness = true;
+      if (!byPair.has(key)) byPair.set(key, { slots:[a,b], matchesLightness:false, ranges:[] });
+      const pair = byPair.get(key);
+      pair.ranges.push(range ?? null);
+      if (!range || lightness >= range[0] && lightness <= range[1]) pair.matchesLightness = true;
     }
     const scale = plan.tuning?.scale ?? 1;
     const rankAt = (x, y) => plan.ranks[Math.floor(x / scale) % plan.width + (Math.floor(y / scale) % plan.height) * plan.width];
@@ -141,12 +143,12 @@
       [all.reduce((a,b)=>Math.abs(b.share-share)<Math.abs(a.share-share) ? b : a)];
     const endpoints=plan.rgb.map(rgb=>linear(rgb)), sites=plan.rgb.map(lab);
     const cutoffs=[], edgesByCutoff=new Map();
-    const pairs=plan.pairs.map(({slots,matchesLightness},index)=>{
+    const pairs=plan.pairs.map(({slots,matchesLightness,ranges},index)=>{
       const [a,b]=slots, colors=slots.map(i=>swatches[i]);
       const contrast={distance:distance(sites[a],sites[b]),lightness:Math.abs(sites[a][0]-sites[b][0])};
       const status=locked!==undefined ? 'reserved-target' : pattern==='none' ? 'dither-disabled' :
         !matchesLightness ? 'outside-lightness' : coverages.length ? 'reviewed' : 'no-mixed-coverage';
-      const base={index,colors,contrast,status};
+      const base={index,colors,contrast,status,lightnessRanges:ranges};
       if (status!=='reviewed') return base;
       const {cutoff,...mix}=bestMix(plan.targetLab,colors,endpoints,slots,coverages);
       cutoffs[index]=cutoff;

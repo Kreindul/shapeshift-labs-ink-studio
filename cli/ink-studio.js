@@ -898,6 +898,7 @@ const CMD = {
         '  palette weather <scene> [--plan file.json | --select JSON --times t1,t2] [--out directory]',
         '  palette stages <scene> [--select JSON] [--allowed JSON] [--out directory]   review paint, lighting, grade and resolve',
         '  palette compare <scene|checkpoint> <palettes.json> [--out directory]   apply alternatives to one captured shot',
+        '  palette save-look <approved.json> [--pack pack.json] [--out pack.json]   save approved palette findings as a look',
         '  palette chart <chart.json> [--type chart] [--format png|data]   export an indexed swatch, bar or pair chart',
         '  palette lighting <source-or-draft.json> [--approve] [--out file.json]   suggest or save named lighting ramps',
         '  palette field <field.json> [--t seconds] [--w width --h height] [--format png|data]   render a palette field or report grayscale bands',
@@ -1086,6 +1087,26 @@ const CMD = {
     if (pos[0] === 'plot') return require('./palette-plot.js')(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'fit') return require('./palette-fit.js').fit(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'dither-review') return require('./palette-fit.js').review(pos.slice(1),opt,lib(),outputFile);
+    if (pos[0] === 'save-look') {
+      if (pos.length !== 2 || Object.entries(opt).some(([key,value])=>!['pack','out'].includes(key) || typeof value !== 'string'))
+        die('Use palette save-look <approved.json> [--pack pack.json] [--out pack.json]');
+      const source = path.resolve(pos[1]), inputs = [];
+      function read(file) {
+        inputs.push(fs.statSync(file));
+        return JSON.parse(fs.readFileSync(file,'utf8'));
+      }
+      const approved = read(source);
+      for (const [field,key] of [['palette','reference'],['ramp','review'],['ramp','approved'],['dither','review']])
+        if (typeof approved?.[field]?.[key] === 'string')
+          approved[field][key] = read(path.resolve(path.dirname(source),approved[field][key]));
+      const pack = opt.pack === undefined ? undefined : JSON.parse(fs.readFileSync(path.resolve(opt.pack),'utf8'));
+      const result = lib().KIT.authoring.assetPacks.savePaletteLook(approved,pack);
+      const output = opt.out && outputFile('palette-look.json');
+      const existing = output && fs.statSync(output,{throwIfNoEntry:false});
+      if (existing && inputs.some(input=>input.dev===existing.dev && input.ino===existing.ino))
+        die('Write the pack separately from the approval and analysis reports');
+      return require('./look.js').write([JSON.stringify(result,null,2)+'\n'],output);
+    }
     if (pos[0] === 'compare') {
       if (pos.length !== 3 || ['out','t','cols','threshold','heatmap-max','region-limit'].some(key=>opt[key]===true))
         die('Use palette compare <scene|checkpoint> <palettes.json> [--out directory]');

@@ -584,7 +584,9 @@ const SurfaceLook = (() => {
       }
     }
     const signals = prepareSignals(settings.signals, context, validateOnly);
-    const layers = Object.entries(settings.layers || {})
+    const sourceLayers = settings.layers ?? {};
+    const layers = Object.entries(settings.lookAssetId && sourceLayers.lookAssetRamp ?
+      {lookAssetRamp:sourceLayers.lookAssetRamp,...sourceLayers} : sourceLayers)
       .filter(([, layer]) => layer && (layer.strength !== 0 || layer.drive?.strength !== undefined) &&
         (colorCurves || layer.type !== 'colorCurve') && (colorLut || layer.type !== 'colorLut') &&
         (colorStack || layer.type !== 'colorStack') && (transmission || layer.type !== 'transmission') &&
