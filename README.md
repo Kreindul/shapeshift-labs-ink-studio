@@ -792,6 +792,7 @@ Common rendering controls:
 | `--edges off` | Hide the edge sprites attached to materials in a per-pixel scene. |
 | `--surface off` | Render without the view-dependent finish layers. |
 | `--transmission off` | Toggle thin-material transmission in surface finishes. |
+| `--surface-detail-kits off` | Hide authored [surface detail kits](docs/surface-materials.md#surface-detail-kits). |
 | `--reflection-probes off` | Toggle local reflection probes. |
 | `--reflections off` / `--atmosphere off` | Toggle scene reflection captures or atmosphere volumes. |
 | `--w`, `--h`, `--out` | Output viewport size and destination. The renderer resolves a lower-resolution pixel grid derived from the scene's detail settings. |
