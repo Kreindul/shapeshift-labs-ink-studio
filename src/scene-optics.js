@@ -6,7 +6,8 @@ const SceneOptics = (() => {
   const { field: ripple, ringSampler } = ripples;
   const densities = typeof VolumeField === 'undefined' ? require('./volume-field.js') : VolumeField;
   const geometry = typeof GeometryDensity === 'undefined' ? require('./geometry-density.js') : GeometryDensity;
-  const volumeLight = typeof VolumeLight === 'undefined' ? require('./volume-light.js') : VolumeLight;
+  let volumeLight;
+  try{volumeLight=VolumeLight;}catch{volumeLight=require('./volume-light.js');}
   const fieldBands = typeof FieldBands === 'undefined' ? require('./field-bands.js') : FieldBands;
   const opticalMaterials = typeof OpticalMaterials === 'undefined' ? require('./optical-materials.js') : OpticalMaterials;
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -55,13 +56,14 @@ const SceneOptics = (() => {
     return [((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255];
   }
 
-  const common = ({ density = 0.2, color = '#99b1c4', near = 0, far, id, tags, mediumKind, optical } = {}) => {
+  const common = ({ density = 0.2, color = '#99b1c4', near = 0, far, id, tags, mediumKind, optical,lit,step=.2,anisotropy=0 } = {}) => {
+    if(lit!==undefined&&(typeof lit!=='boolean'||!Number.isFinite(step)||step<=0||!Number.isFinite(anisotropy)||Math.abs(anisotropy)>=1))throw new RangeError('Invalid lit volume settings');
     nonnegative(near, 'Volume near distance');
     if (far !== undefined && (!Number.isFinite(far) || far <= near))
       throw new RangeError('Volume far distance must exceed near');
     return { density: nonnegative(density, 'Volume density'), color, near, far, ...(id !== undefined && { id }),
       ...(tags !== undefined && { tags }), ...(mediumKind !== undefined && { mediumKind }),
-      ...(optical !== undefined && { optical: opticalMaterials.material(optical) }) };
+      ...(optical !== undefined && { optical: opticalMaterials.material(optical) }),...(lit!==undefined&&{lit,step,anisotropy}) };
   };
   function fog(options = {}) {
     const { bottom, top, depthBand } = options;
