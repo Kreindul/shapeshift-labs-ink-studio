@@ -248,6 +248,16 @@ function liveSunOption() {
   if (value || Object.keys(overrides).length) return overrides;
 }
 
+function aerialOption() {
+  const value = opt['aerial-perspective'];
+  if (value === 'off') return false;
+  if (value !== undefined && value !== 'on' && value !== true) die('--aerial-perspective expects on or off');
+  const pairs = [['aerial-start', 'start'], ['aerial-density', 'density'], ['aerial-contrast', 'contrast']];
+  const supplied = pairs.filter(([flag]) => opt[flag] !== undefined);
+  if (!value && !supplied.length) return undefined;
+  return Object.fromEntries(supplied.map(([flag, setting]) => [setting, opt[flag] === true ? NaN : num(flag)]));
+}
+
 const view = extra =>
   Object.assign(
     {
@@ -293,6 +303,7 @@ const view = extra =>
       skyProfiles: opt['sky-profile'] === undefined ? undefined : (skyProfiles ??= skyProfileOverrides(opt['sky-profile'])),
       liveSun: liveSunOption(),
       atmosphere: opt.atmosphere === 'off' ? false : undefined,
+      aerialPerspective: aerialOption(),
       volumeQuality: opt['volume-scale'] || opt['volume-steps'] || opt['volume-jitter'] ? {
         ...(opt['volume-scale'] && { scale: num('volume-scale') }),
         ...(opt['volume-steps'] && { steps: num('volume-steps') }),
@@ -428,6 +439,7 @@ const CMD = {
         'sun options: --live-sun on|off --sun-direction x,y,z --sun-ambient n --sun-intensity n --shadow-map-size n --shadow-bias n --sun-shadows off',
         'bounce options: --sky-bounce color|preset|off --ground-bounce color|preset|off --sky-bounce-intensity n --ground-bounce-intensity n',
         'sky options: --sky-environment file.json|off --sky-time seconds --sky-profile track=profile --sky-reflections scene|material',
+        'aerial options: --aerial-perspective on|off --aerial-start units --aerial-density per-unit --aerial-contrast 0..1',
         'view options: --surface off (no finish layers) --water off --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --px1 (native art pixels) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (remove lone pixels) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n',
         'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable off --snap --dither-space screen|world|object --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
       ].join('\n')

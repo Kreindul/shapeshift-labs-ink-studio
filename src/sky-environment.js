@@ -47,7 +47,8 @@ const SkyEnvironment = (() => {
   ];
   const colorChannels = ['zenith', 'horizon', 'ground', 'sunColor', 'overcastColor'];
   const ranges = { daylight: [0, 1], sunAzimuth: [-1e6, 1e6], sunAltitude: [-Math.PI/2, Math.PI/2],
-    sunSize: [.001, .3], sunStrength: [0, 8], overcast: [0, 1] };
+    sunSize: [.001, .3], sunStrength: [0, 8], overcast: [0, 1],
+    aerialStart: [0, 1e6], aerialDensity: [0, 64], aerialContrast: [0, 1] };
   const base = Object.freeze({
     zenith: '#234a80', horizon: '#aec5cc', ground: '#263442', sunColor: '#ffe7be',
     sunAzimuth: 2.8, sunAltitude: .36, sunSize: .022, sunStrength: .6, orthoFov: 38
@@ -202,15 +203,49 @@ const SkyEnvironment = (() => {
     return Object.freeze({ [compiled]: true, sample, frame });
   }
 
-  // directions are normalized before shading. The sun and splats use world angles.
-  function shade(sky, ray, output = [0, 0, 0]) {
+  function aerial(authored, override, profile = {}) {
+    const enabled = override ?? authored;
+    if (enabled === false || enabled === undefined) return null;
+    function settings(value) {
+      if (value === true || value === false || value === undefined) return {};
+      const result = record(value, 'Aerial perspective');
+      if (Object.keys(result).some(key => !['start', 'density', 'contrast'].includes(key)))
+        throw new TypeError('Aerial perspective needs start, density and contrast settings');
+      return result;
+    }
+    const { start = profile.aerialStart ?? 8, density = profile.aerialDensity ?? .065,
+      contrast = profile.aerialContrast ?? .15 } = { ...settings(authored), ...settings(override ?? undefined) };
+    bounded(start, ...ranges.aerialStart, 'Aerial start distance');
+    bounded(density, ...ranges.aerialDensity, 'Aerial density');
+    bounded(contrast, ...ranges.aerialContrast, 'Aerial contrast');
+    return density > 0 && contrast < 1 ? { start, density, contrast } : null;
+  }
+
+  const airTransmission = (settings, distance) =>
+    settings.contrast + (1 - settings.contrast) * Math.exp(-settings.density * Math.max(0, distance));
+
+  function atmosphere(sky, ray, output, diskVisible) {
     const height = ray[1], horizon = height > 0 ? sky.zenith : sky.ground;
     const fade = height > 0 ? Math.sqrt(height) : clamp(-height * 3);
     const angle = dot(ray, sky.sun);
-    const disk = height >= 0 ? .92 * clamp((angle - sky.sunEdge) / (sky.sunCore - sky.sunEdge)) : 0;
+    const disk = diskVisible && height >= 0 ? .92 * clamp((angle - sky.sunEdge) / (sky.sunCore - sky.sunEdge)) : 0;
     const glow = angle > 0 && height >= 0 ? .22 * Math.exp(-19 * (1 - angle)) : 0;
     const sunlight = clamp((disk + glow) * sky.sunStrength);
     for (let c = 0; c < 3; c++) output[c] = mix(mix(sky.horizon[c], horizon[c], fade), sky.sunColor[c], sunlight);
+    return output;
+  }
+
+  // The glow is scattered light. The solar disk and directional accents are background light sources.
+  function scattering(sky, direction, output = [0, 0, 0]) {
+    if (direction[1] >= 0) return atmosphere(sky, direction, output, false);
+    // Distant surfaces below the horizon take the air colour along their azimuth.
+    const span = Math.hypot(direction[0], direction[2]);
+    const alongHorizon = span > 0 ? [direction[0] / span, 0, direction[2] / span] : [0, 0, 0];
+    return atmosphere(sky, alongHorizon, output, false);
+  }
+
+  function shade(sky, ray, output = [0, 0, 0]) {
+    atmosphere(sky, ray, output, true);
     for (const splat of sky.splats) {
       const forward = dot(ray, splat.direction);
       if (forward <= 0) continue;
@@ -223,6 +258,6 @@ const SkyEnvironment = (() => {
     }
     return output;
   }
-  return Object.freeze({ compile, shade });
+  return Object.freeze({ compile, shade, aerial, airTransmission, scattering });
 })();
 if (typeof module !== 'undefined') module.exports = SkyEnvironment;

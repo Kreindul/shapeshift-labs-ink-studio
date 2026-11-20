@@ -1,4 +1,5 @@
 const SceneOptics = require('../src/scene-optics.js');
+const { airTransmission } = require('../src/sky-environment.js');
 
 function cameraRays(view, eye, W, H, focal, ortho) {
   const origin = eye.slice(),
@@ -103,17 +104,27 @@ function volumeNoise(seed) {
   return noiseTiles.get(seed);
 }
 
-function traceMedia(volumes, segments, origin, direction, stop, result, sample, options) {
+function traceMedia(volumes, segments, origin, direction, stop, result, sample, options, aerial) {
   result.fill(0, 0, 3);
   result.fill(1, 3, 6);
-  let cursor = 0;
+  let cursor = 0, dryDistance = 0, aerialThrough = 1;
   function air(end) {
-    if (!volumes.length || end <= cursor) return;
-    SceneOptics.trace(volumes, origin, direction, end, sample, { ...options, start: cursor });
-    for (let channel = 0; channel < 3; channel++) {
-      result[channel] += result[channel + 3] * sample[channel];
-      result[channel + 3] *= sample[3];
+    if (end <= cursor) return;
+    if (volumes.length) {
+      SceneOptics.trace(volumes, origin, direction, end, sample, { ...options, start: cursor });
+      for (let channel = 0; channel < 3; channel++) {
+        result[channel] += result[channel + 3] * sample[channel];
+        result[channel + 3] *= sample[3];
+      }
     }
+    if (!aerial || end <= aerial.start || aerialThrough === 0) return;
+    dryDistance += end - Math.max(cursor, aerial.start);
+    const through = airTransmission(aerial, dryDistance), ratio = through / aerialThrough;
+    for (let channel = 0; channel < 3; channel++) {
+      result[channel] += result[channel + 3] * (1 - ratio) * aerial.color[channel];
+      result[channel + 3] *= ratio;
+    }
+    aerialThrough = through;
   }
   for (const [start, exit, style, surface] of segments) {
     if (start >= stop) break;
@@ -134,26 +145,54 @@ function traceMedia(volumes, segments, origin, direction, stop, result, sample, 
   return result;
 }
 
-function mediaSampler(volumes, water, rayAt, width, horizon, options) {
+function mediaSampler(volumes, water, rayAt, width, horizon, options, aerial) {
   const rays = [], sample = [0, 0, 0, 1], result = new Float64Array(6);
+  const fields = volumes.some(volume => volume.type === 'field');
+  const tile = fields && options.jitter !== 'off' ? volumeNoise(options.seed) : null;
+  const samples = fields ? options.samples : 1;
+  const query = { ...options, jitter: .5 };
   let opacity = 0;
   const stats = { rays: 0, fallbackRays: 0, depthSamples: 0 };
-  function shade(pixel, depth, rgb) {
+  function shade(pixel, depth, rgb, geometry = true) {
     let ray = rays[pixel];
     if (!ray) {
-      const { origin, direction, axial } = rayAt(pixel % width + .5, Math.floor(pixel / width) + .5);
+      const x = pixel % width, y = Math.floor(pixel / width);
+      const { origin, direction, axial } = rayAt(x + .5, y + .5);
       stats.rays++;
       ray = rays[pixel] = { origin: origin.slice(), direction: direction.slice(), axial,
-        segments: water.raySegments(origin, direction, horizon / axial) };
+        segments: water ? water.raySegments(origin, direction, horizon / axial) : [],
+        phase: tile ? (tile.ranks[y % tile.height * tile.width + x % tile.width] + .5) / tile.ranks.length : .5,
+        values: new Float64Array(6) };
     }
-    if (!ray.segments.length && !volumes.length) {
+    const stop = Math.min(horizon, depth) / ray.axial;
+    const useAerial = geometry && aerial && Number.isFinite(depth) && stop > aerial.start;
+    if (!useAerial && !ray.segments.length && !volumes.length) {
       opacity = 0;
       return rgb;
     }
-    stats.depthSamples++;
-    traceMedia(volumes, ray.segments, ray.origin, ray.direction, Math.min(horizon, depth) / ray.axial, result, sample, options);
-    opacity = 1 - (result[3] + result[4] + result[5]) / 3;
-    return [0, 1, 2].map(i => result[i] + result[i + 3] * rgb[i]);
+    if (useAerial && !ray.aerial) {
+      ray.aerial = { ...aerial, color: aerial.color(pixel, ray.direction) };
+    }
+    if (useAerial && !ray.segments.length && !volumes.length) {
+      const remaining = airTransmission(aerial, stop - aerial.start);
+      opacity = 1 - remaining;
+      return [0, 1, 2].map(i => remaining * rgb[i] + opacity * ray.aerial.color[i]);
+    }
+    const { values } = ray;
+    const mode = Boolean(useAerial);
+    if (stop !== ray.stop || mode !== ray.useAerial) {
+      ray.stop = stop;
+      ray.useAerial = mode;
+      values.fill(0);
+      for (let i = 0; i < samples; i++) {
+        query.jitter = (i + ray.phase) / samples;
+        stats.depthSamples++;
+        traceMedia(volumes, ray.segments, ray.origin, ray.direction, stop, result, sample, query, mode ? ray.aerial : null);
+        for (let c = 0; c < 6; c++) values[c] += result[c] / samples;
+      }
+    }
+    opacity = 1 - (values[3] + values[4] + values[5]) / 3;
+    return [0, 1, 2].map(i => values[i] + values[i + 3] * rgb[i]);
   }
   return { shade, opacity: () => opacity, stats };
 }

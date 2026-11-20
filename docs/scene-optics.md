@@ -62,6 +62,8 @@ material or reflected view.
 
 ## Atmosphere
 
+For sky-coloured extinction at scene depth, see [Aerial perspective](aerial-perspective.md).
+
 ```js
 const world = B.finish({
   cam,

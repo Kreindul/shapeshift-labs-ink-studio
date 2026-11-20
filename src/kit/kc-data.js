@@ -294,6 +294,11 @@
         bad('finish.skyEnvironment', error.message);
       }
     }
+    try {
+      SkyEnvironment.aerial(st.finish.aerialPerspective);
+    } catch (error) {
+      bad('finish.aerialPerspective', error.message);
+    }
     if (st.finish.skyReflections !== undefined && !['scene', 'material'].includes(st.finish.skyReflections))
       bad('finish.skyReflections', 'skyReflections must be scene or material');
     if (st.finish.surfaceEffects !== undefined) {

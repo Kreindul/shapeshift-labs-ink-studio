@@ -275,7 +275,6 @@ function render(world, o, preparedPalettes) {
   const sourceWater = o.water !== false && world.water?.count && world.water.raySegments ? world.water : null;
   const water = sourceWater && (optics || paletteRules) ?
     sourceWater.mapColors((id, kind) => mediumLook(TargetSelectors.medium(id, kind))) : sourceWater;
-  const axialDepth = volumes.length || water ? new Float32Array(W * H).fill(Infinity) : null;
   const glassIndex = optics && TargetSelectors.index(world);
   const glassLooks = glassIndex && new Map();
   const centers = captureMotion ? new Float32Array(N * 2).fill(NaN) : null;
@@ -283,11 +282,20 @@ function render(world, o, preparedPalettes) {
   const art = createArtPasses([...passSelection].filter(name => name !== 'target' && name !== 'mask'), W, H);
   const rayAt = cameraRays(V, eye, W, H, focal, ortho);
   const skySource = o.skyEnvironment ?? world.skyEnvironment;
-  const sky = skySource ? SkyEnvironment.compile(skySource).frame(o.skyTime ?? t, o.skyProfiles).sky : null;
+  const environment = skySource ? SkyEnvironment.compile(skySource).frame(o.skyTime ?? t, o.skyProfiles) : null;
+  const sky = environment?.sky;
+  const aerial = o.atmosphere !== false && !o.captureCoverage ?
+    SkyEnvironment.aerial(world.aerialPerspective, o.aerialPerspective, environment?.parameters) : null;
+  const axialDepth = volumes.length || water || aerial ? new Float32Array(W * H).fill(Infinity) : null;
   const skySample = sky && ((direction, out) => SkyEnvironment.shade(sky, direction, out));
-  const skyRay = sky && !transparent && !o.captureCoverage ?
+  const showSky = sky && !transparent && !o.captureCoverage;
+  const skyRay = sky && (showSky || aerial && ortho) ?
     cameraRays(V, eye, W, H, ortho ? H * .5 / Math.tan(sky.orthoFov * .5) : focal, false) : null;
-  const skyColor = skyRay && [0, 0, 0];
+  const skyDirection = pixel => skyRay(pixel % W + .5, Math.floor(pixel / W) + .5).direction;
+  const skyColor = showSky && [0, 0, 0];
+  // Orthographic geometry uses an artificial camera setback. Measure aerial distance from the nominal eye.
+  const air = aerial && { ...aerial, start: aerial.start + eyeD - dist,
+    color: sky ? (pixel, direction) => SkyEnvironment.scattering(sky, ortho ? skyDirection(pixel) : direction) : () => hex(0) };
   const skyReflectionSource = o.skyReflections ?? world.skyReflections;
   if (skyReflectionSource !== undefined && !['scene', 'material'].includes(skyReflectionSource))
     throw new RangeError('Sky reflections source must be scene or material');
@@ -298,7 +306,7 @@ function render(world, o, preparedPalettes) {
     const lighting = volumes.some(volume => volume.type === 'field') && (o.volumeLighting ?? world.volumeLighting);
     return { ...quality, time: t, media: lighting ? SceneOptics.lighting(lighting, world.pal) : undefined };
   };
-  const geometrySample = probe || sortedSurfaces ? sampleFrames(world, t) : null;
+  const geometrySample = probe || sortedSurfaces || aerial ? sampleFrames(world, t) : null;
   const captured = o.captureCoverage || transparent ? new Float32Array(W * H) : null;
   // The reflected pass uses the same projection and reads only the plane's front side.
   const reflectionTint = effects?.reflection || o.reflectionTint;
@@ -492,19 +500,20 @@ function render(world, o, preparedPalettes) {
   }
   let mn = Infinity;
   for (let i = 0; i < N; i++) if (depth[i] < mn) mn = depth[i];
+  const mediumHorizon = aerial ? Math.max(horizon, -mn + R) : horizon;
   if (world.back) for (let j = 0; j < world.back.length; j++) depth[world.back[j]] = mn;
   const order = new Uint32Array(N);
   for (let i = 0; i < N; i++) order[i] = i;
   order.sort((a, b) => depth[a] - depth[b]);
-  const waterOptions = water && atmosphereOptions();
-  const rayMedia = water && mediaSampler(volumes, water, rayAt, W, horizon, waterOptions);
+  const mediaOptions = (water || aerial) && atmosphereOptions();
+  const rayMedia = mediaOptions && mediaSampler(volumes, water, rayAt, W, mediumHorizon, mediaOptions, air);
   const retainLayers = retainContributions || Boolean(rayMedia);
   const col = new Float32Array(W * H * 3),
     dep = new Float32Array(W * H),
     gls = new Float32Array(W * H);
   for (let i = 0; i < W * H; i++) {
-    const background = skyRay ? skySample(skyRay(i % W + .5, Math.floor(i / W) + .5).direction, skyColor) : bg;
-    const backdrop = rayMedia ? rayMedia.shade(i, horizon, background) : background;
+    const background = showSky ? skySample(skyDirection(i), skyColor) : bg;
+    const backdrop = rayMedia ? rayMedia.shade(i, horizon, background, false) : background;
     col[i * 3] = backdrop[0];
     col[i * 3 + 1] = backdrop[1];
     col[i * 3 + 2] = backdrop[2];
@@ -544,9 +553,10 @@ function render(world, o, preparedPalettes) {
       (o.fine || (world.look && world.look.fine)) && world.fine && world.fine.length >= N * 12 ? world.fine : null,
     FPAL = FN ? world.pal.map((h, i) => hex(i)) : null;
   let deferred = sortedSurfaces ? new Map() : null, deferredCount = 0, orderFallback = false;
-  function composite(p, i, z, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, mark) {
+  function composite(p, i, z, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, mark,
+    opticalDepth = z) {
     const p3 = p * 3, ia = 1 - a;
-    if (rayMedia) [pr, pg, pb] = rayMedia.shade(p, z, [pr, pg, pb]);
+    if (rayMedia) [pr, pg, pb] = rayMedia.shade(p, opticalDepth, [pr, pg, pb]);
     if (retainLayers && glass && bend && !contributions) contributions = contributionLayers(col, captured, W, H, false, bend);
     if (contributions) contributions.before(p, pr, pg, pb, a, wd && a > .5, glass && !wd, dn);
     col[p3] = pr * a + col[p3] * ia;
@@ -580,7 +590,7 @@ function render(world, o, preparedPalettes) {
       gls[p] *= ia;
       if (a > 0.5) {
         if (win) win[p] = surface?.reveals(i) ? -1 : i;
-        if (axialDepth) axialDepth[p] = z;
+        if (axialDepth) axialDepth[p] = opticalDepth;
       }
     } else if (glass) gls[p] = Math.min(1, gls[p] + a * 0.5);
     else if (win && !retainLayers && !coat && a > 0.5) win[p] = -1;
@@ -757,7 +767,7 @@ function render(world, o, preparedPalettes) {
         i11 = m00 / dt;
       }
     }
-    const wantsDepth = probe || deferred;
+    const wantsDepth = probe || deferred || aerial;
     const probeNormal = wantsDepth ? geometrySample(i).normal : null, probeCenter = wantsDepth && [x, y, z];
     const probeReach = wantsDepth ? 3 * Math.sqrt(c00 + c11 + c22) : 0;
     const centerMark = lookPass && { ...lookPass.mark };
@@ -838,7 +848,7 @@ function render(world, o, preparedPalettes) {
         a *= alpha;
         if (a < 0.004) continue;
         const p = iy * W + ix, wd = writesDepth && alpha === 1;
-        const surfaceZ = probe || deferred ?
+        const surfaceZ = wantsDepth ?
           sampledDepth(rayAt(ix + .5, iy + .5), probeNormal, probeCenter, -cz, probeReach) : -cz;
         if (probe) probe(p, i, -cz, surfaceZ, pr, pg, pb, a);
         if (deferred && deferredCount >= fragmentBudget) {
@@ -848,12 +858,13 @@ function render(world, o, preparedPalettes) {
         if (deferred) {
           const entry = { sort: flags & 4 ? Infinity : surfaceZ, index: n, center: -cz,
             sample: [i, surfaceZ, clamp((surfaceZ - (eyeD - R)) / (2 * R), 0, 1), a, pr, pg, pb,
-              wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, lookPass && { ...lookPass.mark }] };
+              wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, lookPass && { ...lookPass.mark },
+              aerial ? surfaceZ : undefined] };
           if (!deferred.has(p)) deferred.set(p, []);
           deferred.get(p).push(entry);
           deferredCount++;
         } else composite(p, i, -cz, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass,
-          lookPass?.mark);
+          lookPass?.mark, aerial ? surfaceZ : undefined);
       }
     }
   }
@@ -1276,11 +1287,12 @@ function render(world, o, preparedPalettes) {
     }
   }
   contributions?.refract(gls, dep);
-  let atmosphere, volumeStats = waterOptions?.stats ? rayMedia.stats : undefined;
+  let atmosphere, volumeStats = mediaOptions?.stats ? rayMedia.stats : undefined;
   if (rayMedia && (ink?.ramps.has('fog') || o.captureFog)) {
     const fog = new Float32Array(W * H);
     for (let p = 0; p < fog.length; p++) {
-      rayMedia.shade(p, axialDepth[p], bg);
+      const depth = axialDepth[p], covered = Number.isFinite(depth);
+      rayMedia.shade(p, covered ? depth : horizon, bg, covered);
       fog[(H - 1 - Math.floor(p / W)) * W + p % W] = rayMedia.opacity();
     }
     atmosphere = { fog };
