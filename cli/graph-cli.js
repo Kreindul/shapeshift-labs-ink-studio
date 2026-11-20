@@ -83,7 +83,7 @@ module.exports = async function graphCommand(pos,opt,settings) {
   if (!Object.hasOwn(flags,mode) || pos.length!==(mode==='batch'?3:2) ||
       Object.entries(opt).some(([key,value])=>!flags[mode].includes(key) || (key==='json' ? value!==true : typeof value!=='string' || !value.trim())) ||
       opt.port!==undefined && opt.node===undefined || opt.protocol!==undefined && opt.protocol!=='ndjson')
-    throw new TypeError('Use graph validate|plan|inspect|run|batch|session <project.json> [cases.json]. See ink-studio help');
+    throw new TypeError('Use graph validate|plan|inspect|run|batch|session <project.json> [cases-or-sweep.json]. See ink-studio help');
   const project=readGraphProject(file,settings), sources=project.sourceFiles();
   let inputs, result;
   if (opt.inputs!==undefined) {

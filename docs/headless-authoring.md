@@ -151,7 +151,7 @@ The JSON report describes the sampled value. With `--out DIRECTORY`, a
 serializable preview is written as PNG or JSON alongside the report.
 
 In addition to the stock procedural graph operations, the runner registers
-`add` and `multiply` with numeric `a` and `b` inputs, `time`, seeded `random`,
+`add`, `multiply`, and `lessThan` with numeric `a` and `b` inputs, `time`, seeded `random`,
 and `pngAsset` and `jsonAsset`. An asset operation reads a `name` from the
 project's `assets` map. For example `"sprite": {"format":"png","file":"sprite.png"}`
 declares a PNG asset called `sprite`. Assets are loaded relative to the
@@ -221,6 +221,82 @@ and encoded artifacts. Operation implementations can be registered from the
 host using `operations`, or from an `ink-studio.config.js` file using
 `graphOperations`. Treat input and output values as immutable while an
 evaluator caches them.
+
+## Typed data and arrays
+
+Declare these types on project inputs, group ports, or library operations.
+
+| Port type | Value |
+| --- | --- |
+| `raster` | `{width, height, data, channels?}` with 1–4 interleaved channels of finite samples. Omit `channels` to infer it from the buffer length. PNG export requires RGB8 or RGBA8. |
+| `field` | A callable field or an Ink handle with a `sample` method. Graph operations can produce fields such as the distance output of `meshPaths`. |
+| `path` | At least two finite points of the same dimension (2D or 3D), or `{points, closed?}`. |
+| `mesh` | 3D `points` and indexed polygon `faces`, or flat triangle buffers named `pos`/`tri`, `positions`/`indices`, or `points`/`triangles`. |
+| `palette` | 1–256 swatches as packed RGB integers, six-digit hex strings, or RGB triples in `[0,1]`. Accepts a swatch array or `{palette}`. |
+| `atlas` | An Ink sprite atlas with `metadata` and RGBA8 `images`, or its compiled handle. Use `atlas.compile` to make the handle in a graph. |
+| `audio` | `{sampleRate, channels, samples}` with a positive integer rate and channel count and complete frames of normalized interleaved PCM samples in `[-1,1]`. |
+| `record`, `array`, `array<T>` | A plain named record, an array of arbitrary values, or an array whose elements must satisfy port type `T`. Arrays can nest, as in `array<array<number>>`. |
+
+Use a `data.typed` node with a top-level `type` and a `value` input to
+validate a literal or a value from `jsonAsset` and expose a typed output.
+Graph planning checks links between declared types. A link from `any` is
+checked against the receiving port when evaluated. Node callers can supply
+native typed buffers and compiled handles as input overrides. Their contents
+must stay immutable while cached.
+
+### Array operations
+
+`array.map`, `array.filter`, `array.reduce`, and keyed `array.sort` take
+`items` and name a reusable callback with the node's `group` field. The group
+declares an `item` input and a `value` output. It can also declare a numeric
+`index` for the zero-based index in the input array. Further group inputs
+become ports on the array node. Each item gets a deterministic seed based
+on its index and the node seed.
+
+| Operation | Group output and result |
+| --- | --- |
+| `array.map` | Replace each item with the group's `value`. |
+| `array.filter` | Keep items whose group returns `true`, in input order. |
+| `array.reduce` | Pass `initial` to the group's `accumulator` input, then feed each returned `value` into the next call in input order. An empty array returns `initial`. |
+| `array.sort` | Use finite numbers or strings as keys, in `asc` or `desc` order. Equal keys preserve input order in both directions. Omit `group` to sort an array of numbers or strings directly. |
+
+`array.broadcast` takes an `arrays` record of named axes and an explicit
+`mode`. Use `data.record` to assemble axes linked from other graph nodes.
+The output has one record per row, keyed by axis name.
+
+| Mode | Alignment |
+| --- | --- |
+| `zip` | Pair entries at the same index. All axes must have the same length. |
+| `cycle` | Run to the longest length and wrap shorter axes. |
+| `hold` | Run to the longest length and repeat the last entry of each shorter axis. |
+| `cartesian` | Produce every combination. Axis names sort lexically and the last axis varies fastest. |
+| `cartesianReverse` | Produce every combination with the first sorted axis varying fastest. |
+
+An empty axis produces zero rows when the lengths are valid for the mode.
+Set `limit` to cap the number of output rows. The same operation is available
+as `KIT.procedural.graph.arrays.broadcast(arrays, { mode, limit })`.
+
+### Cartesian parameter sweeps
+
+`graph batch` also accepts a sweep object. Each axis contains a nonempty
+array of values. Sweep any named graph parameter under `inputs` and
+optionally `time` and `seed`. The batch uses sorted axis names
+(`inputs.NAME`, `seed`, `time`) with the last axis varying fastest. It
+assigns sequential case IDs with the given `idPrefix` and reports the axis
+lengths and case count alongside the regular batch results. The default
+limit is 256 cases.
+
+```json
+{"idPrefix":"signal","sweep":{"inputs":{"gain":[1,2,3],"threshold":[2,3]}}}
+```
+
+The [signal graph](../examples/headless-array-graph.json) maps, filters,
+sorts, and reduces a typed numeric array. Run it for six combinations
+using the [sweep definition](../examples/headless-array-sweep.json).
+
+```sh
+ink-studio graph batch examples/headless-array-graph.json examples/headless-array-sweep.json --out graph-sweep
+```
 
 ## Geometry and attributes
 

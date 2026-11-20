@@ -1030,7 +1030,7 @@ const CMD = {
         '  graph validate|plan <project.json> [--inputs values.json]   validate and describe a headless graph',
         '  graph inspect <project.json> [--output NAME | --node PATH --port NAME] [--out directory]',
         '  graph run <project.json> [--inputs values.json --at seconds --seed N --out directory]',
-        '  graph batch <project.json> <cases.json> [--out directory]   run named cases and report CI failures',
+        '  graph batch <project.json> <cases-or-sweep.json> [--out directory]   run named cases or a Cartesian sweep',
         '  graph session <project.json> [--protocol ndjson --out directory]   serve requests using a warm graph',
         '  material-controls <material.json> [--palette colors.json --out report.json]  inspect shared material controls',
         '  light-emitters <lights.json> [--at seconds --out report.json]  inspect shaped lights and cookies',

@@ -73,7 +73,7 @@ function describe(value, depth = 0) {
   return Object.fromEntries(keys.map(key=>[key,describe(value[key],depth+1)]));
 }
 
-function graphSpec(value, label) {
+function graphSpec(value, label, groupOperators) {
   fields(value,['inputs','nodes','outputs'],label);
   const {inputs={},nodes,outputs}=value;
   function binding(value) {
@@ -88,8 +88,10 @@ function graphSpec(value, label) {
       throw new TypeError('Invalid graph binding in '+label);
   }
   for (const [name,node] of named(nodes,label+' nodes')) {
-    fields(node,['op','params','inputs'],'node '+name);
+    fields(node,['op','params','inputs',...(groupOperators.includes(node?.op) ? ['group'] :
+      node?.op==='data.typed' ? ['type'] : [])],'node '+name);
     if (!id(node.op)) throw new TypeError('Invalid operation for node '+name);
+    if (node.group!==undefined && !id(node.group)) throw new TypeError('Invalid group for node '+name);
     for (const [,value] of [...named(node.inputs??{},'node inputs'),...named(node.params??{},'node parameters')]) binding(value);
   }
   named(inputs,label+' parameters');
@@ -143,7 +145,7 @@ function prepareAssertions(rows, plan) {
 }
 
 function nativeOperations(kit, assets) {
-  const binary = (inputs, fn) => ({inputs,outputs:{value:'number'},run(args){return {value:fn(args)};}});
+  const binary = (fn, type='number') => ({inputs:{a:'number',b:'number'},outputs:{value:type},run(args){return {value:fn(args)};}});
   function asset(type) {
     return {inputs:{name:'string'},outputs:{value:type==='png' ? 'image' : 'any'},run({name}){
       const entry=assets.get(name);
@@ -152,13 +154,51 @@ function nativeOperations(kit, assets) {
     }};
   }
   return {
-    add:binary({a:'number',b:'number'},({a,b})=>a+b),
-    multiply:binary({a:'number',b:'number'},({a,b})=>a*b),
+    add:binary(({a,b})=>a+b),
+    multiply:binary(({a,b})=>a*b),
+    lessThan:binary(({a,b})=>a<b,'boolean'),
     time:{time:true,outputs:{value:'number'},run(_,ctx){return {value:ctx.time};}},
     random:{outputs:{value:'number'},run(_,ctx){return {value:kit.KIT.grow.dice(ctx.seed)()};}},
     pngAsset:asset('png'),
     jsonAsset:asset('json')
   };
+}
+
+function snapshotInputs(inputs, clone) {
+  const active=new Set();
+  function copy(value) {
+    // Existing compiled toolkit handles and native sample buffers keep their identity.
+    if (typeof value==='function' || typeof value?.sample==='function' || typeof value?.snapshot==='function' ||
+        ArrayBuffer.isView(value)) return value;
+    if (!Array.isArray(value) && !record(value)) return clone(value);
+    if (active.has(value)) throw new TypeError('Graph inputs contain a cycle');
+    active.add(value);
+    const result=Array.isArray(value) ? Array.from(value,copy) :
+      Object.fromEntries(Object.entries(value).map(([key,item])=>{
+        if (['__proto__','constructor','prototype'].includes(key)) throw new TypeError('Unsafe graph input key '+key);
+        return [key,copy(item)];
+      }));
+    active.delete(value);
+    return Object.freeze(result);
+  }
+  return Object.fromEntries(Object.entries(inputs).map(([name,value])=>[name,copy(value)]));
+}
+
+function sweepCases(definition, broadcast) {
+  const {sweep,idPrefix='case',limit=256}=fields(definition,['sweep','idPrefix','limit'],'graph sweep');
+  if (!id(idPrefix)) throw new TypeError('Graph sweep needs a valid ID prefix');
+  const {inputs={},time,seed}=fields(sweep,['inputs','time','seed'],'graph sweep axes');
+  const axes={...Object.fromEntries(named(inputs,'sweep parameter axes').map(([name,values])=>['inputs.'+name,values])),
+    ...(time!==undefined && {time}),...(seed!==undefined && {seed})};
+  const rows=broadcast(axes,{mode:'cartesian',limit});
+  if (!rows.length) throw new RangeError('Graph sweep axes must contain at least one value each');
+  const digits=Math.max(3,String(rows.length).length);
+  return {cases:rows.map(({time,seed,...values},i)=>({
+    id:idPrefix+'-'+String(i+1).padStart(digits,'0'),
+    inputs:Object.fromEntries(Object.entries(values).map(([key,value])=>[key.slice(7),value])),
+    ...(time!==undefined && {time}),...(seed!==undefined && {seed})
+  })), report:{mode:'cartesian',axes:Object.keys(axes).sort().map(name=>({name,count:axes[name].length})),
+    count:rows.length,limit}};
 }
 
 function cacheReport(frame) {
@@ -178,12 +218,13 @@ function cacheReport(frame) {
 
 function createGraphProject(source, { kit=require('../index.js').load(), baseDir=process.cwd(), operations={}, sourceFile }={}) {
   const {graph,data}=kit.KIT.procedural;
+  const {groupOperators,broadcast}=graph.arrays;
   const project=data.freeze(data.clone(source));
   const {format:kind,version:revision,groups:definitions={},assets:assetDefinitions={},exports:exportsSpec={},
     assertions:assertionSpecs=[],time=0,seed=0,...root}=fields(project,
     ['format','version','inputs','nodes','outputs','groups','assets','exports','assertions','time','seed'],'graph project');
   if (kind!==format || revision!==version) throw new TypeError('Expected ink-studio/graph-project version 1');
-  const spec=graphSpec(root,'project graph');
+  const spec=graphSpec(root,'project graph',groupOperators);
   const paths=new Set(sourceFile ? [path.resolve(sourceFile)] : []);
   const groupSpecs=new Map(named(definitions,'groups').map(([name,value])=>{
     if (typeof value==='string' && value.length) {
@@ -192,9 +233,9 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
       const {format,version,...spec}=JSON.parse(fs.readFileSync(file,'utf8'));
       if (format!=='ink-studio/graph-group' || version!==1)
         throw new TypeError('Expected ink-studio/graph-group version 1 in '+value);
-      return [name,graphSpec(spec,'group '+name)];
+      return [name,graphSpec(spec,'group '+name,groupOperators)];
     }
-    return [name,graphSpec(value,'group '+name)];
+    return [name,graphSpec(value,'group '+name,groupOperators)];
   }));
   const assets=new Map(named(assetDefinitions,'assets').map(([name,definition])=>{
     const {format,file}=fields(definition,['format','file'],'graph asset '+name);
@@ -216,7 +257,10 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
 
   function compile(spec) {
     let expandedNodes=Object.keys(spec.nodes).length;
-    for (const {op} of Object.values(spec.nodes)) if (groupSpecs.has(op)) expandedNodes+=compileGroup(op).expandedNodes;
+    for (const {op,group} of Object.values(spec.nodes)) {
+      const dependency=groupOperators.includes(op) ? group : op;
+      if (groupSpecs.has(dependency)) expandedNodes+=compileGroup(dependency).expandedNodes;
+    }
     if (expandedNodes>maxNodes) throw new RangeError('Expanded graph exceeds its '+maxNodes+' node budget');
     const compiled=graph.create(spec,{operations:ops,groups,planOnly:true}), plan=compiled.plan();
     for (const {id,op,inputs} of plan.nodes) {
@@ -237,7 +281,7 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     const spec=groupSpecs.get(name), {plan}=compile(spec);
     visiting.delete(name);
     const outputs=Object.fromEntries(Object.entries(plan.outputs).map(([key,link])=>[key,link.type]));
-    groups[name]=graph.group(spec,{operations:ops,groups,outputs});
+    groups[name]={...graph.group(spec,{operations:ops,groups,outputs}),expandedNodes:plan.expandedNodes};
     preparedGroups.set(name,plan);
     return plan;
   }
@@ -248,7 +292,7 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     const {output,format}=fields(definition,['output','format'],'graph export '+name);
     if (!id(output) || !Object.hasOwn(rootPlan.outputs,output) || !['png','json'].includes(format))
       throw new TypeError('Graph export '+name+' needs a known output and png or json format');
-    if (format==='png' && !['image','any'].includes(rootPlan.outputs[output].type))
+    if (format==='png' && !['image','raster','any'].includes(rootPlan.outputs[output].type))
       throw new TypeError('Graph PNG export '+name+' needs an image output');
     return {name,output,format};
   });
@@ -273,7 +317,7 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     const resolved=clock(t,s);
     for (const [name] of named(inputs,'input values'))
       if (!Object.hasOwn(rootPlan.inputs,name)) throw new RangeError('Unknown graph input '+name);
-    return {...resolved,inputs:compiled.parameters(data.freeze(data.clone(inputs)))};
+    return {...resolved,inputs:compiled.parameters(snapshotInputs(inputs,data.clone))};
   }
 
   function clear() {
@@ -333,8 +377,17 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     catch { return null; }
   }
 
+  function planValue(value) {
+    try { return data.clone(value); }
+    catch { return describe(value); }
+  }
+
   return Object.freeze({
-    plan:inputs=>data.clone(inputs===undefined ? projectPlan : {...projectPlan,resolvedInputs:request({inputs}).inputs}),
+    plan:inputs=>({
+      ...data.clone(projectPlan),
+      ...(inputs!==undefined && {resolvedInputs:Object.fromEntries(Object.entries(request({inputs}).inputs)
+        .map(([name,value])=>[name,planValue(value)]))})
+    }),
     validate(inputs) {
       if (inputs!==undefined) request({inputs});
       return {...header,kind:'validate',valid:true,nodes:rootPlan.expandedNodes,groups:preparedGroups.size};
@@ -344,8 +397,10 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     batch(cases,defaults={}) {
       fields(defaults,['inputs','time','seed'],'graph batch defaults');
       if (defaults.inputs!==undefined) named(defaults.inputs,'batch input values');
-      if (!Array.isArray(cases) || !cases.length) throw new TypeError('Graph batch needs a nonempty case array');
-      const prepared=Array.from(cases,row=>{
+      const sweep=Array.isArray(cases) ? null : sweepCases(cases,broadcast);
+      const rows=sweep?.cases ?? cases;
+      if (!rows.length) throw new TypeError('Graph batch needs a nonempty case array');
+      const prepared=Array.from(rows,row=>{
         const {id:name,inputs={},...options}=fields(row,['id','inputs','time','seed'],'graph batch case');
         if (!id(name)) throw new TypeError('Graph batch case needs an ID');
         named(inputs,'case input values');
@@ -354,6 +409,7 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
       separateNames(prepared.map(row=>row.name),'Graph batch cases');
       const results=prepared.map(row=>({id:row.name,...run(row.request)}));
       return {results,report:{...header,kind:'batch',passed:results.every(row=>row.report.passed),
+        ...(sweep && {sweep:sweep.report}),
         cases:results.map(({id,report})=>({id,directory:'cases/'+id,...report}))}};
     },
     clear,
