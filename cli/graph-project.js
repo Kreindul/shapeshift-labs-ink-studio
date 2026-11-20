@@ -34,12 +34,16 @@ function separateNames(names, label) {
 function imageBytes(value) {
   const { width, height, data } = value ?? {};
   const size = width * height;
+  const bytes = data instanceof Uint8Array || data instanceof Uint8ClampedArray;
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1 ||
       size > 2**24 || ![size*3,size*4].includes(data?.length) ||
-      !(data instanceof Uint8Array || data instanceof Uint8ClampedArray ||
-        Array.isArray(data) && Array.from(data).every(n => Number.isInteger(n) && n>=0 && n<=255)))
+      !(Array.isArray(data) || ArrayBuffer.isView(data)))
     throw new TypeError('Graph PNG output needs an RGB8 or RGBA8 image');
-  return PNG.encode(width,height,ArrayBuffer.isView(data) ? data : Uint8Array.from(data),data.length / size);
+  if (!bytes) for (let i=0; i<data.length; i++) {
+    const n=data[i];
+    if (!Number.isInteger(n) || n<0 || n>255) throw new TypeError('Graph PNG output needs an RGB8 or RGBA8 image');
+  }
+  return PNG.encode(width,height,bytes ? data : Uint8Array.from(data),data.length / size);
 }
 
 function jsonBytes(value) {
@@ -290,10 +294,12 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
   const {compiled,plan:rootPlan}=compile(spec);
   const exports=named(exportsSpec,'exports').map(([name,definition])=>{
     const {output,format}=fields(definition,['output','format'],'graph export '+name);
-    if (!id(output) || !Object.hasOwn(rootPlan.outputs,output) || !['png','json'].includes(format))
-      throw new TypeError('Graph export '+name+' needs a known output and png or json format');
+    if (!id(output) || !Object.hasOwn(rootPlan.outputs,output) || !['png','json','atlas'].includes(format))
+      throw new TypeError('Graph export '+name+' needs a known output and png, json or atlas format');
     if (format==='png' && !['image','raster','any'].includes(rootPlan.outputs[output].type))
       throw new TypeError('Graph PNG export '+name+' needs an image output');
+    if (format==='atlas' && !['atlas','any'].includes(rootPlan.outputs[output].type))
+      throw new TypeError('Graph atlas export '+name+' needs an atlas output');
     return {name,output,format};
   });
   separateNames(exports.map(entry=>entry.name),'Graph exports');
@@ -350,10 +356,24 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     return {file:'artifacts/'+name+'.'+format,format,sha256:sha256(bytes),bytes};
   }
 
+  function encodeAtlas(name,value) {
+    const {spriteAtlasManifest}=require('./sprite-atlas.js'), location='artifacts/'+name+'/', images=new Map();
+    const manifest=spriteAtlasManifest(value,(width,height,rgba)=>{
+      const bytes=PNG.encode(width,height,rgba,4), hash=sha256(bytes), file='images/'+hash+'.png';
+      images.set(file,{file:location+file,format:'png',sha256:hash,bytes});
+      return file;
+    });
+    const bytes=jsonBytes(manifest);
+    return [...images.values(),{file:location+'atlas.json',format:'json',sha256:sha256(bytes),bytes}];
+  }
+
   function run(prepared) {
     const {frame,report}=evaluate(prepared);
     const checks=assertions.map(check=>check(frame)), passed=checks.every(check=>check.passed);
-    const artifacts=exports.map(({name,output,format})=>({name,output,...encode(name,frame.outputs[output],format)}));
+    const artifacts=exports.flatMap(({name,output,format})=>{
+      const value=frame.outputs[output], encoded=format==='atlas' ? encodeAtlas(name,value) : [encode(name,value,format)];
+      return encoded.map(artifact=>({name,output,...artifact}));
+    });
     return {outputs:frame.outputs,artifacts,report:{...report,kind:'run',passed,assertions:checks,
       outputs:Object.fromEntries(Object.entries(frame.outputs).map(([name,value])=>[name,describe(value)])),
       artifacts:artifacts.map(({bytes,...entry})=>({...entry,bytes:bytes.length}))}};
@@ -373,7 +393,11 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
   }
 
   function preview(value) {
-    try { return encode('preview',value,Number.isSafeInteger(value?.width) && value.data ? 'png' : 'json'); }
+    if (Number.isSafeInteger(value?.width) && value.data) {
+      try { return encode('preview',value,'png'); }
+      catch { /* Numeric raster channels can be inspected as JSON. */ }
+    }
+    try { return encode('preview',value,'json'); }
     catch { return null; }
   }
 

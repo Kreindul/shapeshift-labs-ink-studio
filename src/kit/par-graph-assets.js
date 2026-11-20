@@ -159,6 +159,7 @@
   P.graph.tiles = tiles;
   P.graph.operations = Object.freeze({
     ...P.graph.arrays.operations,
+    ...P.raster.operations,
     meshPaths: {
       inputs: { mesh: 'geometry', sources: 'points', targets: { type: 'points', default: [] }, options: { type: 'any', default: {} } },
       outputs: { value: 'any', curves: 'points', distance: 'field' },

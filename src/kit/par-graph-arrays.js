@@ -135,6 +135,15 @@
       return {value:record[key]};
     }
   };
+  operations['data.collect']={
+    inputs:{source:'record',keys:'array<string>'},outputs:{value:'array'},
+    run({source,keys}) {
+      return {value:keys.map(key=>{
+        if (!Object.hasOwn(source,key)) throw new RangeError('Missing graph record key '+key);
+        return source[key];
+      })};
+    }
+  };
   operations['atlas.compile']={
     inputs:{source:'atlas'},outputs:{value:'atlas'},
     run({source}) { return {value:K.sprite.atlas(source)}; }

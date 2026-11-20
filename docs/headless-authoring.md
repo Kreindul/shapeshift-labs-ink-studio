@@ -161,8 +161,9 @@ Host operation implementations are supplied separately.
 
 ### Outputs and CI
 
-Declare `exports` as a map of artifact names to `{ "output": "name", "format": "json" }`
-or `"png"` for RGB8 or RGBA8 image outputs. With `--out`, runs write those
+Declare `exports` as a map of artifact names to `{ "output": "name", "format": "json" }`,
+`"png"` for RGB8 or RGBA8 image outputs, or `"atlas"` for an Ink sprite
+atlas bundle. With `--out`, runs write those
 artifacts and `report.json`. The stdout report includes artifact paths,
 SHA-256 hashes and cache hits and misses for every executed node, including
 group paths. Cache statuses describe the current evaluation. Unchanged
@@ -296,6 +297,89 @@ using the [sweep definition](../examples/headless-array-sweep.json).
 
 ```sh
 ink-studio graph batch examples/headless-array-graph.json examples/headless-array-sweep.json --out graph-sweep
+```
+
+## Standalone raster composition
+
+The raster library lives at `ink.load().KIT.procedural.raster`. The same
+operations are stock nodes in versioned graph projects. They work on
+standalone canvases and imported PNGs. Canvas coordinates start at the
+top left, with X right and Y down. Color composition uses straight-alpha
+RGBA8 in and out. One-channel rasters can also carry signed or fractional
+values, such as depths in scene units or normalized masks.
+
+| Graph operation | Inputs and outputs |
+| --- | --- |
+| `raster.canvas` | Set `width`, `height` and an optional RGB or RGBA `color` in byte units. Defaults to transparent. |
+| `raster.channel` | Extract a channel from `source`. Set `options.channel` to an index, `r`, `g`, `b`, `alpha` or `luma`. |
+| `raster.channels` | Set `planes` to one to four aligned single-channel rasters or constants. At least one plane supplies the dimensions. |
+| `raster.math` | Set `a`, `b` and `op`. `b` may be an aligned raster or a scalar. A single-channel `b` broadcasts across the channels of `a`. |
+| `raster.mask` | Multiply `source` alpha by an aligned `mask`. Set `options.channel` (default `luma`), `scale` (default 255) and `invert`. |
+| `raster.rgba` | Convert `source` to RGBA8 for display or PNG export. One and two channels represent gray and gray-alpha. |
+| `raster.frame` | Composite the current time of an Ink layered raster `source`. Set optional `options.tag` and `layers`. |
+
+Channel math offers `add`, `subtract`, `multiply`, `divide`, `min`, `max`,
+`difference`, `power`, `greater`, `less` and `equal`. Comparisons produce
+zero or one, so set mask `scale` to 1 when using them to gate coverage.
+Math preserves numeric results and rejects nonfinite samples. Inspect
+numeric channels with `graph inspect` or export them as JSON.
+
+### Layers, depth, and height
+
+Use `raster.blend` for a `background` and `foreground`. Its `options`
+describe the foreground layer. Use `raster.stack`, `raster.depth` or
+`raster.height` with explicit `width`, `height` and a `layers` array for
+several layers. A layer has a `source` raster and optional integer `x` and
+`y` offsets, `opacity` from 0 to 1, RGB `tint` multipliers from 0 to 1, a
+local `mask` with `maskOptions`, and a blend `mode`.
+
+Modes are `normal`, `multiply`, `screen`, `overlay`, `hardLight`,
+`softLight`, `add`, `subtract`, `darken`, `lighten`, `difference` and
+`exclusion`. The ordinary stack draws from back to front in array order.
+
+- `raster.depth` accepts a scalar or an aligned one-channel `depth` per
+  layer. Lower values are closer. It sorts covered samples per pixel and
+  resolves ties in stack order. The `depth` output gives the closest
+  contributing depth. Use the color output's alpha for coverage.
+- `raster.height` compares a scalar or an aligned one-channel `height` per
+  layer as it composites. Higher samples come forward. `options.bias`
+  shifts the comparison and `softness` feathers the join in height units.
+  The `height` output contains the visible, coverage-weighted height.
+
+Create each layer record with `data.record` to link its image and maps.
+Use another `data.record` to name those layers and `data.collect` with a
+`source` record and `keys` array to assemble them in explicit order.
+
+### Sprite transforms and packing
+
+| Graph operation | Options |
+| --- | --- |
+| `raster.crop` | Set `x`, `y`, `width`, and `height` of an in-bounds rectangle. |
+| `raster.resize` | Set `width` and `height`. Choose `nearest` (default) or `bilinear` for `filter`. Bilinear filters colors with premultiplied alpha by default. Set `premultiply: false` for independent numerical channels. |
+| `raster.nineSlice` | Set `width`, `height`, and `insets: [left, top, right, bottom]`. Choose `stretch` or `repeat` for `fill`. Corners retain their original dimensions. |
+| `raster.spriteStack` | Pass one raster or a bottom-to-top array as `source`. Set the repeat `count`, per-slice pixel `shift`, rotation `angle` in radians, first or last slice `anchor`, base `tint`, or `endOpacity`. Set `size` and optional `position` for a fixed canvas. Omit them to fit the full stack. |
+| `raster.pack` | Set `sprites` and options such as `maxWidth`, `maxHeight`, transparent `padding`, edge `extrude`, and alpha `trim`. Outputs the color raster, native `atlas` and `metadata`. |
+
+Crop, resize, and nine-slice accept an optional pixel `pivot: [x, y]` on
+the source raster and map it into the result. Sprite stacks align slices
+by pivot, falling back to their centers.
+
+Atlas entries can be a raster or a record with `source`, `id`, optional
+`pivot`, `unitsPerPixel`, and aligned `maps` such as `normal`, `emission`,
+`silhouette`, and `depth`. For Ink RGB24 depth maps provide
+`options.depthRange: [near, far]`. Packing keeps the original frame order
+and records each source size, trim offset, atlas rectangle and adjusted
+pivot. Export the node's `atlas` port with `format: "atlas"` to write
+`artifacts/<name>/atlas.json` and its PNGs, ready for `readSpriteAtlas`.
+
+Generate the [review example](../examples/raster-composition.cjs) to see
+depth-sorted rings, height-blended moss, a masked beacon beam, a stamped
+sprite stack, a nine-slice panel, and a packed sheet. The example writes the
+input PNGs and graph project, runs the CLI, and makes a PNG review board.
+
+```sh
+node examples/raster-composition.cjs raster-composition-review
+ink-studio graph run raster-composition-review/composition.json --out raster-composition-review/graph
 ```
 
 ## Geometry and attributes
