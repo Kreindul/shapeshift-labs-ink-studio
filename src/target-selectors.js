@@ -31,22 +31,27 @@ const TargetSelectors = (() => {
     return target;
   }
 
+  const namedGlass = (world, i) => (Math.round(world.data?.[i * 16 + 11]) & 256) !== 0;
   function index(world) {
     const { objectIds, materialIds, targetIds, objects, materials, targets } = world.renderMetadata ?? {};
     const cache = new Map();
     const stride = 8; // SurfaceLook.STRIDE
     function row(i) {
       const objectId = objectIds?.[i] || 0, materialId = materialIds?.[i] || 0, targetId = targetIds?.[i] || 0;
+      const glass = namedGlass(world, i);
       const surfaceSlot = world.surfaceData?.[i * stride] || 0;
       const surfaceName = world.surfaces?.[surfaceSlot - 1]?.settings?.id;
       const key = ((targetId * (objects?.length ?? 1) + objectId) * (materials?.length ?? 1) + materialId) *
         ((world.surfaces?.length ?? 0) + 1) + surfaceSlot;
-      if (!cache.has(key)) {
+      const group = key * 2 + Number(glass);
+      if (!cache.has(group)) {
         const object = objects?.[objectId], material = materials?.[materialId], extra = targets?.[targetId];
-        cache.set(key, { kind: 'splat', ...(object != null && { object, entity: object }),
-          ...(material != null && { material }), ...(name(surfaceName) && { surface: surfaceName }), ...extra });
+        const surface = extra?.surface ?? surfaceName;
+        cache.set(group, { kind: 'splat', ...(object != null && { object, entity: object }),
+          ...(material != null && { material }), ...(name(surface) && { surface }),
+          ...(glass && { mediumKind: 'glass', ...(name(surface ?? object) && { medium: surface ?? object }) }), ...extra });
       }
-      return cache.get(key);
+      return cache.get(group);
     }
     function groups(selector) {
       const result = new Map();
@@ -66,7 +71,8 @@ const TargetSelectors = (() => {
   function media(world) {
     return [
       ...(world.atmosphere ?? []).map(volume => medium(volume.id, volume.mediumKind ?? volume.type, volume.tags)),
-      ...(world.water?.media ?? []).map(item => medium(item.id, item.kind))
+      ...(world.water?.media ?? []).map(item => medium(item.id, item.kind)),
+      ...(world.reflections ?? []).map(item => medium(item.id, 'reflection', item.tags))
     ];
   }
   return Object.freeze({ prepare, matches, describe, index, name, medium, media });

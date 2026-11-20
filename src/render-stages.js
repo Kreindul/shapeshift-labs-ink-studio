@@ -73,6 +73,27 @@ const RenderStages = (() => {
     });
   }
 
+  function optics(entries, options = {}) {
+    if (entries === undefined || entries === false || Array.isArray(entries) && !entries.length) return null;
+    if (!Array.isArray(entries) || entries.length > 32) throw new TypeError('Expected up to 32 optical look rules');
+    const definitions = Array.from(entries).flatMap(entry => {
+      if (!entry || Object.getPrototypeOf(entry) !== Object.prototype || !entry.select ||
+          Object.keys(entry).some(key => !['select', 'stack', 'palette', 'order', 'weight', 'assetId'].includes(key)) ||
+          (!entry.stack && !entry.palette)) throw new TypeError('An optical look needs a selector and a stack or palette');
+      const { stack, palette, ...scope } = entry;
+      return [...(stack ? [{ ...scope, stage: 'lit', stack }] : []),
+        ...(palette ? [{ ...scope, stage: 'palette', palette: Array.isArray(palette) ? { palette } : palette }] : [])];
+    });
+    const rules = prepare(definitions, options).sort((a, b) => a.order - b.order);
+    function matching(target) {
+      return rules.filter(rule => targets.matches(rule.select, target));
+    }
+    return Object.freeze({ matching, transform(target) {
+      const layers = matching(target);
+      if (layers.length) return rgb => apply(layers, rgb).map(value => Math.max(0, Math.min(1, value)));
+    } });
+  }
+
   function plan(world, options = {}) {
     const entries = world.look?.renderStages;
     if ((entries === undefined || entries === false || Array.isArray(entries) && !entries.length) &&
@@ -138,7 +159,7 @@ const RenderStages = (() => {
       const applied = rule.palette ? amount >= .5 : amount > 0;
       let transformed;
       if (applied && rule.palette) {
-        transformed = result = rule.palette.swatches[rule.palette.index(input, x, y)];
+        transformed = result = rule.palette.swatches[rule.palette.index(input, x, y, x !== undefined)];
       } else if (applied) {
         transformed = rule.stack.sample(input);
         result = amount === 1 ? transformed : transformed.map((n, i) => input[i] + (n - input[i]) * amount);
@@ -151,7 +172,7 @@ const RenderStages = (() => {
   }
 
   function apply(rules, rgb, sample) {
-    return evaluate(rules, rgb, sample, 0, 0);
+    return evaluate(rules, rgb, sample);
   }
 
   function trace(rules, rgb, sample, [x, y] = [0, 0]) {
@@ -210,6 +231,6 @@ const RenderStages = (() => {
     return frame;
   }
 
-  return Object.freeze({ names, stage, blend, albedo, prepare, plan, describe, trace, apply, material, quantize, finish });
+  return Object.freeze({ names, stage, blend, albedo, prepare, optics, plan, describe, trace, apply, material, quantize, finish });
 })();
 if (typeof module !== 'undefined') module.exports = RenderStages;

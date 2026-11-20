@@ -29,7 +29,7 @@ const Airflow = require('../src/airflow.js');
 const LightSchedule = require('../src/light-schedule.js');
 const surfaceShading = require('./surface-shading.js');
 const SceneOptics = require('../src/scene-optics.js');
-const { cameraRays, surfacePoint, reflectionSampler, atmosphereQuality, applyAtmosphere } = require('./scene-optics.js');
+const { cameraRays, surfacePoint, reflectionSampler, atmosphereQuality, mediaSampler, applyAtmosphere } = require('./scene-optics.js');
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x),
   sstep = (a, b, x) => {
     const t = clamp((x - a) / (b - a), 0, 1);
@@ -103,11 +103,14 @@ function render(world, o, preparedPalettes) {
     throw new RangeError('Invalid splat order or fragment budget');
   const probe = typeof o.fragmentProbe === 'function' ? o.fragmentProbe : null;
   const styled = !o.raw && !o.samples && !o.captureCoverage;
-  const stages = !o.raw && RenderStages.plan(world, {
-    blueNoise: settings => blueNoise(world, settings), skipMasks: o.lookMasks === false
-  });
-  const coverageAware = !o.raw && (o.coverageAware ?? look.coverageAware) === true;
-  const retainContributions = coverageAware || Boolean(stages);
+  const lookOptions = { palette: world.pal, roles: world.paletteRoles, context: world.surfaceEffects,
+    blueNoise: settings => blueNoise(world, settings), skipMasks: o.lookMasks === false };
+  const stages = !o.raw && RenderStages.plan(world, lookOptions);
+  const optics = !o.raw && RenderStages.optics(look.optics, lookOptions);
+  const scopedReflection = world.reflections?.length && (look.paletteConstraints?.targets?.length ||
+    world.surfaces?.some(({ settings }) => settings.paletteConstraint));
+  const coverageAware = !o.raw && (o.coverageAware ?? look.coverageAware ?? Boolean(optics || scopedReflection)) === true;
+  const retainContributions = coverageAware || Boolean(stages || optics);
   const legacyLook = styled && !retainContributions;
   const ink = styled ? ArtInk.prepare(o.ink ?? look.ink, world.pal) : null;
   const effects = styled ? ArtEffects.prepare(o.artEffects ?? look.effects, world.pal) : null;
@@ -238,15 +241,27 @@ function render(world, o, preparedPalettes) {
     -(V[4] * V[12] + V[5] * V[13] + V[6] * V[14]),
     -(V[8] * V[12] + V[9] * V[13] + V[10] * V[14])
   ];
-  const volumes =
-    o.atmosphere !== false && world.atmosphere?.length ? SceneOptics.prepareVolumes(world.atmosphere, world.pal,
-      paletteRules ? volume => PixelLook.mediumTransform(paletteRules,
-        TargetSelectors.medium(volume.id, volume.mediumKind ?? volume.type, volume.tags)) : undefined) : [];
-  const axialDepth = volumes.length ? new Float32Array(W * H).fill(Infinity) : null;
+  const mediumLook = medium => optics?.transform(medium) ?? PixelLook.mediumTransform(paletteRules, medium);
+  const volumes = o.atmosphere !== false && world.atmosphere?.length ?
+    SceneOptics.prepareVolumes(world.atmosphere, world.pal, volume =>
+      mediumLook(TargetSelectors.medium(volume.id, volume.mediumKind ?? volume.type, volume.tags))) : [];
+  const sourceWater = o.water !== false && world.water?.count && world.water.raySegments ? world.water : null;
+  const water = sourceWater && (optics || paletteRules) ?
+    sourceWater.mapColors((id, kind) => mediumLook(TargetSelectors.medium(id, kind))) : sourceWater;
+  const axialDepth = volumes.length || water ? new Float32Array(W * H).fill(Infinity) : null;
+  const glassIndex = optics && TargetSelectors.index(world);
+  const glassLooks = glassIndex && new Map();
   const centers = captureMotion ? new Float32Array(N * 2).fill(NaN) : null;
   const motionReference = centers && { w: W, h: H, centers };
   const art = createArtPasses([...passSelection], W, H);
   const rayAt = cameraRays(V, eye, W, H, focal, ortho);
+  const horizon = eyeD + 2 * R;
+  const atmosphereOptions = () => {
+    const quality = atmosphereQuality({ ...world.volumeQuality, ...o.volumeQuality });
+    quality.wind = world.volumeWind && !o.wind && !an.wind ? Airflow.frame(world.volumeWind).velocity : wind.velocity;
+    const lighting = volumes.some(volume => volume.type === 'field') && (o.volumeLighting ?? world.volumeLighting);
+    return { ...quality, time: t, media: lighting ? SceneOptics.lighting(lighting, world.pal) : undefined };
+  };
   const geometrySample = probe || sortedSurfaces ? sampleFrames(world, t) : null;
   const captured = o.captureCoverage || transparent ? new Float32Array(W * H) : null;
   // The reflected pass uses the same projection and reads only the plane's front side.
@@ -269,6 +284,7 @@ function render(world, o, preparedPalettes) {
               captureMotion: false,
               fragmentProbe: undefined,
               atmosphere: false,
+              water: false,
               reflections: false,
               edges: false
             }),
@@ -428,13 +444,18 @@ function render(world, o, preparedPalettes) {
   const order = new Uint32Array(N);
   for (let i = 0; i < N; i++) order[i] = i;
   order.sort((a, b) => depth[a] - depth[b]);
+  const waterOptions = water && atmosphereOptions();
+  const rayMedia = water && mediaSampler(volumes, water, rayAt, W, horizon, waterOptions);
+  const retainLayers = retainContributions || Boolean(rayMedia);
   const col = new Float32Array(W * H * 3),
     dep = new Float32Array(W * H),
     gls = new Float32Array(W * H);
   for (let i = 0; i < W * H; i++) {
-    col[i * 3] = bg[0];
-    col[i * 3 + 1] = bg[1];
-    col[i * 3 + 2] = bg[2];
+    const backdrop = rayMedia ? rayMedia.shade(i, horizon, bg) : bg;
+    col[i * 3] = backdrop[0];
+    col[i * 3 + 1] = backdrop[1];
+    col[i * 3 + 2] = backdrop[2];
+    if (captured && rayMedia) captured[i] = rayMedia.opacity();
     dep[i] = 1;
   }
   let drawn = 0;
@@ -447,7 +468,7 @@ function render(world, o, preparedPalettes) {
   // Keep later translucent coats when the opaque receiver is recoloured per pixel.
   let surfaceOverlay = null;
   const bend = world.refract === undefined ? 6 : world.refract;
-  let contributions = retainContributions && PIX ? contributionLayers(col, captured, W, H, true, bend) : null;
+  let contributions = retainLayers && PIX ? contributionLayers(col, captured, W, H, true, bend) : null;
   const stageMasks = stages?.surfaceMask || contribution && localConstraints?.some(policy => policy?.mask);
   const stagedFrames = stageMasks ? sampleFrames(world, t) : null;
   const maskFrames = stagedFrames && new Map();
@@ -472,7 +493,8 @@ function render(world, o, preparedPalettes) {
   let deferred = sortedSurfaces ? new Map() : null, deferredCount = 0, orderFallback = false;
   function composite(p, i, z, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass) {
     const p3 = p * 3, ia = 1 - a;
-    if (retainContributions && glass && bend && !contributions) contributions = contributionLayers(col, captured, W, H, false, bend);
+    if (rayMedia) [pr, pg, pb] = rayMedia.shade(p, z, [pr, pg, pb]);
+    if (retainLayers && glass && bend && !contributions) contributions = contributionLayers(col, captured, W, H, false, bend);
     if (contributions) contributions.before(p, pr, pg, pb, a, wd && a > .5, glass && !wd, dn);
     col[p3] = pr * a + col[p3] * ia;
     col[p3 + 1] = pg * a + col[p3 + 1] * ia;
@@ -504,7 +526,7 @@ function render(world, o, preparedPalettes) {
         if (axialDepth) axialDepth[p] = z;
       }
     } else if (glass) gls[p] = Math.min(1, gls[p] + a * 0.5);
-    else if (win && !retainContributions && !coat && a > 0.5) win[p] = -1;
+    else if (win && !retainLayers && !coat && a > 0.5) win[p] = -1;
   }
 
   function playFragments(sort) {
@@ -639,7 +661,13 @@ function render(world, o, preparedPalettes) {
       x1 = Math.min(W - 1, Math.ceil(sx + ex)),
       y0 = Math.max(0, Math.floor(sy - ey)),
       y1 = Math.min(H - 1, Math.ceil(sy + ey));
-    const coat = !retainContributions && PIX && hasSurface && (!writesDepth || reflectInRaster || surface.reveals(i));
+    let glassLook;
+    if (glass && glassIndex) {
+      const target = glassIndex.row(i);
+      if (!glassLooks.has(target)) glassLooks.set(target, optics.transform(target));
+      glassLook = glassLooks.get(target);
+    }
+    const coat = !retainLayers && PIX && hasSurface && (!writesDepth || reflectInRaster || surface.reveals(i));
     if (coat && !surfaceOverlay) surfaceOverlay = new Float32Array(W * H * 4);
     r = Math.min(r, 1);
     g = Math.min(g, 1);
@@ -719,7 +747,7 @@ function render(world, o, preparedPalettes) {
           [pr, pg, pb, alpha, highlight, paletteId] = surface.shade(i, ...hit, x, y, z, pr, pg, pb, ix + 0.5, iy + 0.5);
         }
         const scoped = contribution?.applies(i, paletteId);
-        if (staged?.lit || scoped) {
+        if (staged?.lit || scoped || glassLook) {
           let sample;
           if (litMask || (scoped && contribution.masked(i, paletteId))) {
             const sampleNormal = litNormal ?? stageFrame(i).normal;
@@ -729,7 +757,8 @@ function render(world, o, preparedPalettes) {
           }
           let rgb = [pr, pg, pb];
           if (scoped) rgb = contribution.shade(i, paletteId, rgb, ix, H - 1 - iy, sample, highlight <= .22);
-          [pr, pg, pb] = staged?.lit ? RenderStages.apply(staged.lit, rgb, sample) : rgb;
+          if (staged?.lit) rgb = RenderStages.apply(staged.lit, rgb, sample);
+          [pr, pg, pb] = glassLook ? glassLook(rgb) : rgb;
         }
         if (staged?.lit || (fragmentSurface && reflectInRaster)) {
           pr += (fog[0] - pr) * fogMix;
@@ -1012,8 +1041,10 @@ function render(world, o, preparedPalettes) {
         const lit = staged?.lit ? RenderStages.apply(staged.lit, rgb, sample) : rgb;
         const kf = world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dep[p]) * world.fog.max : 0;
         if (surfaceGlint) surfaceGlint[p] = c[4] > 0.22;
-        if (retainContributions) {
-          contributions.replacePattern(p, [0, 1, 2].map(channel => lit[channel] + (fog[channel] - lit[channel]) * kf));
+        if (retainLayers) {
+          if (localAt) localAt[p] = localSlot(i, c[5], p);
+          const shaded = [0, 1, 2].map(channel => lit[channel] + (fog[channel] - lit[channel]) * kf);
+          contributions.replacePattern(p, rayMedia ? rayMedia.shade(p, axialDepth[p], shaded) : shaded);
           if (detail && surface?.projected(i) && c[4] > 0.22) detail[(H - 1 - y) * W + x] = 1;
           continue;
         }
@@ -1144,7 +1175,8 @@ function render(world, o, preparedPalettes) {
       sprM = new Uint8Array(W * H);
       for (let q = 0; q < W * H; q++) {
         if (sprC[q] < 0 || !PALC[sprC[q]]) continue;
-        const c = PALC[sprC[q]];
+        const depth = eyeD - R + sprD[q] * 2 * R;
+        const c = rayMedia ? rayMedia.shade(q, depth, PALC[sprC[q]]) : PALC[sprC[q]];
         col[q * 3] = c[0];
         col[q * 3 + 1] = c[1];
         col[q * 3 + 2] = c[2];
@@ -1161,13 +1193,17 @@ function render(world, o, preparedPalettes) {
     }
   }
   contributions?.refract(gls, dep);
-  let atmosphere, volumeStats;
-  if (axialDepth) {
-    const quality = atmosphereQuality({ ...world.volumeQuality, ...o.volumeQuality });
-    quality.wind = world.volumeWind && !o.wind && !an.wind ? Airflow.frame(world.volumeWind).velocity : wind.velocity;
-    const lighting = volumes.some(volume => volume.type === 'field') && (o.volumeLighting ?? world.volumeLighting);
-    const media = lighting ? SceneOptics.lighting(lighting, world.pal) : undefined;
-    atmosphere = applyAtmosphere(volumes, col, axialDepth, rayAt, W, H, eyeD + 2 * R, quality, t, media,
+  let atmosphere, volumeStats = waterOptions?.stats ? rayMedia.stats : undefined;
+  if (rayMedia && (ink?.ramps.has('fog') || o.captureFog)) {
+    const fog = new Float32Array(W * H);
+    for (let p = 0; p < fog.length; p++) {
+      rayMedia.shade(p, axialDepth[p], bg);
+      fog[(H - 1 - Math.floor(p / W)) * W + p % W] = rayMedia.opacity();
+    }
+    atmosphere = { fog };
+  } else if (axialDepth && !rayMedia) {
+    const quality = atmosphereOptions();
+    atmosphere = applyAtmosphere(volumes, col, axialDepth, rayAt, W, H, horizon, quality, t, quality.media,
       ink?.ramps.has('fog') || o.captureFog || transparent, o.volumeHistory,
       o.volumeHistory && [W, H, focal, ortho, ...V].join('/'));
     if (quality.stats) volumeStats = atmosphere.stats;
@@ -1176,13 +1212,21 @@ function render(world, o, preparedPalettes) {
     detail, sprM, surfaceGlint, centers, motionFrom });
   if (o.captureCoverage) {
     if (reflectionTint && passes?.emission) ArtEffects.tintReflection(col, captured, passes.emission, W, H, reflectionTint, t);
+    const reflectionLook = reflectionPlane && optics?.transform(TargetSelectors.medium(reflectionPlane.id, 'reflection', reflectionPlane.tags));
+    if (reflectionLook) for (let p = 0; p < captured.length; p++) {
+      const coverage = captured[p];
+      if (coverage <= 1e-6) continue;
+      const q = p * 3;
+      const rgb = reflectionLook([col[q] / coverage, col[q + 1] / coverage, col[q + 2] / coverage]);
+      for (let channel = 0; channel < 3; channel++) col[q + channel] = rgb[channel] * coverage;
+    }
     return { w: W, h: H, rgb: col, coverage: captured };
   }
   const alpha = transparent ? new Uint8Array(W * H) : null;
   if (alpha) {
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const p = y * W + x, q = (H - 1 - y) * W + x;
-      const fog = atmosphere?.fog?.[q] || 0;
+      const fog = rayMedia ? 0 : atmosphere?.fog?.[q] || 0;
       const a = fog + (1 - fog) * captured[p];
       alpha[q] = Math.round(clamp(a, 0, 1) * 255);
       if (a > 1e-6) for (let c = 0; c < 3; c++) col[p * 3 + c] /= a;
@@ -1205,7 +1249,7 @@ function render(world, o, preparedPalettes) {
             gx = gls[at(x + 1, y)] - gls[at(x - 1, y)],
             gy = gls[at(x, y + 1)] - gls[at(x, y - 1)];
           let q = p;
-          if (!retainContributions && gls[p] + Math.abs(gx) + Math.abs(gy) > 0) q = at(x + Math.round(gx * bend), y + Math.round(gy * bend));
+          if (!retainLayers && gls[p] + Math.abs(gx) + Math.abs(gy) > 0) q = at(x + Math.round(gx * bend), y + Math.round(gy * bend));
           let k = 1;
           if (aoK > 0) {
             let occ = 0;
@@ -1275,7 +1319,7 @@ function render(world, o, preparedPalettes) {
         b = col[p * 3 + 2];
       const yo = H - 1 - y,
         q = (yo * W + x) * 3;
-      if (!o.raw && !retainContributions) {
+      if (!o.raw && !retainLayers) {
         const gx = G(x + 1, y) - G(x - 1, y),
           gy = G(x, y + 1) - G(x, y - 1);
         if (gls[p] + Math.abs(gx) + Math.abs(gy) > 0) {

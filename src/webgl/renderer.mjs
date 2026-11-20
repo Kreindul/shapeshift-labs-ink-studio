@@ -94,7 +94,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     let wetGeometry, wetContours, waterTexture, packedWater;
     let portalSource, portalDestination, portalMask, portalSpriteLayer, portalProgram;
     let lastWater, lastWaterTime, waterWidth = 0, waterHeight = 0;
-    let waterLookSource, waterLookPlan, mappedWater;
+    let waterLookSource, waterLookPlan, waterOpticalPlan, mappedWater;
+    let opticsDefinition, opticsWorld, opticsPlan;
     const cleaned = target(), finished = target(), history = [target(), target()];
     const data = table(2048, 0, maxSize), bones = table(768, 4, maxSize);
     const fine = table(1536, 7, maxSize), pattern = table(2048, 10, maxSize);
@@ -345,12 +346,20 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const look = world.look ?? {};
       const constraints = !raw && prepareConstraints(world, frame.paletteConstraints ?? look.paletteConstraints);
       const sourceWater = frame.water !== false && world.water?.count ? world.water : null;
-      if (sourceWater !== waterLookSource || constraints !== waterLookPlan) {
+      if (!raw && sourceWater && (look.optics !== opticsDefinition || world !== opticsWorld)) {
+        opticsDefinition = look.optics;
+        opticsWorld = world;
+        opticsPlan = toolkit.RenderStages?.optics(look.optics, { palette: world.pal, roles: world.paletteRoles,
+          blueNoise: toolkit.KIT?.procedural?.materials?.blueNoise });
+      }
+      const optical = raw ? null : opticsPlan;
+      if (sourceWater !== waterLookSource || constraints !== waterLookPlan || optical !== waterOpticalPlan) {
         waterLookSource = sourceWater;
         waterLookPlan = constraints;
-        mappedWater = constraints && sourceWater?.mapColors ?
-          sourceWater.mapColors((medium, mediumKind) => toolkit.PixelLook.mediumTransform(constraints, { medium, mediumKind })) :
-          sourceWater;
+        waterOpticalPlan = optical;
+        mappedWater = (constraints || optical) && sourceWater?.mapColors ?
+          sourceWater.mapColors((medium, mediumKind) => optical?.transform({ kind: 'medium', medium, mediumKind }) ??
+            toolkit.PixelLook.mediumTransform(constraints, { medium, mediumKind })) : sourceWater;
       }
       const waterScene = mappedWater;
       if (waterScene) {

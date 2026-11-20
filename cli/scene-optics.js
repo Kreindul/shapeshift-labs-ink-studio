@@ -103,6 +103,61 @@ function volumeNoise(seed) {
   return noiseTiles.get(seed);
 }
 
+function traceMedia(volumes, segments, origin, direction, stop, result, sample, options) {
+  result.fill(0, 0, 3);
+  result.fill(1, 3, 6);
+  let cursor = 0;
+  function air(end) {
+    if (!volumes.length || end <= cursor) return;
+    SceneOptics.trace(volumes, origin, direction, end, sample, { ...options, start: cursor });
+    for (let channel = 0; channel < 3; channel++) {
+      result[channel] += result[channel + 3] * sample[channel];
+      result[channel + 3] *= sample[3];
+    }
+  }
+  for (const [start, exit, style, surface] of segments) {
+    if (start >= stop) break;
+    const end = Math.min(stop, exit);
+    air(start);
+    const depth = surface - origin[1] - (start + end) * .5 * direction[1];
+    const u = Math.max(0, Math.min(1, (depth - style.depthRange[0]) / (style.depthRange[1] - style.depthRange[0])));
+    const deep = u * u * (3 - 2 * u);
+    for (let channel = 0; channel < 3; channel++) {
+      const loss = -Math.expm1(-style.extinction[channel] * (end - start));
+      const tint = style.tint[channel] + (style.deepTint[channel] - style.tint[channel]) * deep;
+      result[channel] += result[channel + 3] * loss * tint;
+      result[channel + 3] *= 1 - loss;
+    }
+    cursor = end;
+  }
+  air(stop);
+  return result;
+}
+
+function mediaSampler(volumes, water, rayAt, width, horizon, options) {
+  const rays = [], sample = [0, 0, 0, 1], result = new Float64Array(6);
+  let opacity = 0;
+  const stats = { rays: 0, fallbackRays: 0, depthSamples: 0 };
+  function shade(pixel, depth, rgb) {
+    let ray = rays[pixel];
+    if (!ray) {
+      const { origin, direction, axial } = rayAt(pixel % width + .5, Math.floor(pixel / width) + .5);
+      stats.rays++;
+      ray = rays[pixel] = { origin: origin.slice(), direction: direction.slice(), axial,
+        segments: water.raySegments(origin, direction, horizon / axial) };
+    }
+    if (!ray.segments.length && !volumes.length) {
+      opacity = 0;
+      return rgb;
+    }
+    stats.depthSamples++;
+    traceMedia(volumes, ray.segments, ray.origin, ray.direction, Math.min(horizon, depth) / ray.axial, result, sample, options);
+    opacity = 1 - (result[3] + result[4] + result[5]) / 3;
+    return [0, 1, 2].map(i => result[i] + result[i + 3] * rgb[i]);
+  }
+  return { shade, opacity: () => opacity, stats };
+}
+
 function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon, quality, time, media, capture, history, viewKey) {
   const light = [0, 0, 0, 1], sample = [0, 0, 0, 1];
   const fields = volumes.some(volume => volume.type === 'field');
@@ -177,4 +232,4 @@ function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon, quality, ti
   return { fog, stats };
 }
 
-module.exports = { cameraRays, surfacePoint, reflectionSampler, atmosphereQuality, applyAtmosphere };
+module.exports = { cameraRays, surfacePoint, reflectionSampler, atmosphereQuality, traceMedia, mediaSampler, applyAtmosphere };

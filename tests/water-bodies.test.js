@@ -106,7 +106,7 @@ test('water atlas packs 256 adjacent tiles and resolves creator optics by medium
 async function browserProbe(createRenderer, compileSprites, coastline, floodValley) {
   const canvas = document.querySelector('canvas');
   const { waterBodies, verticalSpans } = KIT.procedural;
-  const renderer = createRenderer(canvas, { toolkit: { KIT, PixelLook } });
+  const renderer = createRenderer(canvas, { toolkit: { KIT, PixelLook, RenderStages } });
   const gl = canvas.getContext('webgl2'), size = 65, middle = 32;
   compileSprites(gl, PixelLook);
   const blackWater = { tint: [0, 0, 0], extinction: [0.9, 0.4, 0.12],
@@ -163,6 +163,14 @@ async function browserProbe(createRenderer, compileSprites, coastline, floodVall
   const stacked = world({ ...baseCamera, target: [0, -1, -2] }, { blank: true, background: 0xffffff, water: layers });
   const t = Math.exp(-0.7);
   close(draw(stacked)(), [(1 - t + t * t) * 255, t * t * 255, t * 255], 'layers use ray order');
+  let opticalTint;
+  const watched = { ...stacked.water, mapColors(colorFor) {
+    opticalTint = colorFor('front', 'water')([1, 0, 0]);
+    return stacked.water.mapColors(colorFor);
+  } };
+  draw({ ...stacked, water: watched, look: { optics: [{ select: { medium: 'front' }, palette: ['#00ff00'] }] } }, { raw: false });
+  close(opticalTint, [0, 1, 0], 'the bound optical palette reaches native water', 0);
+
 
   const styled = waterBodies.scene([volume({ optics: { ...blackWater, surface: 0.65, refraction: 4, foam: 1, caustics: 1 },
     sample: () => ({ bed: -0.35, surface: 0, current: [0.6, 0] }) })]);

@@ -29,7 +29,7 @@ const SceneOptics = (() => {
     return n;
   };
 
-  function plane({ id, at = [0, 0, 0], normal = [0, 1, 0], bias = 0.001, select } = {}) {
+  function plane({ id, at = [0, 0, 0], normal = [0, 1, 0], bias = 0.001, select, tags } = {}) {
     if (typeof id !== 'string' || !id.trim()) throw new TypeError('A reflection plane needs an ID');
     if (select !== undefined && typeof select !== 'function')
       throw new TypeError('Reflection selection must be a function');
@@ -38,7 +38,8 @@ const SceneOptics = (() => {
       at: point(at, 'Reflection origin'),
       normal: unit(normal, 'Reflection normal'),
       bias: nonnegative(bias, 'Reflection bias'),
-      select
+      select,
+      ...(tags !== undefined && { tags })
     };
   }
 
@@ -147,8 +148,8 @@ const SceneOptics = (() => {
     return range[1] > range[0];
   }
 
-  function interval(volume, from, dir, stop) {
-    const range = [volume.near, Math.min(stop, volume.far ?? stop)];
+  function interval(volume, from, dir, stop, start) {
+    const range = [Math.max(start, volume.near), Math.min(stop, volume.far ?? stop)];
     if (range[1] <= range[0]) return null;
     switch (volume.type) {
       case 'fog':
@@ -176,7 +177,7 @@ const SceneOptics = (() => {
   function trace(volumes, origin, direction, stop, result = [0, 0, 0, 1], options) {
     const hits = [];
     for (const volume of volumes) {
-      const range = interval(volume, origin, direction, stop);
+      const range = interval(volume, origin, direction, stop, options?.start ?? 0);
       if (range) hits.push([range[0], volume, 1], [range[1], volume, -1]);
     }
     hits.sort((a, b) => a[0] - b[0]);
@@ -201,7 +202,7 @@ const SceneOptics = (() => {
   }
 
   return { plane, planeDistance, reflectedView, captureView, fog, sphere, box, shaft, field, prepareVolumes,
-    trace, lighting: (settings, palette) => volumeLight.lighting(settings, volumeColor, palette),
+    trace, slab, lighting: (settings, palette) => volumeLight.lighting(settings, volumeColor, palette),
     occluder: volumeLight.occluder, volumeHistory: volumeLight.history, ripple, ringSampler };
 })();
 if (typeof module !== 'undefined') module.exports = SceneOptics;

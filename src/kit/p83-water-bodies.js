@@ -1,4 +1,4 @@
-/* A water frame shared by world queries and the WebGL ray integrator. */
+/* Water frames shared by world queries and renderers. */
 (function (K) {
   const P = K.procedural;
   const maxAxis = 64, uniformBodies = 8, maxBodies = 256, atlasSize = 2048;
@@ -24,9 +24,9 @@
         !(Math.fround(depthRange[1]) > Math.fround(depthRange[0])) || !rgb(color) ||
         !number(height) || height < 1e-4 || !number(scale) || scale <= 0 || scale > 64)
       throw new RangeError('Invalid water optics');
-    return { tint: tint.slice(), extinction: extinction.slice(), surfaceColor: surfaceColor.slice(),
+    return P.data.freeze({ tint: tint.slice(), extinction: extinction.slice(), surfaceColor: surfaceColor.slice(),
       surface, refraction, foam, caustics, deepTint: deepTint?.slice() ?? tint.slice(), depthRange: depthRange.slice(),
-      sediment: { color: color.slice(), strength, height, scale }, styled: deepTint !== undefined || strength > 0 };
+      sediment: { color: color.slice(), strength, height, scale }, styled: deepTint !== undefined || strength > 0 });
   }
 
   function create({ id, bounds, resolution = [1, 1], sample, optics: look } = {}) {
@@ -350,6 +350,56 @@
     };
   }
 
+  function rayBox(bounds, origin, direction, stop) {
+    const range = [0, stop];
+    return [0, 1, 2].every(axis =>
+      SceneOptics.slab(range, origin[axis], direction[axis], bounds.min[axis], bounds.max[axis])) ? range : null;
+  }
+
+  function columnSegments(body, state, origin, direction, range, cuts, out) {
+    const { nx, nz, dx, dz, data, spans, style, spanProfiles, caps } = state;
+    const { min } = body.bounds;
+    const [start, stop] = range;
+    // Split once at each horizontal grid crossing. Each open interval belongs to one column.
+    const times = [start, stop];
+    for (const [axis, size, count] of [[0, dx, nx], [2, dz, nz]]) {
+      if (Math.abs(direction[axis]) < 1e-10) continue;
+      const at = t => (origin[axis] + direction[axis] * t - min[axis]) / size;
+      const low = Math.max(1, Math.ceil(Math.min(at(start), at(stop))));
+      const high = Math.min(count - 1, Math.floor(Math.max(at(start), at(stop))));
+      for (let cell = low; cell <= high; cell++) {
+        const t = (min[axis] + cell * size - origin[axis]) / direction[axis];
+        if (t > start && t < stop) times.push(t);
+      }
+    }
+    times.sort((a, b) => a - b);
+    function wet(from, to, bed, top, profile, surface) {
+      const clipped = [from, to];
+      if (top <= bed || !SceneOptics.slab(clipped, origin[1], direction[1], bed, top)) return;
+      let [enter, exit] = clipped;
+      for (const [left, right] of cuts) {
+        if (right <= enter || left >= exit) continue;
+        if (left > enter) out.push([enter, left, profile, surface]);
+        enter = right;
+        if (enter >= exit) return;
+      }
+      out.push([enter, exit, profile, surface]);
+    }
+    for (let i = 1; i < times.length; i++) {
+      const from = times[i - 1], to = times[i];
+      if (to - from < 1e-10) continue;
+      const mid = (from + to) * .5;
+      const x = Math.max(0, Math.min(nx - 1, Math.floor((origin[0] + direction[0] * mid - min[0]) / dx)));
+      const z = Math.max(0, Math.min(nz - 1, Math.floor((origin[2] + direction[2] * mid - min[2]) / dz)));
+      const col = (z * nx + x) * 4;
+      if (spans) {
+        const first = data[col], end = first + data[col + 1];
+        for (let span = first; span < end; span++)
+          wet(from, to, spans[span * 4], spans[span * 4 + 1], spanProfiles[span] ?? style, caps[span * 2 + 1]);
+      } else wet(from, to, data[col], data[col + 1], style, data[col + 1]);
+    }
+  }
+
   function scene(bodies, { airPockets = [] } = {}) {
     if (!Array.isArray(bodies) || bodies.length > maxBodies || !Array.from(bodies).every(body => states.has(body)) ||
         new Set(bodies.map(body => body.id)).size !== bodies.length)
@@ -461,14 +511,24 @@
       });
       return P.data.freeze(changed);
     }
+    function raySegments(origin, direction, stop) {
+      const cuts = pockets.map(pocket => rayBox(pocket.bounds, origin, direction, stop))
+        .filter(Boolean).sort((a, b) => a[0] - b[0]);
+      const segments = [];
+      for (const body of active) {
+        const range = rayBox(body.bounds, origin, direction, stop);
+        if (range) columnSegments(body, states.get(body), origin, direction, range, cuts, segments);
+      }
+      return segments.sort((a, b) => a[0] - b[0]);
+    }
     function mapColors(colorFor) {
       const next = sorted.map(body => {
         const state = states.get(body), styles = new Map();
         function recolor(id, style) {
           if (styles.has(id)) return styles.get(id);
           const transform = colorFor(id, 'water');
-          const mapped = transform ? { ...style, tint: transform(style.tint), deepTint: transform(style.deepTint),
-            surfaceColor: transform(style.surfaceColor), sediment: { ...style.sediment, color: transform(style.sediment.color) } } : style;
+          const mapped = transform ? P.data.freeze({ ...style, tint: transform(style.tint), deepTint: transform(style.deepTint),
+            surfaceColor: transform(style.surfaceColor), sediment: { ...style.sediment, color: transform(style.sediment.color) } }) : style;
           styles.set(id, mapped);
           return mapped;
         }
@@ -489,7 +549,7 @@
       });
       return next.every((body, i) => body === sorted[i]) ? result : scene(next, { airPockets });
     }
-    const result = Object.freeze({ media, mediumAt, count: active.length, layered, pack, changesFrom, mapColors });
+    const result = Object.freeze({ media, mediumAt, count: active.length, layered, pack, changesFrom, mapColors, raySegments });
     sceneStates.set(result, { physical, pockets });
     return result;
   }

@@ -125,13 +125,29 @@
     return { target: bind(asset && override(asset, changes), catalog), select: selector };
   }
 
+  function opticalRules(entries, catalog) {
+    if (!Array.isArray(entries)) return entries;
+    return Array.from(entries).flatMap(rule => {
+      if (!rule || !Object.hasOwn(rule, 'asset')) return [rule];
+      if (!fields(rule, ['asset', 'select', 'order', 'weight']) || !rule.select)
+        throw Error('An optical binding needs an asset and selector, and optional order or weight');
+      const { target, select } = ruleBinding(rule, catalog, true);
+      if (!target?.strength) return [];
+      const { id, mask, stack, palette, order, weight } = target;
+      if (mask) throw Error('Optical look coefficients need a uniform binding; set mask to false on the asset binding');
+      return [{ select, assetId: id, ...(stack && { stack }), ...(palette && { palette }),
+        ...(order !== undefined && { order }), ...(weight !== undefined && { weight }) }];
+    });
+  }
+
   function scene(look, catalog) {
     if (!look) return look;
-    const { asset, targets = [], renderStages, ...inline } = look, bound = bind(asset, catalog);
+    const { asset, targets = [], renderStages, optics, ...inline } = look, bound = bind(asset, catalog);
     if (renderStages !== undefined && renderStages !== false && !Array.isArray(renderStages))
       throw Error('Expected a list of render stage rules');
     const usesStages = Array.isArray(renderStages) && renderStages.some(rule => rule && Object.hasOwn(rule, 'asset'));
-    if (!usesStages && !Object.hasOwn(look, 'asset') && !Object.hasOwn(look, 'targets')) return look;
+    const usesOptics = Array.isArray(optics) && optics.some(rule => rule && Object.hasOwn(rule, 'asset'));
+    if (!usesStages && !usesOptics && !Object.hasOwn(look, 'asset') && !Object.hasOwn(look, 'targets')) return look;
     if (inline.paletteConstraints !== undefined && inline.paletteConstraints !== false && !record(inline.paletteConstraints))
       throw Error('Scene palette constraints must be an object or false');
     if (!Array.isArray(targets) || targets.length > 63) throw Error('Expected up to 63 look targets');
@@ -154,6 +170,7 @@
     return {
       ...(bound?.strength && bound.stack && !boundStages.length && !bound.mask && { colorStack: bound.stack }),
       ...inline,
+      ...(optics !== undefined && { optics: opticalRules(optics, catalog) }),
       ...((staged.length || renderStages !== undefined) && { renderStages: renderStages === false && !staged.length ? false : staged }),
       ...(constraints !== false && (rules.length || fallback.default) && {
         paletteConstraints: { ...constraints, ...fallback, ...(rules.length && { targets: [...(constraints?.targets ?? []), ...rules] }) }

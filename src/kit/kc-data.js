@@ -392,6 +392,11 @@
     } catch (error) {
       bad('finish.look.renderStages', error.message);
     }
+    try {
+      RenderStages.optics(look?.optics, { palette: pal, roles: st.roles, blueNoise: K.procedural.materials.blueNoise });
+    } catch (error) {
+      bad('finish.look.optics', error.message);
+    }
     const roleNames = Object.keys(st.roles),
       ids = new Set(),
       parts = new Set(),

@@ -197,3 +197,63 @@ world.spriteSurfaces = signs.finish();
 The batch contains the atlas bitmap and interleaved XYZ and UV-in-texels
 vertices. Inkwell Rebirth draws those triangles once into the scene color and
 depth before drawing the splats. Use nearest filtering to keep the art sharp.
+
+## Look bindings for media and reflection captures
+
+Use `finish.look.optics` on a diorama, `visual.look.optics` on a simulation
+world, or `look.optics` on a JavaScript scene. Rules accept inline RGB
+stacks, palette swatches, or a versioned look asset. They share look
+selectors, `order`, and `weight`. These bindings adjust uniform
+optical colors. Author spatial variation with volumes, water columns,
+or coverage-aware material rules.
+
+```json
+{
+  "optics": [
+    { "select": { "medium": "cistern-water", "mediumKind": "water" }, "asset": "cistern/verdigris" },
+    { "select": { "medium": "drift" }, "asset": "cistern/mauve" },
+    { "select": { "medium": "inspection-pane", "mediumKind": "glass" }, "palette": ["#cd8e56", "#edd6a0"] },
+    { "select": { "medium": "cistern-mirror", "mediumKind": "reflection" }, "asset": "cistern/mirror-wash" }
+  ]
+}
+```
+
+- **Water.** Bind a native water body or span medium by ID. Its bound
+  tint enters the existing channel-wise extinction calculation. In the
+  headless renderer, the camera ray crosses the published columns or
+  spans, subtracts air pockets, and accumulates absorption and color
+  up to each splat's depth. A simulation view with a matching optical
+  rule builds the water frame from `visual.fields.water`. It can
+  also specify base coefficients in `visual.waterOptics`.
+- **Fog.** Match the volume ID or its kind. The binding grades its color,
+  density ramp colors, and emission before the volume integrator uses
+  them. With native water, air volumes are integrated through the dry
+  parts of the ray and water through the wet parts.
+- **Glass.** Match `mediumKind: "glass"`, or add the pane's surface or
+  object name as `medium`. The glass flag comes from the material or
+  splat. The optical binding grades that pane's own contribution,
+  preserving its coverage and the other looks behind it.
+- **Reflections.** Match the reflection plane ID with
+  `mediumKind: "reflection"`. Materials and scoped splat looks are
+  evaluated in the mirrored capture. An optional capture look then
+  grades its RGB while preserving capture coverage, before the
+  receiving material uses it.
+
+Water bindings work in the standard WebGL renderer when the host
+supplies the bundled `RenderStages` toolkit. The headless renderer
+supports all four bindings. It uses the native water frame for
+transmission, and separate surface materials for effects like ripples
+and planar reflections. Fog-only views can use the separate coarser
+and temporal atmosphere pass.
+
+```sh
+node cli/ink-studio.js render examples/optical-look-bindings.js --ortho --out cistern.png
+node cli/ink-studio.js render examples/optical-look-bindings.js --ortho \
+  --params '{"variant":"reflection"}' --out cistern-reflection.png
+node cli/ink-studio.js probe examples/optical-look-bindings.js \
+  --select '{"medium":"cistern-water"}' --args '{"stage":"optics","rgb":[0.2,0.21,0.24]}'
+```
+
+Use `--water off`, `--atmosphere off`, or `--reflections off` to
+inspect individual passes. The optical probe reports the coefficient
+mapping supplied to the integrator.
