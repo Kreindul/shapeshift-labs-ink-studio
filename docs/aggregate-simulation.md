@@ -3,7 +3,8 @@
 A [simulation chunk](simulation-chunks.md) can switch a solver's working
 representation at a detail boundary. Cadence and representation are
 independent. A distant level can still step every tick while updating a
-block grid, cohorts or an inventory ledger.
+block grid, cohorts or an inventory ledger. Levels with the same model
+configuration share its working state when switching cadence.
 
 ```json
 {

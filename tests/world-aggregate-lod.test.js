@@ -110,6 +110,27 @@ test('aggregate steps, output signals and native query projections avoid reconst
   assert.equal(expanded,1);
 });
 
+test('moving between cadences that share an aggregate profile reuses its state',()=>{
+  let reductions=0,expansions=0;
+  const implementations={work:()=>({initial:()=>({stock:3}),step:state=>state,
+    simulationAggregate:()=>({quantities:{stock:{units:'kg'}},
+      reduce:state=>{reductions++;return state;},expand:state=>{expansions++;return state;},
+      measure:state=>state,step:state=>state,validate(){}})
+  })};
+  const profiles={work:{aggregate:{model:'sum'}}}, options=aggregate(profiles,29);
+  options.levels.splice(2,0,{id:'distant',within:80,every:4,systems:clone(profiles)});
+  const run=W.runtime.create(define({factory:{kind:'work'}},options,[focus(3,75)]),{implementations});
+  const data=run.checkpoint().states.factory.data;
+  run.advance(3);
+  assert.equal(detail(run,'factory').level,'distant');
+  assert.equal(run.checkpoint().states.factory.data,data);
+  assert.equal(reductions,1);
+  assert.equal(expansions,0);
+  const saved=clone(run.checkpoint());
+  saved.states.factory.level='far';
+  assert.throws(()=>W.runtime.create(saved.world,{checkpoint:saved,implementations}),/Saved representation does not match/);
+});
+
 test('logistics retains route eligibility offscreen and accepts a conservative transfer without expanding its ledger',()=>{
   let routeChecks=0, open=true;
   const implementations={navigator:()=>({initial:()=>null,traces:{road:{run(){

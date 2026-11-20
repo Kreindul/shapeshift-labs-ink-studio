@@ -139,7 +139,13 @@
         const {name,chunk,models,using,fine}=row, entry=chunkState.entries[chunk];
         if(entry.sleeping)continue;
         const state=states[name], before=using(state), after=models.get(entry.level)??null;
-        if(before===after)continue;
+        if(before===after){
+          if(after&&state.level!==entry.level){
+            states[name]=freeze({...state,level:entry.level});
+            changed=true;
+          }
+          continue;
+        }
         const detail=fine(state);
         if(after){
           const data=rooted(after.reduce(detail));
@@ -159,7 +165,7 @@
     function validate(states,chunkState){
       for(const {name,chunk,models,using} of members){
         const entry=chunkState.entries[chunk], adapter=using(states[name]);
-        check(entry.sleeping||models.get(entry.level)===(adapter??undefined),
+        check(entry.sleeping||(models.get(entry.level)===(adapter??undefined)&&(!adapter||states[name].level===entry.level)),
           'Saved representation does not match the active simulation level for '+name);
       }
     }

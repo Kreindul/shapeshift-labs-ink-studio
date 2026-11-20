@@ -70,6 +70,7 @@
       for(const system of row.systems){
         check(id(system)&&own(systems,system)&&!owner.has(system),'Chunk system must exist in exactly one chunk: '+system);
         const {kind,schedule}=world.systems[system], provider=systems[system], models=new Map();
+        const profiles=[];
         const rates=detail.slice(0,-1).map(tier=>{
           const option=own(tier.instances,system)?{...tier.overrides[kind],...tier.instances[system]}:tier.overrides[kind];
           const defined=cadence(tier,schedule??{});
@@ -78,7 +79,15 @@
           check(!Object.keys(tuning).length||typeof provider.checkSimulationLOD==='function',
             'Solver does not support simulation detail tuning: '+system);
           provider.checkSimulationLOD?.(tuning,{...clock,dt:world.dt});
-          if(option?.aggregate)models.set(tier.id,W.simulationAggregate.define(provider,option.aggregate,system+'/'+tier.id));
+          if(option?.aggregate){
+            const spec=option.aggregate;
+            let profile=profiles.find(row=>equal(row.spec,spec));
+            if(!profile){
+              profile={spec,adapter:W.simulationAggregate.define(provider,spec,system+'/'+tier.id)};
+              profiles.push(profile);
+            }
+            models.set(tier.id,profile.adapter);
+          }
           return freeze({...clock,tuning});
         });
         owner.set(system,{rates,models,chunk:name,maxEvery:Math.max(...rates.map(clock=>clock.every)),
