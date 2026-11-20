@@ -668,6 +668,49 @@ node examples/raster-warps.cjs raster-warps-review
 ink-studio graph run raster-warps-review/raster-warps.json --out raster-warps-review/graph
 ```
 
+## Procedural generation and recipes
+
+The stock graph runner includes 15 `proc.*` operations. The same generators
+are available in the library as `KIT.procedural.generator`. Build reusable
+graph groups around these nodes to expose the settings a scene or shot needs.
+The graph seed is mixed with each node ID. Set `options.seed` on a seeded node
+to reuse the same result under different node names. Animated sampling uses
+the graph clock in seconds. Set `options.time` to hold a specific sample.
+
+| Graph operation | Inputs and outputs |
+| --- | --- |
+| `proc.noise` | Compile a native [field expression](procedural.md#composable-procedural-fields) in `definition`. The `value` field works with simplex, periodic and time-loop noise, fractal stacks, masks and domain warps. |
+| `proc.pattern` | Produce a 0–1 field. Set `kind` to `checker`, `stripes`, `dots`, `rings`, `brick` or `chevrons`. Set `size` in world units, `axes` to `xy`, `xz` or `yz`, `angle` in radians, `offset` and `velocity` as pairs, and `fill` as a fraction. |
+| `proc.sample` | Rasterize a scalar `source` field at pixel centers across `origin` plus the plane vectors `u` and `v`. The one-channel raster retains signed and fractional values. Feed it to `color.gradient` with `channel: 0` and an explicit `range` to make artwork. |
+| `proc.repeat` | Repeat a raster at an explicit output size with pixel `offset` and two-axis `scale`. Channel counts and numeric values are retained. |
+| `proc.tiles` | Lay out weighted `definitions` with north, east, south and west sockets. `mode: "solve"` accepts `pins`, `ports`, `boundary` and `wrap`. `mode: "wang"` uses `labels` and a world-cell `origin` for independently generated chunks. Returns a layout with a status and, on success, row-major IDs. |
+| `proc.tileImage` | Paint a successful `layout` with an `images` record keyed by tile ID. Each tile uses the same pixel dimensions. Masked cells stay transparent. |
+| `proc.scatter` | Scatter points in 2D or 3D `bounds` at a minimum `radius`. Use a scalar field or raster `mask` and an exclusive `threshold`. A raster spans XY for planar scatter or XZ for spatial scatter. The default mask channel is alpha for RGBA and channel zero otherwise. Outputs include points, stable sample records and a work report. |
+| `proc.path` | Make a typed path from planar or spatial `points`. Choose `mode: "linear"` or `"spline"`, interpolation `steps`, optional `closed`, and an optional count of equal-distance `samples`. Raw `points` and arc `length` have their own ports. |
+| `proc.reaction` | Sample Ink’s Gray–Scott grid at an integer `steps` input. Set `width`, `height`, `feed`, `kill`, `wrap`, a same-size `mask`, or authored row-major `spots`. Returns V as `value`, U as `u` and update counts as `report`. Use step easing when keying the integer step count. |
+| `proc.rain` | Rasterize `rain` or `snow` with configurable count, speed, wind, mark length, opacity and an optional raster mask. The `particles` port returns positions, tails and opacity in pixel space. |
+| `proc.sparks` | Sample seeded births with a timed start/end, rate, lifetime, launch angle, spread, speed, gravity and trail length. Returns the transparent sprite layer and pixel-space particles. |
+| `proc.plume` | Use Ink’s native `smoke`, `steam`, `spray` or `fog` emitter from an authored socket pose or socket track. Adjust its motion, life, style and volume or splat representation. Returns a flat XY preview and a serializable `recipe` for `look.atmosphereEmitters`. |
+| `proc.tree` | Generate a `pine`, `broadleaf` or `bare` tree with adjustable levels, size and colour. Returns an XY raster, spatial `branches` with `pts`, `r0` and `r1` for sculpted tubes, and 3D `leaves` points. |
+| `proc.cable` | Build a catenary from XYZ `start` and `end`, with `sag`, `gravity` and a segment count. Returns an XY raster, equal-arc samples on the spatial `path` port, and `length`. |
+| `proc.parallax` | Composite raster `layers` at independent camera `factor` values with pixel `offset`, timed `velocity`, repeat axes, filter and opacity. Animate `options.camera` with a vector track to preview a pan. |
+| `proc.horizon` | Package raster band sources as native 3D `look.horizonBands` with explicit radii, height ranges, azimuth, repeats and camera bounds. |
+
+Use `data.record` to insert a connected field or raster into an options
+record, and `data.collect` to wire named records into a layer array. Tree,
+cable and plume previews use a pixel `origin` and `pixelsPerUnit` for the XY
+projection. Art from any raster output can also go into `warp.surface` or
+`warp.project` for use on 3D surfaces.
+
+The Storm Relay example emits the editable graph, its rendered shot and
+generator swatches, native horizon and emitter data, branch and cable
+geometry, a matching 3D render, and an animated PNG.
+
+```sh
+node examples/procedural-generation.cjs procedural-review
+ink-studio graph run procedural-review/storm-relay.json --at 1.22 --out procedural-review/graph
+```
+
 ## Geometry and attributes
 
 `geometry.meshPaths(mesh, { sources, edgeCost, maxCost })` supports native and imported indexed meshes. It returns per-vertex distances and predecessors, plus `path(vertex)`, `curves(vertices)` and a sampled `distanceAt(point)` field. The cost function receives positions, vertex IDs, length and adjacent faces. Return infinity to block an edge.

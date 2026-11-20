@@ -169,6 +169,7 @@
     ...P.rasterColor.operations,
     ...P.pixelEffects.operations,
     ...P.rasterWarp.operations,
+    ...P.generator.operations,
     meshPaths: {
       inputs: { mesh: 'geometry', sources: 'points', targets: { type: 'points', default: [] }, options: { type: 'any', default: {} } },
       outputs: { value: 'any', curves: 'points', distance: 'field' },
