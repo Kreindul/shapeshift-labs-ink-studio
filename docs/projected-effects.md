@@ -219,6 +219,26 @@ ink-studio clip examples/palette-cycling.js --from 0 --to 6 --fps 12 \
   --w 216 --h 144 --px 1 --out fernfall.png
 ```
 
+### Hue–brightness fields
+
+Set `pattern: 'hue-brightness'` and give the layer a `hueBrightness` definition. The lower-left corner comes from the projection origin. Hue increases along `along` and brightness increases along `across`. Use rest space to keep the field attached to an object.
+
+```json
+{
+  "type": "projected",
+  "pattern": "hue-brightness",
+  "projection": { "origin": [0, 1, 0], "along": [1, 0, 0], "across": [0, 1, 0] },
+  "hueBrightness": {
+    "palette": ["#172930", "#386c75", "#7ab7b3", "#d6d2a5", "#ec8b5e"],
+    "saturation": 0.6,
+    "brightness": [0.12, 0.92],
+    "size": [2, 1]
+  }
+}
+```
+
+`size` defaults to `[1, 1]` in projection units before the layer's scale. The paint covers that rectangle. Set `wrap: true` to tile it. In a material the palette can also contain scene palette indices. Its swatches supply the layer's output palette by default, and the usual mask, strength, blend, and target palette precedence apply. The pattern is available in headless exports and through the shared `SurfaceLook` sampler.
+
 ### Author a shader in JavaScript
 
 A layer can name a shader from `surfaceEffects.shaders` or use a function as

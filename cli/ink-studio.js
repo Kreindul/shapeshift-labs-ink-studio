@@ -847,6 +847,7 @@ const CMD = {
         '  hierarchy <graph.json> [--node id] [--parent id|world] [--out file.json]   inspect or reparent live scene nodes',
         '  curve <family.json> [--distance n] [--text INK] [--out file.json]   sample reusable curve families',
         '  ornament <pattern.json> [--format pigment|relief|tiles] [--out file]   export a wallpaper or frieze pattern',
+        '  palette field <field.json> [--saturation 0–1] [--w 192 --h 96]   render a hue–brightness field',
         '  palette <recipe.json> [--t seconds] [--out palette.json]   sample palette recipes, paths and animation',
         '  inspect <scene|run>         discover fields, actions, ports and entities',
         '  environment inspect <scene|run> --at x,y,z [--t seconds] [--out report.json]   explain sky and local weather',
@@ -1011,6 +1012,15 @@ const CMD = {
     return require('./ornament.js')(pos, opt, lib(), outputFile);
   },
   palette() {
+    if (pos[0] === 'field') {
+      if (pos.length !== 2 || ['w', 'h', 'saturation', 'out'].some(key => opt[key] === true))
+        die('Use palette field <field.json> [--saturation 0–1] [--w width --h height --out field.png]');
+      let definition = JSON.parse(fs.readFileSync(path.resolve(pos[1]), 'utf8'));
+      if (opt.saturation !== undefined) definition = { ...definition, saturation: num('saturation') };
+      const field = lib().KIT.palette.hueBrightness(definition);
+      save('hue-brightness.png', field.raster(num('w', 192), num('h', 96)));
+      return;
+    }
     if (!pos[0]) die('palette needs a recipe, path or animation JSON file');
     const definition = JSON.parse(fs.readFileSync(path.resolve(pos[0]), 'utf8'));
     const api = lib().KIT.palette, time = num('t', 0);

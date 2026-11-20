@@ -162,3 +162,20 @@ node cli/ink-studio.js palette animation.json --t 3.25 --out frame-palette.json
 ```
 
 The command accepts a recipe, path or palette-animation JSON definition and exports sampled colors. Recipes and animation also export named role indices and ramps. `--t` selects animation seconds; path definitions export their configured preview samples. Output can be written to a file or printed as JSON. Use the exported `palette` and `roles` when authoring a diorama.
+
+
+## Hue–brightness fields
+
+Use `KIT.palette.hueBrightness({ palette, saturation, hue, brightness })` to sample a rectangular field or export an indexed chart. A palette contains 1–48 hex colours or normalized RGB swatches. Hue runs horizontally across one turn by default, with red at both ends. Write a range such as `[0.8, 1.2]` to span part of the wheel across red. Brightness is HSV value and rises from bottom to top. Set the `brightness` range to `[0.05, 0.56]` for a dark field. Saturation runs from 0 for gray input targets to 1 for fully saturated targets. The selected colours always come from the supplied palette using Ink's weighted RGB palette match. An equal match uses the earliest swatch.
+
+- `index(u, v)` returns a swatch slot for normalized coordinates.
+- `sample(u, v, out?)` writes the chosen normalized RGB.
+- `raster(width, height)` returns top-down RGB bytes, one index per pixel, and the ordered palette. It samples pixel centres.
+
+```sh
+ink-studio palette field examples/hue-brightness-field.json --w 192 --h 96 \
+  --saturation 0.32 --out muted-field.png
+ink-studio render examples/hue-brightness.js --w 232 --h 132 --px 1 --out prism-workshop.png
+```
+
+The [Prism Workshop](../examples/hue-brightness.js) projects three variants of one palette onto its windows. See [hue–brightness material projection](projected-effects.md#huebrightness-fields) for the layer definition.

@@ -589,5 +589,5 @@
     update(0);
     return Object.freeze({ world: view, grade, update, sample, source });
   }
-  K.palette = Object.freeze({ path, transfer, recipe, duotone, animate, bind });
+  K.palette = Object.freeze({ path, transfer, recipe, duotone, animate, bind, hueBrightness: PaletteFields.hueBrightness });
 })(KIT);
