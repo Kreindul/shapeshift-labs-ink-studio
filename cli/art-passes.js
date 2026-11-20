@@ -149,7 +149,8 @@ function createArtPasses(request, w, h, emissiveSlots) {
     for (const [channel, ids] of [['motion', owner], ['emissionMotion', emissionOwner]]) {
       if (!selected.has(channel)) continue;
       const vectors = new Float32Array(size * 2);
-      const previous = geometry.motionFrom, current = geometry.motionReference;
+      const previous = channel === 'motion' ? geometry.motionFrom : geometry.emissionMotionFrom;
+      const current = geometry.motionReference;
       if (previous?.w === w && previous.h === h && previous.centers.length === geometry.centers.length) {
         for (let p = 0; p < size; p++) {
           const i = ids[p] * 2;
