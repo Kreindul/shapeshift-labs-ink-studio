@@ -39,11 +39,11 @@
         radius=Math.max(radius,p.radius);
       }
       const admission=hasGates?gates.begin(state,people,ctx):null;
-      function move(agent,from,wanted,route,cursor,walk,maxDistance){
+      function move(agent,from,wanted,route,cursor,walk,maxDistance,exit){
         const p=people.get(agent.id);
         if(!p)return {...walk(from,[wanted[0]-from[0],wanted[2]-from[2]]),crowd:clear};
         p.goal=agent.goal;
-        const gate=admission?.request(p,from,route,cursor);
+        const gate=admission?.request(p,from,route,cursor,exit);
         const target=gate?.hold??gate?.guide??wanted, span=distance(from,target);
         const budget=gate?.hold||gate?.guide?maxDistance:distance(from,wanted);
         const step=Math.min(budget,span);
@@ -122,7 +122,7 @@
         });
         return safe;
       }
-      return {move,commit,canRelocate,finish:()=>admission?.finish()??state};
+      return {move,commit,canRelocate,exitGoal:agent=>admission?.exitGoal(people.get(agent.id)),finish:()=>admission?.finish()??state};
     }
     function validateAgent(state){
       check(record(state)&&statuses.includes(state.status)&&

@@ -19,11 +19,13 @@
       const collections=new Map();
       for(const slot of S.order(roster)){
         const row=S.read(roster,slot);
-        const key=[row.species,...row.position.map(n=>Math.floor(n/cell)),...row.goal.map(n=>Math.floor(n/goalCell))].join('/');
+        const holdsOrder=W.agentOrders.holding(row.orders);
+        const goal=holdsOrder?row.position:row.goal;
+        const key=[row.species,holdsOrder?'orders':'motion',...row.position.map(n=>Math.floor(n/cell)),...goal.map(n=>Math.floor(n/goalCell))].join('/');
         if(!collections.has(key))collections.set(key,{species:row.species,members:[],sum:[0,0,0],destination:[0,0,0]});
         const group=collections.get(key);
         group.members.push(row.id);
-        for(let i=0;i<3;i++){group.sum[i]+=row.position[i];group.destination[i]+=row.goal[i];}
+        for(let i=0;i<3;i++){group.sum[i]+=row.position[i];group.destination[i]+=goal[i];}
       }
       const memberGroup={}, groups=[];
       for(const {species,members,sum,destination} of collections.values()){

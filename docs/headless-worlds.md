@@ -33,6 +33,9 @@ test free space, and discover usable sockets on the same snapshot.
 [Incremental navigation tiles](navigation-tiles.md) share walking
 routes and recompute crossings affected by local changes.
 
+[Agent orders](agent-orders.md) schedule and inspect reusable tasks with
+movement, waits, events, and conservative transfers.
+
 [First-divergence debugging](first-divergence.md) compares timelines
 tick by tick and reports actual inputs and changed state paths.
 
@@ -716,7 +719,7 @@ reaches the feeder.
 | `routed-links` | Socket-to-socket cables, hoses and belt loops with guide points, slack, tension, break limits, typed signals, torque transmission and conservative transfers. |
 | `navigation` | Bounded walking, swimming or flying route traces. Ground search can take depth, clearance and wear into account. Hosts can also expose the volumetric traversal graph. |
 | `habitat` | Authored species rules evaluate world fields and nearby or reachable resources. Probes return a score, suitability and the reasons behind the decision. |
-| `agents` | Ground, swim and flight movement with replanning, scene-aware destinations and optional limb contacts. [Agent storage and lifecycle](agent-storage.md) covers runtime spawning, removal, and packed component queries. Add [activity decisions](agent-decisions.md) for prioritized goals and confirmed arrivals. |
+| `agents` | Ground, swim and flight movement with replanning, scene-aware destinations and optional limb contacts. [Agent storage and lifecycle](agent-storage.md) covers runtime spawning, removal, and packed component queries. Add [activity decisions](agent-decisions.md) for prioritized goals or [orders](agent-orders.md) for queued tasks and outcomes. |
 | `wear` | Optional wear from contact-producing systems or submitted contact batches. Track local accumulation and recovery, and use `enabled` to control updates. Trace a durable route and promote it with `scene promote <run> <trace> --as id`, supplying its endpoints through `--at` and JSON `--args`. |
 
 Water handles one surface column per XZ cell. Keep a simulation's resolution

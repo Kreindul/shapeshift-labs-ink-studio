@@ -75,7 +75,8 @@
           const option=own(tier.instances,system)?{...tier.overrides[kind],...tier.instances[system]}:tier.overrides[kind];
           const defined=cadence(tier,schedule??{});
           const clock=cadence(option??{},defined), tuning=option?.tuning??{};
-          check(!provider.requestTransfers||clock.substeps===1,'Transfer producers need one substep inside a simulation chunk');
+          check(!provider.requestTransfers||provider.receiveTransfers||clock.substeps===1,
+            'Transfer producers need one substep inside a simulation chunk');
           check(!Object.keys(tuning).length||typeof provider.checkSimulationLOD==='function',
             'Solver does not support simulation detail tuning: '+system);
           provider.checkSimulationLOD?.(tuning,{...clock,dt:world.dt});

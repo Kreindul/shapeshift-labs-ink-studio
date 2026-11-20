@@ -32,12 +32,12 @@
 
   function bind(systems) {
     if (plans.has(systems)) return plans.get(systems);
-    const accounts = new Map(), producers = [];
+    const accounts = new Map(), producers = [], queued = [];
     for (const system of Object.keys(systems).sort()) {
       const provider = systems[system];
       if (provider.requestTransfers !== undefined) {
         check(typeof provider.requestTransfers === 'function','Invalid transfer producer '+system);
-        producers.push(system);
+        (provider.receiveTransfers?queued:producers).push(system);
       }
       const definitions = provider.accounts ?? {};
       check(record(definitions),'Invalid transfer account table for '+system);
@@ -131,7 +131,7 @@
       }
     }
 
-    const plan = Object.freeze({size:accounts.size,producers:Object.freeze(producers),validate,inspect,settle,validateReceipts,
+    const plan = Object.freeze({size:accounts.size,producers:Object.freeze([...producers,...queued]),validate,inspect,settle,validateReceipts,
       validateBalances(states) {
         for (const account of accounts.values()) quote(account,states[account.system]);
       },

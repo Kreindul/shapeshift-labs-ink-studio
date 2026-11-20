@@ -7,7 +7,7 @@
 
   function define(provider,spec,label){
     check(record(spec)&&id(spec.model)&&typeof provider.step==='function'&&
-      typeof provider.simulationAggregate==='function'&&!provider.requestTransfers,
+      typeof provider.simulationAggregate==='function'&&(!provider.requestTransfers||provider.receiveTransfers),
       'Unsupported aggregate simulation model for '+label);
     const {preserve,...settings}=spec, adapter=provider.simulationAggregate(settings);
     check(record(adapter)&&['reduce','expand','step','measure','validate'].every(key=>typeof adapter[key]==='function')&&
@@ -79,6 +79,9 @@
       const descriptors=(rows,hook,verb)=>Object.fromEntries(Object.entries(rows).map(([key,row])=>
         [key,{...row,[verb]:ctx=>dispatch(ctx,key,hook,row[verb])}]));
       systems[name]={...provider,
+        ...(provider.receiveTransfers&&{requestTransfers(state,ctx,limit){
+          return using(state)||models.has(ctx.simulationLOD?.level)?[]:provider.requestTransfers(state,ctx,limit);
+        }}),
         ...(provider.fields&&{fields:descriptors(provider.fields,'fields','read')}),
         ...(provider.traces&&{traces:descriptors(provider.traces,'traces','run')}),
         ...(provider.actions&&{actions:Object.fromEntries(Object.entries(provider.actions).map(([key,action])=>

@@ -658,18 +658,26 @@
           const input = currentValues(name,nextManual,{},outputs,delays);
           const timing=detail&&{start:0,end:1,every:detail.every,substeps:1,substep:1,detail};
           const ctx = context(name,nextWorld,before,at,input,makeEmit(name),requestQuery,undefined,timing||undefined);
-          const planned = systems[name].requestTransfers(before[name],ctx);
+          const planned = systems[name].requestTransfers(before[name],ctx,Math.max(0,W.transfers.limit-requests.length));
           check(Array.isArray(planned) && planned.length + requests.length <= W.transfers.limit,
             'Expected a bounded transfer request list from '+name);
           for (const request of planned) requests.push({name,request});
         }
       }
       check(requests.length <= W.transfers.limit,'Transfer request budget exceeded');
+      let confirmations;
       const receipts = requests.length ? rootedState(requests.map(({name,request,root})=>{
         const receipt = transfers.settle(drafts,request,at,name,rootedState);
         makeEmit(name,undefined,root)('transfer',receipt);
+        if(systems[name]?.receiveTransfers){
+          confirmations??=new Map();
+          if(!confirmations.has(name))confirmations.set(name,[]);
+          confirmations.get(name).push(receipt);
+        }
         return receipt;
       })) : [];
+      for(const [name,confirmed] of confirmations??[])
+        drafts[name]=rootedState(systems[name].receiveTransfers(drafts[name],confirmed,{tick:at,emit:makeEmit(name)}));
       let nextSpatial = spatialSampling;
       if (slowReaders.size && (trace || Object.keys(spatialSampling).length)) {
         nextSpatial = {...spatialSampling};

@@ -149,7 +149,7 @@
         const ranks={a:0,b:0};
         for(const x of all)if(!holders.has(x.agent))row.ranks.set(x.agent,ranks[x.side]++);
       }
-      function request(person,from,route,cursor){
+      function request(person,from,route,cursor,exit){
         let best, gap=Infinity, held;
         nearby(from,from,person.radius,g=>{
           const row=working.get(g.name), holder=row.holders.get(person.id);
@@ -162,7 +162,7 @@
         if(held){
           const {row,holder}=held, {g}=row, side=holder.side;
           const [goal]=local(g,person.goal);
-          if(!side||!live(holder,person)||(side==='a'?goal<=g.length:goal>=0))
+          if(!side||!exit&&(!live(holder,person)||(side==='a'?goal<=g.length:goal>=0)))
             return {gate:g.name,status:'crossing'};
           if(!holder.entered){
             for(const prior of row.holders.values()){
@@ -183,6 +183,19 @@
         const {row,side}=best, old=row.waiting.get(person.id);
         row.next.set(person.id,receipt(person,side,old?.side===side?old.since:ctx.tick));
         return {gate:row.g.name,status:'queued',hold:holding(row.g,person,side,row.ranks.get(person.id)??0)};
+      }
+      function exitGoal(person){
+        if(!person)return;
+        let point;
+        nearby(person.position,person.position,person.radius,g=>{
+          const holder=working.get(g.name).holders.get(person.id);
+          if(!point&&holder?.entered&&holder.side){
+            const pad=Math.max(person.radius*1.35,.28);
+            point=at(g,holder.side==='a'?g.length+pad:-pad,0);
+            point[1]=person.position[1];
+          }
+        });
+        return point;
       }
       function pass(person,a,b){
         let safe=true;
@@ -220,7 +233,7 @@
         }
         return result;
       }
-      return {request,pass,crossed,finish};
+      return {request,exitGoal,pass,crossed,finish};
     }
     function report(state){
       return Object.fromEntries([...gates].map(([name,g])=>[name,{from:g.from,to:g.to,width:g.half*2,
