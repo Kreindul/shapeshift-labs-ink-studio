@@ -185,6 +185,89 @@ field, takes the apparent wind along the sail's local `axis`, and
 applies a two-sided pressure force. Set `field` to the field name and
 `units` to the expected velocity unit (default `world/s`).
 
+## Conservative transfers between systems
+
+Systems can expose named accounts. A transfer debits one account and
+credits another with the same accepted quantity. A request names two
+`system/account` endpoints and an amount. Both endpoints must agree
+on the resource, unit string, and quantity type. Accounts support
+continuous numbers, safe integers for countable items, and signed
+`vec2` or `vec3` quantities such as momentum.
+
+- `store` defines accounts with `resource`, `units`, `initial`, and
+  optional `type`, `min`, and `max`. Numeric accounts default to a
+  zero lower bound. Vector accounts default to signed, unbounded
+  components. Specify vector bounds per component, using `null` for
+  unbounded components.
+- `exchange` defines named links with `from`, `to`, and either an
+  `amount` per tick or a `rate` per second. A Boolean input named
+  after each link controls whether it submits requests. It starts
+  enabled unless the link declares `"enabled":false`.
+- A `water` system can expose named cells with
+  `"accounts":{"outlet":[0.5,0.5]}`. Each account reads and writes a
+  cell's actual water volume in `world^3`. The basin's mass probe counts
+  account transfers in `received` and `sent`. Incoming water starts
+  at rest, and withdrawing volume preserves the remaining water's
+  velocity. The solver can then evolve the basin normally.
+
+The default `partial` mode moves as much as the source can supply and
+the destination can hold. Use `"mode":"exact"` to require the whole
+amount. A clipped vector keeps its direction. If a move would round
+away at either endpoint, both balances stay intact and the receipt
+reports the precision limit.
+
+The runtime applies ordinary commands, then settles scheduled
+`world/transfer` requests in command order. System-generated requests
+follow in system ID order and preserve each producer's own order.
+Each request sees the balances left by earlier requests in that tick.
+Producers all read the same pre-transfer snapshot and the input
+values available at the start of the tick. Solvers step from the
+settled snapshot. A failed endpoint write aborts the tick, including
+any earlier transfers. Checkpoints and replay preserve receipts.
+
+The [transfer station](../examples/world-transfers.json) requests
+five cubic world units from a shallow-water basin. The cistern has
+room for two, so the basin drops from eight to six while the tank
+rises from eight to ten. The next pump request moves zero. The same
+scene demonstrates capped heat storage, exact and partial integer
+shipments, and signed vector transfers.
+
+```sh
+ink-studio inspect examples/world-transfers.json
+ink-studio probe examples/world-transfers.json --ticks 1 --field world/transfers
+ink-studio probe examples/world-transfers.json --ticks 1 --field basin/mass
+ink-studio probe examples/world-transfers.json --ticks 2 --field world/account --args '{"account":"cistern/water"}'
+ink-studio render examples/conservative-transfer.js --out transfer-station.png
+```
+
+`world/transfers` reports the latest tick's receipts with requested
+and applied quantities, status, and limiting endpoint. The runtime
+also emits a `transfer` event for each receipt, so `world/history` can
+filter earlier transfers even after the run advances.
+
+A custom system exposes the same interface through its factory. An
+account's `read` returns its balance and current bounds. Its `write`
+receives the new absolute balance and returns the updated JSON state.
+Both functions operate on the supplied snapshot. A writer updates
+only its account and any associated bookkeeping.
+
+```js
+accounts: {
+  heat: {
+    resource: 'thermal-energy',
+    units: 'J',
+    type: 'number',
+    read: state => ({balance: state.joules, max: state.capacity}),
+    write: (state, balance) => ({...state, joules: balance})
+  }
+}
+```
+
+To drive requests from a model, implement
+`requestTransfers(state, context)` and return an array of
+`{from, to, amount, mode?, id?}` objects. Use `checkTransfers(validate)`
+to validate fixed endpoint references during world validation.
+
 ## Author a world
 
 A manifest has `format: "ink-studio/world"`, `version: 1`, a stable `id`,
@@ -215,7 +298,8 @@ asset-pack IDs or exact revisions. `scene remix` modifies a definition and
 `scene capture` saves a placed, edited assembly under a new prefab ID.
 
 `world/input` drives an unconnected typed input, `world/patch` edits live
-entity and metadata records, and `world/event` emits a named event. Each
+entity and metadata records, `world/event` emits a named event, and
+`world/transfer` queues a conservative account transfer. Each
 scheduled command has a positive integer `tick`, an `action`, and an
 optional `args` object. Commands scheduled for one tick run in order. All
 stepping systems read a common snapshot after that tick's commands. A
@@ -236,6 +320,8 @@ reaches the feeder.
 | --- | --- |
 | `fields` | Typed spatial fields with defaults, grids, regions and a `set` action. |
 | `control` | Typed arithmetic, thresholds, selection, binary logic, pulses, latches, timers and hysteresis. |
+| `store` | Bounded numeric, integer, or vector accounts with named resources and units. |
+| `exchange` | Enabled links that request a fixed amount per tick or a rate per second. |
 | `water` | Bounded XZ shallow water with live bed edits, fractional face openings, conservative pump transfer, sensors and probes for the bed, depth, current and volume. An `obstacle` field may supply signed solid clearance. |
 | `mechanics` | Oriented box bodies and shared clearance or support queries, fixed and powered mounts, transmission ratios and stall reports, physical separation, configurable fracture, wheel traction, buoyancy, thrust and sail forces. |
 | `navigation` | Bounded walking, swimming or flying route traces. Ground search can take depth, clearance and wear into account. Hosts can also expose the volumetric traversal graph. |

@@ -6,6 +6,7 @@
   const clock = () => typeof performance === 'undefined' ? Date.now() : performance.now();
   const tickOK = value => Number.isSafeInteger(value) && value >= 0 && value <= 10000000;
   const ordered = value => Object.keys(value).sort();
+  const worldActions = ['input','patch','event','transfer'];
   const checkpointFormat = 'ink-studio/checkpoint', runFormat = 'ink-studio/run';
 
   function register(kind, factory) {
@@ -51,6 +52,8 @@
       const query = Q.create({world},systems);
       for (const system of consumers) system.checkFields(query);
     }
+    const transfers = W.transfers.bind(systems);
+    for (const name of transfers.producers) systems[name].checkTransfers?.(transfers.validate);
     const incoming = new Map(), edges = new Map(), indegree = new Map();
     for (const name of ordered(systems)) {
       edges.set(name,[]);
@@ -82,7 +85,7 @@
       }
     }
     check(order.length === names.length, 'Instantaneous signal cycle; use a delay or a stateful system');
-    return {world,systems,ports,incoming,order,names};
+    return {world,systems,ports,incoming,order,names,transfers};
   }
   function actionCheck(raw, plan, min = 1) {
     check(record(raw) && tickOK(raw.tick) && raw.tick >= min && record(raw.args ?? {}) &&
@@ -90,7 +93,7 @@
     const [system,key] = endpoint(raw.action);
     let args = raw.args ?? {};
     if (system === 'world') {
-      check(['input','patch','event'].includes(key), 'Unknown world action ' + key);
+      check(worldActions.includes(key), 'Unknown world action ' + key);
       if (key === 'input') {
         args={...args,port:portOf(plan.world,args.port)};
         check(!plan.incoming.has(args.port), 'A connected input is driven by its source: ' + args.port);
@@ -100,7 +103,8 @@
           record(edit)&&['set','remove','merge','test'].includes(edit.op)&&(edit.op==='remove'||own(edit,'value'))&&
           ['entities','metadata'].includes(W.data.selector(edit.path)[0])),
         'Live patches may change entities and metadata');
-      } else check(id(args.kind), 'An event needs a kind');
+      } else if (key === 'transfer') plan.transfers.validate(args);
+      else check(id(args.kind), 'An event needs a kind');
     } else {
       check(own(plan.systems[system]?.actions,key), 'Unknown action ' + raw.action);
       plan.systems[system].checkAction?.(key,args);
@@ -115,7 +119,7 @@
       (scenario.until === undefined || tickOK(scenario.until)), 'Invalid scenario specification');
     for (const name of scenario.allow ?? []) {
       const [system,action] = endpoint(name);
-      check(system === 'world' ? ['input','patch','event'].includes(action) : own(plan.systems[system]?.actions,action),
+      check(system === 'world' ? worldActions.includes(action) : own(plan.systems[system]?.actions,action),
         'Unknown allowed action ' + name);
     }
     const ids = new Set();
@@ -164,7 +168,7 @@
       world=result.world;
     }
     const {plan}=result;
-    const {systems,ports,incoming,order,names} = plan;
+    const {systems,ports,incoming,order,names,transfers} = plan;
     const projection = Q.projection(systems);
     const rootInputs = Object.fromEntries(Object.entries(ports.inputs).map(([name,port]) => [name,port.default]));
     const rootOutputs = Object.fromEntries(Object.entries(ports.outputs).map(([name,port]) => [name,port.default]));
@@ -176,10 +180,11 @@
     const historyLimit = world.history?.limit ?? 10000;
     let tick = 0, states = {}, outputs = rootOutputs, manual = rootInputs, delays = rootDelays,
       history = [], dropped = 0, lastEvents = [], scenario = {status:'running',score:0,matched:{},metrics:{}};
-    let currentQuery, lastSignals = {...rootInputs,...rootOutputs};
+    let currentQuery, lastTransfers = [], lastSignals = {...rootInputs,...rootOutputs};
 
-    function view(worldValue = world, statesValue = states, signals = lastSignals, tickValue = tick) {
-      return Object.freeze({world:worldValue,states:statesValue,signals,tick:tickValue,time:tickValue*worldValue.dt,history,dropped});
+    function view(worldValue = world, statesValue = states, signals = lastSignals, tickValue = tick, receipts = lastTransfers) {
+      return Object.freeze({world:worldValue,states:statesValue,signals,tick:tickValue,time:tickValue*worldValue.dt,history,dropped,
+        ...(receipts.length && {transfers:receipts})});
     }
     function context(name, worldValue, statesValue, at, input, emit, query) {
       return Object.freeze({world:worldValue,query,id:name,states:statesValue,tick:at,time:at*worldValue.dt,dt:worldValue.dt,
@@ -230,7 +235,8 @@
     }
     function save() {
       return freeze({format:checkpointFormat,version:1,tick,world,states,outputs,manual,delays,history,dropped,
-        signals:lastSignals,events:lastEvents,pending:packCommands(),scenario});
+        signals:lastSignals,events:lastEvents,pending:packCommands(),scenario,
+        ...(lastTransfers.length && {transfers:lastTransfers})});
     }
     function restore(saved) {
       check(record(saved) && saved.format === checkpointFormat && saved.version === 1 && equal(saved.world,world) && tickOK(saved.tick),
@@ -249,6 +255,9 @@
         for (const value of payload.delays[name]) portValue(ports.inputs[name],value,name);
       }
       for (const name of names) systems[name].validateState?.(payload.states[name]);
+      transfers.validateBalances(payload.states);
+      if (own(payload,'transfers')) transfers.validateReceipts(payload.transfers,payload.tick);
+      lastTransfers = payload.transfers ?? [];
       ({tick,states,outputs,manual,delays,history,dropped,scenario,signals:lastSignals,events:lastEvents} = payload);
       enqueue(payload.pending,false);
     }
@@ -258,6 +267,7 @@
       for (const name of names) states[name] = rootedState(systems[name].initial(
         context(name,world,Object.freeze({}),0,{},() => {},initialQuery)));
       states = freeze(states);
+      transfers.validateBalances(states);
       const startQuery = Q.create(view(),systems,projection);
       const initialOutputs = {};
       for (const name of names) readOutputs(name,states[name],context(name,world,states,0,{},() => {},startQuery),initialOutputs);
@@ -301,7 +311,7 @@
       const at = tick+1, commands = scheduled.get(at) ?? [], events = [];
       check(tickOK(at),'Tick budget exceeded');
       let nextWorld = world, changedEntities = new Set();
-      const drafts = {...states}, nextManual = {...manual};
+      const drafts = {...states}, nextManual = {...manual}, requests = [];
       const makeEmit = system => (kind,detail = {}) => {
         check(id(kind) && record(detail) && events.length < 10000, 'Invalid event or per-tick event budget exceeded');
         events.push(freeze({...copy(detail),kind,system,tick:at,id:at+'.'+events.length}));
@@ -327,6 +337,7 @@
             const {kind,...detail} = item.args;
             emit(kind,detail);
           }
+          if (key === 'transfer') requests.push({name,request:item.args});
         } else {
           const actionQuery = Q.create(view(nextWorld,{...drafts}),systems,projection);
           const ctx = context(name,nextWorld,Object.freeze({...drafts}),at,{},emit,actionQuery);
@@ -334,8 +345,26 @@
         }
       }
       projection?.change(world.entities,nextWorld.entities,changedEntities);
+      if (transfers.producers.length) {
+        const before = Object.freeze({...drafts});
+        const requestQuery = Q.create(view(nextWorld,before,lastSignals,at,[]),systems,projection);
+        for (const name of transfers.producers) {
+          const input = currentValues(name,nextManual,{},outputs,delays);
+          const ctx = context(name,nextWorld,before,at,input,makeEmit(name),requestQuery);
+          const planned = systems[name].requestTransfers(before[name],ctx);
+          check(Array.isArray(planned) && planned.length + requests.length <= W.transfers.limit,
+            'Expected a bounded transfer request list from '+name);
+          for (const request of planned) requests.push({name,request});
+        }
+      }
+      check(requests.length <= W.transfers.limit,'Transfer request budget exceeded');
+      const receipts = requests.length ? rootedState(requests.map(({name,request})=>{
+        const receipt = transfers.settle(drafts,request,at,name,rootedState);
+        makeEmit(name)('transfer',receipt);
+        return receipt;
+      })) : [];
       const committed = freeze(drafts);
-      const previousQuery = Q.create(view(nextWorld,committed),systems,projection);
+      const previousQuery = Q.create(view(nextWorld,committed,lastSignals,tick,receipts),systems,projection);
       const immediate = {}, nextStates = {}, nextOutputs = {}, observed = {}, spent = {};
       for (const name of order) {
         const system = systems[name];
@@ -352,7 +381,7 @@
         [edge.to,[...delays[edge.to].slice(1),nextOutputs[edge.from]]]));
       const publishedSignals = freeze({...observed,...nextOutputs});
       const memory = historyWith(events,nextWorld.history);
-      const nextScenario = evaluateScenario({...view(nextWorld,freeze(nextStates),publishedSignals,at),...memory},events);
+      const nextScenario = evaluateScenario({...view(nextWorld,freeze(nextStates),publishedSignals,at,receipts),...memory},events);
       tick = at;
       world = nextWorld;
       states = nextStates;
@@ -363,6 +392,7 @@
       history = memory.history;
       dropped = memory.dropped;
       lastEvents = freeze(events);
+      lastTransfers = receipts;
       scenario = nextScenario;
       scheduled.delete(at);
       currentQuery = undefined;

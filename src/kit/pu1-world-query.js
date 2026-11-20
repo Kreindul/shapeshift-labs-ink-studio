@@ -121,6 +121,7 @@
     const base = {world, states, signals, tick, time:view.time ?? tick * world.dt};
     const locations = new Map(), active = new Set();
     let spatialIndex, aliases, appearance;
+    const transfers = () => W.transfers.bind(systems);
     const look = () => appearance ??= W.lookQuery(visual ?? (() => W.visual({makeBuilder,makeSculpt},view,api)),base.time);
 
     function location(id) {
@@ -192,6 +193,11 @@
           (entity===undefined||[event.entity,event.body,event.place].includes(entity))&&condition(where,event));
         return ok({events:events.slice(0,limit),matched:events.length,dropped});
       }},
+      account:{type:'record',read:({args}) => {
+        const balance = transfers().inspect(states,args.account);
+        return balance ? ok(balance) : missing('unknown transfer account','missing');
+      }},
+      transfers:{type:'record',read:()=>ok({tick:view.transfers?.[0]?.tick??tick,receipts:view.transfers??[]})},
       signal:{type:'value',read:({args}) => {
         const port=typeof args.port==='string'?portOf(world,args.port):null;
         return own(signals,port)?ok(signals[port]):missing('unknown signal port');
@@ -278,10 +284,12 @@
         const row = {...world.entities[id],id};
         return condition(where,row) ? [row] : [];
       });
-      return {tick,time:base.time,entities,fields:describe(fields),traces:describe(traces),systems:sorted(systems).map(id => ({
+      const accounts = transfers().describe();
+      return {tick,time:base.time,entities,fields:describe(fields),traces:describe(traces),
+        ...(accounts.length && {accounts}),systems:sorted(systems).map(id => ({
         id,...world.systems[id],inputs:systems[id].inputs ?? {},outputs:systems[id].outputs ?? {},
         actions:sorted(systems[id].actions ?? {})
-      })),actions:['world/input','world/patch','world/event']};
+      })),actions:['world/input','world/patch','world/event',...(accounts.length ? ['world/transfer'] : [])]};
     }
     function spatial({point,radius,where} = {}) {
       check(vector(point) && Number.isFinite(radius) && radius >= 0, 'Expected a finite spatial query');

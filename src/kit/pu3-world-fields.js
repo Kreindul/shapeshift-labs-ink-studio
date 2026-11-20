@@ -133,7 +133,7 @@
     const [dx,dz] = Array.isArray(cell) ? cell : [cell,cell];
     check(Number.isSafeInteger(width) && Number.isSafeInteger(height) && width>0 && height>0 && width*height<=65536 &&
       [dx,dz].every(n => Number.isFinite(n)&&n>0) && vector(origin,2),'Water needs a bounded XZ grid');
-    const cellArea=dx*dz;
+    const cellArea=dx*dz, maxDepth=2000;
     const index = (x,z) => {
       const ix=Math.floor((x-origin[0])/dx), iz=Math.floor((z-origin[1])/dz);
       return ix>=0 && ix<width && iz>=0 && iz<height ? iz*width+ix : -1;
@@ -176,7 +176,7 @@
       return byFace.get(cache);
     }
     function makeSolver(withTerrain = false) {
-      return P.motion.shallowWater({width,height,cell,origin,
+      return P.motion.shallowWater({width,height,cell,origin,maxDepth,
         ...(withTerrain?{terrain:(x,z)=>regions(bed,[x,z],config.base??0),initial:(x,z)=>regions(seed,[x,z])}:{})});
     }
     const solver = makeSolver();
@@ -203,15 +203,51 @@
         return {status:'ok',value:hit[key],...(explain && {source:{kind:'cell',cell:[cell%width,Math.floor(cell/width)]}})};
       });
     }
+    const access = config.accounts ?? {}, accounts = {}, usedCells = new Set();
+    check(record(access) && Object.keys(access).length <= 512,'Invalid water transfer accounts');
+    for (const [name,point] of Object.entries(access)) {
+      check(id(name) && vector(point,2) && index(...point) >= 0,'Water account needs an XZ point within its grid');
+      const cell = index(...point);
+      check(!usedCells.has(cell),'Water transfer accounts must use distinct cells');
+      usedCells.add(cell);
+      accounts[name] = {resource:'water',units:'world^3',type:'number',
+        read(state) {return {balance:state.fluid.depth[cell]*cellArea,max:maxDepth*cellArea};},
+        write(state,balance) {
+          const old = state.fluid.depth[cell], level = Math.min(maxDepth,balance/cellArea);
+          const amount = level*cellArea-old*cellArea;
+          const depth = state.fluid.depth.slice();
+          depth[cell] = level;
+          let {mx,mz} = state.fluid;
+          if (level < old) {
+            mx = mx.slice(); mz = mz.slice();
+            mx[cell] *= level/old; mz[cell] *= level/old;
+          }
+          const {sent,received} = state.exchange;
+          return {...state,fluid:{...state.fluid,depth,mx,mz},
+            exchange:{sent:sent+Math.max(0,-amount),received:received+Math.max(0,amount)}};
+        }};
+    }
+    const exchanging = usedCells.size > 0;
     function metric({state}) {
       const {depth,startVolume,added,drained,moved}=state.fluid;
       const volume=depth.reduce((a,b)=>a+b,0)*cellArea;
-      return Q.ok({volume,initial:startVolume,added,drained,transferred:moved,error:volume-startVolume-added+drained});
+      const error = volume-startVolume-added+drained;
+      const exchange = state.exchange;
+      return Q.ok({volume,initial:startVolume,added,drained,transferred:moved,
+        ...(exchange && {received:exchange.received,sent:exchange.sent}),
+        error:exchange ? error-exchange.received+exchange.sent : error});
     }
     const terrainQuery=config.obstacle;
     check(terrainQuery===undefined || typeof terrainQuery==='string','Invalid obstacle field');
-    return {inputs,outputs,initial:() => ({fluid:makeSolver(true).checkpoint(),gate:gateInit,pump:pumpInit,terrain:[],manual:{}}),
-      validateState(state){solver.restore(state.fluid);},
+    return {inputs,outputs,...(exchanging && {accounts}),
+      initial:() => ({fluid:makeSolver(true).checkpoint(),gate:gateInit,pump:pumpInit,terrain:[],manual:{},
+        ...(exchanging && {exchange:{sent:0,received:0}})}),
+      validateState(state) {
+        solver.restore(state.fluid);
+        if (exchanging) check(record(state.exchange) &&
+          [state.exchange.sent,state.exchange.received].every(value=>Number.isFinite(value) && value>=0),
+        'Invalid water transfer balance');
+      },
       checkAction(type,args){
         if(type==='bed')patchList([{bounds:args.bounds,value:args.height}],2);
         if(type==='gate')check(own(gates,args.gate)&&Number.isFinite(args.opening)&&args.opening>=0&&args.opening<=1,'Invalid gate command');
