@@ -287,6 +287,15 @@
       return out;
     }
     let surfaceEffects;
+    if (st.finish.skyEnvironment !== undefined && st.finish.skyEnvironment !== false) {
+      try {
+        SkyEnvironment.compile(st.finish.skyEnvironment);
+      } catch (error) {
+        bad('finish.skyEnvironment', error.message);
+      }
+    }
+    if (st.finish.skyReflections !== undefined && !['scene', 'material'].includes(st.finish.skyReflections))
+      bad('finish.skyReflections', 'skyReflections must be scene or material');
     if (st.finish.surfaceEffects !== undefined) {
       try {
         surfaceEffects = K.splatEffects.context(st.finish.surfaceEffects);

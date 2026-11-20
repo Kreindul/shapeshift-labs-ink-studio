@@ -207,8 +207,12 @@
         const view = center ? K.V.sub(K.V.add(center,
           [dist * Math.cos(pitch) * Math.sin(yaw), dist * Math.sin(pitch), dist * Math.cos(pitch) * Math.cos(yaw)]), worldPosition) : [0, 1, 0];
         const tangent = Array.from(surface.subarray(surfaceOffset + 5, surfaceOffset + 8));
-        const layers = [];
-        const shaded = SurfaceLook.shade(surfaces.get(slot), { ...site, normal, view, ...(tangent.some(Boolean) && { tangent }),
+        const layers = [], prepared = surfaces.get(slot);
+        const sky = world.skyEnvironment && prepared.layers.some(layer =>
+          layer.type === 'reflection' && (world.skyReflections ?? layer.source) === 'scene') &&
+          SkyEnvironment.compile(world.skyEnvironment).frame(site.time).sky;
+        const shaded = SurfaceLook.shade(prepared, { ...site, normal, view, ...(tangent.some(Boolean) && { tangent }),
+          ...(sky && { sky: (direction, output) => SkyEnvironment.shade(sky, direction, output), skyReflectionSource: world.skyReflections }),
           depth: Math.hypot(...view),
           visibility: surface[surfaceOffset + 4] }, color, [0, 0, 0, 1, 0, undefined], layers);
         color = shaded.slice(0, 3);

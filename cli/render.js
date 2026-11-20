@@ -33,6 +33,7 @@ const LightSchedule = require('../src/light-schedule.js');
 const LiveSun = require('./live-sun.js');
 const surfaceShading = require('./surface-shading.js');
 const SceneOptics = require('../src/scene-optics.js');
+const SkyEnvironment = require('../src/sky-environment.js');
 const { cameraRays, surfacePoint, reflectionSampler, atmosphereQuality, mediaSampler, applyAtmosphere } = require('./scene-optics.js');
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x),
   sstep = (a, b, x) => {
@@ -281,6 +282,15 @@ function render(world, o, preparedPalettes) {
   const motionReference = centers && { w: W, h: H, centers };
   const art = createArtPasses([...passSelection].filter(name => name !== 'target' && name !== 'mask'), W, H);
   const rayAt = cameraRays(V, eye, W, H, focal, ortho);
+  const skySource = o.skyEnvironment ?? world.skyEnvironment;
+  const sky = skySource ? SkyEnvironment.compile(skySource).frame(o.skyTime ?? t, o.skyProfiles).sky : null;
+  const skySample = sky && ((direction, out) => SkyEnvironment.shade(sky, direction, out));
+  const skyRay = sky && !transparent && !o.captureCoverage ?
+    cameraRays(V, eye, W, H, ortho ? H * .5 / Math.tan(sky.orthoFov * .5) : focal, false) : null;
+  const skyColor = skyRay && [0, 0, 0];
+  const skyReflectionSource = o.skyReflections ?? world.skyReflections;
+  if (skyReflectionSource !== undefined && !['scene', 'material'].includes(skyReflectionSource))
+    throw new RangeError('Sky reflections source must be scene or material');
   const horizon = eyeD + 2 * R;
   const atmosphereOptions = () => {
     const quality = atmosphereQuality({ ...world.volumeQuality, ...o.volumeQuality });
@@ -328,6 +338,8 @@ function render(world, o, preparedPalettes) {
     eye,
     forward: [V[2], V[6], V[10]],
     reflection,
+    sky: skySample,
+    skyReflectionSource,
     parallel: ortho ? [V[2], V[6], V[10]] : null,
     footprint: (dist * 2) / (tp * H),
     time: t,
@@ -491,7 +503,8 @@ function render(world, o, preparedPalettes) {
     dep = new Float32Array(W * H),
     gls = new Float32Array(W * H);
   for (let i = 0; i < W * H; i++) {
-    const backdrop = rayMedia ? rayMedia.shade(i, horizon, bg) : bg;
+    const background = skyRay ? skySample(skyRay(i % W + .5, Math.floor(i / W) + .5).direction, skyColor) : bg;
+    const backdrop = rayMedia ? rayMedia.shade(i, horizon, background) : background;
     col[i * 3] = backdrop[0];
     col[i * 3 + 1] = backdrop[1];
     col[i * 3 + 2] = backdrop[2];
@@ -686,14 +699,15 @@ function render(world, o, preparedPalettes) {
     const planar = surface?.planar(i);
     const pixelSurface = PIX?.[i * 8] && !surface?.reveals(i) && (!planar || (al >= 1 && !(flags & 1)));
     const projected = surface?.projected(i);
-    const fragmentSurface = !pixelSurface && (planar || projected || liveNormal && hasSurface);
+    const reflectedSky = surface?.environment(i);
+    const fragmentSurface = !pixelSurface && (planar || projected || reflectedSky || liveNormal && hasSurface);
     const detailParticle = world.effectParticles?.some(({ first, count }) => i >= first && i < first + count);
     if (hasSurface && !pixelSurface && !fragmentSurface) {
       [r, g, b, coverage, glint, centerPalette] = surface.shade(i, x, y, z, x, y, z, r, g, b, undefined, undefined, lookPass?.surface);
     }
     const fogMix =
       !(flags & 2) && world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dn) * world.fog.max : 0;
-    const reflectInRaster = planar && !pixelSurface;
+    const reflectInRaster = (planar || reflectedSky) && !pixelSurface;
     const normal = fragmentSurface ? surface.surfaceNormal(i) : null;
     if (fogMix && !reflectInRaster && !staged?.lit && !liveNormal) {
       r += (fog[0] - r) * fogMix;

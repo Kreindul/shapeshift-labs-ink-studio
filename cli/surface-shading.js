@@ -22,7 +22,7 @@ function surfaceShading(world, options, camera) {
     }
     return rigFrames.get(part);
   }
-  const { eye, forward, parallel, footprint, time, reflection, blueNoise } = camera;
+  const { eye, forward, parallel, footprint, time, reflection, sky, skyReflectionSource, blueNoise } = camera;
   const { STRIDE } = SurfaceLook;
   const liveLight = camera.sun ?? (world.surfaceLight === undefined ? undefined :
     SurfaceLook.prepareLightTrack(world.surfaceLight)(time));
@@ -51,6 +51,9 @@ function surfaceShading(world, options, camera) {
     material =>
       reflection && material.layers.some(layer => layer.type === 'planarReflection' && reflection.has(layer.plane))
   );
+  const skyMaterials = sky && materials.map(material => material.layers.some(layer =>
+    layer.type === 'reflection' && (skyReflectionSource ?? layer.source) === 'scene'));
+  const environment = i => Boolean(skyMaterials?.[surfaceData[i * STRIDE] - 1]);
   const sample = {
     position: [0, 0, 0],
     worldPosition: [0, 0, 0],
@@ -58,7 +61,8 @@ function surfaceShading(world, options, camera) {
     view: [0, 0, 0],
     footprint,
     time,
-    visibility: 1
+    visibility: 1,
+    skyView: [0, 0, 0], skyReflectionSource
   };
   const rgb = [0, 0, 0];
   const result = [0, 0, 0, 1, 0];
@@ -125,6 +129,17 @@ function surfaceShading(world, options, camera) {
     view[0] = c * vx - s * vz;
     view[1] = parallel ? parallel[1] : eye[1] - y;
     view[2] = s * vx + c * vz;
+    sample.sky = environment(i) ? sky : undefined;
+    if (sample.sky) {
+      sample.skyView[0] = vx;
+      sample.skyView[1] = view[1];
+      sample.skyView[2] = vz;
+      // Finish normals are evaluated in the material frame. Reflect in world space.
+      sample.skyNormal = angle || frame ? n => {
+        const local = frame ? frame.apply(frame.normal, n) : n;
+        return [c * local[0] + s * local[2], local[1], c * local[2] - s * local[0]];
+      } : undefined;
+    }
     const [lx, ly, lz] = prepared.sun;
     sample.lightDirection = angle ? [c * lx - s * lz, ly, s * lx + c * lz] : undefined;
     if (frame) {
@@ -151,7 +166,7 @@ function surfaceShading(world, options, camera) {
   }
 
   return {
-    has, normalAt, surfaceNormal, planar, shade, palettes, constraints,
+    has, normalAt, surfaceNormal, planar, environment, shade, palettes, constraints,
     projected,
     reveals: i => materials[surfaceData[i * STRIDE] - 1]?.reveals
   };

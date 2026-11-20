@@ -1,4 +1,5 @@
 (function (K) {
+  K.skyEnvironment = SkyEnvironment;
   K.reflection = {
     plane: SceneOptics.plane,
     reflectedView: SceneOptics.reflectedView,

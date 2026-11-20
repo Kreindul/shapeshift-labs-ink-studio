@@ -203,6 +203,14 @@ const SurfaceLook = (() => {
       return bell(alignment, layer.roughness[0]) * Math.sqrt(clamp(q.nl * 2)) * q.light;
     },
     reflection(layer, q, col) {
+      const source = q.skyReflectionSource ?? layer.source;
+      if (source === 'scene' && q.sky) {
+        const normal = q.skyNormal ? unit(q.skyNormal(q.n), q.n) : q.n;
+        const view = q.skyView ? unit(q.skyView, normal) : q.v;
+        const twice = 2 * dot(normal, view);
+        q.sky(normal.map((v, i) => twice * v - view[i]), col);
+        return fresnel(q.nv, layer.f0 ?? 0.04, layer.power ?? 5);
+      }
       // A compact three-colour environment reflected in the sample normal.
       const up = q.n[1] * 2 * q.nv - q.v[1];
       const tint = up < 0 ? layer.ground : layer.sky;
@@ -387,6 +395,8 @@ const SurfaceLook = (() => {
           ],
           id
         );
+        if (layer.type === 'reflection' && layer.source !== undefined && !['scene', 'material'].includes(layer.source))
+          throw new RangeError(id + '.source must be scene or material');
         if (layer.type === 'planarReflection') {
           if (typeof layer.plane !== 'string' || !layer.plane.trim())
             throw new TypeError(id + '.plane must be a reflection plane ID');
@@ -485,6 +495,8 @@ const SurfaceLook = (() => {
       seed,
       geometricNormal,
       reflection: sample.reflection,
+      sky: sample.sky, skyReflectionSource: sample.skyReflectionSource,
+      skyNormal: sample.skyNormal, skyView: sample.skyView,
       nt: dot(n, half),
       nl: dot(n, sun),
       light: visibility

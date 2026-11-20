@@ -31,6 +31,8 @@ The receiving material limits the reflected area, including irregular outlines. 
 
 `K.reflection.material` adds a `planarReflection` layer named `mirror`. The layer takes the usual finish tint, `strength`, Fresnel `f0` and `power`, and optional finish masks. `distortion` controls how much a normal perturbation shifts the reflection in art pixels. `blur` is a small reflection filter radius in art pixels. Any finish normal, including `waves`, `noise` and ripple rings, can perturb the capture. Empty reflected pixels reveal the other finish layers and the base colour.
 
+For finishes that use the scene sky and its active profile, see [Shared sky reflections](shared-sky-reflections.md).
+
 The existing `reflection` finish type supplies a three-colour sky. It can be layered underneath a planar mirror. `K.reflection.reflectedView(matrix, plane)` supplies the mirrored column-major world-to-view transform to other renderers. `K.reflection.captureView(matrix, plane, eye)` also supplies the clipping equation `[nx, ny, nz, -dot(at, normal)]` and the clip bias. It returns `null` if the eye is on or behind the reflecting side's bias. Use `SurfaceLook.shade` with a `reflection(layer, normal, geometricNormal)` callback returning `{ rgb, coverage }` in 0–1.
 
 ## Ripple sources
