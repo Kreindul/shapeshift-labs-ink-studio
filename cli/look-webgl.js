@@ -32,7 +32,7 @@ try {
     const html = execFileSync(executable, ['--headless', '--no-first-run', '--disable-background-networking',
       '--allow-file-access-from-files', ...software,
       '--user-data-dir=' + path.join(temp, 'profile'), '--dump-dom', pathToFileURL(page).href],
-    { timeout: 120000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    { timeout: 120000, maxBuffer: 8 * 1024 * 1024, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     const output = /<pre id="result">([^<]*)<\/pre>/.exec(html)?.[1];
     if (!output || output === 'pending') throw new Error('Chrome did not complete the WebGL fixture page');
     const result = JSON.parse(decodeURIComponent(output));

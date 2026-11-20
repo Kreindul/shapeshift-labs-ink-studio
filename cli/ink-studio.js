@@ -704,7 +704,7 @@ const CMD = {
         '    [--bake clip.json] [--preview directory] [--at seconds|--frames count] [--direction index] [--out report.json]',
         '  retarget --profiles  show built-in role templates',
         '  passes <id> [--channels coverage,depth,normal,objectId,materialId,emission]  save art-pixel render pass previews',
-        '  environment-parity [--out directory --chrome executable]  compare matched CLI and WebGL environment frames',
+        '  environment-parity [--fixture observatory --out directory --chrome executable]  compare matched CLI and WebGL environment frames',
         '  passes <id> --channels environment --px1   export sky, fog transmittance, precipitation, reflections and foreground coverage',
         '  render|sheet|clip <id> or sim render <file> --passes environment   write environment passes beside the export',
         '  render|sheet|clip <id> --look pack/look|file.json|off [--passes target,mask,materialId]',
@@ -1257,7 +1257,7 @@ const CMD = {
   },
   'environment-parity'() {
     const parity = require('./environment-parity.js');
-    const result = parity.compare({chrome:opt.chrome,hardware:opt.hardware});
+    const result = parity.compare({chrome:opt.chrome,hardware:opt.hardware,fixture:opt.fixture});
     const directory = opt.out ? path.resolve(opt.out) : path.join(OUT,'environment-parity');
     parity.write(directory,result);
     for (const {id,mean,p95} of result.frames) console.log(id,mean.toFixed(3),'mean RGB byte error, p95',p95);

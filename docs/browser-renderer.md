@@ -227,6 +227,17 @@ ink-studio environment-parity --out studio/out/environment-parity
 
 The command writes matched raw CLI and WebGL frames at the same art resolution, camera and time, plus amplified pixel differences and JSON error measurements. Sky-only cases isolate the directional background. Card and fog cases use matching soft splat edges to compare the media and depth compositing.
 
+### Fog observatory test scene
+
+The [compact 3D fixture](../examples/environment-test-scene.js) puts a baked cloud card behind an opaque tower, with a translucent pane in front of a bounded fog box. Illuminated markers make the depth changes visible. The 6.75-second camera track orbits the tower, pitches down, pans laterally, and advances from outside the box to inside it and past the far boundary.
+
+```sh
+ink-studio clip examples/environment-test-scene.js --to 6.75 --w 192 --h 128 --px 1 --raw --out perspective.png
+ink-studio clip examples/environment-test-scene.js --to 6.75 --w 192 --h 128 --px 1 --raw --ortho --out orthographic.png
+ink-studio environment-parity --fixture observatory --out observatory-review
+```
+
+The comparison renders the same seven camera checkpoints in each projection. An orthographic fog ray starts at the renderer's setback eye, so the orthographic view can retain fog after the nominal camera has passed the box.
 
 ## Feature coverage
 

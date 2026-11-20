@@ -3,6 +3,7 @@ const path = require('node:path');
 const ink = require('../index.js');
 const PNG = require('./png.js');
 const runWebGL = require('./look-webgl.js');
+const observatory = require('../examples/environment-test-scene.js');
 
 const width = 112, height = 72;
 const front = {target:[0,0,0],dist:11,pitch:.035,yaw:.06};
@@ -53,7 +54,8 @@ function build({ makeBuilder, KIT:K }) {
 }
 
 function browser(kit, fixture, backend, {width,height,cases}) {
-  const world = fixture(kit), gpu = backend(width,height,{raw:true,dither:0});
+  const authored = fixture(kit), world = authored.build ? authored.build(authored.seed) : authored;
+  const gpu = backend(width,height,{raw:true,dither:0});
   try {
     return { driver:gpu.driver, frames:cases.map(entry=>{
       const scene = entry.cloud || entry.fog ? world : {...world,count:0};
@@ -90,9 +92,17 @@ function metrics(reference,actual) {
 }
 
 function compare(options = {}) {
-  const world = build(ink.load());
-  const gpu = runWebGL(options,build,browser,{width,height,cases});
-  const details = cases.map((entry,i)=>{
+  const kit = ink.load(), name = options.fixture ?? 'baseline';
+  if (!['baseline','observatory'].includes(name))
+    throw new RangeError('Environment parity fixture must be baseline or observatory');
+  const fixture = name === 'observatory' ? observatory : build;
+  const authored = fixture(kit), world = authored.build ? authored.build(authored.seed) : authored;
+  const views = name === 'observatory'
+    ? [false,true].flatMap(ortho=>authored.checkpoints.map(({id,time,description})=>({
+      id:(ortho ? 'ortho-' : 'perspective-')+id, time, description, camera:authored.camera(time,ortho), cloud:true, fog:true
+    }))) : cases;
+  const gpu = runWebGL(options,fixture,browser,{width,height,cases:views});
+  const details = views.map((entry,i)=>{
     const {camera,time,profiles,cloud,fog} = entry;
     const scene = cloud || fog ? world : {...world,count:0};
     const view = {...camera,w:width,h:height,px:1,t:time,raw:true,soft:true,dither:0,skyProfiles:profiles,
@@ -107,12 +117,12 @@ function compare(options = {}) {
     return { ...entry, ...error, cliEffect:metrics(baseline,cpu).mean, webglEffect:metrics(disabled,pixels).mean,
       cpu, gpu:pixels, difference };
   });
-  return { width,height,driver:gpu.driver,frames:details };
+  return { width,height,driver:gpu.driver,fixture:name,frames:details };
 }
 
 function write(directory, result) {
   fs.mkdirSync(directory,{recursive:true});
-  const {width,height,driver} = result;
+  const {width,height,driver,fixture} = result;
   const frames = result.frames.map(({cpu,gpu,difference,...details})=>{
     const files = { cli:details.id+'-cli.png', webgl:details.id+'-webgl.png', difference:details.id+'-diff.png' };
     for (const [kind,pixels] of [['cli',cpu],['webgl',gpu],['difference',difference]])
@@ -120,6 +130,6 @@ function write(directory, result) {
     return {...details,files};
   });
   fs.writeFileSync(path.join(directory,'environment-parity.json'),
-    JSON.stringify({width,height,driver,differenceGain:4,frames},null,2)+'\n');
+    JSON.stringify({width,height,driver,fixture,differenceGain:4,frames},null,2)+'\n');
 }
 module.exports = { compare, write };
