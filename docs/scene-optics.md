@@ -165,6 +165,12 @@ Sample the track once per frame with seconds since playback started and
 upload the returned `centers`, `extents`, and `settled` before compositing.
 Use the surface depth and camera to evaluate coverage in world space.
 
+`InkVeil.sweep({ from, to, start, end, feather })` moves a single ordered
+edge through the scene. Use world-space endpoints beyond the foreground
+and rear silhouettes. Upload `frame.plane` to `u_inkSweep` and
+`frame.feather` to `u_inkSweepFeather` while the track plays. Zero disables
+the sweep. A negative feather holds the frame at black before the edge starts.
+
 ## Pixel art on flat surfaces
 
 `SpriteSurface.make()` batches world-space rectangles into an RGBA atlas.

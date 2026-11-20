@@ -55,6 +55,28 @@ const InkVeil = (() => {
     };
   }
 
+  // March one feathered plane across the world. The interval before start is fully black.
+  function sweep({ from, to, start = 0, end, feather = 1 }) {
+    const point = value => value?.length === 3 && value.every(Number.isFinite);
+    if (!point(from) || !point(to) || ![start, end, feather].every(Number.isFinite) ||
+        start < 0 || end <= start || feather <= 0)
+      throw new RangeError('Expected finite sweep endpoints, an increasing interval and a positive feather');
+    const delta = to.map((value, i) => value - from[i]), distance = Math.hypot(...delta);
+    if (!(distance > 0 && Number.isFinite(distance))) throw new RangeError('Sweep endpoints must be distinct');
+    const normal = delta.map(value => value / distance);
+    const origin = normal.reduce((sum, value, i) => sum + value * from[i], 0);
+    const frame = { plane: new Float32Array([...normal, origin]), feather };
+    return {
+      duration: end,
+      sample(seconds) {
+        const t = Math.max(0, Math.min(1, (seconds - start) / (end - start)));
+        frame.plane[3] = origin + (distance + feather) * t * t * (3 - 2 * t);
+        frame.feather = seconds <= start ? -feather : feather;
+        return frame;
+      }
+    };
+  }
+
   const glsl = `
 uniform bool u_inkOn, u_inkWater;
 uniform vec4 u_inkPlane, u_inkBounds, u_inkPulse;
@@ -65,6 +87,8 @@ uniform sampler2D u_inkFootprint;
 uniform int u_inkRevealCount;
 uniform float u_inkRevealSettled;
 uniform vec4 u_inkRevealCenters[8], u_inkRevealExtents[8];
+uniform vec4 u_inkSweep;
+uniform float u_inkSweepFeather;
 
 float inkRank(ivec2 pixel) {
   const float ranks[16] = float[16](${bayer.map(i => i.toFixed(1)).join(',')});
@@ -73,6 +97,7 @@ float inkRank(ivec2 pixel) {
 
 vec3 inkVeil(vec3 color, ivec2 pixel, vec2 resolution, float depth, mat3 view, vec3 eye,
   vec4 camera, bool ortho) {
+  if (u_inkSweepFeather < 0.0) return vec3(0.0);
   float rank = inkRank(ivec2(pixel.x, int(resolution.y) - 1 - pixel.y));
   float value = mix(dot(color, vec3(0.30, 0.49, 0.21)), max(color.r, max(color.g, color.b)), 0.46);
   float coverage = mix(1.0, smoothstep(u_inkPlane.y, u_inkPlane.z, value), u_inkPlane.w);
@@ -128,10 +153,12 @@ vec3 inkVeil(vec3 color, ivec2 pixel, vec2 resolution, float depth, mat3 view, v
     }
     coverage *= shown;
   }
+  if (u_inkSweepFeather > 0.0)
+    coverage *= smoothstep(0.0, u_inkSweepFeather, u_inkSweep.w - dot(position, u_inkSweep.xyz));
   return coverage >= rank ? color : vec3(0.0);
 }
 `;
 
-  return Object.freeze({ rank, footprint, reveal, glsl });
+  return Object.freeze({ rank, footprint, reveal, sweep, glsl });
 })();
 if (typeof module !== 'undefined') module.exports = InkVeil;

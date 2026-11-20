@@ -41,3 +41,15 @@ test('world-space reveal cues stay selectable, overlap, then settle to full cove
   assert.equal(track.sample(0).settled, 0);
   assert.throws(() => reveal([], [0,1]), RangeError);
 });
+
+test('a continuous ink sweep holds black, advances forward and passes its destination', () => {
+  const { sweep } = require('../src/ink-veil.js');
+  const track = sweep({ from: [0, 0, 9], to: [0, 0, -9], start: .3, end: 5.3, feather: 2 });
+  assert.equal(track.duration, 5.3);
+  assert.equal(track.sample(.29).feather, -2);
+  assert.equal(track.sample(2.8).feather, 2);
+  assert.deepEqual(Array.from(track.sample(2.8).plane), [0, 0, -1, 1]);
+  assert(track.sample(3.4).plane[3] > 1);
+  assert.equal(track.sample(5.3).plane[3], 11);
+  assert.throws(() => sweep({ from: [0,0,1], to: [0,0,1], end: 2 }), RangeError);
+});
