@@ -899,8 +899,11 @@ function renderFrame(world, o, preparedPalettes) {
   const optical = world.opticalSplats && OpticalMaterials.frame(world, { view: V, eye, ortho },
     sampleFrames(world, t), { x: X, y: Y, z: Z });
   const spillLights = o.areaLights === false ? [] : EmissiveFinishes.spillLights(emissive, { x:X, y:Y, z:Z, alpha:AL });
-  const areaLight = (areaLights.length || spillLights.length) && AreaRaster.createLighting([...areaLights,...spillLights],world,d,AL);
-  const diffuseFrames = (areaLight || probes) && sampleFrames(world,t), diffuseNormals = [];
+  const spotLighting = Array.isArray(volumeLighting?.spots) && volumeLighting.spots.some(light => light?.surfaceIntensity !== undefined)
+    ? prepareVolumeLight() : undefined;
+  const directLight = (areaLights.length || spillLights.length || spotLighting?.surfaceSpots.length) &&
+    AreaRaster.createLighting([...areaLights,...spillLights],world,d,AL,{ spots:spotLighting?.surfaceSpots, shadow:spotLighting?.shadow });
+  const diffuseFrames = (directLight || probes) && sampleFrames(world,t), diffuseNormals = [];
   function diffuseNormal(i) {
     return diffuseNormals[i] ?? (diffuseNormals[i] = receivesDiffuse(i) && diffuseFrames(i).normal || false);
   }
@@ -1122,7 +1125,7 @@ function renderFrame(world, o, preparedPalettes) {
         live.gains(i,...position,sunGains);
         color=color.map((v,k)=>v*sunGains[k]);
       }
-      if (areaLight && diffuseNormal(i)) color = areaLight(sprite.p, position, sprite.normal, color);
+      if (directLight && diffuseNormal(i)) color = directLight(sprite.p, position, sprite.normal, color);
       if (!live?.normal(i) && probeReceiver(i))
         color = probes.shade(position,sprite.normal,color,undefined,0,probeAlbedo(i));
       if (surface?.has(i) && !PIX?.[i*8]) {
@@ -1361,7 +1364,7 @@ function renderFrame(world, o, preparedPalettes) {
       .24 + .76 * exposure.light(x,y,z) : 1;
     const rule = subject?.(i);
     const contactReceiver = contact?.at(i);
-    const areaReceiver = areaLight && diffuseNormal(i);
+    const directReceiver = directLight && diffuseNormal(i);
     const localProbe = !liveNormal && probeReceiver(i) && diffuseNormal(i);
     const localAlbedo = localProbe && probeAlbedo(i);
     const fogMix = !(flags & 2) && world.fog.max > 0 && world.fog.start < 1
@@ -1538,10 +1541,10 @@ function renderFrame(world, o, preparedPalettes) {
           pg -= Math.max(0, pg - fog[1]*bakedFog)*(1 - gain);
           pb -= Math.max(0, pb - fog[2]*bakedFog)*(1 - gain);
         }
-        if (areaReceiver || localProbe) {
-          const n = exact?.normal ?? (areaReceiver || localProbe);
+        if (directReceiver || localProbe) {
+          const n = exact?.normal ?? (directReceiver || localProbe);
           const point = exact?.position ?? surfacePoint(rayAt(ix+.5,iy+.5),n,x,y,z,-cz,3*Math.sqrt(c00+c11+c22));
-          if (areaReceiver) [pr,pg,pb] = areaLight(p,point,n,[pr,pg,pb],fog,centerFog ? fogMix : 0);
+          if (directReceiver) [pr,pg,pb] = directLight(p,point,n,[pr,pg,pb],fog,centerFog ? fogMix : 0);
           if (localProbe) [pr,pg,pb] = probes.shade(point,n,[pr,pg,pb],fog,centerFog ? fogMix : 0,localAlbedo);
         }
         const scoped = contribution?.applies(i, paletteId);
@@ -1901,10 +1904,10 @@ function renderFrame(world, o, preparedPalettes) {
           if (gain < 1) base = base.map(value => value * gain);
         }
         if (bounceTints && live.normal(i)) base = base.map((value, channel) => value * bounceTints[p * 3 + channel]);
-        const receiverNormal = (areaLight || !live?.normal(i) && probeReceiver(i)) && diffuseNormal(i);
+        const receiverNormal = (directLight || !live?.normal(i) && probeReceiver(i)) && diffuseNormal(i);
         if (receiverNormal) {
           const exact = sdf?.hits[p], point = exact?.position ?? [HX[p],HY[p],HZ[p]], n = exact?.normal ?? receiverNormal;
-          if (areaLight) base = areaLight(p,point,n,base);
+          if (directLight) base = directLight(p,point,n,base);
           if (!live?.normal(i) && probeReceiver(i)) base = probes.shade(point,n,base,undefined,0,probeAlbedo(i));
         }
         const finishedSurface = surface?.has(i);
