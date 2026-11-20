@@ -98,3 +98,16 @@ animation can move as `mutable`. Mark shader-driven translations that the
 planner cannot infer as mutable too. `visibleIndices` writes the original
 indices for each retained group using a column-major view-projection matrix.
 Use its returned count as the instance count for color, ID and mask passes.
+
+## Ordered ink coverage
+
+`InkVeil.footprint(bounds, size, signedDistance, feather)` bakes an R8 mask
+for a horizontal receiving surface. Positive world-space distance is inside
+the shape. Use the mask bounds to map the ray-plane intersection to texels.
+
+`InkVeil.glsl` applies the same ordered thresholds as `InkVeil.rank`.
+Shaded pixels below the coverage threshold return black. Light intensity,
+a feathered shoreline, and projected caustics drive coverage on the plane.
+The view depth occludes the plane behind foreground geometry. Each of the up to
+eight light sources supplies world X and Z, radius and signed intensity. Use the
+internal art-pixel coordinates so the pattern stays sharp at integer scales.
