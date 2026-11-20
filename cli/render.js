@@ -327,6 +327,8 @@ function render(world, o, preparedPalettes) {
   const prepareVolumeLight = () => volumeLighting ? (localLighting ??= SceneOptics.lighting(volumeLighting, world.pal,
     { time: t, localLights: o.volumeLocalLights, localShadows: o.volumeLocalShadows })) : undefined;
   const wind = Airflow.frame(o.wind ?? weather?.wind ?? an.wind);
+  const localWind = o.wind == null ? weather?.windHere : undefined;
+  const airAt = (x,z) => localWind ? Airflow.frame(localWind(skyTime,x,z,wind.velocity)) : wind;
   const daylight = o.lightDaylight ?? o.environment?.daylight ?? an.daylight ?? 1;
   const dusk = LightSchedule.gain(daylight);
   const lampEye = [
@@ -337,7 +339,7 @@ function render(world, o, preparedPalettes) {
   const lamps = LightSchedule.select(world.lights || [], lampEye, { daylight, duskOnly: true });
   const rainConfig = RainImpacts.settings(world.rainImpacts, o.rainImpacts);
   const precipitation = Precipitation.frame(world, o.precipitation, {
-    time: skyTime, wind: wind.velocity, windAt: o.wind == null ? weather?.windAt : undefined, weather, impacts: rainConfig,
+    time: skyTime, wind: wind.velocity, windAt: o.wind == null ? weather?.windAt : undefined, weather, localWind, impacts: rainConfig,
     lamps: world.precipitationRanges?.length ? LightSchedule.select(world.lights || [], lampEye, { daylight }) : [],
     localLighting: prepareVolumeLight
   });
@@ -464,10 +466,11 @@ function render(world, o, preparedPalettes) {
       y -= pr * rg;
       al *= 1 - pr * pr;
       if (profileRain) {
-        al *= weather?.rainGain ?? 0;
+        const { velocity } = airAt(x,z);
         const age = pr * rg / Math.max(sp, 1e-5);
-        x += wind.velocity[0] * age;
-        z += wind.velocity[1] * age;
+        x += velocity[0] * age;
+        z += velocity[1] * age;
+        al *= weather?.rainHere ? weather.rainHere(x,z) : weather?.rainGain ?? 0;
       }
       sc *= 1 + pr * ex;
     } else if (kind === 3) {
@@ -477,8 +480,9 @@ function render(world, o, preparedPalettes) {
       x += Math.sin(pr * 7 + ph * 50) * 0.25 * pr;
       if (kraw & Airflow.packedFlag) {
         const age = pr * rg / Math.max(sp, 0.00001);
-        x += wind.velocity[0] * age;
-        z += wind.velocity[1] * age;
+        const { velocity } = airAt(x,z);
+        x += velocity[0] * age;
+        z += velocity[1] * age;
       }
       al *= (1 - pr) * sstep(0, 0.1, pr);
       sc *= 0.6 + pr * ex;
@@ -516,8 +520,9 @@ function render(world, o, preparedPalettes) {
     } else if (kind === 11) {
       if (kraw & Airflow.packedFlag) {
         const displacement = Airflow.bend(t, ph, sp, rg);
-        x += wind.flex[0] * displacement;
-        z += wind.flex[1] * displacement;
+        const { flex } = airAt(x,z);
+        x += flex[0] * displacement;
+        z += flex[1] * displacement;
       } else {
         const x0 = x;
         x += rg * Math.sin(t * sp + y * 1.3 + z * 0.9 + ph);
@@ -731,7 +736,7 @@ function render(world, o, preparedPalettes) {
       c22 = d[q + 10] * s2;
     if (kind === 2 && (precipitation?.rows[i] || (kraw & Airflow.packedFlag))) {
       // Profile and world precipitation rain are baked vertical. Rebuild its axial covariance along the current flow.
-      const [wx, wz] = wind.velocity, speed = d[q + 13];
+      const [wx, wz] = airAt(x,z).velocity, speed = d[q + 13];
       const length = Math.hypot(wx, speed, wz);
       const ax = wx / length, ay = -speed / length, az = wz / length;
       const cross = c00, stretch = c11 - cross;

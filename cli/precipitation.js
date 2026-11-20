@@ -45,7 +45,7 @@ function blocks(occluder, from, to, time) {
   return distance > 1e-6 && occluder(...from, delta.map(n => n / distance), distance, time);
 }
 
-function frame(world, override, { time, wind, windAt, weather, lamps, localLighting, impacts }) {
+function frame(world, override, { time, wind, windAt, localWind, weather, lamps, localLighting, impacts }) {
   if (!world.precipitationRanges?.length) return null;
   const config = settings(world.precipitation, override);
   // Tag the authored rows even in the disabled view so they disappear together.
@@ -53,16 +53,29 @@ function frame(world, override, { time, wind, windAt, weather, lamps, localLight
   let duration = 0;
   for (const { first, end, profile } of world.precipitationRanges) {
     rows.fill(profile ? 2 : 1, first, end);
-    if (config && windAt) for (let row = first; row < end; row++) {
+    if (config && (windAt || localWind)) for (let row = first; row < end; row++) {
       const q = row * 16;
       duration = Math.max(duration, world.data[q + 14] / world.data[q + 13]);
     }
   }
   if (!config) return { rows };
   const { occlusion, occluder, flightSegments, lightStrength } = config;
-  const drift = windPath(time, duration + (impacts?.lookback ?? 0), wind, duration > 0 ? windAt : undefined);
+  const historyLength = duration + (impacts?.lookback ?? 0);
+  const uniformDrift = windPath(time, historyLength, wind, duration > 0 ? windAt : undefined);
+  const histories = new Map(), uniform = new Map();
+  function driftFor(index,x,z) {
+    if (!localWind || !duration) return uniformDrift;
+    if (!histories.has(index)) {
+      const velocityAt = t => {
+        if (!uniform.has(t)) uniform.set(t,windAt?.(t) ?? wind);
+        return localWind(t,x,z,uniform.get(t));
+      };
+      histories.set(index,windPath(time,historyLength,localWind(time,x,z,wind),velocityAt));
+    }
+    return histories.get(index);
+  }
   const receivers = (impacts?.receivers ?? []).filter(receiver => occlusion || receiver.kind !== 'roof');
-  function hit(x, y, z, speed, height, birthAge, flown) {
+  function hit(x, y, z, speed, height, birthAge, flown, drift) {
     const total = drift(birthAge);
     for (const receiver of receivers) {
       const age = (y - receiver.y) / speed;
@@ -96,11 +109,12 @@ function frame(world, override, { time, wind, windAt, weather, lamps, localLight
         const cycle = time / period + phase;
         if (impacts.lookback / period > 4096) throw new RangeError('Rain impact history exceeds the emitter budget');
         const youngest = (cycle - Math.floor(cycle)) * period;
+        const drift = driftFor(row,x,z);
         for (let born = youngest; born <= impacts.lookback + period; born += period) {
-          const contact = hit(x, y, z, speed, height, born, Math.min(born, period));
+          const contact = hit(x, y, z, speed, height, born, Math.min(born, period), drift);
           if (!contact || born - contact.age > impacts.lookback) continue;
           const eventTime = time - born + contact.age;
-          const strength = config.rain * (profile ? weather.rainAt?.(eventTime) ?? weather.rainGain : 1);
+          const strength = config.rain * (profile ? weather.rainAt?.(eventTime,contact.at[0],contact.at[2]) ?? weather.rainGain : 1);
           if (!(strength > 0)) continue;
           const total = drift(born);
           // Stop just above the authored receiving plane so the receiver itself is not treated as upstream cover.
@@ -109,7 +123,7 @@ function frame(world, override, { time, wind, windAt, weather, lamps, localLight
             const age = travel * u, tail = drift(born - age);
             return [x + total[0] - tail[0], y - speed * age, z + total[1] - tail[1]];
           };
-          if (!blocked(point, [x,y,z], travel, time - born, windAt ? flightSegments : 1))
+          if (!blocked(point, [x,y,z], travel, time - born, (windAt || localWind) ? flightSegments : 1))
             events.push({ ...contact, time:eventTime, strength });
         }
       }
@@ -123,12 +137,14 @@ function frame(world, override, { time, wind, windAt, weather, lamps, localLight
 
   function pose(index, x, y, z, kind, phase, speed, height, sway, alpha) {
     const snow = kind === 15, profile = rows[index] === 2;
-    const rate = snow ? config.snow * (profile ? weather?.snowGain ?? 0 : 1) :
-      config.rain * (profile ? weather?.rainGain ?? 0 : 1);
-    if (!rate || !alpha) return null;
+    const gain = snow ? config.snow : config.rain;
+    const localRate = profile && (snow ? weather?.snowHere : weather?.rainHere);
+    const uniformRate = profile ? (snow ? weather?.snowGain : weather?.rainGain) ?? 0 : 1;
+    if (!gain || !alpha || (!uniformRate && !localRate)) return null;
     const cycle = time * speed / height + phase, fraction = cycle - Math.floor(cycle);
     const age = fraction * height / speed;
-    if (!snow && y - speed * age <= receivers[0]?.y && hit(x, y, z, speed, height, age, age)) return null;
+    const drift = driftFor(index,x,z);
+    if (!snow && y - speed * age <= receivers[0]?.y && hit(x, y, z, speed, height, age, age, drift)) return null;
     const total = drift(age);
     function point(progress) {
       const flown = progress * fraction;
@@ -138,7 +154,8 @@ function frame(world, override, { time, wind, windAt, weather, lamps, localLight
       return [x + total[0] - remaining[0] + wx, y - flown * height, z + total[1] - remaining[1] + wz];
     }
     const position = point(1);
-    if (blocked(point, [x,y,z], age, time - age, snow || windAt ? flightSegments : 1)) return null;
+    const rate = gain * (localRate ? localRate(position[0],position[2]) : uniformRate);
+    if (!rate || blocked(point, [x,y,z], age, time - age, snow || windAt || localWind ? flightSegments : 1)) return null;
     const coverage = snow ? fade(0,.05,fraction) * (1 - fade(.92,1,fraction)) : 1 - fraction * fraction;
     return [...position, Math.min(.99, alpha * rate * coverage)];
   }

@@ -140,12 +140,15 @@ const VolumeLight = (() => {
     }
     const entry = segments[0]?.[0] ?? 0;
     const rateFloor = (Math.min(stop, segments.at(-1)?.[0] ?? stop) - entry) / maxSteps;
-    const hasField = segments.some(([, volume]) => volume.type === 'field');
+    const hasField = segments.some(([, volume]) => volume.type === 'field' || volume.densityField);
     for (const [end, volume, sign] of segments) {
       if (hasField && result[3] < .001) break;
       if (active.size && end > last) {
         let minStep = Infinity;
-        for (const v of active) if (v.type === 'field') minStep = Math.min(minStep, v.step * stepScale);
+        for (const v of active) {
+          if (v.type === 'field') minStep = Math.min(minStep, v.step * stepScale);
+          if (v.densityField) minStep = Math.min(minStep, v.densityField.step * stepScale);
+        }
         if (minStep === Infinity) {
           let density = 0;
           rgb.fill(0);
@@ -171,10 +174,11 @@ const VolumeLight = (() => {
             let density = 0, advance = Infinity;
             rgb.fill(0);
             for (const v of active) {
+              const localDensity = v.density * (v.densityField?.sample(x,z) ?? 1);
               if (v.type !== 'field') {
                 advance = 0;
-                density += v.density;
-                for (let k = 0; k < 3; k++) rgb[k] += v.density * v.rgb[k] * gain;
+                density += localDensity;
+                for (let k = 0; k < 3; k++) rgb[k] += localDensity * v.rgb[k] * gain;
                 continue;
               }
               const gap = skip && v.field.skip ? v.field.skip(origin[0] + t * direction[0], origin[1] + t * direction[1],
@@ -185,7 +189,7 @@ const VolumeLight = (() => {
               }
               advance = 0;
               const value = v.field.sample(x, y, z, time, options);
-              const extinction = value * v.density;
+              const extinction = value * localDensity;
               if (!extinction) continue;
               density += extinction;
               const base = mediumColor(v, value);

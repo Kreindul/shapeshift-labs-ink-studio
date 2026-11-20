@@ -13,6 +13,8 @@ Enable `weatherBinding: true` on a scene with a [sky environment](shared-sky-ref
 
 For a numeric channel that’s absent, the matching subsystem uses its ordinary defaults. Rain tagged with `profile: true` appears in the CPU renderer when the binding provides a positive rain rate. An explicit render `wind` value overrides the profile velocity for that render.
 
+Use [moving fronts](weather-fronts.md) to carry a named profile along a world-space route.
+
 ## Configure the binding
 
 ```js

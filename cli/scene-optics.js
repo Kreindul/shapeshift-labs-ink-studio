@@ -152,7 +152,7 @@ function traceMedia(volumes, segments, origin, direction, stop, result, sample, 
 
 function mediaSampler(volumes, water, rayAt, width, horizon, options, aerial) {
   const rays = [], sample = [0, 0, 0, 1], result = new Float64Array(6);
-  const fields = volumes.some(volume => volume.type === 'field');
+  const fields = volumes.some(volume => volume.type === 'field' || volume.densityField);
   const tile = fields && options.jitter !== 'off' ? volumeNoise(options.seed) : null;
   const samples = fields ? options.samples : 1;
   const query = { ...options, jitter: .5 };
@@ -204,10 +204,10 @@ function mediaSampler(volumes, water, rayAt, width, horizon, options, aerial) {
 
 function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon, quality, time, media, capture, history, viewKey) {
   const light = [0, 0, 0, 1], sample = [0, 0, 0, 1];
-  const fields = volumes.some(volume => volume.type === 'field');
+  const fields = volumes.some(volume => volume.type === 'field' || volume.densityField);
   const query = { ...quality, time, media };
   // Density history cannot track moving illumination.
-  const temporal = fields && !quality.cloudShadow && !media?.animatedLocals && quality.jitter === 'spatiotemporal' && history;
+  const temporal = fields && !quality.cloudShadow && !volumes.some(v => v.densityField) && !media?.animatedLocals && quality.jitter === 'spatiotemporal' && history;
   const tile = fields && quality.jitter !== 'off' ? volumeNoise(quality.seed) : null;
   const accumulation = temporal ? new Float32Array(W * H * 4) : null;
   const frame = temporal ? Math.floor(time * 60) : 0;

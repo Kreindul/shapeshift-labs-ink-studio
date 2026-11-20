@@ -201,7 +201,13 @@ const SkyEnvironment = (() => {
       };
       return { parameters: p, sky };
     }
-    return Object.freeze({ [compiled]: true, sample, frame });
+    function profile(id) {
+      const value = looks.get(id);
+      if (!value) throw new RangeError('Unknown sky profile ' + id);
+      return Object.fromEntries(Object.entries(value).map(([key,v]) => [key, Array.isArray(v) ? encode(v) : v]));
+    }
+
+    return Object.freeze({ [compiled]: true, sample, frame, profile });
   }
 
   function aerial(authored, override, profile = {}) {

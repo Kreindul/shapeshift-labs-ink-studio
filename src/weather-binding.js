@@ -1,5 +1,9 @@
 /* Environment tracks drive both rendered weather and retained surface forcing. */
 const WeatherBinding = (() => {
+  const Front = typeof WeatherFront === 'undefined' ? require('./weather-front.js') : WeatherFront;
+  const outside = { rain:0, snowfall:0, air:10, humidity:.44, windX:0, windZ:0, fogDensity:1, wetness:0, light:0 };
+  const velocity = ({ windX, windZ }) =>
+    windX === undefined && windZ === undefined ? undefined : [windX ?? 0, windZ ?? 0];
   const defaults = {
     rain: 'rain', snowfall: 'snowfall', air: 'airTemperature', humidity: 'humidity',
     windX: 'windX', windZ: 'windZ', fogDensity: 'fogDensity', wetness: 'surfaceWetness', light: 'daylight'
@@ -32,10 +36,10 @@ const WeatherBinding = (() => {
         surface.standingWater = { ...record(original.standingWater, 'Standing water'),
           ...record(modified.standingWater, 'Standing water') };
     }
-    const { rainFull = 1, snowFull = 1, windDryingSpeed = 5, fogVolumes } = { ...base, ...edits };
+    const { rainFull = 1, snowFull = 1, windDryingSpeed = 5, fogVolumes, fronts } = { ...base, ...edits };
     const channels = { ...base.channels, ...edits.channels };
     for (const raw of [base, edits]) {
-      if (Object.keys(raw).some(key => !['channels', 'rainFull', 'snowFull', 'windDryingSpeed', 'fogVolumes', 'surface'].includes(key)))
+      if (Object.keys(raw).some(key => !['channels', 'rainFull', 'snowFull', 'windDryingSpeed', 'fogVolumes', 'surface', 'fronts'].includes(key)))
         throw new RangeError('Unknown weather binding setting');
       if (raw.channels !== undefined) record(raw.channels, 'Weather channels');
     }
@@ -57,14 +61,14 @@ const WeatherBinding = (() => {
         throw new TypeError('Weather surface forcing must be a function');
       retained = { step, forcing, options };
     }
-    return { channels, rainFull, snowFull, windDryingSpeed, fogVolumes: fogVolumes && new Set(fogVolumes), surface: retained };
+    return { channels, rainFull, snowFull, windDryingSpeed, fogVolumes: fogVolumes && new Set(fogVolumes), fronts: Front.compile(fronts), surface: retained };
   }
 
-  function bind(environment, config, { profiles, createSurface } = {}) {
+  function bind(environment, config, { profiles, createSurface, frontsEnabled = true } = {}) {
     if (!config) return null;
     if (!environment?.sample) throw new TypeError('Weather binding needs a sky environment');
     const pins = profiles === undefined ? undefined : Object.freeze({ ...profiles });
-    const { channels, rainFull, snowFull, windDryingSpeed, fogVolumes, surface } = config;
+    const { channels, rainFull, snowFull, windDryingSpeed, fogVolumes, fronts, surface } = config;
     const keys = Object.keys(defaults);
     function read(parameters) {
       const signal = {};
@@ -72,26 +76,68 @@ const WeatherBinding = (() => {
         const channel = channels[key] ?? defaults[key];
         if (channel === false) continue;
         if (Object.hasOwn(parameters, channel)) signal[key] = number(parameters[channel], ...ranges[key], 'Weather ' + channel);
-        else if (Object.hasOwn(channels, key)) throw new RangeError('Missing weather channel ' + channel);
+
       }
-      const { windX, windZ } = signal;
-      return { ...signal, wind: windX === undefined && windZ === undefined ? undefined : [windX ?? 0, windZ ?? 0] };
+      return { ...signal, wind:velocity(signal) };
     }
-    const sample = time => read(environment.sample(time, pins));
-    sample(0);
+    const uniform = time => read(environment.sample(time, pins));
+    const authored = fronts.map(front => ({ ...front, target:read(environment.profile(front.profile)) }));
+    const base = uniform(0);
+    for (const [key, channel] of Object.entries(channels))
+      if (channel !== false && base[key] === undefined && authored.every(front => front.target[key] === undefined))
+        throw new RangeError('Missing weather channel ' + channel);
+    const active = frontsEnabled ? authored : [];
+    function spatial(time, signal = uniform(time)) {
+      const layers = active.map(front => ({ weight:front.frame(time), target:front.target }));
+      function value(key, x, z, fallback = signal[key]) {
+        for (const { weight, target } of layers) {
+          if (target[key] === undefined) continue;
+          const amount = weight(x,z);
+          if (amount) {
+            const base = fallback ?? outside[key];
+            fallback = base + (target[key] - base)*amount;
+          }
+        }
+        return fallback;
+      }
+      function at(x,z) {
+        const local = { ...signal };
+        for (const { weight, target } of layers) {
+          const amount = weight(x,z);
+          if (!amount) continue;
+          for (const key of keys) if (target[key] !== undefined) {
+            const base = local[key] ?? outside[key];
+            local[key] = base + (target[key] - base)*amount;
+          }
+        }
+        local.wind = velocity(local);
+        return local;
+      }
+      return { at, value };
+    }
+    function sample(time, x, z) {
+      if (!active.length || (x === undefined && z === undefined)) return uniform(time);
+      if (!Number.isFinite(x) || !Number.isFinite(z)) throw new TypeError('Weather position must be a finite XZ pair');
+      return spatial(time).at(x,z);
+    }
+
+    const forcingValues = ({ rain, snowfall, air, humidity, light, wind }) => ({
+      rain, snowfall, air, humidity, light, wind:wind && Math.min(1, Math.hypot(...wind)/windDryingSpeed)
+    });
 
     function forcing(local) {
       if (local !== undefined && typeof local !== 'function') throw new TypeError('Weather forcing must be a function');
-      let lastTime, signal, uniform;
+      let lastTime, signal, values, region;
       return (x, z, time, state) => {
         if (time !== lastTime) {
-          signal = sample(time);
+          signal = uniform(time);
+          region = active.length ? spatial(time,signal) : null;
+          values = forcingValues(signal);
           lastTime = time;
-          const { rain, snowfall, air, humidity, wind, light } = signal;
-          uniform = { rain, snowfall, air, humidity, light,
-            wind: wind && Math.min(1, Math.hypot(...wind) / windDryingSpeed) };
         }
-        return local ? { ...uniform, ...local(x, z, time, state, signal) } : uniform;
+        const input = region ? region.at(x,z) : signal;
+        const forced = region ? forcingValues(input) : values;
+        return local ? { ...forced, ...local(x, z, time, state, input) } : forced;
       };
     }
     let solver, snapshot, tick = 0;
@@ -114,20 +160,46 @@ const WeatherBinding = (() => {
       }
       return snapshot;
     }
+    const fogFronts = active.filter(front => front.target.fogDensity !== undefined);
+    const fogStep = fogFronts.length ? Math.min(...fogFronts.map(front => front.step)) : 0;
+    const localWind = active.some(front => front.target.wind);
+    const localWetness = active.some(front => front.target.wetness !== undefined);
     function frame(time, parameters) {
-      const signal = parameters ? read(parameters) : sample(time);
+      const signal = parameters ? read(parameters) : uniform(time);
       const state = surfaceAt(time);
+      const region = active.length ? spatial(time,signal) : null;
+      const history = region && new Map([[time,region]]);
+      const at = t => {
+        if (!history.has(t)) {
+          if (history.size >= 512) history.delete(history.keys().next().value);
+          history.set(t,spatial(t));
+        }
+        return history.get(t);
+      };
+      const rainGain = value => Math.min(1, (value ?? 0)/rainFull);
+      const snowGain = value => Math.min(1, (value ?? 0)/snowFull);
       const wetness = signal.wetness;
-      return { ...signal, rainGain: Math.min(1, (signal.rain ?? 0) / rainFull),
-        snowGain: Math.min(1, (signal.snowfall ?? 0) / snowFull),
-        rainAt: at => Math.min(1, (sample(at).rain ?? 0) / rainFull),
-        windAt: signal.wind && (at => sample(at).wind),
-        fogGain: volume => !fogVolumes || fogVolumes.has(volume.id) ? signal.fogDensity ?? 1 : 1,
-        surface: state || wetness !== undefined ? (x, z) => {
+      return { ...signal, rainGain:rainGain(signal.rain), snowGain:snowGain(signal.snowfall),
+        rainAt: (t,x,z) => rainGain(region && Number.isFinite(x) && Number.isFinite(z)
+          ? at(t).value('rain',x,z) : uniform(t).rain),
+        rainHere: region && ((x,z) => rainGain(region.value('rain',x,z))),
+        snowHere: region && ((x,z) => snowGain(region.value('snowfall',x,z))),
+        windAt: signal.wind && (t => uniform(t).wind),
+        windHere: localWind && ((t,x,z,fallback) => {
+          const field = at(t);
+          return [field.value('windX',x,z, fallback[0]),field.value('windZ',x,z, fallback[1])];
+        }),
+        fogGain(volume) {
+          if (fogVolumes && !fogVolumes.has(volume.id)) return 1;
+          if (fogStep) return { step:fogStep, sample:(x,z) => region.value('fogDensity',x,z) ?? 1 };
+          return signal.fogDensity ?? 1;
+        },
+        surface: state || wetness !== undefined || localWetness ? (x, z) => {
           const point = state?.sample(x, z);
           if (state && !point) return null;
-          if (wetness === undefined) return point;
-          return { ...point, wetness: Math.max(wetness, point?.wetness ?? 0) };
+          const local = localWetness ? region.value('wetness',x,z) : wetness;
+          if (local === undefined) return point;
+          return { ...point, wetness: Math.max(local, point?.wetness ?? 0) };
         } : undefined };
     }
     return Object.freeze({ sample, forcing, frame, surfaceAt });

@@ -109,7 +109,12 @@ const SceneOptics = (() => {
       .map(d => {
         if (!d || !Object.hasOwn(volumeKinds, d.type)) throw new TypeError('Unknown atmosphere volume');
         const volume = volumeKinds[d.type](d);
-        if (densityGain) volume.density = nonnegative(volume.density * densityGain(volume), 'Volume density');
+        if (densityGain) {
+          const gain = densityGain(volume);
+          if (gain && typeof gain.sample === 'function' && Number.isFinite(gain.step) && gain.step > 0)
+            volume.densityField = gain;
+          else volume.density = nonnegative(volume.density * gain, 'Volume density');
+        }
         const transform = colorFor?.(volume);
         const color = value => {
           const rgb = volumeColor(value, palette);
@@ -182,7 +187,7 @@ const SceneOptics = (() => {
       if (range) hits.push([range[0], volume, 1], [range[1], volume, -1]);
     }
     hits.sort((a, b) => a[0] - b[0]);
-    if (options?.cloudShadow || hits.some(([, volume]) => volume.type === 'field'))
+    if (options?.cloudShadow || hits.some(([, volume]) => volume.type === 'field' || volume.densityField))
       return volumeLight.integrate(hits, origin, direction, stop, result, options);
     result[0] = result[1] = result[2] = 0;
     result[3] = 1;
