@@ -29,7 +29,7 @@ const waxed = K.surface.material({ r: [4, 5, 6] }, {
 });
 ```
 
-For per-pixel rendering set `S.pixel = true` before baking and set `look: { pixel: true }` on the finished world. The ordinary splat path evaluates the same effects at splat centres. An optional surface finish takes over from the material's baked `gloss`.
+For per-pixel rendering set `S.pixel = true` before baking and set `look: { pixel: true }` on the finished world. The ordinary splat path evaluates simple finishes at splat centres and bevel highlights at the art-pixel sample. An optional surface finish takes over from the material's baked `gloss`.
 
 ## Shared settings
 
@@ -44,6 +44,7 @@ For per-pixel rendering set `S.pixel = true` before baking and set `look: { pixe
 | Layer type | Controls |
 | --- | --- |
 | `diffuse` | Map the direct-light response through a material lighting ramp. |
+| `bevel` | Highlight sculpted ridges and creases within a configurable art-pixel reach. |
 | `specular` | Set `roughness` to one value or to `[along, across]` to shape the reflected highlight. Set `color` for a tinted highlight. |
 | `fiber` | Set `roughness`, `shift` and optionally `figure`, `axis` and `scale` for tilted fibres with a moving band. |
 | `reflection` | Approximate sky, horizon and ground reflection with `sky`, `horizon` and `ground` colours. Use `f0` and `power` to shape the facing-to-grazing response. |
@@ -59,7 +60,7 @@ These are stylized reflectance models. The CLI resolves them into the scene pale
 
 Use a `diffuse` finish layer to give a material its own transition from
 shadow to direct light. A `lightingRamp` can also tint and shape the response
-of a `specular`, `sheen`, `fiber`, or `glints` layer. The effects run in layer
+of a `specular`, `sheen`, `fiber`, `glints`, or `bevel` layer. The effects run in layer
 order, so put the diffuse layer before highlights or projected paint it
 should sit beneath.
 
@@ -102,6 +103,49 @@ and worn stone under a shared key light.
 
 ```sh
 node cli/ink-studio.js render examples/material-lighting-ramps.js --w 288 --h 128 --px 1 --t 0.75
+```
+
+## Bevel highlights
+
+Add a `bevel` finish layer to catch light along features in a native sculpt.
+Use a narrow warm tint for copper rims, a broader band for chips in stone,
+or a lower bend threshold for soft folds in cloth.
+
+```js
+const copper = K.surface.material({ r: [6, 7, 8, 9] }, {
+  layers: {
+    rim: { type: 'bevel', width: 2, minBend: 0.12, strength: 0.85,
+      lightingRamp: { role: 'copper-edge' } }
+  }
+});
+```
+
+- `width` is the search reach in art pixels and defaults to 1.5. The
+  supported range is 0.25 to 8. The renderer uses the camera projection
+  and sample depth, so changing export scale keeps the reach in art pixels.
+- `edge` defaults to `convex` for raised rims and fold ridges. Choose
+  `concave` for creases or `both` for raised and recessed detail.
+- `minBend` sets the minimum signed-distance departure per unit of reach.
+  It defaults to 0.13. Lower values bring out gentler curves.
+  `softness` is the falloff interval above that threshold and defaults to 0.42.
+- Set `color` or a `lightingRamp`, and use the usual `strength`, `mask`,
+  `steps`, and `shadow` controls. Lower `power` softens the falloff away
+  from the light. Disable the layer by setting its named slot to `false`.
+
+The sculpt retains its distance source automatically when a material uses
+a bevel. Sculpts with grouped solids and cutouts share their combined field.
+The headless renderer samples bends from that field and leaves the
+original geometry and coverage in place. Custom hosts can supply
+`sample.bevelDistance(x, y, z)` in the frame of `sample.position` and
+`sample.artFootprint` as the world-space reach of one art pixel before
+foreshortening.
+
+The [specimen board](../examples/material-bevel-highlights.js) can be
+rendered with the finishes enabled or disabled at the same resolution.
+
+```sh
+node cli/ink-studio.js render examples/material-bevel-highlights.js --w 338 --h 132 --px 1
+node cli/ink-studio.js render examples/material-bevel-highlights.js --w 338 --h 132 --px 1 --surface off
 ```
 
 ## Presets

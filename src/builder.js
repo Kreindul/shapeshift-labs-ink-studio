@@ -266,16 +266,18 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     surfacePending = false,
     shadowLod;
   const renderSdfs = [];
+  let bevelIds = new WeakMap();
   const surfaces = [],
     surfaceIds = new Map(),
     surfaceRow = new Float32Array(SurfaceLook.STRIDE);
-  function surfaceNext(settings, nx, ny, nz, light, visibility = 1, tangent) {
+  function surfaceNext(settings, nx, ny, nz, light, visibility = 1, tangent, bevelDistance) {
     let ids = surfaceIds.get(settings);
     if (!ids) surfaceIds.set(settings, (ids = new Map()));
-    const key = light.join(',');
+    if (bevelDistance && !bevelIds.has(bevelDistance)) bevelIds.set(bevelDistance, surfaces.length + 1);
+    const key = light.join(',') + (bevelDistance ? '/' + bevelIds.get(bevelDistance) : '');
     let id = ids.get(key);
     if (id === undefined) {
-      id = surfaces.push({ settings, light: Array.from(light) });
+      id = surfaces.push({ settings, light: Array.from(light), ...(bevelDistance && { bevelDistance }) });
       ids.set(key, id);
     }
     surfaceRow.set([id, nx, ny, nz, visibility, tangent?.[0] ?? 0, tangent?.[1] ?? 0, tangent?.[2] ?? 0]);
@@ -1124,6 +1126,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     surfaces.length = 0;
     renderSdfs.length = 0;
     surfaceIds.clear();
+    bevelIds = new WeakMap();
     bounced = 0;
     cidx.length = 0;
     nrms.length = 0;

@@ -20,7 +20,9 @@ const SurfaceLook = (() => {
   const WHITE = [1, 1, 1];
   const TAU = Math.PI * 2;
   const specularLayers = new Set(['specular','fiber','sheen','film','diffraction','glints','reflection','planarReflection']);
-  const rampLayers = new Set(['diffuse', 'specular', 'fiber', 'sheen', 'glints']);
+  const rampLayers = new Set(['diffuse', 'specular', 'fiber', 'sheen', 'glints', 'bevel']);
+  const hasBevel = settings => Object.values(settings.layers ?? {}).some(layer =>
+    layer?.type === 'bevel' && layer.strength !== 0);
   const clamp = n => Math.min(1, Math.max(0, n));
   const mix = (a, b, t) => a + (b - a) * t;
   const unit = (v, fallback = AXES.y) => {
@@ -248,7 +250,33 @@ const SurfaceLook = (() => {
     return f0 + (1 - f0) * (1 - clamp(cosine)) ** power;
   }
 
+  function bevelCoverage(layer, sample, normal, view) {
+    const distance = sample.bevelDistance, pixel = sample.artFootprint ?? sample.footprint;
+    if (typeof distance !== 'function' || !Number.isFinite(pixel) || pixel <= 0) return 0;
+    const [x, y, z] = sample.position;
+    const center = distance(x, y, z);
+    if (!Number.isFinite(center)) return 0;
+    const u = tangent(AXES.x, normal);
+    const v = cross(normal, u);
+    const diagonal = sign => u.map((value, i) => (value + sign * v[i]) * Math.SQRT1_2);
+    let bend = 0;
+    for (const direction of [u, v, diagonal(1), diagonal(-1)]) {
+      // Use a projected pixel radius across the face, with a limit at grazing angles.
+      const foreshortening = Math.sqrt(Math.max(0.16, 1 - dot(direction, view) ** 2));
+      const reach = layer.width * pixel / foreshortening;
+      const [dx, dy, dz] = direction.map(value => value * reach);
+      // Opposed probes cancel linear slope. A flat face produces no bend.
+      const departure = (distance(x + dx, y + dy, z + dz) + distance(x - dx, y - dy, z - dz) - 2 * center) / reach;
+      const score = layer.edge === 'both' ? Math.abs(departure) : layer.edge === 'concave' ? -departure : departure;
+      if (Number.isFinite(score)) bend = Math.max(bend, score);
+    }
+    return smooth(layer.minBend, layer.minBend + layer.softness, bend);
+  }
+
   const models = {
+    bevel(layer, q) {
+      return clamp(q.nl) ** layer.power * q.light;
+    },
     diffuse(layer, { nl, light }) {
       return clamp(nl) * light;
     },
@@ -460,7 +488,8 @@ const SurfaceLook = (() => {
             'tilt',
             'response',
             'distortion',
-            'blur'
+            'blur',
+            ...(layer.type === 'bevel' ? ['minBend', 'softness'] : [])
           ],
           id
         );
@@ -503,10 +532,19 @@ const SurfaceLook = (() => {
         ) {
           throw new TypeError(id + '.roughness must be a number or an along/across pair');
         }
+        let bevel;
+        if (layer.type === 'bevel') {
+          const { width = 1.5, minBend = 0.13, softness = 0.42, edge = 'convex', power = 0.65 } = layer;
+          if (width < 0.25 || width > 8 || !(minBend > 0 && minBend < 2) ||
+              !(softness > 0 && softness <= 2) || !['convex', 'concave', 'both'].includes(edge) || power <= 0)
+            throw new RangeError(id + ' bevel needs width in 0.25–8 art pixels, positive minBend, softness and power, and a valid edge');
+          bevel = { width, minBend, softness, edge, power };
+        }
         const roughness = Array.isArray(layer.roughness) ? layer.roughness : [layer.roughness, layer.roughness];
         return {
           ...layer,
           id,
+          ...bevel,
           spatialMask,
           model: models[layer.type],
           lightingRamp,
@@ -650,6 +688,10 @@ const SurfaceLook = (() => {
         layer.lightingRamp.tint(level, rgb);
         response = layer.lightingRamp.amount ? layer.lightingRamp.amount(level) : layer.type === 'diffuse' ? 1 : level;
       }
+      if (layer.type === 'bevel') {
+        if (!response) continue;
+        response *= bevelCoverage(layer, sample, geometricNormal, v);
+      }
       const weight = clamp(response * strength);
       const spark = layer.type === 'glints';
       const size = layer.detailSize ?? (spark ? 2 * clamp(layer.radius ?? .37) * positive(layer.scale,.12) * scale : 0);
@@ -668,6 +710,6 @@ const SurfaceLook = (() => {
     return output;
   }
 
-  return { STRIDE, material, merge, prepare, shade, prepareLightTrack };
+  return { STRIDE, hasBevel, material, merge, prepare, shade, prepareLightTrack };
 })();
 if (typeof module !== 'undefined') module.exports = SurfaceLook;

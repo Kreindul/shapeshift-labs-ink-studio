@@ -241,3 +241,52 @@ test('JSON material ramps render with animated light, remain palette-resolved an
   spec.solids[0].mat.surface.layers.cloth = false;
   assert.deepEqual(render(KIT.diorama.build(spec), view).rgb, render(world, { ...view, surface: false }).rgb);
 });
+
+test('bevel reach follows art pixels, detects convex rims and concave folds, and respects light', () => {
+  // A slab meets a perpendicular wall at x = 0. Test from the front face.
+  const corner = (x, y, z) => Math.max(x, z);
+  const fold = (x, y, z) => Math.min(-x, z);
+  const layer = (width, edge) => prepare({ layers: { edge: { type: 'bevel', width, edge, color: '#ffffff' } } });
+  const shade = (shader, bevelDistance, x, artFootprint, overrides = {}) =>
+    Surface.shade(shader, { ...front, position: [x, 0, 0], bevelDistance, artFootprint, ...overrides }, base)[0];
+  const narrow = layer(1), wide = layer(3), concave = layer(3, 'concave'), both = layer(3, 'both');
+  assert.equal(shade(narrow, corner, -0.02, 0.01), base[0]);
+  assert(shade(wide, corner, -0.02, 0.01) > base[0] + 0.15);
+  assert.equal(shade(wide, corner, -0.02, 0.01), shade(wide, corner, -0.04, 0.02));
+  assert.equal(shade(wide, (x, y, z) => z, -0.02, 0.01), base[0]);
+  assert.equal(shade(wide, fold, -0.02, 0.01), base[0]);
+  assert.equal(shade(concave, fold, -0.02, 0.01), shade(both, corner, -0.02, 0.01));
+  assert(shade(concave, fold, -0.02, 0.01) > base[0] + 0.15);
+  assert.equal(shade(wide, corner, -0.02, 0.01, { visibility: 0 }), base[0]);
+  assert.equal(shade(wide, corner, -0.02, 0.01, { lightDirection: [0, 0, -1] }), base[0]);
+  assert.equal(shade(wide, undefined, -0.02, 0.01), base[0]);
+  assert.throws(() => layer(0), /width in 0.25–8 art pixels/);
+  assert.throws(() => layer(2, 'inside'), /valid edge/);
+});
+
+test('authored bevels affect sculpt corners at export size and preserve flat faces and coverage', () => {
+  const spec = {
+    id: 'bevel-export',
+    light: { surfaceDirection: [[0, 0, 0, 1]] },
+    finish: { cam: { target: [0, 0, 0], yaw: 0, pitch: 0, dist: 4, ortho: true }, look: { pixel: true }, dither: 0 },
+    solids: [
+      { kind: 'box', at: [0, 0, 0], half: [0.95, 0.8, 0.24], mat: { role: 'stone', surface: { layers: {
+        rim: { type: 'bevel', lightingRamp: { role: 'pale' }, width: 4, strength: 1 }
+      } } } },
+      { kind: 'box', at: [0, 0, -1.2], half: [3, 2, 0.1], mat: 'dark' }
+    ]
+  };
+  const world = KIT.diorama.build(spec);
+  assert.equal(typeof world.surfaces[0].bevelDistance, 'function');
+  for (const ortho of [true, false]) for (const raw of [true, false]) {
+    const view = { w: 112, h: 88, px: 1, ortho, raw, captureCoverage: true };
+    const on = render(world, view), off = render(world, { ...view, surface: false });
+    const center = ((on.h >> 1) * on.w + (on.w >> 1)) * 3;
+    assert.deepEqual(on.rgb.slice(center, center + 3), off.rgb.slice(center, center + 3));
+    assert.notDeepEqual(on.rgb, off.rgb);
+    assert.deepEqual(on.coverage, off.coverage);
+  }
+  delete spec.solids[0].mat.surface.layers.rim;
+  const off = KIT.diorama.build(spec);
+  assert(off.surfaces.every(binding => !binding.bevelDistance));
+});
