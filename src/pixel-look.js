@@ -264,7 +264,7 @@ const PixelLook = (() => {
     return distance;
   }
 
-  function preparePalette(definition, { palette = [], roles = {}, blueNoise, deferDitherColors = false } = {}) {
+  function preparePalette(definition, { palette = [], roles = {}, blueNoise, deferDitherColors = false, prepareDitherTile = false } = {}) {
     if (!record(definition) || Object.keys(definition).some(key => !['palette', 'reserved', 'dither', 'source', 'match'].includes(key)))
       throw new TypeError('A palette constraint accepts palette, reserved, dither, source and match settings');
     const { source = 'lit', match = 'rgb' } = definition;
@@ -338,7 +338,7 @@ const PixelLook = (() => {
     if (pattern === 'checker') {
       width = height = 2;
       ranks = Float32Array.of(.25, .75, .75, .25);
-    } else if (pattern === 'blue-noise' && amount) {
+    } else if (pattern === 'blue-noise' && (amount || prepareDitherTile)) {
       if (typeof blueNoise !== 'function') throw new TypeError('Pass materials.blueNoise to prepare this palette pattern');
       const tile = blueNoise({ seed });
       ({ width, height } = tile);

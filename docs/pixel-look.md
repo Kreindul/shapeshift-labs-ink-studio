@@ -426,6 +426,9 @@ node cli/ink-studio.js render examples/authorized-dither-pairs.js --ortho --w 32
 node cli/ink-studio.js render examples/authorized-dither-pairs.js --ortho --w 320 --h 176 --px 1 --params '{"mode":"open"}' --out signal-open.png
 ```
 
+To find a pair and pixel ratio for a particular target, use the
+[native-size dither fit](palette-recipes.md#fit-a-target-with-two-swatches).
+
 ### Choose a matching priority
 
 Set `match` on a palette policy to choose the closest swatch for the
