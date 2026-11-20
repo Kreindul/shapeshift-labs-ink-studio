@@ -334,6 +334,7 @@ const CMD = {
         '  clip-sequence <id> [--handoff 0] [--out report.json]  inspect clip instances, retimed cues, and handoffs',
         '  authored-contacts <id> [--at seconds] [--out report.json]  inspect contact ranges and socket transfer timing',
         '  motion-fx <id> [--at seconds] [--out report.json]  inspect keyed FX layers and sampled effect output',
+        '  cloth-review <id> [--pose seconds] [--through seconds] [--bake take.json]  preview a cloth pose and optionally bake it',
         '  passes <id> [--channels coverage,depth,normal,objectId,materialId,emission]  save art-pixel render pass previews',
         '  shimmer <id> [--mode orbit|zoom|pan|still --frames 24]  how many pixels flicker over a move, and a GIF of it',
         '  crisp <id ...|all> [--t 2 --map]   how crisp at its own pixel size: stray pixels, specks, flat area, finest frequencies,',
@@ -667,6 +668,24 @@ const CMD = {
       fs.writeFileSync(file, report);
       console.log('wrote', file);
     }
+  },
+  'cloth-review'() {
+    const world = build(pos[0]), review = world.clothReview, demo = world.clothDemo;
+    if (!review?.bake || !demo?.start) die('cloth-review needs a scene with an authored cloth panel');
+    if (opt.bake !== undefined && typeof opt.bake !== 'string') die('--bake needs a JSON output filename');
+    const sourceTime = num('pose', demo.selected());
+    demo.start(sourceTime);
+    review.advance(num('through', 30));
+    let bake;
+    if (opt.bake) {
+      const take = review.bake();
+      bake = path.resolve(opt.bake);
+      fs.mkdirSync(path.dirname(bake), { recursive: true });
+      fs.writeFileSync(bake, JSON.stringify(take) + '\n');
+    }
+    const regions = Object.fromEntries(['pin', 'free', 'protected'].map(role => [role, review.regions().filter(value => value === role).length]));
+    process.stdout.write(JSON.stringify({ scene: world.id, sourceTime: demo.selected(),
+      nu: review.nu, nv: review.nv, regions, ...review.state(), ...(bake && { bake }) }, null, 2) + '\n');
   },
   passes() {
     const w = build(pos[0]), t = num('t', 0);

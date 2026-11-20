@@ -366,6 +366,8 @@ Use [authored contacts and prop handoffs](docs/authored-contacts.md) to pin a ha
 
 Use [Motion FX](docs/motion-fx.md) to time stretch, smear, trails, and solid splat sweeps independently. Each effect has its own intensity keys and part mask.
 
+Use [Cloth Review](docs/cloth-review.md) to paint pin, free, and protected regions, preview the existing XPBD solver from a captured pose, and bake a settled take.
+
 `K.character(B, spec, lane)` creates an input-driven character with movement, running, jumping, dashing, attacks, casting and crouching. Its specification supplies geometry and rig points; it is a toolkit for authoring a character, rather than a bundled cast of character assets. The API is documented at the top of [kk-character.js](src/kit/kk-character.js).
 
 ## Particles and interaction
@@ -659,6 +661,7 @@ The CLI and Node `render()` use the CPU renderer. Use the [browser renderer](doc
 | `clip-sequence <scene> [--handoff 0]` | Report clip instances, retimed keys and cues, and measured handoffs. |
 | `authored-contacts <scene> [--at seconds]` | Report authored contact ranges, transfer timing, and optional pose evidence. |
 | `motion-fx <scene> [--at seconds]` | Report Motion FX timing, part masks, and sampled splat or deformation counts. |
+| `cloth-review <scene> [--pose seconds] [--bake take.json]` | Run a captured cloth pose and optionally bake the settled simulation. |
 | `variants <scene> --seeds 3,7,12` | Render a ranked seed contact sheet for a scene with variant metrics. |
 | `sheet <scene> --from 0 --to 3 --n 12` | Make a labeled sheet of animation frames. |
 | `turn <scene> --n 8` | Make a sheet from multiple viewing angles. |
