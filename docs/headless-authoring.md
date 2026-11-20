@@ -534,6 +534,69 @@ node examples/raster-palette.cjs raster-palette-review
 ink-studio graph run raster-palette-review/raster-palette.json --out raster-palette-review/graph
 ```
 
+## Pixel effects and raster analysis
+
+These graph nodes take a typed `source` raster. The library exposes the
+same operations under `ink.load().KIT.procedural.pixelEffects`. Colour
+effects return straight-alpha RGBA8 at the source dimensions. Add
+transparent canvas margin before an effect when its coverage needs room
+outside the original image.
+
+| Operation | Options and additional outputs |
+| --- | --- |
+| `fx.kernelBlur` | Use a Gaussian or box `kind`, integer `radius` from 0 to 64, and optional Gaussian `sigma`. Supply a custom odd-size `kernel` array of nonnegative weights for an authored filter. Weights normalize to one. |
+| `fx.pathBlur` | Link a 2D `path`. It samples the path at equal arc-length intervals. Set `samples`, `anchor: "start" \| "center" \| "end"`, `falloff: "uniform" \| "start" \| "end"`, and `filter: "linear" \| "nearest"`. Path coordinates are pixel displacements relative to the anchor. |
+| `fx.outline` | Set `outer`, `inner`, and `feather` in pixels, plus `color` and `innerColor`. The `outer` and `inner` outputs are separate byte masks. |
+| `fx.bevel` | Set `width`, 2D light `direction`, `strength` from 0 to 1, and `highlight` and `shadow` colours. The `height` output is a one-channel relief map in 0–1. |
+| `fx.glow` | Blur a selected `channel` above `threshold` using `radius`, `sigma`, `strength` and `color`. Set `placement: "behind"` for a sprite halo or `"over"` with `mode: "screen" \| "add" \| "normal"` for an opaque image. Exports the separate `glow` raster and byte `mask`. |
+| `fx.erode` | Recede from exposed edges by a Euclidean `radius` in pixels. Returns the edited raster and its surviving byte `mask`. |
+| `fx.repair` | Use `method: "close"` and a Euclidean `radius` for holes and narrow gaps, or `"bridge"` and `maxGap` for breaks along rows, columns or diagonals. New pixels take the nearest selected source colour or an explicit `color`. Inspect them in the separate `added` mask. |
+| `fx.pixelSort` | Sort contiguous eligible pixels along a horizontal, vertical, diagonal, or antidiagonal `axis`. Choose a `key`, optional inclusive `range`, `order`, and `minLength`. An aligned raster `mask` can limit sorting further. |
+
+Both blurs filter premultiplied colour and alpha with `edge` set to
+`clamp`, `transparent`, or `wrap`. Kernel blur defaults to clamped edges.
+Path blur defaults to transparent edges.
+
+Outline, bevel, erosion, repair, and analysis take an optional
+`channel`, `threshold` (default 128) and `invert`. They select visible
+pixels from alpha for alpha-bearing rasters or luma otherwise. Choose a
+named channel or a numeric index to drive the shape with a different
+plane. Glow defaults to alpha and threshold 1. Use luma and a higher
+threshold to isolate highlights on an opaque image.
+
+Pixel sort supports channel names or indices, `hue`, `saturation`, and
+OKLab `lightness`. Hue, saturation, and lightness use 0–1. Other keys use
+the source channel's units. Transparent or excluded pixels break runs.
+Equal keys retain input order, and each pixel carries its colour and alpha.
+Mask eligibility uses `maskChannel` (default luma) and `maskThreshold`
+(default 128).
+
+### Trace paths and points
+
+`fx.analyze` returns `paths` as `array<path>`, `points` as
+`array<vec2>`, a byte `mask`, and `regions` containing each selected
+component's bounds, area, seed and centroid. Use `minArea` to omit small
+components and `connectivity: 4` or `8` to define adjacency.
+
+- Tracing follows the selected silhouette and its holes, including
+  shapes that meet the canvas edge. Coordinates use the top-left pixel
+  grid. Turn tracing off with `paths: false` when only points are needed.
+  Tracing uses Ink's marching-squares budget of 500,000 cells including
+  the border.
+- Set `pointMode` to `centroids` (default), `boundary`, `pixels`, or
+  `none`. Centroids and pixel samples use pixel centres. Boundary points
+  follow the traced paths. Use `stride` to thin boundary or pixel
+  samples and `limit` to bound point output.
+
+The [Prism Moth example](../examples/pixel-effects.cjs) writes a complete
+graph, native PNGs, and extracted paths and points. The preview redraws
+the traced paths and marks the component centroids.
+
+```sh
+node examples/pixel-effects.cjs pixel-effects-review
+ink-studio graph run pixel-effects-review/pixel-effects.json --out pixel-effects-review/graph
+```
+
 ## Geometry and attributes
 
 `geometry.meshPaths(mesh, { sources, edgeCost, maxCost })` supports native and imported indexed meshes. It returns per-vertex distances and predecessors, plus `path(vertex)`, `curves(vertices)` and a sampled `distanceAt(point)` field. The cost function receives positions, vertex IDs, length and adjacent faces. Return infinity to block an edge.
