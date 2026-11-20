@@ -15,6 +15,26 @@ function packVolume(volume, out, offset) {
     volume.near,volume.far ?? 1e20,volume.radius ?? 0,+(!!volume.lit)],offset);
 }
 
+function packPaletteFields(fog, card, firstRow) {
+  const fields = [...fog.map(volume => volume.paletteField), card?.paletteField];
+  if (!fields.some(field => field?.strength)) return { rows: [], fog: false, card: -1 };
+  const descriptors = new Float32Array(fields.length * 8), colors = [];
+  fields.forEach((field, i) => {
+    if (!field?.strength) return;
+    const first = firstRow + fields.length * 2 + colors.length / 4;
+    if (field.stops) {
+      for (const { at, rgb } of field.stops) colors.push(...rgb, at);
+    } else {
+      for (let j = 0; j <= 128; j++) colors.push(...field.sampleUnit(j / 128), 0);
+    }
+    const source = ['depth', 'altitude', 'density', 'light'].indexOf(field.source);
+    descriptors.set([field.stops ? 1 : 2, source, field.low, field.span,
+      first, field.stops?.length ?? 129, field.strength, fog[i]?.step ?? 0], i * 8);
+  });
+  return { rows: [...descriptors, ...colors], fog: fog.some(volume => volume.paletteField),
+    card: card?.paletteField?.strength ? firstRow + 2 * fog.length : -1 };
+}
+
 export function createEnvironment(gl, resources, {table, textureUnit}, maxSize, toolkit) {
   const K = toolkit.KIT;
   const state = toolkit.EnvironmentFrame ?? K?.environmentFrame;
@@ -29,7 +49,7 @@ export function createEnvironment(gl, resources, {table, textureUnit}, maxSize, 
     return resources.texture();
   }
 
-  function prepare(world, frame, camera, time, width, height) {
+  function prepare(world, frame, camera, time, width, height, reflection = false) {
     if (frame.environment === false || !state || !skyAPI) return null;
     const skySource = frame.skyEnvironment ?? world.skyEnvironment;
     const cloudSource = frame.cloudField ?? world.cloudField;
@@ -41,7 +61,8 @@ export function createEnvironment(gl, resources, {table, textureUnit}, maxSize, 
     const sampled = state.timeline(world,frame,time,direction,K?.weather?.tracks);
     const background = paletteColor(world.pal[0]);
     const celestial = celestialAPI?.settings(world.celestialTracks,frame.celestialTracks)?.frame(sampled.skyTime);
-    const sky = skyAPI.withCelestials(sampled.environment?.sky,celestial,background);
+    const weatherSky = skyAPI.withCelestials(sampled.environment?.sky,celestial,background);
+    const sky = reflection ? skyAPI.forReflection(weatherSky) : weatherSky;
     const pose = cameraPose(camera);
     const eye = pose.eye.map((n,i)=>n-camera.setback*pose.back[i]);
     let clouds, cloudView;
@@ -76,9 +97,12 @@ export function createEnvironment(gl, resources, {table, textureUnit}, maxSize, 
     const skyFocal = camera.ortho ? Math.tan((sky?.orthoFov ?? Math.PI/3)*.5) : camera.tangent;
     const skyView = [skyFocal*camera.aspect,skyFocal];
     const horizon = Math.max(camera.distance+2*camera.radius,card ? cloudView.horizon(pose.eye) : 0);
-    const useBackdrop = !!(sky?.celestial || sky?.paletteRamp || horizonArt || flatCloud);
+    const useBackdrop = !!(sky?.celestial || sky?.paletteRamp || sky?.paletteField || horizonArt || flatCloud);
     const splats = useBackdrop ? [] : sky?.splats ?? [];
-    const rows = new Float32Array(16*(fog.length+splats.length));
+    const paletteStart = 4 * (fog.length + splats.length);
+    const fields = packPaletteFields(fog, card, paletteStart);
+    const rows = new Float32Array(paletteStart * 4 + fields.rows.length);
+    rows.set(fields.rows, paletteStart * 4);
     for (let i=0;i<fog.length;i++) packVolume(fog[i],rows,i*16);
     for (let i=0;i<splats.length;i++) {
       const layer = splats[i];
@@ -140,6 +164,7 @@ export function createEnvironment(gl, resources, {table, textureUnit}, maxSize, 
         u_envSun:sky?.sun ?? blank,u_envSunRGB:sky?.sunColor ?? blank,
         u_envSunParams:[sky?.sunEdge ?? 0,sky?.sunCore ?? 1,sky?.sunStrength ?? 0],
         u_envFogCount:fog.length,u_envBands:direction?.atmosphereBands ?? 0,
+        u_envPaletteFog: +fields.fog, u_envPaletteStart: paletteStart, u_envPaletteCard: fields.card,
         u_envCardSize:card?.resolution ?? 0,u_envCloudHardness:direction?.cloudHardness ?? .5,
         ...(card && {u_envCardFrame:[...card.center,card.radius],u_envCardRight:card.right,u_envCardUp:card.up,
           u_envCardNormal:card.normal,u_envCloudRGB:card.rgb,

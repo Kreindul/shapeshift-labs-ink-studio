@@ -8,6 +8,7 @@ const SkyEnvironment = (() => {
     color = require('./color-space.js');
     paletteFields = require('./palette-fields.js');
   }
+  const palettes = typeof AtmospherePalette === 'undefined' ? require('./atmosphere-palette.js') : AtmospherePalette;
   const decode = color.prepare('srgb', 'srgb-linear'), encode = color.prepare('srgb-linear', 'srgb');
   const TAU = Math.PI * 2, transitionLimit = 2048;
   const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
@@ -194,8 +195,14 @@ const SkyEnvironment = (() => {
     }
     let backdrop = null;
     if (sky !== false) {
-      const { orthoFov = base.orthoFov, splats = [], paletteRamp } = record(sky, 'Sky');
-      backdrop = { orthoFov: bounded(orthoFov, 1, 160, 'Orthographic sky FOV'), paletteRamp: skyRamp(paletteRamp),
+      const { orthoFov = base.orthoFov, splats = [], paletteRamp, paletteField } = record(sky, 'Sky');
+      let field;
+      if (paletteField !== undefined && paletteField !== false) {
+        const { reflections = true, gain, ...definition } = record(paletteField, 'Sky palette field');
+        if (typeof reflections !== 'boolean') throw new TypeError('Sky palette field reflections must be a boolean');
+        field = { ...palettes.compile(definition, palettes.skyDomains), reflections, gain: gainBinding(gain) };
+      }
+      backdrop = { orthoFov: bounded(orthoFov, 1, 160, 'Orthographic sky FOV'), paletteRamp: skyRamp(paletteRamp), field,
         splats: list(splats, 4096, 'Angular splats').map(raw => {
           record(raw, 'Angular splat');
           const [az, el] = vector(raw.at, 2, 'Splat azimuth and elevation');
@@ -342,13 +349,16 @@ const SkyEnvironment = (() => {
       const backdropColor = (key, weight) => (p[key] ?? rgb(base[key])).map((c, i) => mix(c, veil[i], overcast * weight));
       const ramp = backdrop?.paletteRamp;
       const rampStrength = ramp && clamp(ramp.strength * (ramp.gain === undefined ? 1 : p[ramp.gain] ?? 0) * (1-overcast));
+      const field = backdrop?.field;
+      const fieldStrength = field && clamp(field.strength * (field.gain === undefined ? 1 : p[field.gain] ?? 0));
       const sky = backdrop && {
         orthoFov: backdrop.orthoFov * Math.PI / 180, sun,
         zenith: backdropColor('zenith', .82), horizon: backdropColor('horizon', .68), ground: backdropColor('ground', .35),
         sunColor: p.sunColor ?? rgb(base.sunColor), sunStrength,
         sunEdge: Math.cos(p.sunSize ?? base.sunSize), sunCore: Math.cos(.86 * (p.sunSize ?? base.sunSize)),
         splats: backdrop.splats.map(style).filter(layer => layer.opacity > 0),
-        ...(rampStrength > 0 && { paletteRamp: { ...ramp, strength: rampStrength } })
+        ...(rampStrength > 0 && { paletteRamp: { ...ramp, strength: rampStrength } }),
+        ...(fieldStrength > 0 && { paletteField: { ...field, strength: fieldStrength } })
       };
       return { parameters: p, sky };
     }
@@ -409,8 +419,15 @@ const SkyEnvironment = (() => {
     }
     for (let c = 0; c < 3; c++) {
       const base = mix(sky.horizon[c], horizon[c], fade);
-      output[c] = mix(ramp ? mix(base,output[c],ramp.strength) : base, sky.sunColor[c], sunlight);
+      output[c] = ramp ? mix(base,output[c],ramp.strength) : base;
     }
+    const field = sky.paletteField;
+    if (field) {
+      const value = field.source === 'elevation' ? Math.asin(clamp(height, -1, 1)) :
+        field.source === 'azimuth' ? field.low + mod(Math.atan2(ray[0],ray[2]) - field.low,TAU) : sunlight;
+      field.apply(value, output, output, field.strength);
+    }
+    for (let c = 0; c < 3; c++) output[c] = mix(output[c], sky.sunColor[c], sunlight);
     return output;
   }
 
@@ -421,6 +438,10 @@ const SkyEnvironment = (() => {
     const span = Math.hypot(direction[0], direction[2]);
     const alongHorizon = span > 0 ? [direction[0] / span, 0, direction[2] / span] : [0, 0, 0];
     return atmosphere(sky, alongHorizon, output, false);
+  }
+
+  function forReflection(sky) {
+    return sky?.paletteField?.reflections === false ? { ...sky, paletteField: undefined } : sky;
   }
 
   function shade(sky, ray, output = [0, 0, 0]) {
@@ -437,6 +458,6 @@ const SkyEnvironment = (() => {
     }
     return sky.celestial ? sky.celestial.shade(ray, output) : output;
   }
-  return Object.freeze({ compile, shade, aerial, airTransmission, scattering, withCelestials, transitionLimit });
+  return Object.freeze({ compile, shade, forReflection, aerial, airTransmission, scattering, withCelestials, transitionLimit });
 })();
 if (typeof module !== 'undefined') module.exports = SkyEnvironment;

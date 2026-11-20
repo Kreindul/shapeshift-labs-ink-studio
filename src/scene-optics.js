@@ -8,6 +8,7 @@ const SceneOptics = (() => {
   const geometry = typeof GeometryDensity === 'undefined' ? require('./geometry-density.js') : GeometryDensity;
   let volumeLight;
   try{volumeLight=VolumeLight;}catch{volumeLight=require('./volume-light.js');}
+  const palettes = typeof AtmospherePalette === 'undefined' ? require('./atmosphere-palette.js') : AtmospherePalette;
   const fieldBands = typeof FieldBands === 'undefined' ? require('./field-bands.js') : FieldBands;
   const opticalMaterials = typeof OpticalMaterials === 'undefined' ? require('./optical-materials.js') : OpticalMaterials;
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -56,14 +57,15 @@ const SceneOptics = (() => {
     return [((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255];
   }
 
-  const common = ({ density = 0.2, color = '#99b1c4', near = 0, far, id, tags, mediumKind, optical,lit,step=.2,anisotropy=0 } = {}) => {
-    if(lit!==undefined&&(typeof lit!=='boolean'||!Number.isFinite(step)||step<=0||!Number.isFinite(anisotropy)||Math.abs(anisotropy)>=1))throw new RangeError('Invalid lit volume settings');
+  const common = ({ density = 0.2, color = '#99b1c4', near = 0, far, id, tags, mediumKind, optical,lit,step=.2,anisotropy=0,paletteField } = {}) => {
+    if((lit!==undefined||paletteField)&&(lit!==undefined&&typeof lit!=='boolean'||!Number.isFinite(step)||step<=0||!Number.isFinite(anisotropy)||Math.abs(anisotropy)>=1))throw new RangeError('Invalid lit volume settings');
     nonnegative(near, 'Volume near distance');
     if (far !== undefined && (!Number.isFinite(far) || far <= near))
       throw new RangeError('Volume far distance must exceed near');
     return { density: nonnegative(density, 'Volume density'), color, near, far, ...(id !== undefined && { id }),
       ...(tags !== undefined && { tags }), ...(mediumKind !== undefined && { mediumKind }),
-      ...(optical !== undefined && { optical: opticalMaterials.material(optical) }),...(lit!==undefined&&{lit,step,anisotropy}) };
+      ...(optical !== undefined && { optical: opticalMaterials.material(optical) }),...(lit!==undefined&&{lit,step,anisotropy}),
+      ...(paletteField !== undefined && { paletteField, step }) };
   };
   function fog(options = {}) {
     const { bottom, top, depthBand } = options;
@@ -155,6 +157,9 @@ const SceneOptics = (() => {
           // An authored field ramp supplies the scattering color at each height.
           volume.ramp = volume.ramp?.map(rgb => opticalMaterials.medium(volume.optical, rgb, true, transform).tint);
         }
+        const field = palettes.compile(volume.paletteField, palettes.volumeDomains, color);
+        if (field?.strength) volume.paletteField = field;
+        else delete volume.paletteField;
         if (volume.bands) volume.bands = fieldBands.bind(volume.bands, swatch => {
           const rgb = color(swatch);
           return volume.optical ? opticalMaterials.medium(volume.optical, rgb, true, transform).tint : rgb;
@@ -260,7 +265,8 @@ const SceneOptics = (() => {
     }
     hits.sort((a, b) => a[0] - b[0]);
     if (options?.cloudShadow || options?.flash || options?.exposure?.fog || options?.cutouts?.fog || hits.some(([, volume]) =>
-      volume.type === 'field' || volume.densityField || volume.depthBand?.sample))
+      volume.type === 'field' || volume.densityField || volume.depthBand?.sample || volume.paletteField ||
+      (volume.lit && options?.media?.paletteLocals)))
       return volumeLight.integrate(hits, origin, direction, stop, result, options);
     result[0] = result[1] = result[2] = 0;
     result[3] = 1;

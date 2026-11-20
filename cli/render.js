@@ -616,8 +616,9 @@ function renderFrame(world, o, preparedPalettes) {
   const skyBase = backdropClouds && !sky ? hex(0) : bg;
   const skyOverlay = (flash || cloudView) && !sky && !backdropClouds;
   const opticalSky = sky || clouds?.visible || flash;
+  const reflectionSky = SkyEnvironment.forReflection(sky);
   const skySample = (opticalSky || horizonArt) && ((direction, out, origin, reflection, cloudSignal) => {
-    if (sky) SkyEnvironment.shade(sky, direction, out);
+    if (sky) SkyEnvironment.shade(reflection ? reflectionSky : sky, direction, out);
     else for (let c = 0; c < 3; c++) out[c] = skyBase[c];
     if (horizonArt && !reflection) horizonArt(direction, out);
     if (origin) {
@@ -672,7 +673,7 @@ function renderFrame(world, o, preparedPalettes) {
     quality.wind = volumeWind ?? wind.velocity;
     if (volumeFlow) quality.windOffset = volumeFlow.windOffset;
     const media = volumes.some(volume => volume.type === 'field'||volume.lit) ? prepareVolumeLight() : undefined;
-    return { ...quality, time: t, waterTime: motion.water, waterWind, cloudShadow, flash, media, exposure, cutouts, cloud:cloudView, effectCoverage: trackMedia,
+    return { ...quality, time: t, depthOffset, waterTime: motion.water, waterWind, cloudShadow, flash, media, exposure, cutouts, cloud:cloudView, effectCoverage: trackMedia,
       cloudStart:cloudView && eyeD-dist, fogTransmittance:!!fogPass, bands:direction?.bands, counters:counters?.volume };
   };
   const geometrySample = probe || sortedSurfaces || sdf || emitterHits || aerial || cloudShadow || flash || cloudView ? sampleFrames(world, t) : null;

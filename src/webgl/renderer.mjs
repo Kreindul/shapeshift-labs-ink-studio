@@ -857,7 +857,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       }
       const water = waterUniforms(waterScene, camera, motion?.water ?? time, plane, captures, width, height);
       if (water) water.u_waterWindGain = (windResponse?.water ?? 0) * Math.hypot(...flex('water'));
-      const env = environment.prepare(world,frame,camera,t,width,height);
+      const env = environment.prepare(world,frame,camera,t,width,height,reflectionCapture);
       if (env || lastEnvironment) historyValid = false;
       lastEnvironment = !!env;
       const wet = water && wetVariant(water,!!env?.media);

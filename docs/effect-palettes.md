@@ -41,3 +41,61 @@ Set `look.effectPalettes` on the world, `finish.look.effectPalettes` in a dioram
 - A `when` gate reads a numeric sky profile channel at the active sky time. Supply `min`, `max`, or both. A missing channel leaves the ramp inactive.
 
 The ramps run after scene palette and art styling. Set `captureEffectPalettes: true` when rendering from the library to receive an `effectPaletteMask` for an active set. Its top-down pixel values are 0 for unassigned, 1 fog, 2 clouds, 3 sky, and 4 emission. The returned palette and usage counts include the selected swatches.
+
+## Drive palette fields from atmosphere samples
+
+Author a `paletteField` where the atmosphere is sampled. Each field maps
+one physical input through a `domain` to a palette. Use explicit
+`bands` with normalized stops, or reuse a [palette ramp](palette-recipes.md#spectrum-and-primary-ramps).
+`strength` blends the field with the authored colour from 0 to 1.
+The fields change colour while the existing density, transmittance and
+shadow settings still govern how much of it reaches the camera.
+
+| Binding | Sources |
+| --- | --- |
+| `skyEnvironment.sky.paletteField` | `elevation` and `azimuth` in radians, or `sunlight` from 0 to 1 |
+| `cloudField.paletteField` | World `altitude`, `density`, or local `light` |
+| `atmosphere[n].paletteField` | `depth` along the viewing ray from the camera, or world `altitude` |
+| `volumeLighting.point.paletteField`, `points[n]`, or `spots[n]` | Local `intensity` after cone, cookie, falloff and scattering phase |
+
+For example, put this field on a fog volume. It samples cool blue near
+the camera, then lilac and rose farther along the ray.
+
+```json
+{
+  "source": "depth",
+  "domain": [4, 30],
+  "field": {
+    "type": "bands",
+    "stops": [
+      {"at": 0, "color": "#7399ac"},
+      {"at": 0.4, "color": "#998da8"},
+      {"at": 0.75, "color": "#e1a5aa"}
+    ]
+  }
+}
+```
+
+Clouds take their tint at the sampled height and then apply cloud
+lighting. A lit fog volume receives the colour sampled by each local
+beam. The light still falls off and geometry can cut it. Fog field
+samples use the volume's `step` and the existing volume quality budget.
+
+Sky fields can bind `gain` to a numeric sky profile channel. Scene sky
+reflections use the same directional field by default. Set
+`reflections: false` inside the sky field to keep the base sky in the
+reflection. Surface finishes can also choose their own reflection source.
+
+The headless renderer supports all bindings. WebGL samples sky fields
+and supports fields on analytic fog volumes and its supported cloud
+representations. Its cloud cards sample the visible span's midpoint.
+Local point and spot palette fields use the headless volume light path.
+
+The [pigment lighthouse](../examples/atmosphere-palette-fields.js) uses
+all four bindings. Compare its shared reflection with the same field
+restricted to the visible sky.
+
+```sh
+ink-studio render examples/atmosphere-palette-fields.js --w 354 --h 190 --px 1 --t .22 --out shared.png
+ink-studio render examples/atmosphere-palette-fields.js --w 354 --h 190 --px 1 --t .22 --params '{"mode":"separate-reflection"}' --out separate.png
+```
