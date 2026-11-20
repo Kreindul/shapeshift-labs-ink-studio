@@ -46,6 +46,7 @@ For per-pixel rendering set `S.pixel = true` before baking and set `look: { pixe
 | `diffuse` | Map the direct-light response through a material lighting ramp. |
 | `tint` | Apply a constant `color` using `blend: 'mix'`, `'add'`, or `'multiply'`. |
 | `bevel` | Highlight sculpted ridges and creases within a configurable art-pixel reach. |
+| `transmission` | Add tinted backlight through a thin sheet using its thickness and incident light. |
 | `specular` | Set `roughness` to one value or to `[along, across]` to shape the reflected highlight. Set `color` for a tinted highlight. |
 | `fiber` | Set `roughness`, `shift` and optionally `figure`, `axis` and `scale` for tilted fibres with a moving band. |
 | `localReflection` | Sample a named [local reflection probe](scene-optics.md#local-reflection-probes). Set scalar or along/across roughness. |
@@ -150,6 +151,55 @@ node cli/ink-studio.js render examples/material-bevel-highlights.js --w 338 --h 
 node cli/ink-studio.js render examples/material-bevel-highlights.js --w 338 --h 132 --px 1 --surface off
 ```
 
+## Thin-material transmission
+
+Add a `transmission` layer to glow where a light reaches the far side of a
+sheet. The layer adds colored light in linear space using the sheet's
+normal and the direction to the viewer. It works on either side and
+preserves the material's opacity and coverage.
+
+```js
+const paper = K.surface.material({ r: [15, 16, 17] }, {
+  layers: {
+    through: { type: 'transmission', source: 'local',
+      color: '#ffdda0', strength: 0.75, thickness: 0.16 }
+  }
+});
+const world = B.finish({
+  cam,
+  lights: [{ p: [0, 1, 0], radius: 2, intensity: 1.7, color: [1, 0.7, 0.35] }]
+});
+```
+
+- Set `source` to `sun` for the finish light direction, `local` for
+  scene point lamps, or `both` to combine them. The default is `both`.
+  The directional source follows the live sun when enabled and the
+  surface light track otherwise. Point lamps use the existing radius,
+  color, and daylight schedule.
+- `color` and `strength` control the tint and gain. `thickness` is
+  optical depth and defaults to 0.24. Thicker or more oblique paths
+  pass less light. `wrap` softens the transition around grazing angles
+  and `power` shapes the falloff. Use masks or [finish signals](#drive-finish-properties)
+  to vary thickness across a leaf, a paper panel, or a cloth hem.
+- Directional backlight uses the live shadow map when present. The
+  headless renderer can also test shadows from point lamps and the
+  finish light against retained static sculpt fields. Retain them
+  with `S.keepRenderSdf = true`. `shadowBias` controls the ray offset in
+  world units and defaults to 0.08. Set `shadow: false` on a layer to
+  bypass its visibility test.
+
+This layer works in JavaScript and JSON finish definitions in the
+headless renderer. In a custom surface host, `sample.transmissionSun`
+accepts a direction, intensity, linear RGB color, and an optional
+`visibility(bias)` callback. `sample.transmissionLights()` can return a
+list of local lights with the same fields. Without a custom sun, the
+sampler uses the finish light and the sample's visibility.
+
+```sh
+ink-studio render examples/thin-transmission.js --w 356 --h 172 --px 1 --out lantern.png
+ink-studio render examples/thin-transmission.js --w 356 --h 172 --px 1 --transmission off --out lantern-unlit.png
+```
+
 ## Drive finish properties
 
 Name a source in `surface.signals` and bind it to one or more layer
@@ -182,8 +232,8 @@ const glazedCeramic = K.surface.material(clay, {
 - Drive `strength` on any finish layer. Drive `roughness` on specular,
   fiber, diffraction, glint, and local reflection layers with a number or an along/across
   pair. Drive `f0` on sky, planar, and local reflections. Drive `color` on tint,
-  specular, fiber, sheen, glint, bevel, planar, and local reflection layers
-  using a normal surface color.
+  specular, fiber, sheen, glint, bevel, planar reflection, local reflection, and transmission layers
+  using a normal surface color. Drive `thickness` on transmission layers.
 - A `weather` source reads `wetness`, `standingWater`, `snow`, `frost`,
   `temperature`, or `exposure` at the world position. A `time` source uses
   scene seconds. Set `range: [low, high]` and optionally choose `linear`,

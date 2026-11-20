@@ -1,5 +1,7 @@
 // Bind the common shader to the software renderer's camera and splat buffers.
 const SurfaceLook = require('../src/surface-look.js');
+const LightSchedule = require('../src/light-schedule.js');
+const linear = require('../src/color-space.js').prepare('srgb', 'srgb-linear');
 
 function surfaceShading(world, options, camera) {
   if (options.surface === false || !world.surfaceData || !world.surfaces?.length) return null;
@@ -10,11 +12,12 @@ function surfaceShading(world, options, camera) {
   const rigFrames = new Map();
   const projected = i => materials[surfaceData[i * STRIDE] - 1]?.projected;
   const local = i => localMaterials?.[surfaceData[i * STRIDE] - 1];
+  const thin = i => materials[surfaceData[i * STRIDE] - 1]?.thin;
   const bevel = i => materials[surfaceData[i * STRIDE] - 1]?.bevelDistance;
 
   function rigFrame(i) {
     const part = rig?.bid[i];
-    if (!part || rig.free?.[i] || !(projected(i) || bevel(i) || local(i))) return null;
+    if (!part || rig.free?.[i] || !(projected(i) || bevel(i) || local(i) || thin(i))) return null;
     if (!rigFrames.has(part)) {
       const { M } = require('../index.js').load().KIT;
       const matrix = rig.M.subarray(part * 12, part * 12 + 9);
@@ -32,10 +35,12 @@ function surfaceShading(world, options, camera) {
     const material = SurfaceLook.prepare(settings, world.pal, liveLight ?? light, world.surfaceEffects,
       { colorCurves: options.colorCurves !== false, colorLut: options.colorLut !== false, colorStack: options.colorStack !== false,
         paletteConstraints: options.paletteConstraints !== false && (options.lookMasks !== false || !settings.paletteConstraint?.mask),
-        paletteRoles: world.paletteRoles, blueNoise, onPaletteClip: camera.onPaletteClip });
+        transmission: options.transmission !== false, paletteRoles: world.paletteRoles, blueNoise, onPaletteClip: camera.onPaletteClip });
     if (bevelDistance && material.layers.some(layer => layer.type === 'bevel')) material.bevelDistance = bevelDistance;
     return material;
   });
+  const lamps = materials.some(material => material.thinLocal) ?
+    (camera.transmissionLamps?.() ?? []).map(light => ({ ...light, tint: linear(light.color) })) : [];
   const ids = new Map();
   const palettes = [], constraints = [];
   for (const material of materials) {
@@ -114,7 +119,7 @@ function surfaceShading(world, options, camera) {
     const angle = rotation(i);
     const c = Math.cos(angle),
       s = Math.sin(angle);
-    const source = prepared.projected || prepared.bevelDistance || local(i) ? rest : data;
+    const source = prepared.projected || prepared.bevelDistance || local(i) || prepared.thin ? rest : data;
     const frame = rigFrame(i);
     const ox = c * dx - s * dz, oy = y - centerY, oz = s * dx + c * dz;
     if (frame) {
@@ -162,7 +167,7 @@ function surfaceShading(world, options, camera) {
     }
     sample.sky = environment(i) ? sampleSky : undefined;
     sample.localReflection = local(i) ? sampleLocal : undefined;
-    if (sample.sky || sample.localReflection) {
+    if (sample.sky || sample.localReflection || prepared.thin) {
       sample.skyView[0] = vx;
       sample.skyView[1] = view[1];
       sample.skyView[2] = vz;
@@ -196,6 +201,30 @@ function surfaceShading(world, options, camera) {
             return reflection(layer, sx, sy, c * dx + s * dz, n[1] - original[1], c * dz - s * dx);
           }
         : undefined;
+    sample.transmissionSun = prepared.thin ? {
+      direction: prepared.sun,
+      intensity: camera.sunIntensity ?? 1,
+      visibility: bias => {
+        const toward = sample.skyNormal ? sample.skyNormal(normal) : normal;
+        return camera.transmissionSunVisibility?.(i, sample.worldPosition, prepared.sun, toward, bias) ?? sample.visibility;
+      }
+    } : undefined;
+    let incident;
+    sample.transmissionLights = prepared.thinLocal && lamps.length ? () => {
+      if (incident) return incident;
+      incident = [];
+      for (const light of lamps) {
+        const intensity = LightSchedule.contribution(light, x, y, z);
+        if (!intensity) continue;
+        const offset = [light.p[0] - x, light.p[1] - y, light.p[2] - z];
+        const distance = Math.hypot(...offset);
+        if (distance <= 1e-8) continue;
+        const direction = offset.map(value => value / distance);
+        incident.push({ direction, intensity, color: light.tint,
+          visibility: bias => camera.transmissionOccluded?.(sample.worldPosition, direction, distance, bias) ? 0 : 1 });
+      }
+      return incident;
+    } : undefined;
     rgb[0] = r;
     rgb[1] = g;
     rgb[2] = b;
@@ -206,7 +235,7 @@ function surfaceShading(world, options, camera) {
 
   return {
     has, normalAt, surfaceNormal, planar, environment, shade, palettes, constraints,
-    projected, bevel, local,
+    projected, bevel, local, thin,
     finishBeforeFog: i => materials[surfaceData[i * STRIDE] - 1]?.finishBeforeFog,
     reveals: i => materials[surfaceData[i * STRIDE] - 1]?.reveals
   };

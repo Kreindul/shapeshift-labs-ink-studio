@@ -314,6 +314,8 @@ Move section planes, depth ranges, and spatial masks across a native render. [In
 
 Compare synchronized scenes with side-by-side playback, a swipe divider, and signed overlays. [Comparison views](docs/comparison-views.md)
 
+Encode categories with patterns and shapes, label scale endpoints, and navigate linked records with a keyboard. [Accessible data encodings](docs/linked-views.md#accessible-encodings)
+
 The [unified scene timeline](docs/scene-timeline.md) synchronizes camera motion, rig poses, lights, effects, audio cues, and world events through keyframes and nested sequences.
 
 Use `K.rig` for tagged rigid parts, `K.creature` for a creature rig, and `K.puppet` for hierarchical parts with deformation. `K.anim` provides clips, easing, layers, state machines, constraints, facial controls and presentation cues. `K.acts` provides ready-made action and reaction clips.
@@ -499,7 +501,7 @@ There are several simulation levels:
 | API | Use |
 | --- | --- |
 | `K.breaker`, `K.rubble`, `K.debris` | Breaking, unsupported pieces, falling rubble and loose fragments. |
-| [`K.destruction`](docs/destruction.md) | Named structural groups, current-pose physics handoffs, swept cannonball/catapult impacts, support cascades and exact reset. |
+| [`K.destruction`](docs/destruction.md) | Breakable authored parts and terrain strokes, current-pose physics handoffs, swept impacts, support cascades and exact reset. |
 | [`K.ecology`](docs/ecology.md) | Shared material channels, extensible processes and contacts, existing fire integration, splat/texture damage, local light and checkpoint replay. |
 | `K.jelly`, `K.sand` | Lightweight shape deformation or granular motion. |
 | `K.mpm` | A material-point solver for elastic jelly, yielding clay, granular sand and water. |
@@ -773,6 +775,7 @@ Common rendering controls:
 | `--ortho` | Use a parallel projection. |
 | `--edges off` | Hide the edge sprites attached to materials in a per-pixel scene. |
 | `--surface off` | Render without the view-dependent finish layers. |
+| `--transmission off` | Toggle thin-material transmission in surface finishes. |
 | `--reflection-probes off` | Toggle local reflection probes. |
 | `--reflections off` / `--atmosphere off` | Toggle scene reflection captures or atmosphere volumes. |
 | `--w`, `--h`, `--out` | Output viewport size and destination. The renderer resolves a lower-resolution pixel grid derived from the scene's detail settings. |
@@ -1006,3 +1009,5 @@ Surface fragments can detach, follow shared wind, gather into live forms, and re
 Named targets can drive shared brackets, labels, glyph ripples, depth visibility and optional magnified views. See [target inspection effects](docs/target-inspection.md) and the [interactive relay observatory](examples/target-inspection.html).
 
 `KIT.palette` adds dependency-free two-color recipes, independent OKLCh channel curves, named material roles, reference-ramp transfer, and seekable palette paths. See [palette recipes](docs/palette-recipes.md) and the [interactive Chromatic garden](examples/palette-recipes.html). Export colors with `ink-studio palette examples/palette-recipe.json`.
+
+`KIT.paint` adds dependency-free spectral paint mixing, reusable swatch recipes, tint/shade controls, gradients and baked RGB ramps or mixture lookup tables. See [paint mixing](docs/paint-mixing.md) and the [interactive Pigment atelier](examples/paint-mixing.html).

@@ -680,6 +680,7 @@ const view = extra =>
       water: opt.water === 'off' ? false : undefined,
       reflections: opt.reflections === 'off' ? false : undefined,
       reflectionProbes: onOffOption('reflection-probes'),
+      transmission: onOffOption('transmission'),
       skyReflections: opt['sky-reflections'],
       ...skyOptions(),
       celestialTracks: celestialOption(),
@@ -766,6 +767,7 @@ const CMD = {
       [
         'ink-studio <command> <diorama id | lab/file.js> [options]',
         '',
+        '  paint mix|ramp|table|swatches <file.json> [--out file.json]   mix pigments or bake colors',
         '  palette <recipe.json> [--t seconds] [--out palette.json]   sample palette recipes, paths and animation',
         '  inspect <scene|run>         discover fields, actions, ports and entities',
         '  environment inspect <scene|run> --at x,y,z [--t seconds] [--out report.json]   explain sky and local weather',
@@ -779,6 +781,7 @@ const CMD = {
         '  authoring inspect <scene> [--authoring snapshot.json] [--part id]   inspect retained parts',
         '  authoring preview <scene> <edits.json> [--authoring snapshot.json] [--image preview.png]   stage and validate edits',
         '  authoring apply <scene> <edits.json> [--authoring snapshot.json] --out snapshot.json   save validated edits',
+        '  authoring suggest-breakable <scene> --at x,y,z [--radius 1] [--voxel .1] [--ids]   suggest a connected breakable part',
         '  --params JSON --parameter-time SEC   supply shared controls and choose the material bake time for a diorama',
         '  scene apply|stamp|remix|capture|upgrade|sync-prefab|history|promote <world> ...  edit or derive a world manifest',
         '    scene upgrade <world|checkpoint> <instance> --to PREFAB [--migration FILE] [--dry-run]',
@@ -896,7 +899,7 @@ const CMD = {
         'lightning options: --lightning on|off|file.json',
         'exposure options: --scene-exposure on|off|file.json',
         'aerial options: --aerial-perspective on|off --aerial-start units --aerial-density per-unit --aerial-contrast 0..1',
-        'view options: --surface off (no finish layers) --water off --reflections off --reflection-probes off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --px1 (native art pixels) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --adaptive-sampling on|off|file.json --clean (remove lone pixels) --camera-shot id --ortho [on|off] (override authored projection) --cols 4 --out file.png --seed n',
+        'view options: --surface off (no finish layers) --water off --reflections off --reflection-probes off --transmission off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --px1 (native art pixels) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --adaptive-sampling on|off|file.json --clean (remove lone pixels) --camera-shot id --ortho [on|off] (override authored projection) --cols 4 --out file.png --seed n',
         'socket emitter options: --atmosphere-emitters on|off|file.json',
         'animated splat options: --splat-fields on|off|file.json',
         'sprite options: --sprite-atlas on|off|atlas.json --sprite-at x,y,z --sprite-scale n --sprite-atlas-mode card|impostor|scenery',
@@ -925,6 +928,15 @@ const CMD = {
     else process.stdout.write(json);
   },
   authoring() {
+    if (pos[0] === 'suggest-breakable') {
+      if (pos.length !== 2 || typeof opt.at !== 'string' || opt.at.split(',').some(value => !value.trim()))
+        throw new Error('Usage: ink-studio authoring suggest-breakable <scene> --at x,y,z [--radius 1] [--voxel .1] [--ids]');
+      const { ids, ...suggestion } = lib().KIT.authoring.breakables.suggest(build(pos[1]), {
+        at: list('at'), radius: num('radius'), voxel: num('voxel')
+      });
+      process.stdout.write(JSON.stringify({ ...suggestion, samples: ids.length, ...(opt.ids && { ids }) }, null, 2) + '\n');
+      return;
+    }
     return require('./authoring.js')(pos, opt, {
       scene,
       render(world) {
@@ -2167,6 +2179,7 @@ const CMD = {
      it, carried on), so it stays put from every view. The decals are kept in studio/paint/<id>/decals.json; the game's build puts
      them in the page, and the CLI draws them at once */
   paint() {
+    if (['mix', 'ramp', 'table', 'swatches'].includes(pos[0])) return require('./paint.js')(pos, opt, lib());
     const [sub, id] = pos;
     if (!['export', 'absorb', 'clear', 'layers', 'tune'].includes(sub) || !id)
       die(

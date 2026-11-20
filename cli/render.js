@@ -672,7 +672,12 @@ function renderFrame(world, o, preparedPalettes) {
       atmosphere:false, water:false, reflections:false, edges:false, transparencyHistory:undefined
     });
   }, o[probeCaptures]) : null;
-  let live;
+  let live, transmissionOccluder;
+  function transmissionOccluded(point, direction, distance, bias) {
+    if (!world.renderSdfs?.length || distance <= bias) return false;
+    if (transmissionOccluder === undefined) transmissionOccluder = AreaRaster.sceneOccluder(world, d, AL);
+    return transmissionOccluder?.(point.map((value, axis) => value + direction[axis] * bias), direction, distance - bias);
+  }
   const sunGains = sun && [0, 0, 0];
   const surface = surfaceShading(world, stages && !coverageAware ? { ...o, paletteConstraints: false } : o, {
     eye,
@@ -690,7 +695,15 @@ function renderFrame(world, o, preparedPalettes) {
     footprint: (dist * 2) / (tp * H),
     detail: stableDetail, pixelsPerUnit: focal / (o.artGridScale || 1), orthographic: ortho,
     time: t,
-    sun: sun?.direction,
+    sun: sun?.direction, sunIntensity: sun?.intensity,
+    transmissionLamps: () => LightSchedule.select(world.lights || [], lampEye, { daylight }),
+    transmissionOccluded,
+    transmissionSunVisibility(i, point, direction, normal, bias) {
+      if (live) return live.transmissionVisibility(i, point, normal, bias);
+      if (transmissionOccluded(point, direction, world.radius * 4, bias)) return 0;
+      const [x, y, z] = point;
+      return (cloudShadow?.(x, y, z) ?? 1) * (exposure?.light?.(x, y, z) ?? 1);
+    },
     cloudShadow,
     exposure,
     weather: weather?.surface,
@@ -1309,7 +1322,7 @@ function renderFrame(world, o, preparedPalettes) {
     const pixelSurface = !opticalActive && PIX?.[i * 8] && !surface?.reveals(i) && (!planar || (al >= 1 && !(flags & 1)));
     const projected = surface?.projected(i);
     const reflectedSky = !skyOverlay && surface?.environment(i);
-    const fragmentSurface = !pixelSurface && (planar || localProbeReflection || projected || surface?.bevel(i) || reflectedSky || liveNormal && hasSurface);
+    const fragmentSurface = !pixelSurface && (planar || localProbeReflection || projected || surface?.bevel(i) || surface?.thin(i) || reflectedSky || liveNormal && hasSurface);
     const ditherRule = fragmentRule(i);
     const detailParticle = fieldParticle || world.effectParticles?.some(({ first, count }) => i >= first && i < first + count);
     const centered = hasSurface && !pixelSurface && !fragmentSurface;
