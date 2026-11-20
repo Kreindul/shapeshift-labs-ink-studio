@@ -342,6 +342,47 @@ const layer = {
 
 Use the `raster` object from `palette chart --format data` for the same operation in JSON. An indexed raster can supply its own `palette` of hex colours, normalized RGB triples, or scene palette indices. Its slots then address that list in order. With no local palette, slots address the scene palette directly. Rows default to `origin: 'bottom-left'`. Chart assets set `origin: 'top-left'`. Explicit slot cycles work with an embedded palette, and `null` slots leave the material visible.
 
+### Drive palette fields with scene data
+
+Declare [surface signals](surface-materials.md#drive-finish-properties) on the material, then bind them to a projected palette field with `axes`. Each binding takes a named `signal` and an output `range` that defaults to `[0, 1]`. A signal's own range and interpolation normalize its input before the axis range is applied. Reverse an output range to reverse its effect. Missing sample data uses the first value in the output range.
+
+- `hue`, `brightness`, and `saturation` are available on hue–brightness and polar colour layers. Hue uses turns and wraps. Brightness is HSV value.
+- `u` and `v` are normalized coordinates available on projected hue–brightness, polar, coverage, chroma fields, and palette ramps. They replace the corresponding projected sampling coordinate inside the existing rectangle. Polar fields keep their disk coverage.
+- Signals can read a world or rest axis, directional light, retained weather, time, a painted texture channel, a projected field, or a world query. A `light` signal reads the clamped surface-facing directional light multiplied by the sample's sun visibility. Weather signals read the retained surface channels, such as wetness, where the sample is shaded.
+
+```json
+{
+  "signals": {
+    "course": {"type": "axis", "axis": "y", "space": "world", "range": [0.4, 3.2]},
+    "sun": {"type": "light", "range": [0.03, 0.6]},
+    "wet": {"type": "weather", "channel": "wetness", "range": [0.012, 0.29]}
+  },
+  "layers": {
+    "glaze": {
+      "type": "projected",
+      "pattern": "hue-brightness",
+      "projection": {"along": [1, 0, 0], "across": [0, 1, 0]},
+      "hueBrightness": {
+        "palette": ["#928a7b", "#f1e3c9", "#49a3a0", "#87b6c6"],
+        "size": [8.5, 3.1]
+      },
+      "axes": {
+        "hue": {"signal": "course", "range": [0.43, 0.61]},
+        "brightness": {"signal": "sun", "range": [0.57, 0.98]},
+        "saturation": {"signal": "wet", "range": [0, 0.94]}
+      }
+    }
+  }
+}
+```
+
+The [rain-glazed terrace](../examples/palette-field-weather.js) uses those three bindings on a tiled wall. A red-channel paint mask drives the hue of the wave sign. Export matched dry and damp frames with the CLI.
+
+```sh
+ink-studio render examples/palette-field-weather.js --w 336 --h 160 --px 1 --raw --t 0 --out terrace-dry.png
+ink-studio render examples/palette-field-weather.js --w 336 --h 160 --px 1 --raw --t 3.1 --out terrace-damp.png
+```
+
 ### Author a shader in JavaScript
 
 A layer can name a shader from `surfaceEffects.shaders` or use a function as

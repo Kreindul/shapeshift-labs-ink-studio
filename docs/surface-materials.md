@@ -274,12 +274,15 @@ const glazedCeramic = K.surface.material(clay, {
   scene seconds. Set `range: [low, high]` and optionally choose `linear`,
   `smooth` (the default), or `step` interpolation. In a custom host pass
   the weather frame's `surface` function as `sample.weather(x, z)`.
+- A `light` source reads directional visibility multiplied by how directly
+  the surface faces the sun. It accepts the same range and interpolation.
 - Use the existing `axis`, `query`, `field`, and `texture` mask sources
   as signals with the same settings. JavaScript materials can also
   supply a function that takes the surface sample and returns a value
   in zero to one. Missing values keep the authored property.
 - Signals are shared across layer bindings at each sample. Independent
-  layer masks, finish order, and the export palette still apply.
+  layer masks, finish order, and the export palette still apply. The same
+  signals can [drive the axes of projected palette fields](projected-effects.md#drive-palette-fields-with-scene-data).
 
 The [retained weather example](retained-weather.md#put-it-on-a-material)
 uses the same film signal for stone color and highlight width. Standing

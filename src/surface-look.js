@@ -229,18 +229,18 @@ const SurfaceLook = (() => {
       if (typeof source === 'function') return [id, { read: source }];
       if (!isRecord(source)) throw new TypeError('Surface signal ' + id + ' needs a source');
       const { type, channel, range = [0, 1], interpolation = 'smooth' } = source;
-      if (type === 'weather' || type === 'time') {
+      if (['weather','time','light'].includes(type)) {
         if (type === 'weather' && !['wetness', 'standingWater', 'snow', 'frost', 'temperature', 'exposure'].includes(channel))
           throw new RangeError('Unknown weather channel on surface signal ' + id);
         if (Object.keys(source).some(key => !['type', 'range', 'interpolation', ...(type === 'weather' ? ['channel'] : [])].includes(key)) ||
             !Array.isArray(range) || range.length !== 2)
           throw new TypeError('Surface signal ' + id + ' needs a valid range');
         const transfer = curves.scalar({ stops: [[range[0], 0], [range[1], 1]], interpolation });
-        const read = (sample, weather) => {
-          const value = type === 'weather' ? weather?.[channel] : sample.time ?? 0;
+        const read = (sample, weather, light) => {
+          const value = type === 'weather' ? weather?.[channel] : type === 'light' ? light : sample.time ?? 0;
           return Number.isFinite(value) ? transfer(value) : 0;
         };
-        return [id, { read, weather: type === 'weather' }];
+        return [id, { read, weather: type === 'weather', light: type === 'light' }];
       }
       const read = effects.prepareMask(source, context, { validateOnly });
       return [id, { read }];
@@ -661,7 +661,7 @@ const SurfaceLook = (() => {
             } };
           }
           else if (layer.type === 'colorLut' || layer.type === 'colorStack') effect = effects[layer.type](layer, resolveColor);
-          else if (layer.type === 'projected') effect = effects.layer(layer, context, resolveColor, paletteRoles);
+          else if (layer.type === 'projected') effect = effects.layer(layer, context, resolveColor, paletteRoles, signals);
           else effect = effects.colorCurve(layer, context, resolveColor);
           const compiled = { ...layer, id, blend, strength: clamp(layer.strength ?? 1), effect, spatialMask, retainedMask };
           if (layer.type === 'tint') compiled.color = resolveColor(layer.color);
@@ -725,8 +725,8 @@ const SurfaceLook = (() => {
       });
     const thin = layers.some(layer => layer.type === 'transmission');
     const thinLocal = layers.some(layer => layer.type === 'transmission' && layer.source !== 'sun');
-    const driven = layers.some(layer => layer.drive);
-    const weather = layers.some(layer => layer.retainedMask || layer.drive?.some(entry => entry.signal.weather));
+    const driven = layers.some(layer => layer.drive || layer.effect?.boundAxes);
+    const weather = layers.some(layer => layer.retainedMask || layer.effect?.weather || layer.drive?.some(entry => entry.signal.weather));
     const hasKits = layers.some(layer=>layer.kit);
     const kitExposure = layers.some(layer=>layer.kit?.exposure);
     return {
@@ -819,6 +819,14 @@ const SurfaceLook = (() => {
     const weatherPosition = sample.worldPosition ?? position;
     const weather = prepared.weather && sample.weather?.(weatherPosition[0], weatherPosition[2]);
     const signals = prepared.driven ? new Map() : null;
+    const readSignal = signals && (signal => {
+      if (!signals.has(signal)) {
+        const value = signal.light ? signal.read(sample,weather,clamp(dot(geometricNormal,sun))*visibility) :
+          signal.read(sample,weather);
+        signals.set(signal,Number.isFinite(value) ? clamp(value) : 0);
+      }
+      return signals.get(signal);
+    });
     let maskFrame;
     for (let layer of layers) {
       if (typeof layer.mask === 'function' && !maskFrame) maskFrame = {
@@ -830,11 +838,7 @@ const SurfaceLook = (() => {
       if (maskWeight && layer.drive) {
         layer = { ...layer };
         for (const { key, signal, from, to } of layer.drive) {
-          if (!signals.has(signal)) {
-            const value = signal.read(sample, weather);
-            signals.set(signal, Number.isFinite(value) ? clamp(value) : 0);
-          }
-          const amount = signals.get(signal);
+          const amount = readSignal(signal);
           layer[key] = Array.isArray(from) ? from.map((value, i) => mix(value, to[i], amount)) : mix(from, to, amount);
         }
       }
@@ -852,7 +856,7 @@ const SurfaceLook = (() => {
         continue;
       }
       if (layer.effect) {
-        const result = layer.effect.sample(sample, output, layer);
+        const result = layer.effect.sample(sample, output, layer, readSignal);
         const size = layer.detailSize ?? layer.effect.detailSize;
         const detailGain = stableDetail?.texture && size && detailScale ?
           detail.weight(stableDetail.texture,size/detailScale) : 1;
