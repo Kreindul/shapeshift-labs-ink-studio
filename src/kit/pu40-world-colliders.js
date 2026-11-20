@@ -3,7 +3,7 @@
   const W=K.world, P=K.procedural, {V,M}=K, {check,record,vector}=W.data;
   const {clamp}=W.fields, {freeze}=P.data;
   const eps=1e-8, axisX=[1,0,0], down=[0,-1,0];
-  const shapes=new WeakMap(), boxes=new WeakMap(), poses=new WeakMap();
+  const shapes=new WeakMap(), boxes=new WeakMap(), bends=new WeakMap(), poses=new WeakMap();
   const shapeKeys=new WeakMap(), flatShapes=new Map(), flatPoses=new Map(), facetedPairs=new Map();
   const xyz=point=>vector(point)&&point.every(n=>Math.abs(n)<=1e4);
   const positive=n=>Number.isFinite(n)&&n>=.005&&n<=1e4;
@@ -134,10 +134,30 @@
     const points=part.vertices.map(p=>M.app(rotation,p));
     return remember(flatPoses,key,{points,vectors:edgeVectors(points,part.edges)});
   }
+  function bentParts(body){
+    const {bend,half}=body, {axis,offsets}=bend, cached=bends.get(bend);
+    if(cached?.half===half)return cached.parts;
+    const boxShape=box(half), sections=offsets.length-1;
+    const parts=offsets.slice(0,-1).map((_,i)=>{
+      const vertices=boxShape.vertices.map(p=>{
+        const index=i+Number(p[axis]>0), q=p.slice();
+        q[axis]=(2*index/sections-1)*half[axis];
+        return V.add(q,offsets[index]);
+      });
+      const normals=boxShape.faces.map(([a,b,c],i)=>{
+        const n=V.norm(V.cross(V.sub(vertices[b],vertices[a]),V.sub(vertices[c],vertices[a])));
+        return V.dot(n,boxShape.directions[i])<0?V.mul(n,-1):n;
+      });
+      return poly(vertices,boxShape.faces,normals);
+    });
+    bends.set(bend,{half,parts});
+    return parts;
+  }
   function geometry(body) {
     if(poses.has(body))return poses.get(body);
     let parts;
-    if(body.collider)parts=local(body.collider).parts;
+    if(body.bend)parts=bentParts(body);
+    else if(body.collider)parts=local(body.collider).parts;
     else {
       if(!boxes.has(body.half))boxes.set(body.half,box(body.half));
       parts=[boxes.get(body.half)];
@@ -180,6 +200,12 @@
     return Math.min(...part.faces.map(face=>V.dist(point,closestFace(point,part,face))));
   }
   function distance(body,point,fast=false) {
+    if(body.bend){
+      const local=W.durability.unbendPoint(body,M.app(M.tr(body.rotation),V.sub(point,body.position)));
+      const q=local.map((n,i)=>Math.abs(n)-body.half[i]), inside=Math.max(...q);
+      if(inside<=0)return inside;
+      if(fast)return Math.hypot(...q.map(n=>Math.max(n,0)));
+    }
     return Math.min(...geometry(body).parts.map(part=>partDistance(part,point,fast)));
   }
   function rayPoly(part,from,delta,limit) {

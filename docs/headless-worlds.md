@@ -446,6 +446,8 @@ for a specified wetness. Most numeric properties accept a constant or
 | `thermal.heatCapacity`, `thermal.conductance`, `dryingRate` | Lumped heat capacity in J/K and conductance in W/K use the same reference area. Each cell approaches its ambient temperature at their ratio. The drying rate is in inverse seconds at 20 °C. Dry cells lose moisture faster as their temperature rises. |
 | `erosion.threshold`, `erosion.rate` | For cells covered by water, the bed lowers at `rate × (flow speed − threshold)` above the threshold in world units per second. Each water system exposes the removed bed volume in its `eroded` field. |
 | `fracture.energy`, `fracture.parts` | The mechanics fracture action checks supplied impact energy against the threshold. Fragments inherit the material. `parts` is the default number of pieces and can be overridden by the action. |
+| `fatigue.endurance`, `fatigue.life`, `fatigue.exponent` | Stress amplitude threshold, reference life in cycles and the stress-to-life exponent for structural bodies and worn joints. |
+| `plastic.yield`, `plastic.creep`, `plastic.limit` | Yield stress, creep rate above yield and a cap on permanent curvature over the normalized beam span. |
 | `sounds` | Names the `step`, `roll`, `impact` and `fracture` cues. Foot and wheel contacts carry cue IDs. Impacts and fractures expose their cues in the event record for a host to play. |
 | `appearance.dry`, `appearance.wet` | Equal-length hex color ramps mapped to the scene palette. The ground renderer interpolates them from the same moisture field. |
 
@@ -855,6 +857,53 @@ ink-studio sim run examples/world-routed-workshop.json --actions examples/world-
 ink-studio trace workshop.run.json routes/route --args '{"link":"hose"}'
 ink-studio probe workshop.run.json --field world/transfers
 ink-studio sim render workshop.run.json --colored --out routed-workshop.png
+```
+
+## Material fatigue and permanent deformation
+
+Set `structure` on a box body to divide its primary axis into bending
+sections. `axis` is `0`, `1` or `2` and defaults to X. `sections` ranges
+from 2 to 12 and defaults to 8. `bearings: "ends"` holds both ends level
+while `"fixed-start"` models a cantilever anchored at its negative end.
+The body uses its physical material's `fatigue` and `plastic` laws. You can
+also set either law directly under `structure` with numeric coefficients.
+
+The beam model estimates local bending stress from transverse force and
+the rectangular cross section. Normal collision impulses, actuator loads
+and configured routed loads contribute at their points of application.
+Collision load positions use the touching shapes' overlapping bounds.
+Structure enables the shape-aware mechanics solver. The model uses the
+authored bearings as the reference for calculating moment arms.
+
+Each stress reversal closes a half cycle. Its amplitude is half the
+stress change between successive turning points. At or above `endurance`,
+damage increases by `0.5 × (amplitude / endurance)^exponent / life`.
+A steady load can cause plastic creep when its stress exceeds `yield`.
+The accumulated curvature persists after unloading. It changes the beam's
+collider, rendered shape, sockets and support surface. Material changes in
+world space also publish bounded dependency updates. Surface charts map
+back to their rest coordinates as the beam bends and when it fractures.
+
+Add `wear` to a hinge, shaft or slider. Its fatigue law comes from the
+child's material or an inline `wear.fatigue` law. `sectionModulus` scales
+the joint's applied load into a stress value. `travelRate` adds wear during
+loaded travel. `maxPlay` caps the total backlash in radians for a hinge or
+shaft, or world units for a slider. The realized pose can hold while the
+drive changes direction and takes up the gap. Set `failure: "detach"` to
+release the joint when its damage reaches one.
+
+`material-yield` records the onset of permanent bending. `material-failure`
+records the first section or joint to reach unit damage. Use `rig/fatigue`
+to read current and peak stress, damage, counted cycles, curvature and
+world positions. Pass `body` and optional `section`, pass `joint`, or
+probe a world point to find the nearest live beam section. The joint
+readout includes commanded and realized positions, speed and play.
+
+```sh
+ink-studio sim run examples/world-material-fatigue.json --actions examples/world-material-fatigue.commands.json --ticks 64 --record fatigue.run.json
+ink-studio probe fatigue.run.json --field rig/fatigue --args '{"body":"cycle-beam"}'
+ink-studio probe fatigue.run.json --field rig/fatigue --args '{"joint":"hinge"}'
+ink-studio sim render fatigue.run.json --colored --out fatigue-bench.png
 ```
 
 ## Extend the runtime in JavaScript

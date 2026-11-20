@@ -7,13 +7,13 @@
   const indexThreshold = 32;
   const spin=(rotation,omega,dt) => V.len(omega)>1e-9 ? M.mul(M.rot(V.norm(omega),V.len(omega)*dt),rotation) : rotation;
   function distance(body,point) {
-    if(body.collider)return W.colliders.distance(body,point);
+    if(body.collider||body.bend)return W.colliders.distance(body,point);
     const local=M.app(geometry(body).inverse,V.sub(point,body.position));
     const q=local.map((n,i)=>Math.abs(n)-body.half[i]);
     return Math.hypot(...q.map(n=>Math.max(n,0)))+Math.min(Math.max(...q),0);
   }
   function column(body,x,z,low,high) {
-    if(body.collider)return W.colliders.columns(body,x,z,low,high)[0]??null;
+    if(body.collider||body.bend)return W.colliders.columns(body,x,z,low,high)[0]??null;
     const inv=geometry(body).inverse, from=M.app(inv,V.sub([x,high,z],body.position)), dir=M.app(inv,[0,-1,0]);
     let start=0, end=high-low, face=-1, sign=1;
     for(let k=0;k<3;k++){
@@ -41,7 +41,7 @@
     return shape;
   }
   function boundsOf(body) {
-    if(body.collider){
+    if(body.collider||body.bend){
       const {min,max}=W.colliders.geometry(body);
       return {min,max,bounded:min.every(Number.isFinite)&&max.every(Number.isFinite)};
     }
@@ -55,7 +55,7 @@
     return shape.bounds={min,max,bounded};
   }
   function extents(body) { return geometry(body).extent; }
-  function mechanics(config,{catalog}) {
+  function mechanics(config,{catalog,world}) {
     check(config.contactEvents===undefined || typeof config.contactEvents==='boolean','contactEvents must be boolean');
     const start=config.bodies??{}, jointSpecs=config.joints??{}, forceSpecs=config.forces??{};
     const fabricFields=config.deformables??[];
@@ -66,12 +66,13 @@
       new Set(routeFields).size===routeFields.length,'Invalid routed load fields');
     check([start,jointSpecs,forceSpecs].every(group=>record(group)&&Object.keys(group).length<=512&&Object.keys(group).every(id)),
       'Mechanics needs bounded body, joint and force tables');
-    const richer=fabricFields.length>0||Object.values(start).some(item=>item?.collider!==undefined);
+    const richer=fabricFields.length>0||Object.values(start).some(item=>item?.collider!==undefined||item?.structure!==undefined);
     const continuous=config.continuous??richer, advanced=richer||continuous, iterations=config.contactIterations??10;
     check((config.continuous===undefined||typeof config.continuous==='boolean')&&Number.isSafeInteger(iterations)&&
       iterations>=1&&iterations<=32,'Invalid mechanical contact controls');
     const initialBodies={}, initials={}, inputs={}, outputs={}, claimed=new Map(), driveOrder=[], mountOrder=[];
     const surface=W.surfaceState, surfaceChannels=K.procedural.surfaceState.channels(config.surfaceChannels);
+    const durability=W.durability, structures={}, wearSpecs={};
     const initialCharts={};
     if (config.contactEvents) outputs.contacts='event';
     if(fabricFields.length)outputs['deformable-loads']='event';
@@ -123,6 +124,12 @@
         ...(item.materialAsset!==undefined&&{materialAsset:item.materialAsset}),
         ...(item.materialWetness!==undefined&&{materialWetness:item.materialWetness})};
       if(item.surfaceState!==undefined)initialBodies[key]=surface.init(initialBodies[key],item.surfaceState,initialCharts,surfaceChannels);
+      if(item.structure!==undefined){
+        check(!item.collider&&half.every(n=>n<=1e3),'A beam structure needs bounded box dimensions');
+        const spec=durability.checkStructure(item.structure), profile=W.materials.forBody(catalog,world,initialBodies[key]);
+        check(spec.fatigue||spec.plastic||profile?.fatigue||profile?.plastic,'A beam structure needs a fatigue or plastic material law');
+        structures[key]=spec;
+      }
     }
     for (const [key,spec] of Object.entries(jointSpecs)) {
       check(record(spec)&&['fixed','hinge','slider','shaft'].includes(spec.kind)&&own(start,spec.child)&&
@@ -137,6 +144,13 @@
         'Invalid joint settings for ' + key);
       claimed.set(spec.child,key);
       initials[key]={active:true,value:clamp(spec.at??0,...range),speed:0,load:0,stalled:false};
+      if(spec.wear!==undefined){
+        check(spec.kind!=='fixed','Joint play needs a hinge, shaft or slider');
+        const wear=durability.checkWear(spec.wear), profile=W.materials.forBody(catalog,world,initialBodies[spec.child]);
+        check(wear.fatigue||profile?.fatigue||wear.travelRate>0,'Joint wear needs a fatigue law or travel rate');
+        wearSpecs[key]=wear;
+        initials[key].durability=durability.jointInitial(initials[key].value);
+      }
       inputs['drive.'+key]={type:'number',default:spec.mode==='position'?spec.at??0:spec.speed??0};
       outputs['speed.'+key]='number';
       outputs['stalled.'+key]='bool';
@@ -189,9 +203,11 @@
         const spec=jointSpecs[key], joint=joints[key], child=bodies[spec.child], parent=bodies[spec.parent];
         if (!joint.active||!child||spec.parent&&!parent) continue;
         const axis=V.norm(spec.axis??up), parentRotation=parent?.rotation??M.id();
-        const turn=['hinge','shaft'].includes(spec.kind)?M.rot(axis,joint.value):M.id();
+        const coordinate=joint.durability?.actual??joint.value;
+        const turn=['hinge','shaft'].includes(spec.kind)?M.rot(axis,coordinate):M.id();
         const offset=M.app(turn,spec.offset??zero);
-        const local=V.add(spec.anchor??zero,spec.kind==='slider'?V.mad(offset,axis,joint.value):offset);
+        let local=V.add(spec.anchor??zero,spec.kind==='slider'?V.mad(offset,axis,coordinate):offset);
+        if(parent?.bend)local=durability.bendPoint(parent,local);
         const position=V.add(parent?.position??zero,M.app(parentRotation,local));
         const velocity=dt?V.mul(V.sub(position,previous[spec.child]?.position??child.position),1/dt):parent?.velocity??zero;
         bodies[spec.child]={...child,position,velocity,rotation:M.mul(M.mul(parentRotation,turn),initialBodies[spec.child].rotation),
@@ -228,7 +244,19 @@
           }else speed=ctx.input['drive.'+key];
         }
         const proposed=s.value+speed*ctx.dt, value=clamp(proposed,min,max);
-        const measuredSpeed=(value-s.value)/ctx.dt;
+        let measuredSpeed=(value-s.value)/ctx.dt, wear=s.durability, active=s.active;
+        if(wear&&active){
+          const settings=wearSpecs[key], child=state.bodies[spec.child], material=child&&bodyMaterial(ctx,child);
+          const nextWear=durability.joint(wear,settings,material,{before:s.value,value,load:root===key?demand[root]:s.load});
+          measuredSpeed=(nextWear.actual-wear.actual)/ctx.dt;
+          if(nextWear.failed&&!wear.failed){
+            active=settings.failure!=='detach';
+            ctx.emit('material-failure',{joint:key,entity:state.bodies[spec.child]?.entity??spec.child,
+              damage:nextWear.track.damage,stress:nextWear.stress,play:nextWear.play,detached:!active});
+            if(!active)measuredSpeed=0;
+          }
+          wear=nextWear;
+        }
         if(stalled&&!s.stalled) {
           const capacity=motor.capacity??1e9;
           let cause;
@@ -254,7 +282,7 @@
           transitions[key]=cause;
           ctx.emit('machine-stop',detail,[cause]);
         }
-        next[key]={...s,value,speed:measuredSpeed,stalled,networkLoad:demand[root]};
+        next[key]={...s,active,value,speed:measuredSpeed,stalled:active&&stalled,networkLoad:demand[root],...(wear&&{durability:wear})};
       }
       return next;
     }
@@ -287,6 +315,12 @@
       });
       const fabricLoads=new Map();
       const joints=advanceJoints(state,ctx), bodies={...state.bodies};
+      const observations=new Map();
+      function observe(key,point,force){
+        if(!own(structures,key)||V.len(force)<=1e-8)return;
+        if(!observations.has(key))observations.set(key,[]);
+        observations.get(key).push({point,force});
+      }
       follow(bodies,ctx.world);
       for(const key of mountOrder){
         const joint=jointSpecs[key];
@@ -319,6 +353,7 @@
           if(read.status!=='ok')continue;
           for(const load of read.value){
             const child=byEntity.get(load.entity), root=child&&roots[child];
+            observe(child,load.point,load.force);
             if(!root||bodies[root].fixed)continue;
             force[root]=V.add(force[root]??zero,load.force);
             const arm=V.sub(load.point,state.bodies[root].position);
@@ -348,8 +383,9 @@
       }
       for(const [key,spec] of Object.entries(forceSpecs)){
         const body=bodies[spec.body], root=roots[spec.body];
-        if(!body||!root||bodies[root].fixed)continue;
-        const point=V.add(body.position,M.app(body.rotation,spec.at??zero));
+        const dynamic=root&&!bodies[root].fixed;
+        if(!body||!dynamic&&!own(structures,spec.body))continue;
+        const point=V.add(body.position,M.app(body.rotation,durability.bendPoint(body,spec.at??zero)));
         let wheel;
         let direction=M.app(body.rotation,V.norm(spec.axis??up)), input=clamp(ctx.input['force.'+key],-1,1);
         if(spec.kind==='wheel'){
@@ -377,12 +413,14 @@
           const fit=wheel.support?bodyMaterial(ctx,wheel.support):groundMaterial(ctx,advanced?wheel.at:point);
           const coefficient=friction(bodyMaterial(ctx,body)?.friction,fit?.friction);
           if(coefficient!==undefined) {
-            (rolling??=new Set()).add(root);
+            if(dynamic)(rolling??=new Set()).add(root);
             const limit=coefficient*body.mass*Math.max(0,-(config.gravity??[0,-9.81,0])[1]);
             magnitude=clamp(magnitude,-limit,limit);
           }
         }
         const load=V.mul(direction,magnitude);
+        observe(spec.body,point,load);
+        if(!dynamic)continue;
         force[root]=V.add(force[root]??zero,load);
         const moment=V.cross(V.sub(point,bodies[root].position),load);
         torque[root]=V.add(torque[root]??zero,spec.kind==='wheel'?[0,moment[1],0]:moment);
@@ -401,7 +439,17 @@
       let motion, swept;
       if(advanced){
         const plane=!config.terrain?config.ground??0:undefined, sounded=new Set();
-        motion=W.contactMotion.prepare(bodies,roots,masses,{ground:plane,fabric,onFabric(seat,key,magnitude){
+        const onContact=state.beams?(a,b,normal,parts,impulse)=>{
+          if(!own(structures,a)&&!own(structures,b))return;
+          const left=W.colliders.geometry(bodies[a]).parts[parts[0]];
+          const right=b===null?null:W.colliders.geometry(bodies[b]).parts[parts[1]];
+          const point=right?left.min.map((n,i)=>(Math.max(n,right.min[i])+Math.min(left.max[i],right.max[i]))*.5):
+            [(left.min[0]+left.max[0])*.5,left.min[1],(left.min[2]+left.max[2])*.5];
+          const force=V.mul(normal,impulse/ctx.dt);
+          observe(a,point,V.mul(force,-1));
+          if(b!==null)observe(b,point,force);
+        }:undefined;
+        motion=W.contactMotion.prepare(bodies,roots,masses,{ground:plane,fabric,onContact,onFabric(seat,key,magnitude){
           const {system,shape,face,nodes,weights,point,normal}=seat, body=bodies[key],
             token=JSON.stringify([key,system,shape,face]), previous=fabricLoads.get(token);
           const impulse=V.mad(previous?.impulse??zero,normal,magnitude);
@@ -444,7 +492,7 @@
         let lift=0, contact, supportBody;
         for(const child of members.get(key)){
           const body=bodies[child];
-          const bounds=body.collider?W.colliders.geometry(body):null;
+          const bounds=body.collider||body.bend?W.colliders.geometry(body):null;
           const half=bounds?bounds.max.map((v,i)=>(v-bounds.min[i])*.5):extents(body);
           const center=bounds?V.lerp(bounds.min,bounds.max,.5):body.position;
           const bottom=bounds?.min[1]??body.position[1]-half[1];
@@ -461,6 +509,7 @@
           const floor=groundMaterial(ctx,contact), surface=bodyMaterial(ctx,supportBody);
           const coefficient=friction(surface?.friction,floor?.friction);
           const approach=Math.max(0,-bodies[key].velocity[1]);
+          if(own(structures,supportBody.id))observe(supportBody.id,contact,[0,1.12*approach*masses[key]/ctx.dt,0]);
           translateRoot(key,1,lift,-.12);
           const body=bodies[key];
           let velocity=body.velocity;
@@ -557,8 +606,38 @@
             wheel:key,...(cue&&{cue})});
         }
       }
+      let beams;
+      if(state.beams){
+        beams={...state.beams};
+        const changed=[];
+        for(const [key,spec] of Object.entries(structures)){
+          const body=bodies[key], previous=state.beams[key];
+          if(!body)continue;
+          const material=bodyMaterial(ctx,body), {next,bend,hot}=durability.beam(previous,body,spec,material,observations.get(key)??[],ctx.dt);
+          beams[key]=next;
+          if(bend!==body.bend){
+            bodies[key]={...body,bend};
+            changed.push(boundsOf(body),boundsOf(bodies[key]));
+          }
+          if(next.yielded&&!previous.yielded||next.failed&&!previous.failed){
+            const cell=next.cells[hot], at=durability.physicalAt(bodies[key],spec.axis,hot/spec.sections);
+            const detail={body:key,entity:body.entity,material:material?.id??body.material,section:hot,at,
+              stress:V.len(cell.stress),damage:durability.damage(cell)};
+            if(next.yielded&&!previous.yielded)ctx.emit('material-yield',detail);
+            if(next.failed&&!previous.failed)ctx.emit('material-failure',detail);
+          }
+        }
+        if(changed.length){
+          placeMounted(bodies,joints,ctx.dt,state.bodies);
+          if(ctx.spatial){
+            const min=zero.map((_,axis)=>Math.min(...changed.map(row=>row.min[axis])));
+            const max=zero.map((_,axis)=>Math.max(...changed.map(row=>row.max[axis])));
+            for(const field of ['bodies','support','clearance'])ctx.spatial.write(field,{min,max},'permanent-deformation');
+          }
+        }
+      }
       return {...state,bodies,joints,contacts,...(continuous&&{impacts:swept.impacts,impactLimited:swept.limited}),
-        ...(fabricFields.length&&{fabricLoads:[...fabricLoads.values()]})};
+        ...(fabricFields.length&&{fabricLoads:[...fabricLoads.values()]}),...(beams&&{beams})};
     }
     function detach(state,key,ctx) {
       check(own(state.joints,key)&&state.joints[key].active,'Unknown or detached joint ' + key);
@@ -594,7 +673,7 @@
         const child={...body,id:name,entity:name,fixed:false,half,position:V.add(body.position,offset),
           ...(profile&&{materialAsset:profile.id,materialWetness:profile.wetness}),
           velocity:V.add(V.add(body.velocity,V.cross(body.angular,offset)),impulse),mass:body.mass/parts};
-        bodies[name]=surface.fragment(body,child,axis,i,parts,surfaceCharts);
+        bodies[name]=surface.fragment(body,durability.fragment(body,child,axis,local),axis,i,parts,surfaceCharts);
         fragments.push(name);
       }
       if(body.surfaceState)surface.prune(surfaceCharts,bodies);
@@ -607,7 +686,9 @@
       const body=state.bodies[key];
       check(!body.collider,'Reshape needs a box body');
       ctx.emit('body-reshaped',{body:key,before:body.half,half});
-      return {...state,bodies:{...state.bodies,[key]:{...body,half}}};
+      const bend=body.bend&&{...body.bend,offsets:body.bend.offsets.map(offset=>
+        V.mul(offset,half[body.bend.axis]/body.half[body.bend.axis]))};
+      return {...state,bodies:{...state.bodies,[key]:{...body,half,...(bend&&{bend})}}};
     }
     function readSurface({state,target,args}) {
       const key=args.body??target.entity;
@@ -621,6 +702,57 @@
       check(K.procedural.surfaceState.isUv(uv),'Surface sample needs unit UV coordinates');
       return Q.ok({body:body.id,...surface.sample(body,state.surfaceCharts,surfaceChannels,face,uv)});
     }
+    function readFatigue({state,target,args,...ctx}) {
+      const beams=state.beams??{}, point=vector(target)?target:target?.point;
+      function describeBeam(key){
+        const row=beams[key], body=state.bodies[key], spec=structures[key], material=body&&bodyMaterial(ctx,body);
+        const sections=row.cells.map((cell,index)=>({section:index,along:index/spec.sections,
+          at:body?durability.physicalAt(body,row.axis,index/spec.sections):null,
+          stress:cell.stress,stressMagnitude:V.len(cell.stress),peakStress:cell.peakStress,curvature:cell.curvature,damage:durability.damage(cell),
+          cycles:Math.max(...cell.channels.map(track=>track.cycles))}));
+        const hotspot=sections.reduce((best,row)=>row.damage>best.damage||
+          row.damage===best.damage&&row.peakStress>best.peakStress?row:best);
+        return {body:key,entity:body?.entity??key,present:!!body,axis:row.axis,bearings:spec.bearings,loads:row.loads,
+          failed:row.failed,yielded:row.yielded,material:material?.id??body?.material??null,
+          fatigue:spec.fatigue??material?.fatigue??null,plastic:spec.plastic??material?.plastic??null,
+          hotspot,sections};
+      }
+      function describeJoint(key){
+        const {value,speed,active,durability:row}=state.joints[key], body=state.bodies[jointSpecs[key].child];
+        return {joint:key,entity:body?.entity??jointSpecs[key].child,at:body?.position??null,active,
+          command:value,actual:row.actual,speed,stress:row.stress,damage:row.track.damage,cycles:row.track.cycles,
+          wear:row.wear,play:row.play,failed:row.failed};
+      }
+      if(args.joint!==undefined)return own(wearSpecs,args.joint)?Q.ok(describeJoint(args.joint)):
+        Q.missing('Joint wear is unavailable','missing');
+      const key=args.body??(own(beams,target?.entity)?target.entity:Object.keys(beams).find(id=>
+        target?.entity!==undefined&&state.bodies[id]?.entity===target.entity));
+      if(key!==undefined){
+        if(!own(beams,key))return Q.missing('Beam fatigue is unavailable','missing');
+        const beam=describeBeam(key);
+        if(args.section!==undefined){
+          check(Number.isSafeInteger(args.section)&&args.section>=0&&args.section<beam.sections.length,'Unknown beam section');
+          return Q.ok({body:key,...beam.sections[args.section]});
+        }
+        return Q.ok(beam);
+      }
+      if(point){
+        check(vector(point),'A fatigue probe needs a finite XYZ point');
+        let closest, distance=Infinity;
+        for(const id of Object.keys(beams))for(const row of describeBeam(id).sections){
+          if(!row.at)continue;
+          const gap=V.dist(row.at,point);
+          if(gap<distance){distance=gap;closest={body:id,...row};}
+        }
+        return closest?Q.ok({...closest,distance}):Q.missing('No live beam sections','empty');
+      }
+      if(target?.entity!==undefined){
+        const joint=Object.keys(wearSpecs).find(key=>state.bodies[jointSpecs[key].child]?.entity===target.entity);
+        return joint?Q.ok(describeJoint(joint)):Q.missing('Material fatigue is unavailable','missing');
+      }
+      return Q.ok({bodies:Object.fromEntries(Object.keys(beams).map(key=>[key,describeBeam(key)])),
+        joints:Object.fromEntries(Object.keys(wearSpecs).map(key=>[key,describeJoint(key)]))});
+    }
     function support(context) {
       const {state,target,args}=context;
       if(!target.point) return Q.missing('point required');
@@ -628,7 +760,7 @@
       check(Number.isFinite(low)&&Number.isFinite(high)&&low<=high,'Invalid support interval');
       const rows=[];
       const visit=body=>{
-        const hits=body.collider?W.colliders.columns(body,x,z,low,high):[column(body,x,z,low,high)];
+        const hits=body.collider||body.bend?W.colliders.columns(body,x,z,low,high):[column(body,x,z,low,high)];
         for(const row of hits)if(row&&row.normal[1]>.25){
           const profile=bodyMaterial(context,body);
           rows.push(profile?{...row,material:profile.id,...(profile.sounds?.step&&{cue:profile.sounds.step})}:row);
@@ -664,8 +796,10 @@
       }
       return count?{status:'ok',value,body:nearest}:Q.missing('no bodies','empty');
     }
-    return {...((config.surface!==undefined||fabricFields.length||routeFields.length)&&
-      {dependencies:{reads:[config.surface,...fabricFields,...routeFields].filter(Boolean)}}),
+    const structural=Object.keys(structures).length>0;
+    return {...((config.surface!==undefined||fabricFields.length||routeFields.length||structural)&&
+      {dependencies:{reads:[config.surface,...fabricFields,...routeFields].filter(Boolean),
+        ...(structural&&{writes:['bodies','support','clearance']})}}),
     ...((sails.length||config.surface!==undefined||fabricFields.length||routeFields.length) && {checkFields(query) {
       for (const sail of sails) windSampler(query,sail);
       W.materials.checkSurface(query,config.surface);
@@ -687,6 +821,8 @@
       placeMounted(bodies,joints,0);
       return {bodies,joints,contacts:[],...(Object.keys(initialCharts).length&&{surfaceCharts:initialCharts}),
         ...(fabricFields.length&&{fabricLoads:[]}),
+        ...(Object.keys(structures).length&&{beams:Object.fromEntries(Object.entries(structures).map(([key,spec])=>
+          [key,durability.beamInitial(spec)]))}),
         ...(continuous&&{impacts:[],impactLimited:false})};
     },step,validateState(state){
       check(record(state?.bodies)&&record(state.joints)&&Object.keys(state.bodies).length<=1024&&
@@ -699,7 +835,16 @@
         W.materials.validateEntity(catalog,body);
         if(body.collider!==undefined)check(advanced&&!body.surfaceState&&
           W.data.equal(body.half,W.colliders.local(body.collider).half),'Invalid saved collider dimensions');
+        if(body.bend!==undefined){
+          check(advanced&&!body.collider&&own(structures,body.origin),'Invalid body permanent bend');
+          durability.validateBend(body.bend);
+        }
       }
+      if(Object.keys(structures).length){
+        check(record(state.beams)&&Object.keys(state.beams).length===Object.keys(structures).length,'Invalid saved beam table');
+        for(const [key,spec] of Object.entries(structures))durability.beamValidate(state.beams[key],spec);
+      }
+      for(const key of Object.keys(wearSpecs))durability.jointValidate(state.joints[key].durability);
       if(fabricFields.length)check(Array.isArray(state.fabricLoads)&&state.fabricLoads.every(load=>record(load)&&
         id(load.system)&&id(load.shape)&&id(load.body)&&vector(load.point)&&vector(load.impulse)),
       'Invalid saved deformable reactions');
@@ -753,6 +898,7 @@
       joints:{type:'record',read:({state})=>Q.ok(state.joints)},
       contacts:{type:'records',read:({state})=>Q.ok(state.contacts??[])},
       impacts:{type:'record',read:({state})=>Q.ok({impacts:state.impacts??[],limited:state.impactLimited??false})},
+      fatigue:{type:'record',selector:true,read:readFatigue},
       ...(fabricFields.length&&{'deformable-loads':{type:'records',read:({state})=>Q.ok(state.fabricLoads)}}),
       'surface-state':{type:'record',read:readSurface},
       'surface-charts':{type:'record',read:({state})=>state?.surfaceCharts?

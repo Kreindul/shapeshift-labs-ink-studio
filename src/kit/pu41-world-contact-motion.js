@@ -1,7 +1,7 @@
 /* Deterministic translation in impact order, with iterative overlap cleanup. */
 (function(K) {
   const W=K.world, C=W.colliders, {V}=K, eps=1e-8, zero=[0,0,0], down=[0,-1,0];
-  function prepare(bodies,roots,masses,{ground,onGround,fabric,onFabric}={}) {
+  function prepare(bodies,roots,masses,{ground,onGround,fabric,onFabric,onContact}={}) {
     const keys=Object.keys(bodies).sort(), groups=new Map();
     for(const key of keys){
       const root=roots[key];
@@ -17,10 +17,11 @@
       }
     }
     const velocity=root=>groups.has(root)?bodies[root].velocity:zero;
-    function adjust(a,b,normal,depth=0,surface) {
+    function adjust(a,b,{normal,parts,surface},depth=0) {
       const ra=roots[a], rb=b===null?null:roots[b], wa=groups.has(ra)?1/masses[ra]:0, wb=groups.has(rb)?1/masses[rb]:0;
       const denom=wa+wb, speed=V.dot(V.sub(velocity(ra),velocity(rb)),normal);
       if(speed>eps){
+        onContact?.(a,b,normal,parts,speed/denom);
         if(wa)bodies[ra]={...bodies[ra],velocity:V.mad(bodies[ra].velocity,normal,-speed*wa/denom)};
         if(wb)bodies[rb]={...bodies[rb],velocity:V.mad(bodies[rb].velocity,normal,speed*wb/denom)};
         if(surface)onFabric?.(surface,a,speed*masses[ra]);
@@ -78,7 +79,7 @@
         let moved=false;
         function solve(a,b,hit) {
           const depth=hit.gap<-eps?-hit.gap:0;
-          const speed=adjust(a,b,hit.normal,depth,hit.surface);
+          const speed=adjust(a,b,hit,depth);
           moved ||= depth>0||speed>eps;
         }
         floorHits(0,(a,hit)=>solve(a,null,hit));
@@ -112,7 +113,7 @@
         const {a,b,contact}=first, travel=contact.time*remaining;
         move(travel);
         remaining-=travel;
-        const speed=adjust(a,b,contact.normal,0,contact.surface);
+        const speed=adjust(a,b,contact);
         const {system,shape,face}=contact.surface??{};
         impacts.push({a,b,parts:contact.parts,normal:contact.normal,at:1-remaining/dt,speed,
           ...(system&&{surface:{system,shape,face}})});

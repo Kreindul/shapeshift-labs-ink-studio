@@ -128,13 +128,14 @@
     function location(id) {
       if (locations.has(id)) return locations.get(id);
       const entity = own(world.entities,id) && world.entities[id];
-      let point = null, socketTurn = null, material;
+      let point = null, socketTurn = null, material, deformation;
       for (const system of Object.keys(systems)) {
         const pose = systems[system].pose?.(states[system],id);
         if (pose === false) { locations.set(id,null); return null; }
         if (pose) {
           point = pose.position ?? pose;
           socketTurn = pose.rotation ?? null;
+          if(pose.bend)deformation={bend:pose.bend,half:pose.half};
           if (pose.materialAsset!==undefined) material={materialAsset:pose.materialAsset,materialWetness:pose.materialWetness};
           break;
         }
@@ -146,18 +147,19 @@
           const host = location(parent);
           const origin = host&&socket(host,entity.anchor?.socket);
           if (!origin) { locations.set(id,null); return null; }
-          point = K.V.add(origin,host.rotation ? K.M.app(host.rotation,point) : point);
+          const offset=host.bend&&!entity.anchor?.socket?W.durability.bendPoint(host,point):point;
+          point = K.V.add(origin,host.rotation ? K.M.app(host.rotation,offset) : offset);
           socketTurn = host.rotation;
         }
       }
-      const pose = point ? {point,rotation:socketTurn,entity,material} : null;
+      const pose = point ? {point,rotation:socketTurn,entity,material,...deformation} : null;
       locations.set(id,pose);
       return pose;
     }
     function socket(pose,name) {
       if (!name) return pose.point;
       if (!own(pose.entity?.sockets,name)) return null;
-      const offset = pose.entity.sockets[name];
+      const offset = W.durability.bendPoint(pose,pose.entity.sockets[name]);
       return K.V.add(pose.point,pose.rotation ? K.M.app(pose.rotation,offset) : offset);
     }
     function fieldFrame({entity,socket:name}) {

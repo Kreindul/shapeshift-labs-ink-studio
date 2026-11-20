@@ -112,7 +112,8 @@
   function frame(body) {
     const inverse=M.tr(body.rotation??M.id());
     function locate(point,normal,chosen) {
-      const local=M.app(inverse,V.sub(point,body.position)), n=normal&&M.app(inverse,normal);
+      const position=M.app(inverse,V.sub(point,body.position)), normalInBody=normal&&M.app(inverse,normal);
+      const local=W.durability.unbendPoint(body,position), n=W.durability.unbendNormal(body,position,normalInBody);
       let face=chosen;
       if(!face){
         let axis=0, best=-Infinity;

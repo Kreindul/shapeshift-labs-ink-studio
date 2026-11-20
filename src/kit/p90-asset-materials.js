@@ -12,11 +12,18 @@
     friction:[0,4],permeability:[0,100],dryingRate:[0,100],
     thermal:{heatCapacity:[1e-6,1e12],conductance:[0,1e12]},
     fracture:{energy:[0,1e12],parts:[2,32]},
+    fatigue:{endurance:[1e-6,1e12],life:[1e-4,1e12],exponent:[1,12]},
+    plastic:{yield:[1e-6,1e12],creep:[0,1e4],limit:[0,4]},
     erosion:{threshold:[0,1e4],rate:[0,100]}
   };
   const cue=value=>typeof value==='string'&&/^[a-z][a-z0-9._/-]{0,127}$/.test(value);
   const ramp=value=>Array.isArray(value)&&value.length>=1&&value.length<=16&&
     value.every(color=>typeof color==='string'&&/^#[0-9a-f]{6}$/i.test(color));
+  function checkStructural(key,value,wet=true) {
+    const rule=key==='fatigue'||key==='plastic'?rules[key]:undefined;
+    check(rule&&hasKeys(value,Object.keys(rule))&&Object.entries(rule).every(([k,[min,max]])=>
+      (wet?coefficient(value[k],min,max):number(value[k],min,max))),'Invalid structural material '+key);
+  }
 
   function definition(input,pack) {
     check(hasKeys(input,['id','label',...Object.keys(rules),'sounds','appearance'])&&
@@ -26,6 +33,7 @@
     for(const [key,range] of Object.entries(rules)) {
       if(!Object.hasOwn(input,key))continue;
       const value=input[key], fail='Invalid physical material '+input.id+' '+key;
+      if(key==='fatigue'||key==='plastic'){checkStructural(key,value);continue;}
       if(Array.isArray(range))check(coefficient(value,...range),fail);
       else {
         check(hasKeys(value,Object.keys(range))&&Object.keys(value).length===Object.keys(range).length,fail);
@@ -59,5 +67,5 @@
     }
     return result;
   }
-  A.physicalMaterials=Object.freeze({definition,profile});
+  A.physicalMaterials=Object.freeze({definition,profile,checkStructural});
 })(KIT);
