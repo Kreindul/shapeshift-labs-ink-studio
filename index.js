@@ -104,6 +104,7 @@ module.exports = {
   exportGlb: require('./cli/export-glb.js'),
   ...require('./cli/gltf-asset.js'),
   render: require('./cli/render.js').render,
+  ...require('./cli/graph-project.js'),
   paletteUsage: require('./cli/palette-usage.js').paletteUsage,
   reviewRampShot: require('./cli/ramp-review.js').reviewRampShot,
   comparePaletteDistributions: require('./cli/palette-distributions.js').comparePaletteDistributions,

@@ -1027,6 +1027,11 @@ const CMD = {
         '  randomness <recipe.json> [--samples 16 --out report.json]  inspect named authoring streams and distributions',
         '  math-fields <field.json> [--point x,y,z --time n --integrate seconds --out report.json]  inspect procedural math fields',
         '  render-graph <graph.json> [--w 900 --h 620 --out report.json]  inspect effect resolution and memory/work budgets',
+        '  graph validate|plan <project.json> [--inputs values.json]   validate and describe a headless graph',
+        '  graph inspect <project.json> [--output NAME | --node PATH --port NAME] [--out directory]',
+        '  graph run <project.json> [--inputs values.json --at seconds --seed N --out directory]',
+        '  graph batch <project.json> <cases.json> [--out directory]   run named cases and report CI failures',
+        '  graph session <project.json> [--protocol ndjson --out directory]   serve requests using a warm graph',
         '  material-controls <material.json> [--palette colors.json --out report.json]  inspect shared material controls',
         '  light-emitters <lights.json> [--at seconds --out report.json]  inspect shaped lights and cookies',
         '  typography <type.json> [--font font.ttf --at seconds --out report.json]  inspect glyph layout and animation',
@@ -2079,6 +2084,9 @@ const CMD = {
   },
   'render-graph'() {
     return require('./render-graph-plan.js')(pos,opt,lib());
+  },
+  graph() {
+    return require('./graph-cli.js')(pos,opt,{kit:lib(),operations:cfg.graphOperations});
   },
   'material-controls'() {
     return require('./material-controls.js')(pos,opt,lib());

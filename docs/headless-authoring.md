@@ -115,6 +115,113 @@ Connections read an exposed `input`, a `node` and optional `port`, a keyframe tr
 
 `graph.repeat(value, count, step, { seed })` iterates a value. `graph.each(items, fn, { seed })` gives each item a reproducible seed based on its ID. `graph.simulation({ initial, step, dt, checkpoint, cache, maxSteps })` advances states using fixed timesteps. Sample with `simulation.sample(time, { inputs, version })` to retrieve an exact fixed-step state, the number of steps replayed, and the cached checkpoints. Bump the version when the simulation inputs change.
 
+## Run a graph project from the CLI
+
+The [headless graph project](../examples/headless-graph.json) uses a named
+parameter, an animated link, and a [reusable group](../examples/headless-graph-group.json).
+
+```sh
+ink-studio graph validate examples/headless-graph.json
+ink-studio graph plan examples/headless-graph.json
+ink-studio graph inspect examples/headless-graph.json --node gain/scale --at 0.5
+ink-studio graph run examples/headless-graph.json --at 0.5 --out graph-out
+ink-studio graph batch examples/headless-graph.json cases.json --out graph-batch
+ink-studio graph session examples/headless-graph.json --protocol ndjson
+```
+
+Use `"format": "ink-studio/graph-project"` and `"version": 1` with the same
+`inputs`, `nodes`, and `outputs` as a library graph. Set input defaults on the
+typed ports and pass overrides as a JSON object with `--inputs values.json`.
+Optional project `time` and `seed` default to zero. Set `--at` for seconds and
+`--seed` for a specific integer seed.
+
+The `groups` map registers each named group as an operation. A group value is
+an inline graph or a file path relative to the project. Group files use
+`"format": "ink-studio/graph-group"` and `"version": 1` with the graph fields.
+Groups can use other groups registered in the same project. Each instance
+owns its own evaluator and cache. Validation checks typed links, missing
+ports, asset references with literal names, and dependency and group cycles
+without running nodes. Planning reports the evaluation order, source links
+and inferred output types. Add `--inputs` to validate and show resolved
+parameter values.
+
+`inspect` accepts `--output NAME` or `--node PATH` with optional `--port NAME`
+(defaults to `value`). Use slashes to address a node inside group instances.
+The JSON report describes the sampled value. With `--out DIRECTORY`, a
+serializable preview is written as PNG or JSON alongside the report.
+
+In addition to the stock procedural graph operations, the runner registers
+`add` and `multiply` with numeric `a` and `b` inputs, `time`, seeded `random`,
+and `pngAsset` and `jsonAsset`. An asset operation reads a `name` from the
+project's `assets` map. For example `"sprite": {"format":"png","file":"sprite.png"}`
+declares a PNG asset called `sprite`. Assets are loaded relative to the
+project and held as a snapshot for the life of the session. The plan and runs
+share a hash of the project, resolved group definitions, and asset bytes.
+Host operation implementations are supplied separately.
+
+### Outputs and CI
+
+Declare `exports` as a map of artifact names to `{ "output": "name", "format": "json" }`
+or `"png"` for RGB8 or RGBA8 image outputs. With `--out`, runs write those
+artifacts and `report.json`. The stdout report includes artifact paths,
+SHA-256 hashes and cache hits and misses for every executed node, including
+group paths. Cache statuses describe the current evaluation. Unchanged
+artifacts have the same hash across cold and warm runs.
+
+Declare assertions on named outputs with `id`, `output`, `op` and `value`.
+Use optional `path` to select record keys or array indices. Operators are
+`eq` and `ne` for exact equality, `min` and `max` for inclusive numeric
+limits, and `sha256` for a PNG or JSON byte hash. JSON exports sort object
+keys and use UTF-8, two-space indentation and a trailing newline. Missing
+paths fail. For example:
+
+```json
+{"id":"nativeWidth","output":"sprite","path":["width"],"op":"eq","value":32}
+```
+
+A batch file is an array of cases. Each case has a unique `id` and optional
+`inputs`, `time` and `seed`. Cases run in order using one compiled graph.
+`--inputs`, `--at` and `--seed` give defaults and each case can override
+them. The CLI writes one report and artifact set per case under
+`cases/<id>/` and an aggregate report at the output root. For example:
+
+```json
+[
+  {"id":"default","time":0.5},
+  {"id":"repeat","time":0.5},
+  {"id":"regression","time":0.5,"inputs":{"base":1}}
+]
+```
+
+Exit status is 0 on success, 2 when any assertion fails, and 1 for invalid
+input or execution errors. Assertion failures still write the declared
+artifacts and report.
+
+### Persistent sessions
+
+Send one JSON request per line. The response echoes the optional request
+`id` and includes the per-request `code`. Use `run`, `inspect`, `plan`,
+`clear` and `quit`. For example:
+
+```json
+{"id":1,"op":"run","inputs":{"base":5},"time":0.5,"seed":9}
+{"id":2,"op":"inspect","node":"gain/scale","inputs":{"base":5},"time":0.5,"seed":9}
+{"id":3,"op":"quit"}
+```
+
+Session requests use independent parameter overrides. A bad request returns
+an error response and the session can answer later requests. `clear` resets
+node and group caches. If the session has `--out`, each run or inspection
+publishes into its own `request-N` directory.
+
+Use `ink.readGraphProject(file)` or `ink.createGraphProject(spec, { baseDir,
+operations })` in Node for the same validation, planning, inspection and
+execution. `run` returns the native named outputs in addition to the report
+and encoded artifacts. Operation implementations can be registered from the
+host using `operations`, or from an `ink-studio.config.js` file using
+`graphOperations`. Treat input and output values as immutable while an
+evaluator caches them.
+
 ## Geometry and attributes
 
 `geometry.meshPaths(mesh, { sources, edgeCost, maxCost })` supports native and imported indexed meshes. It returns per-vertex distances and predecessors, plus `path(vertex)`, `curves(vertices)` and a sampled `distanceAt(point)` field. The cost function receives positions, vertex IDs, length and adjacent faces. Return infinity to block an edge.

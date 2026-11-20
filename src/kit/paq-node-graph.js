@@ -28,7 +28,7 @@
     }));
   }
 
-  function create(source, { operations = {}, groups = {} } = {}) {
+  function create(source, { operations = {}, groups = {}, planOnly = false } = {}) {
     const stored = P.data.freeze(P.data.clone(source));
     const specInputs = schema(stored.inputs || {});
     if (!record(stored.nodes) || !record(stored.outputs) || Object.keys(stored.nodes).length > 2000)
@@ -37,8 +37,12 @@
     const pending = new Map(), marks = new Map();
 
     function binding(value) {
-      if (!record(value)) return { kind: 'value', value };
-      if (Object.hasOwn(value, 'value')) return { kind: 'value', value: value.value };
+      function literal(value) {
+        const type = ['number','boolean','string'].find(name => typed[name](value)) ?? 'any';
+        return { kind: 'value', value, type };
+      }
+      if (!record(value)) return literal(value);
+      if (Object.hasOwn(value, 'value')) return literal(value.value);
       if (Object.hasOwn(value, 'input')) {
         if (!Object.hasOwn(specInputs, value.input)) throw new RangeError('Unknown graph input ' + value.input);
         return { kind: 'input', id: value.input, type: specInputs[value.input].type };
@@ -53,9 +57,11 @@
         const mode = value.mode || 'number';
         const track = K.anim.keyframeTrack.create({ value: mode }, value.keys.map(key => ({ ...key, value: { value: key.value } })));
         if (!track.keys.length) throw new RangeError('Animated graph parameters need at least one key');
-        return { kind: 'track', track };
+        const v = track.keys[0].value.value;
+        const type = ['number','vec2','vec3'].find(name => typed[name](v)) ?? 'any';
+        return { kind: 'track', track, type, mode };
       }
-      return { kind: 'value', value };
+      return literal(value);
     }
 
     function visit(name) {
@@ -76,14 +82,15 @@
         if (!Object.hasOwn(given, key) && !Object.hasOwn(socket, 'default'))
           throw new RangeError('Missing graph socket ' + name + '.' + key);
         const link = binding(Object.hasOwn(given, key) ? given[key] : { value: socket.default });
-        if (link.type && link.type !== 'any' && socket.type !== 'any' && link.type !== socket.type)
+        if (link.kind !== 'value' && (link.kind !== 'track' || planOnly) &&
+            link.type && link.type !== 'any' && socket.type !== 'any' && link.type !== socket.type)
           throw new TypeError('Incompatible graph socket ' + name + '.' + key);
         if (link.kind === 'value' && !typed[socket.type](link.value)) throw new TypeError('Wrong value for graph socket ' + name + '.' + key);
         return [key, socket, link];
       });
       stack.delete(name);
-      const run = operation.instantiate ? operation.instantiate() : operation.run;
-      configs.set(name, { name, run, outputs, bindings, clock: !!operation.time });
+      const run = planOnly ? undefined : operation.instantiate ? operation.instantiate() : operation.run;
+      configs.set(name, { name, op: spec.op, run, outputs, bindings, clock: !!operation.time });
       order.push(name);
     }
     for (const name of Object.keys(specs)) visit(name);
@@ -99,13 +106,19 @@
       return pending.get(link.id).outputs[link.port];
     };
 
-    function evaluate(input = {}, { time = 0, seed = 0 } = {}) {
-      if (!record(input) || !Number.isFinite(time) || !Number.isSafeInteger(seed)) throw new TypeError('Invalid graph run options');
-      const values = Object.fromEntries(Object.entries(specInputs).map(([name, socket]) => {
+    function parameters(input = {}) {
+      if (!record(input)) throw new TypeError('Graph inputs must be named values');
+      return Object.fromEntries(Object.entries(specInputs).map(([name, socket]) => {
         const value = Object.hasOwn(input, name) ? input[name] : socket.default;
         if (!typed[socket.type](value)) throw new TypeError('Wrong input value for graph socket ' + name);
         return [name, value];
       }));
+    }
+
+    function evaluate(input = {}, { time = 0, seed = 0 } = {}) {
+      if (planOnly) throw new Error('A graph plan cannot be evaluated');
+      if (!Number.isFinite(time) || !Number.isSafeInteger(seed)) throw new TypeError('Invalid graph run options');
+      const values = parameters(input);
       pending.clear();
       const status = {};
       for (const name of order) {
@@ -117,7 +130,11 @@
         });
         const previous = marks.get(name), comparable = entries.map(([, value]) => value);
         const reused = previous?.seed === seed && (!clock || previous.time === time) &&
-          comparable.every((value, i) => Object.is(value, previous.values[i]));
+          comparable.every((value, i) => {
+            const prior = previous.values[i];
+            return Object.is(value, prior) || bindings[i][2].kind === 'track' && Array.isArray(value) &&
+              Array.isArray(prior) && value.length === prior.length && value.every((n, k) => Object.is(n, prior[k]));
+          });
         if (reused) pending.set(name, previous);
         else {
           const produced = run(Object.fromEntries(entries), { time, seed: P.data.hash(name, seed), node: name });
@@ -142,9 +159,27 @@
       }, inspectGroup(name) { return snapshot.get(name)?.subgraph || null; } };
     }
 
-    return Object.freeze({ spec: stored, evaluate, clear() {
+    function plan() {
+      function describe(link) {
+        const { kind, id, port, type } = link;
+        if (kind === 'track') return { kind, type, mode:link.mode, keyCount:link.track.keys.length };
+        if (kind === 'value') return { kind, type };
+        return { kind, type, id, ...(port !== undefined && {port}) };
+      }
+      return P.data.clone({
+        inputs: specInputs,
+        nodes: order.map(name => {
+          const {op,outputs,bindings,clock} = configs.get(name);
+          return {id:name,op,time:clock,outputs,
+            inputs:Object.fromEntries(bindings.map(([key,socket,link]) => [key,{type:socket.type,source:describe(link)}]))};
+        }),
+        outputs: Object.fromEntries(results.map(([name,link]) => [name,describe(link)]))
+      });
+    }
+
+    return Object.freeze({ spec: stored, evaluate, parameters, plan, clear() {
       marks.clear();
-      for (const config of configs.values()) config.run.clear?.();
+      for (const config of configs.values()) config.run?.clear?.();
     } });
   }
 
