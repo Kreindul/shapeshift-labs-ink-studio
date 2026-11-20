@@ -222,6 +222,59 @@ For finishes that use the scene sky and its active profile, see [Shared sky refl
 
 The existing `reflection` finish type supplies a three-colour sky. It can be layered underneath a planar mirror. `K.reflection.reflectedView(matrix, plane)` supplies the mirrored column-major world-to-view transform to other renderers. `K.reflection.captureView(matrix, plane, eye)` also supplies the clipping equation `[nx, ny, nz, -dot(at, normal)]` and the clip bias. It returns `null` if the eye is on or behind the reflecting side's bias. Use `SurfaceLook.shade` with a `reflection(layer, normal, geometricNormal)` callback returning `{ rgb, coverage }` in 0–1.
 
+## Local reflection probes
+
+Add a named probe to capture nearby geometry for curved, glazed, and
+uneven surfaces. A finish can sample a sharply defined reflection or
+filter the same capture into a broad streak along the grain.
+
+```js
+const probe = K.reflection.probe({
+  id: 'lantern-bench',
+  at: [0, 0.7, 0],
+  size: 128,
+  bounds: { min: [-3, 0, -2], max: [3, 3, 2], feather: 0.2 },
+  capture: { exclude: [{ material: 'brushed-copper' }] }
+});
+const copper = K.reflection.localMaterial({ r: [4, 5, 6], materialId: 'brushed-copper' },
+  'lantern-bench', { roughness: [0.57, 0.09], rotation: 0.1, f0: 0.78 });
+const world = B.finish({ cam, reflectionProbes: [probe] });
+```
+
+The helper creates a `localReflection` finish layer. Its `roughness` is
+zero to one and can be a single value or an along/across pair. A pair
+widens the reflection on the rougher axis. `direction` on the surface and
+`rotation` on the layer orient that axis. Finish normal patterns also
+steer the reflection. Use `strength`, Fresnel `f0` and `power`, a
+`color` tint, and optional masks as for other finishes. Surface signals
+can drive roughness, strength, tint, and `f0`.
+
+The headless renderer takes six 90-degree views the first time a probe
+is sampled in a frame. It filters premultiplied coverage in linear light
+using mip levels and cross-face sampling. The active probe captures are
+reused across art-resolution passes in that frame. `size` selects 32,
+64, 128, or 256 pixels per face and defaults to 64. Use `near` to choose
+the capture's near clipping distance in world units. The default is .05.
+Up to eight probes may be authored.
+
+Optional `bounds` project the reflected ray onto a world-space box so
+the capture follows receiver position as well as its normal. Put the
+probe inside that box and position the box near the reflected features.
+`feather` fades the probe near the bounds. The optional `capture` mask
+uses existing named target selectors to include or exclude native splats.
+An empty part of the capture reveals the finish underneath it, such as
+a shared-sky reflection.
+
+In JSON, use `finish.reflectionProbes` with a list of descriptors and a
+material layer like `{ "type": "localReflection", "probe": "lantern-bench", "roughness": 0.25 }`.
+Use `--reflection-probes off` to compare while keeping planar reflections
+available. `--reflections off` disables both kinds of scene capture.
+The `reflections` export pass contains both kinds.
+
+```sh
+ink-studio render examples/local-reflection-workshop.js --w 356 --h 183 --px 1 --out workshop.png
+```
+
 ## Ripple sources
 
 ```js

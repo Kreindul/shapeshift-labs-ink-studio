@@ -773,7 +773,8 @@ Common rendering controls:
 | `--ortho` | Use a parallel projection. |
 | `--edges off` | Hide the edge sprites attached to materials in a per-pixel scene. |
 | `--surface off` | Render without the view-dependent finish layers. |
-| `--reflections off` / `--atmosphere off` | Toggle planar captures or atmosphere volumes. |
+| `--reflection-probes off` | Toggle local reflection probes. |
+| `--reflections off` / `--atmosphere off` | Toggle scene reflection captures or atmosphere volumes. |
 | `--w`, `--h`, `--out` | Output viewport size and destination. The renderer resolves a lower-resolution pixel grid derived from the scene's detail settings. |
 | `--px 2` | Use two screen pixels per art pixel. In `compare` and `review`, `--px` specifies the scale of the reference. |
 | `--tone stipple\|off` | Enable the stipple preset or turn off the scene's tone settings. |

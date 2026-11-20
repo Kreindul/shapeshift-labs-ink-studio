@@ -48,6 +48,7 @@ For per-pixel rendering set `S.pixel = true` before baking and set `look: { pixe
 | `bevel` | Highlight sculpted ridges and creases within a configurable art-pixel reach. |
 | `specular` | Set `roughness` to one value or to `[along, across]` to shape the reflected highlight. Set `color` for a tinted highlight. |
 | `fiber` | Set `roughness`, `shift` and optionally `figure`, `axis` and `scale` for tilted fibres with a moving band. |
+| `localReflection` | Sample a named [local reflection probe](scene-optics.md#local-reflection-probes). Set scalar or along/across roughness. |
 | `reflection` | Approximate sky, horizon and ground reflection with `sky`, `horizon` and `ground` colours. Use `f0` and `power` to shape the facing-to-grazing response. |
 | `sheen` | Choose a grazing `color` and control its width with `power` and its grain bias with `directional`. |
 | `film` | Set `thickness` and `variation` in nanometres, `ior`, `scale` and optional `colors`. Set `flash` for an angle-limited flash or `axisBias` to steer the effect toward the grain. |
@@ -179,9 +180,9 @@ const glazedCeramic = K.surface.material(clay, {
 ```
 
 - Drive `strength` on any finish layer. Drive `roughness` on specular,
-  fiber, diffraction, and glint layers with a number or an along/across
-  pair. Drive `f0` on sky and planar reflections. Drive `color` on tint,
-  specular, fiber, sheen, glint, bevel, and planar reflection layers
+  fiber, diffraction, glint, and local reflection layers with a number or an along/across
+  pair. Drive `f0` on sky, planar, and local reflections. Drive `color` on tint,
+  specular, fiber, sheen, glint, bevel, planar, and local reflection layers
   using a normal surface color.
 - A `weather` source reads `wetness`, `standingWater`, `snow`, `frost`,
   `temperature`, or `exposure` at the world position. A `time` source uses

@@ -418,6 +418,11 @@
       bad('finish.areaLights', error.message);
     }
     try {
+      ReflectionProbes.prepare(st.finish.reflectionProbes);
+    } catch (error) {
+      bad('finish.reflectionProbes', error.message);
+    }
+    try {
       BounceProbes.prepare(st.finish.bounceProbes);
     } catch (error) {
       bad('finish.bounceProbes', error.message);

@@ -19,7 +19,7 @@ const SurfaceLook = (() => {
   const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
   const WHITE = [1, 1, 1];
   const TAU = Math.PI * 2;
-  const specularLayers = new Set(['specular','fiber','sheen','film','diffraction','glints','reflection','planarReflection']);
+  const specularLayers = new Set(['specular','fiber','sheen','film','diffraction','glints','reflection','planarReflection','localReflection']);
   const rampLayers = new Set(['diffuse', 'specular', 'fiber', 'sheen', 'glints', 'bevel']);
   const hasBevel = settings => Object.values(settings.layers ?? {}).some(layer =>
     layer?.type === 'bevel' && (layer.strength !== 0 || layer.drive?.strength !== undefined));
@@ -227,16 +227,17 @@ const SurfaceLook = (() => {
         throw new TypeError(layer.id + '.drive.' + key + ' needs a named signal and a target value');
       const signal = signals.get(setting.signal);
       let from = layer[key], to = setting.to;
-      if (key === 'strength' || key === 'f0' && ['reflection', 'planarReflection'].includes(layer.type)) {
+      if (key === 'strength' || key === 'f0' && ['reflection', 'planarReflection', 'localReflection'].includes(layer.type)) {
         if (!Number.isFinite(to) || to < 0 || to > 1)
           throw new RangeError(layer.id + '.drive.' + key + ' target must be in [0, 1]');
         from ??= 0.04;
-      } else if (key === 'roughness' && ['specular', 'fiber', 'diffraction', 'glints'].includes(layer.type)) {
+      } else if (key === 'roughness' && ['specular', 'fiber', 'diffraction', 'glints', 'localReflection'].includes(layer.type)) {
         to = roughnessPair(to);
-        if (to.length !== 2 || !to.every(value => Number.isFinite(value) && value > 0))
-          throw new RangeError(layer.id + '.drive.roughness needs a positive value or along/across pair');
-        to = to.map(value => positive(value));
-      } else if (key === 'color' && ['tint', 'specular', 'fiber', 'sheen', 'glints', 'bevel', 'planarReflection'].includes(layer.type)) {
+        const local = layer.type === 'localReflection';
+        if (to.length !== 2 || !to.every(value => Number.isFinite(value) && (local ? value >= 0 && value <= 1 : value > 0)))
+          throw new RangeError(layer.id + '.drive.roughness needs a valid value or along/across pair');
+        if (!local) to = to.map(value => positive(value));
+      } else if (key === 'color' && ['tint', 'specular', 'fiber', 'sheen', 'glints', 'bevel', 'planarReflection', 'localReflection'].includes(layer.type)) {
         to = color(to, palette);
       } else throw new RangeError(layer.id + '.drive cannot control ' + key + ' on ' + layer.type);
       return { key, signal, from, to };
@@ -358,6 +359,25 @@ const SurfaceLook = (() => {
         q.sky(normal.map((v, i) => twice * v - view[i]), col);
       }
       return fresnel(q.nv, layer.f0 ?? 0.04, layer.power ?? 5) * (scene ? q.skyAccess : 1);
+    },
+    localReflection(layer, q, col) {
+      if (!q.localReflection) return 0;
+      const normal = q.skyNormal ? unit(q.skyNormal(q.n), q.n) : q.n;
+      const view = q.skyView ? unit(q.skyView, normal) : q.v;
+      const facing = dot(normal, view);
+      if (facing <= 0) return 0;
+      const ray = normal.map((value,i)=>2*facing*value-view[i]);
+      let axis;
+      if (layer.roughness[0] !== layer.roughness[1]) {
+        const along = layer.roughness[0] > layer.roughness[1];
+        const c = layer.cosine, s = layer.sine;
+        const grain = q.t.map((value,i)=>along ? value*c+q.b[i]*s : q.b[i]*c-value*s);
+        axis = tangent(q.reflectionTangent ? q.reflectionTangent(grain) : grain, ray);
+      }
+      const reflected = q.localReflection(layer, ray, axis);
+      if (!reflected) return 0;
+      for (let i=0;i<3;i++) col[i]*=reflected.rgb[i];
+      return reflected.coverage*fresnel(facing, layer.f0 ?? 0.04, layer.power ?? 5);
     },
     planarReflection(layer, q, col) {
       const reflected = q.reflection?.(layer, q.n, q.geometricNormal);
@@ -602,6 +622,11 @@ const SurfaceLook = (() => {
           bevel = { width, minBend, softness, edge, power };
         }
         const roughness = roughnessPair(layer.roughness);
+        const local = layer.type === 'localReflection';
+        if (local && (typeof layer.probe !== 'string' || !layer.probe.trim() ||
+          roughness.some(n=>n !== undefined && (n < 0 || n > 1)) ||
+          (layer.f0 ?? .04) < 0 || (layer.f0 ?? .04) > 1 || (layer.power ?? 5) < 0))
+          throw new RangeError(id + ' needs a probe ID, roughness and f0 in [0, 1], and nonnegative power');
         const compiled = {
           ...layer,
           id,
@@ -612,7 +637,7 @@ const SurfaceLook = (() => {
           lightingRamp,
           strength: clamp(layer.strength ?? 1),
           roughness: [roughness[0], roughness[1] ?? roughness[0]].map(v =>
-            positive(v, layer.type === 'glints' ? 0.085 : 0.22)
+            local ? v ?? 0.22 : positive(v, layer.type === 'glints' ? 0.085 : 0.22)
           ),
           color: color(layer.color, palette),
           crossColor: color(layer.crossColor, palette),
@@ -669,11 +694,15 @@ const SurfaceLook = (() => {
       p,
       n,
       v,
+      t,
+      b,
       nv,
       footprint,
       seed,
       geometricNormal,
       reflection: sample.reflection,
+      localReflection: sample.localReflection,
+      reflectionTangent: sample.reflectionTangent,
       sky: sample.sky, skyOverlay: sample.skyOverlay, skyReflectionSource: sample.skyReflectionSource,
       skyNormal: sample.skyNormal, skyView: sample.skyView, skyAccess: sample.skyAccess ?? 1,
       nt: dot(n, half),
@@ -783,7 +812,7 @@ const SurfaceLook = (() => {
       const amount = (steps > 1 ? Math.round(weight * steps) / steps : weight) * detailGain;
       for (let i = 0; i < 3; i++) output[i] = mix(output[i], rgb[i], amount);
       if (reflected && amount) {
-        const reflection = layer.type === 'reflection' || layer.type === 'planarReflection';
+        const reflection = layer.type === 'reflection' || layer.type === 'planarReflection' || layer.type === 'localReflection';
         for (let i = 0; i < 3; i++) reflected[i] = mix(reflected[i], reflection ? rgb[i] : 0, amount);
       }
     }
