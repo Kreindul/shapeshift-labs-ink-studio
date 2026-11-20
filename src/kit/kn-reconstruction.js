@@ -179,7 +179,9 @@
       const { spread, withdrawal } = values[i], track = tracks[i];
       if (!spread && !withdrawal) continue;
       if (track.unsupported) throw new TypeError('Reconstruction targets must use native splats without bone, rig or shader-driven position changes');
-      for (const { rows, offset, axis, angle } of track.fragments) {
+      for (const { rows: originalRows, offset, axis, angle } of track.fragments) {
+        const rows=originalRows.filter(({index})=>!world.anim?.geometryOwned?.[index]&&!world.anim?.physicsOwned?.[index]);
+        if(!rows.length)continue;
         const pivot = spread ? average(rows, world.data) : null;
         const rotation = spread && angle ? M.rot(axis, angle * spread) : null;
         const transpose = rotation && M.tr(rotation);
