@@ -141,9 +141,10 @@
     return { at, accept, work: () => ({ evaluated: states.size * p.slots, comparisons }) };
   }
 
-  function layout(regions, evaluate, raw = {}) {
+  function layout(regions, evaluate, raw = {}, include) {
     const p = parameters(raw);
-    if (!Array.isArray(regions) || regions.length > 4096 || typeof evaluate !== 'function')
+    if (!Array.isArray(regions) || regions.length > 4096 || typeof evaluate !== 'function' ||
+        (include !== undefined && typeof include !== 'function'))
       throw new Error('Populations need bounded work regions and an evaluator');
     const cells = new Map(),
       instances = [],
@@ -167,6 +168,8 @@
       return regions.some(b => x >= b.min[0] && x <= b.max[0] && z >= b.min[2] && z <= b.max[2]);
     }
     function emit(candidate, sample) {
+      // Scope the output without changing which neighbors participate in spacing.
+      if (include && !include(sample)) return;
       if (instances.length >= p.maxInstances) throw new Error('Population exceeds its instance budget');
       instances.push(A.data.freeze({ ...candidate, sample }));
     }
@@ -189,5 +192,53 @@
     }
     return A.data.freeze({ parameters: p, instances, sampling: { cells: cells.size, candidates, ...filter?.work() } });
   }
-  A.populations = { parameters, layout };
+  function mix(entries, {seed = 0, patchSize = 0, coherence = 0} = {}) {
+    if (!Array.isArray(entries) || entries.length < 1 || entries.length > 32 ||
+        !Number.isSafeInteger(seed) || !Number.isFinite(patchSize) || patchSize < 0 || patchSize > 1e6 ||
+        !Number.isFinite(coherence) || coherence < 0 || coherence > 1 || (coherence && patchSize < .01))
+      throw new Error('Population mix needs bounded options, patch size and coherence');
+    const keys = new Set(), choices = [];
+    for (const entry of entries) {
+      const {key, weight} = entry ?? {};
+      if (typeof key !== 'string' || !key || keys.has(key) || !Number.isFinite(weight) || weight < 0)
+        throw new Error('Population mix needs unique keys and nonnegative weights');
+      keys.add(key);
+      if (weight) choices.push({key, weight, salt: A.data.hash(key,seed)});
+    }
+    if (!choices.length) throw new Error('Population mix needs a positive weight');
+    const largest = Math.max(...choices.map(choice => choice.weight));
+    function patch(x,z) {
+      x /= patchSize;
+      z /= patchSize;
+      const ix = Math.floor(x), iz = Math.floor(z);
+      let nearest = Infinity, salt = 0;
+      for (let j = iz-1; j <= iz+1; j++) for (let i = ix-1; i <= ix+1; i++) {
+        const a = i+.5+(K.hash(i,j,seed+271)-.5)*.6;
+        const b = j+.5+(K.hash(i,j,seed+421)-.5)*.6;
+        const distance = (a-x)**2+(b-z)**2;
+        if (distance >= nearest) continue;
+        nearest = distance;
+        salt = A.data.hash(i+':'+j,seed);
+      }
+      return salt;
+    }
+    return (point, individual) => {
+      if (!Array.isArray(point) || point.length !== 2 ||
+          !point.every(value => Number.isFinite(value) && Math.abs(value) <= 1e6) ||
+          !Number.isSafeInteger(individual))
+        throw new Error('Population mix samples need bounded XZ and an integer seed');
+      const identity = coherence && K.hash(individual,seed,683) < coherence ? patch(...point) : individual;
+      let winner = choices[0].key, best = Infinity;
+      for (const {key, weight, salt} of choices) {
+        const u = Math.max(1e-12,1-K.hash(identity,salt,827));
+        const score = -Math.log(u)/(weight/largest);
+        if (score < best || (score === best && key < winner)) {
+          best = score;
+          winner = key;
+        }
+      }
+      return winner;
+    };
+  }
+  A.populations = { parameters, layout, mix };
 })(KIT);

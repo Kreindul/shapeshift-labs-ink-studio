@@ -288,9 +288,36 @@
     if (look?.pixelSize !== undefined && (!Number.isSafeInteger(look.pixelSize) || look.pixelSize < 1))
       bad('finish.look.pixelSize', 'pixelSize must be a positive integer');
     try {
+      ArtInk.prepare(look?.ink, st.palette);
+    } catch (error) {
+      bad('finish.look.ink', error.message);
+    }
+    try {
+      ArtEffects.prepare(look?.effects, st.palette);
+    } catch (error) {
+      bad('finish.look.effects', error.message);
+    }
+    try {
+      ArtStability.prepare(look?.stable);
+    } catch (error) {
+      bad('finish.look.stable', error.message);
+    }
+    try {
       PixelLook.toneSettings(look?.tone);
     } catch (error) {
       bad('finish.look.tone', error.message);
+    }
+    try {
+      ColorCurves.prepare(look?.colorCurves);
+    } catch (error) {
+      bad('finish.look.colorCurves', error.message);
+    }
+    if (look?.colorLut !== undefined && look.colorLut !== false) {
+      try {
+        ColorLUT.normalize(look.colorLut);
+      } catch (error) {
+        bad('finish.look.colorLut', error.message);
+      }
     }
     if (spec.light?.surfaceDirection !== undefined)
       try {
@@ -318,6 +345,23 @@
         for (const i of ramp)
           if (!Number.isInteger(i) || i < 0 || i >= pal.length)
             bad('roles.' + name, 'colour ' + i + ' is not in the palette (0 to ' + (pal.length - 1) + ')');
+    }
+    try {
+      PixelLook.prepareRemap(look?.paletteRemap, pal, st.roles);
+    } catch (error) {
+      bad('finish.look.paletteRemap', error.message);
+    }
+    try {
+      PixelLook.prepareColorStack(look?.colorStack, pal, st.roles);
+    } catch (error) {
+      bad('finish.look.colorStack', error.message);
+    }
+    try {
+      PixelLook.preparePaletteConstraints(look?.paletteConstraints, {
+        palette: pal, roles: st.roles, blueNoise: K.procedural.materials.blueNoise
+      });
+    } catch (error) {
+      bad('finish.look.paletteConstraints', error.message);
     }
     const roleNames = Object.keys(st.roles),
       ids = new Set(),
@@ -684,7 +728,7 @@
       matOf = m => {
         if (m === undefined) m = 'stone';
         const r = ramp(m),
-          out = { r };
+          out = { r, materialId: typeof m === 'string' ? m : m.role };
         if (typeof m === 'object') {
           const sc = m.scale || 0.7;
           if (m.noise) out.mod = (x, y, z) => m.noise * (B.n3(x * sc, y * sc, z * sc) - 0.5);
@@ -715,7 +759,7 @@
               : K.poly2.rect(o.rect[0], o.rect[1]);
     const made = {},
       make = (s, held) => {
-        const o = { res: s.res };
+        const o = { res: s.res, objectId: s.part ?? s.id };
         if (s.res === undefined) delete o.res;
         if (s.part) {
           o.tag = s.part;
@@ -781,7 +825,7 @@
         } else if (k === 'bubbles') p = S.bubbles(sub(s.of), Object.assign({ cell: s.cell || 0.5, h: s.h || 0.12 }, o));
         else {
           const mats = { stone: m, post: m, rail: m, metal: m },
-            oo = Object.assign({}, s, { mats, tag: s.part, res: s.res });
+            oo = Object.assign({}, s, { mats, tag: s.part, res: s.res, objectId: o.objectId });
           p =
             k === 'pillar'
               ? K.build.pillar(S, s.at, s.h, oo)
@@ -887,7 +931,8 @@
       Object.assign(
         { cam, detail: 14, palName: typeof spec.style === 'string' ? spec.style : 'Data', dither: 0.25, radius: 9 },
         st0.finish,
-        { made, spec, ...(spec.light?.surfaceDirection !== undefined && { surfaceLight: spec.light.surfaceDirection }) }
+        { made, spec, paletteRoles: st0.roles,
+          ...(spec.light?.surfaceDirection !== undefined && { surfaceLight: spec.light.surfaceDirection }) }
       )
     );
     if (!moving.length && !effects.length && !spec.tap) return W;

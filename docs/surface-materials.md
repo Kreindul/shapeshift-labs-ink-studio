@@ -89,12 +89,111 @@ In JSON, `mat.surface` accepts a preset ID or a settings object. Add a `preset` 
 
 The browser script bundle exposes `SurfaceLook` alongside `PixelLook`. Host renderers can cache `SurfaceLook.prepare(settings, palette, lightDirection)` and call `SurfaceLook.shade(prepared, sample, baseRgb, result)`. A sample takes world-space `position`, `normal` and `view` toward the eye, plus optional `tangent`, `visibility`, `footprint` and `time`. The result contains normalized RGB, a coverage multiplier and a glint weight. The finished world includes `surfaces` with material bindings and `surfaceData` with one row per baked splat. `SurfaceLook.STRIDE` is the row length. Row fields are the one-based binding ID (zero for an ordinary splat), XYZ normal, direct-light visibility and optional XYZ tangent. Hosts with skeletal or procedural transforms should supply the rest-space material position and transform the frame consistently with their geometry and lighting.
 
+These finish layers use CPU rendering or a custom host integration. See the
+[WebGL canvas renderer coverage](browser-renderer.md#feature-coverage).
+
 ## Project animated paint and patterns
 
 Use a `projected` layer for animated pixel rasters, field-driven patterns,
 or a JavaScript shader. Existing finish layers can read the same fields
 through a field mask. See the [projected effects guide](projected-effects.md)
 for field authoring, local palettes, and emitters.
+
+## Color curves on surfaces
+
+Add a `colorCurve` layer to a material's finish to map a numeric input
+to color. This layer reads water depth from a world query.
+
+```json
+{
+  "type": "colorCurve",
+  "source": { "field": "river/water", "path": ["depth"], "fallback": 0 },
+  "ramp": {
+    "interpolation": "smooth",
+    "stops": [[0, "#292a43"], [0.6, "#31949f"], [1.8, "#b8e8d9"]]
+  },
+  "outputPalette": ["#292a43", "#315366", "#31949f", "#7abebb", "#b8e8d9"]
+}
+```
+
+The default source is `"luminance"` of the current surface color.
+`"height"` reads world Y and `"depth"` reads distance along the view axis
+in world units. Use `{ "field": "climate/temperature" }` for a numeric
+scene query. Optional `args` are forwarded to `probe`, and a `path` array
+selects a number from a record or array. The layer skips a missing or
+nonnumeric reading unless a numeric `fallback` is supplied.
+
+A source with `field` and `channel` reads a [projected field](projected-effects.md#fields)
+using its usual `space` and `projection`. JavaScript can also provide
+`source(sample, color)` to compute a scalar directly. A custom host
+using camera depth supplies `sample.depth` to `SurfaceLook.shade`.
+
+Surface colors can reference palette indices, hex swatches, or normalized
+RGB. Use `channels` to run independent red, green, and blue curves on the
+current color or the ramp output. The layer also accepts the usual
+`strength` and `mask`, plus the `mix`, `add`, and `multiply` blends.
+An optional `outputPalette` gives the result its own swatches at palette
+resolve. Use raw rendering to see the color before quantization.
+
+The Node renderer runs these surface layers. Browser hosts can use
+`SurfaceLook` for custom integration. The standard WebGL renderer runs
+[scene color curves](pixel-look.md#color-ramps-and-channel-curves).
+
+The [thermal station](../examples/color-curves.js) renders the same
+temperature query with smooth and stepped ramps and applies RGB channel
+curves to the equipment.
+
+```sh
+node cli/ink-studio.js probe examples/color-curves.js --field spring/temperature --at 1,0,0
+node cli/ink-studio.js render examples/color-curves.js --ortho --color-curves off --out before.png
+node cli/ink-studio.js render examples/color-curves.js --ortho --out after.png
+```
+
+## 3D LUTs on surfaces
+
+Add a `colorLut` layer with its imported or native `lut` definition.
+The layer samples the current lit RGB before the surface is blended
+into the frame. It accepts the usual `strength`, `mask`, and color blend
+controls. Use `outputPalette` to preserve the local range of swatches
+during quantization.
+
+```js
+const finish = KIT.surface.material({ r: [1, 2, 3] }, {
+  layers: { patina: { type: 'colorLut', lut: ColorLUT.parseCube(cubeText), strength: 0.7 } }
+});
+```
+
+Surface LUTs run in the Node renderer and in custom browser integrations
+using `SurfaceLook`. The standard WebGL renderer supports
+[scene LUTs](pixel-look.md#3d-color-luts). The CLI flag `--lut off`
+bypasses both the scene LUT and these material layers.
+
+## Color stacks on surfaces
+
+Add a `colorStack` layer with a named `stack` to process the material's
+lit RGB before compositing. The layer accepts the usual `strength`,
+`mask`, `blend`, and `outputPalette` settings. Use the RGB operations,
+curves, and LUTs described in [named color stacks](pixel-look.md#named-color-stacks).
+Indexed remap steps use palette slots at scene resolve.
+
+```js
+const oxidized = KIT.surface.material({ r: [1, 2, 3] }, {
+  layers: {
+    patina: {
+      type: 'colorStack',
+      strength: 0.7,
+      stack: { name: 'Copper patina', steps: [
+        { type: 'hue', degrees: 35 },
+        { type: 'saturation', factor: 0.75 }
+      ] }
+    }
+  }
+});
+```
+
+The Node renderer and custom browser renderers using `SurfaceLook`
+can evaluate surface stacks. The standard WebGL renderer evaluates
+scene stacks during palette resolve.
 
 ## Animate the finish light
 

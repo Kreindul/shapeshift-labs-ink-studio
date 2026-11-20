@@ -44,6 +44,20 @@ test('edge refinement resolves a nonlinear crossing inside a coarse cell', () =>
   assert.deepEqual(refined.sampling, linear.sampling);
   assert.throws(() => A.geometry.implicitSurface(field, box, { edgeRefinements: 13 }), /budget/);
 });
+test('the streamed implicit triangles match the mesh facets and sampling budget', () => {
+  const options = {resolution:.21, maxCells:900, edgeRefinements:2,
+    prepareColumn:(x,z)=>y=>x*x+y*y+z*z-.49};
+  const field = ([x,y,z])=>x*x+y*y+z*z-.49;
+  const mesh = A.geometry.implicitSurface(field,box,options), positions=[], normals=[];
+  const sampling = A.geometry.implicitTriangles(field,box,options,(a,b,c,n)=>{
+    positions.push(...a,...b,...c);
+    normals.push(...n,...n,...n);
+  });
+  assert.deepEqual(Float32Array.from(positions),mesh.positions);
+  assert.deepEqual(Float32Array.from(normals),mesh.normals);
+  assert.deepEqual(sampling,mesh.sampling);
+  assert.throws(()=>A.geometry.implicitTriangles(field,box,options),/output callback/);
+});
 test('sampling is bounded, empty fields stay empty and invalid inputs fail promptly', () => {
   let calls = 0;
   const m = A.geometry.implicitSurface(
@@ -99,4 +113,32 @@ test('clipping validates triangle spans and all attribute buffers, including dis
   ])
     assert.throws(() => A.geometry.clipSurface(bad, []), /clipping/);
   assert.throws(() => A.geometry.clipSurface(m, [{ normal: [0, 0, 0], offset: 0 }]), /plane normals/);
+});
+
+
+test('prepared implicit columns produce the same mesh and keep ordinary edge refinement', () => {
+  let columns = 0, samples = 0;
+  const prepare = (x, z) => y => x * x + z * z + y * y - 0.49;
+  const field = ([x, y, z]) => prepare(x, z)(y);
+  const options = { resolution: 0.27, edgeRefinements: 3, meta };
+  const baseline = A.geometry.implicitSurface(field, box, options);
+  const mesh = A.geometry.implicitSurface(p => {
+    samples++;
+    return field(p);
+  }, box, {
+    ...options,
+    prepareColumn(x, z) {
+      columns++;
+      return prepare(x, z);
+    }
+  });
+  assert.deepEqual(mesh, baseline);
+  const [nx, , nz] = mesh.sampling.counts;
+  assert.equal(columns, (nx + 1) * (nz + 1));
+  assert(samples > 0, 'edge refinement still queries the regular field');
+  const columnOnly = A.geometry.implicitSurface(() => { throw new Error('lattice used the regular field'); },
+    box, { prepareColumn: prepare });
+  assert(columnOnly.positions.length > 0);
+  assert.throws(() => A.geometry.implicitSurface(field, box, { prepareColumn: () => 0 }), /column/);
+  assert.throws(() => A.geometry.implicitSurface(field, box, { prepareColumn: () => () => Infinity }), /finite/);
 });

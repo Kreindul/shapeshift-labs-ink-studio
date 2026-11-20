@@ -84,3 +84,21 @@ test('stock offset retains grid joints and logical identities on a cut fragment'
     .map(compare));
   assert.equal(fit({ sections: [section(0, 1, 1), section(2, 1, 1)], unit: [1, .5] }).pieces.length, 0);
 });
+
+test('nominal stock addressing follows sloped bands, stagger, and the wrapped datum',()=>{
+  const sections=[section(0,-.4,1.4),section(.62,.36,1.9),section(2.3,.08,2.2)];
+  for(const config of [{unit:[.4,null]},{unit:[.48,.3],closed:true,offset:.17,datum:.11}]){
+    const layout=fit({sections,joint:.04,...config});
+    for(const {polygon,id} of layout.pieces){
+      const [s,y]=polygon.reduce(([u,v],[x,z])=>[u+x/polygon.length,v+z/polygon.length],[0,0]);
+      assert.equal(layout.keyAt(s,y),id);
+    }
+    const band=layout.bandAt(.31);
+    close(band.lower,-.02);close(band.upper,1.65);
+    assert.equal(layout.keyAt(.31,band.upper),null);
+    assert.equal(layout.keyAt(-.1,.7),null);
+  }
+  const layout=fit({sections:[section(0,0,1),section(2,0,1)],unit:[.5,null],joint:.06});
+  assert.equal(layout.keyAt(.5,.6),'0/1');
+  assert.equal(layout.keyAt(2,.6),'0/3');
+});

@@ -9,7 +9,14 @@ const fs = require('fs'),
 const KIT_DIR = path.join(__dirname, 'src', 'kit'),
   read = f => fs.readFileSync(f, 'utf8').replace(/\nif \(typeof module[^\n]*\n?$/, '\n');
 const files = () =>
-  ['src/frame-budget.js', 'src/ink-veil.js', 'src/sprite-surface.js', 'src/pixel-look.js', 'src/reflection-plane.js', 'src/airflow.js', 'src/light-schedule.js', 'src/route-visibility.js', 'src/sample-coverage.js', 'src/ripple-field.js', 'src/scene-optics.js', 'src/splat-effects.js', 'src/surface-look.js', 'src/builder.js', 'src/sculpt.js']
+  [
+    'src/frame-budget.js', 'src/ink-veil.js', 'src/sprite-surface.js',
+    'src/art-passes.js', 'src/art-ink.js', 'src/art-effects.js', 'src/art-stability.js',
+    'src/color-space.js', 'src/color-curves.js', 'src/color-lut.js', 'src/color-stack.js', 'src/pixel-look.js', 'src/reflection-plane.js', 'src/airflow.js', 'src/light-schedule.js',
+    'src/route-visibility.js', 'src/sample-coverage.js', 'src/sample-visibility.js', 'src/swept-disc.js', 'src/splat-order.js', 'src/splat-codec.js', 'src/ripple-field.js',
+    'src/volume-field.js', 'src/volume-light.js', 'src/scene-optics.js', 'src/splat-effects.js',
+    'src/surface-look.js', 'src/builder.js', 'src/sculpt.js'
+  ]
     .map(f => path.join(__dirname, f))
     .concat(
       fs
@@ -21,7 +28,7 @@ const files = () =>
 const demoFiles = () => [path.join(__dirname, 'demos', 'labscenes.js')];
 // the names the bundle defines at top level (add them to your own module.exports)
 const EXPORTS =
-  'makeBuilder, makeSculpt, basis, flame, motes, pondMat, lilies, courses, PALETTES, PAL_HEX, KIT, FrameBudget, InkVeil, SpriteSurface, PixelLook, SurfaceLook, SceneOptics, VOX, SplatEffects';
+  'makeBuilder, makeSculpt, basis, flame, motes, pondMat, lilies, courses, PALETTES, PAL_HEX, KIT, FrameBudget, InkVeil, SpriteSurface, ColorSpace, ColorCurves, ColorLUT, ColorStack, PixelLook, SurfaceLook, SceneOptics, VOX, SplatEffects, ArtPasses, ArtInk, ArtStability, ArtEffects, VolumeField, VolumeLight';
 module.exports = {
   files,
   demoFiles,
@@ -72,7 +79,23 @@ module.exports = {
     }
     throw new Error('do not know how to read ' + ext + ' (obj, gltf and glb are read)');
   },
+  async readAsset(file, options = {}) {
+    if (path.extname(file).toLowerCase() !== '.glb') throw Error('Portable asset import expects a GLB file');
+    const decodeImage = options.decodeImage || ((bytes, mime) => {
+      if (mime !== 'image/png') throw Error('Supply decodeImage to import embedded JPEG images');
+      const image = require('./cli/png.js').raster(Buffer.from(bytes));
+      return { width: image.w, height: image.h,
+        pixels: image.max === 255 ? image.data : Uint8Array.from(image.data, v => Math.round(v * 255 / image.max)) };
+    });
+    return module.exports.load().KIT.authoring.assetMeshes.importGLB(
+      new Uint8Array(fs.readFileSync(file)), { ...options, decodeImage });
+  },
   exportGlb: require('./cli/export-glb.js'),
+  render: require('./cli/render.js').render,
+  spriteAtlas: require('./cli/sprite-atlas.js').spriteAtlas,
+  readRasterAsset(file) {
+    return require('./cli/raster-asset.js').readRasterAsset(file, module.exports.load().KIT.procedural.graph.raster);
+  },
   load() {
     const out = path.join(__dirname, 'dist', 'standalone.js'),
       srcs = files().concat(demoFiles()),

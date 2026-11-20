@@ -1,6 +1,6 @@
 /* Portable texture and material channels for imported triangle assets. */
 (function (K) {
-  const A=K.authoring, maxEdge=64, maxPixels=16384, maxMaps=16;
+  const A=K.authoring, maxEdge=128, maxPixels=16384, maxMaps=16;
   const inRange=(v,lo,hi)=>Number.isFinite(v)&&v>=lo&&v<=hi;
   const integer=(v,lo,hi)=>Number.isInteger(v)&&inRange(v,lo,hi);
   const vector=(v,n,lo,hi)=>Array.isArray(v)&&v.length===n&&Array.from(v).every(x=>inRange(x,lo,hi));
@@ -16,15 +16,15 @@
 
   const channels=['color','normal','roughness','emission'];
   function validate(texture,vertices,faces) {
-    const { tints, images, layers={} }=texture||{};
-    if(tints!==undefined&&!bytes(tints,vertices*3)||!Array.isArray(images)||images.length>maxMaps||
+    const { tints, alphaTints, images, layers={} }=texture||{};
+    if(alphaTints!==undefined&&!bytes(alphaTints,vertices)||tints!==undefined&&!bytes(tints,vertices*3)||!Array.isArray(images)||images.length>maxMaps||
        !layers||typeof layers!=='object'||Array.isArray(layers)||
        !Object.keys(layers).every(key=>channels.slice(1).includes(key)))
       throw Error('Invalid asset texture');
     let sum=0;
     for(const image of images) {
-      const {width,height,rgb}=image||{};
-      if(!integer(width,1,maxEdge)||!integer(height,1,maxEdge)||!bytes(rgb,width*height*3))
+      const {width,height,rgb,alpha}=image||{};
+      if(!integer(width,1,maxEdge)||!integer(height,1,maxEdge)||!bytes(rgb,width*height*3)||alpha!==undefined&&!bytes(alpha,width*height))
         throw Error('Invalid asset texture image');
       sum+=width*height;
     }
@@ -38,9 +38,11 @@
           tangents!==undefined&&(!normals||!bytes(tangents,vertices*4))))
         throw Error('Invalid asset '+channel+' texture');
       for(const map of maps) {
-        const {image,wrap,filter,factor}=map||{};
+        const {image,wrap,filter,factor,alphaMode,alphaCutoff,opacity}=map||{};
         const min=channel==='normal'?-16:0, max=['normal','emission'].includes(channel)?16:1;
-        if(!vector(factor,3,min,max)||((image!==undefined||channel==='color'||channel==='normal')&&
+        if(channel==='color'&&(alphaMode!==undefined&&!['OPAQUE','MASK','BLEND'].includes(alphaMode)||
+           alphaCutoff!==undefined&&!inRange(alphaCutoff,0,1)||opacity!==undefined&&!inRange(opacity,0,1))||
+           !vector(factor,3,min,max)||((image!==undefined||channel==='normal')&&
            (!integer(image,0,images.length-1)||!Array.isArray(wrap)||wrap.length!==2||
             !Array.from(wrap).every(w=>['clamp','mirror','repeat'].includes(w))||
             !['nearest','linear'].includes(filter)))) throw Error('Invalid asset '+channel+' sampler');
@@ -56,6 +58,10 @@
     const base=pbr?.baseColorFactor??[1,1,1,1], glow=material?.emissiveFactor??[0,0,0];
     if(channel==='color'&&!vector(base,4,0,1)||
        channel==='emission'&&(!vector(glow,3,0,1)||!inRange(strength,0,16))) throw Error('Invalid GLB '+channel+' factor');
+    const alphaMode=material?.alphaMode??'OPAQUE', alphaCutoff=material?.alphaCutoff??.5;
+    if(channel==='color'&&(!['OPAQUE','MASK','BLEND'].includes(alphaMode)||!inRange(alphaCutoff,0,1)))
+      throw Error('Invalid GLB alpha material');
+    const alpha=channel==='color'?{alphaMode,alphaCutoff,opacity:base[3]}:{};
     const factor=channel==='color'?base.slice(0,3):
       channel==='normal'?[info?.scale??1,info?.scale??1,1]:
       channel==='roughness'?Array(3).fill(pbr?.roughnessFactor??1):
@@ -63,6 +69,7 @@
     if(!vector(factor,3,channel==='normal'?-16:0,['normal','emission'].includes(channel)?16:1))
       throw Error('Invalid GLB '+channel+' factor');
     if(info===undefined) {
+      if(channel==='color') return {factor,...alpha};
       if(channel==='roughness'&&factor[0]<1||channel==='emission'&&factor.some(n=>n>0)) return {factor};
       return null;
     }
@@ -79,7 +86,7 @@
     const wrap=[wraps.get(sampler?.wrapS??10497),wraps.get(sampler?.wrapT??10497)],
       filter=sampler?.magFilter??9729;
     if(wrap.includes(undefined)||![9728,9729].includes(filter)) throw Error('Unsupported GLB texture sampler');
-    return {index,scale,offset,rotation,factor,source:texture.source,
+    return {index,scale,offset,rotation,factor,...alpha,source:texture.source,
       wrap,filter:filter===9728?'nearest':'linear'};
   }
 
@@ -117,19 +124,22 @@
     return {mime,pixels:glb.bin.subarray(start,start+length)};
   }
 
-  function reduceImage(decoded) {
+  function reduceImage(decoded, limit=maxEdge) {
     const {width,height,pixels}=decoded||{};
     const pixelsType=Object.prototype.toString.call(pixels);
     if(!integer(width,1,4096)||!integer(height,1,4096)||
        !['[object Uint8Array]','[object Uint8ClampedArray]'].includes(pixelsType)||pixels.length!==4*width*height)
       throw Error('GLB image decoder must return bounded RGBA bytes');
-    const scale=Math.min(1,maxEdge/Math.max(width,height)), w=Math.max(1,Math.round(width*scale)), h=Math.max(1,Math.round(height*scale));
-    const rgb=new Uint8Array(w*h*3);
+    const scale=Math.min(1,limit/Math.max(width,height)), w=Math.max(1,Math.round(width*scale)), h=Math.max(1,Math.round(height*scale));
+    const rgb=new Uint8Array(w*h*3), alpha=new Uint8Array(w*h);
+    let transparent=false;
     for(let y=0;y<h;y++)for(let x=0;x<w;x++) {
       const dx=Math.min(width-1,Math.floor((x+.5)*width/w)), dy=Math.min(height-1,Math.floor((y+.5)*height/h));
       rgb.set(pixels.subarray((dy*width+dx)*4,(dy*width+dx)*4+3),(y*w+x)*3);
+      const a=pixels[(dy*width+dx)*4+3];
+      alpha[y*w+x]=a; transparent ||= a<255;
     }
-    return {width:w,height:h,rgb:pack(rgb)};
+    return {width:w,height:h,rgb:pack(rgb),...(transparent&&{alpha:pack(alpha)})};
   }
   function dimensions(pixels,mime) {
     const bytes=new DataView(pixels.buffer,pixels.byteOffset,pixels.byteLength);
@@ -157,7 +167,8 @@
     const {json,vertices,triangles}=glb, images=[], imageIds=new Map();
     const layers=new Map(), materialIds=new Map();
     const color=newLayer(), tints=new Uint8Array(vertices*3).fill(255);
-    let tinted=false, normals, tangents;
+    const alphaTints=new Uint8Array(vertices).fill(255);
+    let tinted=false, translucent=false, normals, tangents;
     function newLayer() {
       return {uv:new Array(vertices*2).fill(0),faces:new Array(triangles).fill(-1),maps:[]};
     }
@@ -165,6 +176,7 @@
       const {firstVertex,vertexCount,firstFace,faceCount,accessor}=range;
       if(!keys.has(material)) {
         const map={factor:spec.factor};
+        if(spec.alphaMode!==undefined) Object.assign(map,{alphaMode:spec.alphaMode,alphaCutoff:spec.alphaCutoff,opacity:spec.opacity});
         if(spec.source!==undefined) {
           if(!imageIds.has(spec.source)) {
             if(images.length>=maxMaps) throw Error('Asset exceeds the embedded image budget');
@@ -227,6 +239,12 @@
               tints[(firstVertex+i)*3+k]=Math.round(q*255);
               tinted ||= q<1;
             }
+            if(tint.w===4) for(let i=0;i<vertexCount;i++) {
+              const alpha=tint.get(i,3);
+              if(!inRange(alpha,0,1)) throw Error('GLB vertex alpha must be normalized');
+              alphaTints[firstVertex+i]=Math.round(alpha*255);
+              translucent ||= alpha<1;
+            }
           }
         }
       },
@@ -238,11 +256,13 @@
           const [width,height]=dimensions(pixels,mime);
           if(![width,height].every(n=>integer(n,1,4096)))
             throw Error('Embedded GLB image dimensions exceed the decoder budget');
-          decoded.push(reduceImage(await decodeImage(pixels,mime,{width,height,maxEdge})));
+          const edgeLimit=images.length===1?maxEdge:64;
+          decoded.push(reduceImage(await decodeImage(pixels,mime,{width,height,maxEdge:edgeLimit}),edgeLimit));
         }
         if(normals) layers.get('normal').normals=pack(normals);
         if(tangents) layers.get('normal').tangents=pack(tangents);
         return {...color,images:decoded,...(tinted&&{tints:pack(tints)}),
+          ...(translucent&&{alphaTints:pack(alphaTints)}),
           ...(layers.size&&{layers:Object.fromEntries(layers)})};
       }
     };
@@ -257,10 +277,11 @@
   function sampler(recipe) {
     if(compiled.has(recipe)) return compiled.get(recipe);
     const {texture,positions,triangles,colors,faceColors}=recipe, {V}=K;
-    const images=texture?.images.map(({width,height,rgb})=>({width,height,data:unpack(rgb)}));
+    const images=texture?.images.map(({width,height,rgb,alpha})=>({width,height,data:unpack(rgb),alpha:alpha&&unpack(alpha)}));
     const normalLayer=texture?.layers?.normal;
     const normals=normalLayer?.normals&&unpack(normalLayer.normals),
-      tangents=normalLayer?.tangents&&unpack(normalLayer.tangents), tints=texture?.tints&&unpack(texture.tints);
+      tangents=normalLayer?.tangents&&unpack(normalLayer.tangents), tints=texture?.tints&&unpack(texture.tints),
+      alphaTints=texture?.alphaTints&&unpack(texture.alphaTints);
     const projection=new Map(), frames=new Map();
     const mix=(a,b,q)=>a+(b-a)*q;
     const ids=t=>triangles.slice(t*3,t*3+3);
@@ -284,15 +305,21 @@
       const [a,b,c]=vertices, [wa,wb,wc]=weights;
       return wa*values[stride*a+channel]+wb*values[stride*b+channel]+wc*values[stride*c+channel];
     }
-    function texel(layer,map,vertices,weights,encoded) {
-      const {width,height,data}=images[map.image], nearest=map.filter==='nearest';
+    function texel(layer,map,vertices,weights,encoded,alpha=false) {
+      const image=images[map.image];
+      const {width,height}=image, data=alpha?image.alpha:image.data;
+      if(alpha&&!data) return [1];
+      const stride=alpha?1:3, count=alpha?1:3;
+      const {filter}=map;
+      const nearest=filter==='nearest';
+      /* Shared addressing keeps alpha and color aligned for either filter. */
       const x=interpolate(layer.uv,2,vertices,weights,0)*width-(nearest?0:.5);
       const y=interpolate(layer.uv,2,vertices,weights,1)*height-(nearest?0:.5);
       const u=Math.floor(x),v=Math.floor(y),fx=nearest?0:x-u,fy=nearest?0:y-v;
       const left=edge(u,width,map.wrap[0]),right=edge(u+1,width,map.wrap[0]),
         top=edge(v,height,map.wrap[1]),bottom=edge(v+1,height,map.wrap[1]);
-      const offsets=[top*width+left,top*width+right,bottom*width+left,bottom*width+right].map(i=>3*i);
-      return [0,1,2].map(channel=>{
+      const offsets=[top*width+left,top*width+right,bottom*width+left,bottom*width+right].map(i=>stride*i);
+      return Array.from({length:count},(_,channel)=>{
         const [a,b,c,d]=offsets.map(i=>encoded?linearByte[data[i+channel]]:data[i+channel]/255);
         return mix(mix(a,b,fx),mix(c,d,fx),fy);
       });
@@ -301,10 +328,18 @@
     function baseColor(t,vertices,weights) {
       const map=bindingAt(texture,t);
       if(!map) return colors[faceColors[t]];
-      return texel(texture,map,vertices,weights,true).map((value,c)=>{
+      return (map.image===undefined?[1,1,1]:texel(texture,map,vertices,weights,true)).map((value,c)=>{
         const tint=tints?interpolate(tints,3,vertices,weights,c)/255:1;
         return srgb(value*tint*map.factor[c]);
       });
+    }
+    function coverage(t,vertices,weights) {
+      const map=bindingAt(texture,t);
+      if(!map||!map.alphaMode||map.alphaMode==='OPAQUE') return 1;
+      const image=map.image===undefined?1:texel(texture,map,vertices,weights,false,true)[0];
+      const tint=alphaTints?interpolate(alphaTints,1,vertices,weights,0)/255:1;
+      const alpha=K.clamp(image*tint*(map.opacity??1),0,1);
+      return map.alphaMode==='MASK'?Number(alpha>=(map.alphaCutoff??.5)):alpha;
     }
     function frame(t,vertices) {
       if(frames.has(t)) return frames.get(t);
@@ -356,9 +391,11 @@
       const roughness=rough?(rough.image===undefined?1:texel(roughnessLayer,rough,vertices,weights,false)[1])*rough.factor[1]:1;
       const emission=emitted?(emitted.image===undefined?emitted.factor:texel(emissionLayer,emitted,vertices,weights,true)
         .map((value,i)=>value*emitted.factor[i])):[0,0,0];
-      return {color:baseColor(t,vertices,weights),normal:mappedNormal(t,vertices,weights,geometric),roughness,emission};
+      return {opacity:coverage(t,vertices,weights),color:baseColor(t,vertices,weights),normal:mappedNormal(t,vertices,weights,geometric),roughness,emission};
     }
     const result=Object.freeze({at,atPoint,
+      opacityAt:(t,u,v)=>coverage(t,ids(t),[1-u-v,u,v]),
+      opacityAtPoint:(t,x,y,z)=>coverage(t,ids(t),weightsAt(t,x,y,z)),
       materialAt:(t,u,v,geometric)=>material(t,ids(t),[1-u-v,u,v],geometric),
       materialAtPoint:(t,x,y,z,geometric)=>material(t,ids(t),weightsAt(t,x,y,z),geometric)});
     compiled.set(recipe,result);

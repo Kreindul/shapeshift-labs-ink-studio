@@ -48,3 +48,58 @@ test('surface masks reject invalid or unbounded charts, strokes and queries', ()
   assert.throws(() => P.surfaceMasks.compile([{ ...stroke, points: Array(8193).fill([.5, .5]) }], options), /budget/);
   assert.throws(() => P.surfaceMasks.compile([stroke], options).weight(Infinity, 0));
 });
+
+test('dirty bounds enclose all changed samples on both sides of a periodic seam',()=>{
+  const options={size:[10,4],periodic:true};
+  const start={points:[[.48,.15]],width:1}, seam={points:[[.96,.5],[.04,.55]],width:.55,softness:.12};
+  const restore={points:[[.01,.54]],operation:'erase',width:.3};
+  for(const [a,b] of [[[start],[start,seam]],[[start,seam],[start,seam,restore]],[[start,seam,restore],[start]]]){
+    const bounds=P.surfaceMasks.dirtyBounds(a,b,options);
+    assert(bounds.length>0);
+    assert(bounds.every(box=>box.min[0]>=0&&box.max[0]<=1&&box.min[1]>=0&&box.max[1]<=1));
+    const from=P.surfaceMasks.compile(a,options),to=P.surfaceMasks.compile(b,options);
+    for(let y=0;y<=40;y++)for(let x=0;x<=100;x++){
+      const u=x/100,v=y/40;
+      if(from.weight(u,v)===to.weight(u,v))continue;
+      assert(bounds.some(box=>u>=box.min[0]&&u<=box.max[0]&&v>=box.min[1]&&v<=box.max[1]));
+    }
+    assert(bounds.every(box=>box.max[0]<.25||box.min[0]>.75),'unrelated central samples stay clean');
+  }
+  assert.deepEqual(P.surfaceMasks.dirtyBounds([start],[{...start}],options),[]);
+});
+
+test('loop brushes cross unequal chart edges, retain point anchors and compose local layers in order',()=>{
+  const charts=[{key:'a',length:4},{key:'b',length:1},{key:'c',length:3}],options={charts,height:2};
+  const point=(chart,u,v)=>({chart,uv:[u,v]});
+  const dab={points:[point('a',.98,.45)],width:.5,softness:.1};
+  const stroke={...dab,points:[point('a',.80,.35),point('b',.50,.55)]};
+  const restored={chart:'b',points:[[.08,.45]],width:.34,operation:'erase'};
+  const legacy={chart:'a',points:[[0,.79]],width:.8};
+  const tint=P.surfaceMasks.compileLoop([dab],options);
+  assert.equal(tint.weight('b',.05,.45),1);
+  assert(tint.weight('b',.13,.45)>0&&tint.weight('b',.13,.45)<1);
+  assert.equal(tint.weight('b',.31,.45),0);
+  const before=[legacy,stroke,restored];
+  const mask=P.surfaceMasks.compileLoop(before,options);
+  assert.equal(mask.weight('b',.08,.45),0);
+  assert.equal(mask.weight('a',.99,.45),1);
+  assert.equal(mask.weight('c',.999,.79),0,'older single-chart paint remains clipped');
+  assert.equal(P.surfaceMasks.compileLoop([restored,stroke],options).weight('b',.08,.45),1);
+  const after=[legacy,stroke,{...dab,points:[point('c',.97,.61),point('a',.04,.67)]},restored],
+    dirty=P.surfaceMasks.loopDirtyBounds(before,after,options),
+    next=P.surfaceMasks.compileLoop(after,options);
+  assert.equal(next.weight('a',0,.64),1);
+  assert.equal(next.weight('c',1,.64),1);
+  for(const {key:chart} of charts)for(let y=0;y<=40;y++)for(let x=0;x<=60;x++){
+    const u=x/60,v=y/40;
+    if(mask.weight(chart,u,v)===next.weight(chart,u,v))continue;
+    assert(dirty.some(box=>box.chart===chart&&u>=box.min[0]&&u<=box.max[0]&&v>=box.min[1]&&v<=box.max[1]));
+  }
+  assert.deepEqual(P.surfaceMasks.loopDirtyBounds(after,structuredClone(after),options),[]);
+  const resized=P.surfaceMasks.compileLoop([stroke],{height:6,charts:charts.map(span=>({...span,
+    length:span.key==='a'?11:span.length}))});
+  assert.equal(resized.weight('a',.80,.35),1);
+  assert.equal(resized.weight('b',.50,.55),1);
+  assert.equal(resized.weight('b',.50,.79),0);
+  assert.throws(()=>P.surfaceMasks.compileLoop([{...dab,points:[point('missing',.5,.45)]}],options),/chart/);
+});

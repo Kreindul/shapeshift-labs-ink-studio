@@ -8,8 +8,8 @@
   const equal=(a,b)=>Object.is(a,b)||JSON.stringify(a)===JSON.stringify(b);
   const format='ink-studio/appearance-sample/1';
 
-  function create({describe,compatible=(sample,target)=>sample.family===target.family} = {}){
-    if(typeof describe!=='function'||typeof compatible!=='function')
+  function create({describe,compatible=(sample,target)=>sample.family===target.family,validate} = {}){
+    if(typeof describe!=='function'||typeof compatible!=='function'||validate!==undefined&&typeof validate!=='function')
       throw Error('Appearance transfer needs a binding and compatibility policy');
 
     function binding(entity,source,sample){
@@ -26,6 +26,8 @@
           throw Error('Appearance slots need a semantic key and a local appearance or parameter path');
         if(slot.encode!==undefined&&typeof slot.encode!=='function')
           throw Error('Appearance slot encoders must be functions');
+        if(slot.target!==undefined&&(!name(slot.target)||!Object.hasOwn(source.entities,slot.target)))
+          throw Error('Appearance slot targets must be existing entities');
       }
       return {family:result.family,label:result.label??result.family,entries};
     }
@@ -48,23 +50,31 @@
     function plan(source,ids,raw){
       const s=view(source),sample=input(raw);
       if(!Array.isArray(ids)||ids.length>2048||!ids.every(name))throw Error('Appearance targets need up to 2048 entity IDs');
-      const edits=[],skipped=[];
+      const edits=[],skipped=[],writes=new Map();
       for(const id of new Set(ids)){
         const e=Object.hasOwn(s.entities,id)&&s.entities[id];
         if(!e){skipped.push({id,reason:'missing'});continue;}
         const target=binding(e,s,sample);
         if(!target||!compatible(sample,target,e,s)){skipped.push({id,reason:'incompatible'});continue;}
-        const paths=new Map();
-        for(const [key,{path,value,encode}] of target.entries){
+        let matched=false,changed=false;
+        for(const [key,slot] of target.entries){
           if(!Object.hasOwn(sample.values,key))continue;
+          const {path,value,encode}=slot;
+          const owner=slot.target??id;
+          let paths=writes.get(owner);
+          if(!paths)writes.set(owner,paths=new Map());
           const supplied=sample.values[key],next=encode?clone(encode(clone(supplied))):supplied,
-            encoded=JSON.stringify(path),same=equal(value,supplied);
+            encoded=JSON.stringify(path),same=Object.hasOwn(slot,'stored')?equal(slot.stored,next):equal(value,supplied);
+          matched=true;changed||=!same;
           if(paths.has(encoded)){
-            if(!equal(paths.get(encoded).next,next))throw Error('Appearance slots conflict on '+id);
+            if(!equal(paths.get(encoded).next,next))throw Error('Appearance slots conflict on '+owner);
             paths.get(encoded).same&&=same;
           }else paths.set(encoded,{path,next,same});
         }
-        if(!paths.size){skipped.push({id,reason:'no-common-slots'});continue;}
+        if(!matched)skipped.push({id,reason:'no-common-slots'});
+        else if(!changed)skipped.push({id,reason:'unchanged'});
+      }
+      for(const [id,paths] of writes){
         const patch={};
         for(const {path,next,same} of paths.values()){
           for(let i=1;i<path.length;i++){
@@ -77,9 +87,10 @@
           current[path.at(-1)]=clone(next);
         }
         if(Object.keys(patch).length)edits.push({id,patch});
-        else skipped.push({id,reason:'unchanged'});
       }
-      return freeze({edits,skipped});
+      const result=freeze({edits,skipped});
+      if(edits.length)validate?.(s,result.edits,sample);
+      return result;
     }
     function apply(doc,ids,sample,{label='Transfer appearance'} = {}){
       const result=plan(doc,ids,sample);

@@ -4,7 +4,9 @@ Projected effects draw animated pixel images and procedural patterns on
 splat surfaces. A layer can read a shared field for its color, coverage, or
 coordinate warp. Particle emitters can use the same path or read that field
 to decide where to spawn. All of the effects render on the scene's art-pixel
-grid before the optional text pass.
+grid before the optional text pass in the CPU renderer. Browser hosts can
+use the shared fields and material samplers to integrate these layers into
+their own pipeline. See the [WebGL renderer coverage](browser-renderer.md#feature-coverage).
 
 Try [Tidal signal](../examples/surface-effects.js) for a moving projected
 image, a revealing ribbon, ripples and sparks. [Edge shedding](../examples/edge-shedding.js)
@@ -151,3 +153,12 @@ An optional `weight(hit)` callback can also read a field or evaluate a
 material mask. The emitter inherits the source RGB unless `color`
 supplies a scene palette index or an index callback. The source sampler
 can also be used independently of the emitter.
+
+For one-shot debris, `K.deform.burst({pieces, from, speed, gravity, drag,
+life, shrink})` already computes analytic motion for authored piece
+centers. Sample it directly with `burst.piece(index, seconds)` to get a
+`{point, scale}` without a nearest-piece search. Sample times can be in
+any order. For packed splats, move the center to `point` and multiply
+the covariance by `scale * scale`. The [interactable locks example](../examples/interactable-locks.js)
+uses this on an effects frame after publication and keeps the collision
+and navigation revision independent of the airborne fragments.

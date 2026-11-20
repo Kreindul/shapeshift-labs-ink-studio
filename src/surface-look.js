@@ -3,6 +3,14 @@
 const SurfaceLook = (() => {
   const optics = typeof SceneOptics === 'undefined' ? require('./scene-optics.js') : SceneOptics;
   const effects = typeof SplatEffects === 'undefined' ? require('./splat-effects.js') : SplatEffects;
+  let luts, stacks;
+  try {
+    luts = ColorLUT;
+    stacks = ColorStack;
+  } catch {
+    luts = require('./color-lut.js');
+    stacks = require('./color-stack.js');
+  }
   const STRIDE = 8; // binding ID (one-based), normal XYZ, visibility, optional tangent XYZ
   const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
   const WHITE = [1, 1, 1];
@@ -78,6 +86,8 @@ const SurfaceLook = (() => {
     return Object.fromEntries(
       [...new Set([...Object.keys(a), ...Object.keys(b)])].map(key => {
         const value = Object.hasOwn(b, key) ? b[key] : a[key];
+        if (key === 'lut' && (b.type ?? a.type) === 'colorLut') return [key, luts.normalize(value)];
+        if (key === 'stack' && (b.type ?? a.type) === 'colorStack') return [key, stacks.normalize(value)];
         return [key, isRecord(value) ? merge(a[key], value) : Array.isArray(value) ? value.slice() : value];
       })
     );
@@ -283,7 +293,8 @@ const SurfaceLook = (() => {
     }
   }
 
-  function prepare(settings, palette = [], lightDirection = [-0.55, 0.72, 0.43], context = {}) {
+  function prepare(settings, palette = [], lightDirection = [-0.55, 0.72, 0.43], context = {},
+    { colorCurves = true, colorLut = true, colorStack = true } = {}) {
     if (!isRecord(settings)) throw new TypeError('Surface settings must be an object');
     numeric(settings, ['scale', 'seed', 'steps'], 'surface');
     if (settings.layers !== undefined && !isRecord(settings.layers))
@@ -329,9 +340,12 @@ const SurfaceLook = (() => {
       }
     }
     const layers = Object.entries(settings.layers || {})
-      .filter(([, layer]) => layer && layer.strength !== 0)
+      .filter(([, layer]) => layer && layer.strength !== 0 &&
+        (colorCurves || layer.type !== 'colorCurve') && (colorLut || layer.type !== 'colorLut') &&
+        (colorStack || layer.type !== 'colorStack'))
       .map(([id, layer]) => {
-        if (layer.type !== 'projected' && !Object.hasOwn(models, layer.type))
+        const colorLayer = ['projected', 'colorCurve', 'colorLut', 'colorStack'].includes(layer.type);
+        if (!colorLayer && !Object.hasOwn(models, layer.type))
           throw new RangeError('Unknown surface layer: ' + layer.type);
         numeric(
           layer,
@@ -380,10 +394,13 @@ const SurfaceLook = (() => {
             throw new RangeError('Unknown surface mask: ' + layer.mask.type);
           numeric(layer.mask, ['scale', 'low', 'high', 'seed', 'phase', 'width', 'feather'], id + '.mask');
         }
-        if (layer.type === 'projected') {
+        if (colorLayer) {
           const blend = layer.blend ?? 'mix';
-          if (!['mix', 'add', 'multiply'].includes(blend)) throw new RangeError('Unknown projected blend: ' + blend);
-          const effect = effects.layer(layer, context, value => color(value, palette));
+          if (!['mix', 'add', 'multiply'].includes(blend)) throw new RangeError('Unknown surface color blend: ' + blend);
+          const resolveColor = value => color(value, palette);
+          let effect;
+          if (layer.type === 'colorLut' || layer.type === 'colorStack') effect = effects[layer.type](layer, resolveColor);
+          else effect = (layer.type === 'projected' ? effects.layer : effects.colorCurve)(layer, context, resolveColor);
           return { ...layer, id, blend, strength: clamp(layer.strength ?? 1), effect, fieldMask };
         }
         if (layer.colors !== undefined && !Array.isArray(layer.colors))
@@ -418,6 +435,7 @@ const SurfaceLook = (() => {
     return {
       settings, normal, layers, sun: unit(vector(lightDirection, AXES.y)),
       projected: layers.some(layer => layer.effect || layer.fieldMask),
+      depth: layers.some(layer => layer.effect?.depth),
       reveals: layers.some(layer => layer.effect?.reveals)
     };
   }
@@ -487,6 +505,7 @@ const SurfaceLook = (() => {
       if (layer.effect) {
         const result = layer.effect.sample(sample, output);
         const amount = clamp(result[3] * strength);
+        if (!amount && layer.type === 'colorCurve') continue;
         output[3] *= mix(1, clamp(result[4]), strength);
         output[4] = Math.max(output[4], clamp(result[5] * strength));
         if (amount >= 0.5) output[5] = layer.effect.palette;

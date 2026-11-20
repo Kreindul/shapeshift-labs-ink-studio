@@ -10,6 +10,27 @@ const area = polygon => polygon.reduce((sum, p, index) => {
 const total = result => result.cells.flatMap(cell => cell.fragments).reduce((sum, polygon) => sum + area(polygon), 0);
 const near = (a, b) => assert(Math.abs(a - b) < 1e-7, a + ' != ' + b);
 
+test('sampled masks share boundaries with cell clipping and preserve islands inside a cut',()=>{
+  const {fieldMask,clip}=P.surfaceCells, bounds={min:[-2,-1.5],max:[2,1.5]};
+  const mask=fieldMask((x,y)=>Math.max(Math.hypot(x,y)-1,.37-Math.hypot(x,y)),{bounds,cell:.045});
+  assert(mask);
+  assert(mask.distance(0,0)>.33);
+  assert(mask.distance(.65,0)<-.2);
+  assert(mask.distance(1.3,0)>.27);
+  const result=clip([{key:'single-course',polygon:rectangle(-1.5,-1.3,3,2.6)}],{holes:mask.holes});
+  assert.equal(result.cells[0].key,'single-course');
+  for(const fragment of result.cells[0].fragments){
+    const point=fragment.reduce((sum,p)=>p.map((v,i)=>sum[i]+v/fragment.length),[0,0]);
+    assert(mask.distance(...point)>-1e-5);
+  }
+  const expected=7.8-Math.PI*(1-.37**2);
+  assert(Math.abs(total(result)-expected)<.025);
+  assert.equal(fieldMask(()=>Infinity,{bounds}),null);
+  const clipped=fieldMask(()=>-1,{bounds:{min:[0,0],max:[1,1]},cell:.1});
+  assert(clipped.distance(.5,.5)<-.45);
+  assert(clipped.distance(-.2,.5)>.15);
+});
+
 test('clipping handles an enclosed hole and an angled outer boundary while preserving the logical cell', () => {
   const cells = [{ key: 'panel', polygon: rectangle(0, 0, 4, 4) }];
   const boundary = [[0, 4], [4, 0], [0, 0]];
@@ -36,6 +57,23 @@ test('overlapping cutouts subtract their combined area, and a remote cutout leav
   assert.throws(() => P.surfaceCells.clip(cells, { holes, budget: 1 }), /fragment budget/);
   assert.throws(() => P.surfaceCells.clip(cells, { holes, work: 1 }), /work budget/);
   assert.throws(() => P.surfaceCells.clip(cells, { holes: [[[0, 0], [2, 0], [1, 1], [2, 2], [0, 2]]] }), /convex/);
+});
+
+test('indexed cells pick all surviving fragments and can omit one logical unit', () => {
+  const plan = P.surfaceCells.clip([
+    {key:'cut',polygon:rectangle(0,0,3,1)},
+    {key:'intact',polygon:rectangle(0,1,3,1)}
+  ],{holes:[rectangle(1,-.5,1,2)]});
+  const stock = P.surfaceCells.index(plan);
+  assert.equal(stock.get('cut').fragments.length,2);
+  assert(stock.contains('cut',[.5,.5]));
+  assert(stock.contains('cut',[2.5,.5]));
+  assert(!stock.contains('cut',[1.5,.5]));
+  assert(!stock.contains('missing',[1.5,.5]));
+  const reduced=stock.excluding(['cut','dormant']);
+  assert.deepEqual(reduced.cells,[stock.get('intact')]);
+  assert.equal(reduced.fragmentCount,stock.get('intact').fragments.length);
+  assert.equal(plan.cells.length,2);
 });
 
 test('fitted-course fragments on a periodic chart seam retain one logical key', () => {
@@ -75,4 +113,23 @@ test('lofted cells follow a curved carrier with closed sides and a distinct mate
   assert([...edges.values()].every(sum => sum === 0));
   assert.throws(() => P.surfaceCells.loft(layout, { sample, step: .01, budget: 15 }), /triangle budget/);
   assert.throws(() => P.surfaceCells.loft(layout, { sample: ([u, v]) => [u, 0, v] }), /volume/);
+});
+
+test('height prisms preserve a clipped hole and distinguish tessellation seams from outer edges', () => {
+  const layout = P.surfaceCells.clip([{key:'cover',polygon:rectangle(0,0,2,2)}],{
+    holes:[rectangle(.8,.8,.4,.4)]
+  });
+  const sample = ([x,z],level) => [x,level+.2*x+.1*z,z];
+  const inside = (point,pieces) => pieces.some(({planes}) => planes.every(({normal,offset}) =>
+    normal.reduce((sum,component,i)=>sum+component*point[i],0)<=offset+1e-7));
+  for(const options of [{step:.27},{planar:true}]){
+    const pieces=P.surfaceCells.prisms(layout,{sample,...options});
+    assert(pieces.every(piece=>piece.key==='cover'));
+    assert(inside([.5,.65,.5],pieces));
+    assert(!inside([1,.70,1],pieces));
+    assert(!inside([.5,1.4,.5],pieces));
+    assert(pieces.every(piece=>piece.planes.some(plane=>plane.kind==='upper'&&plane.exterior)));
+    if(!options.planar)assert(pieces.some(piece=>piece.planes.some(plane=>plane.kind==='side'&&!plane.exterior)));
+  }
+  assert.throws(()=>P.surfaceCells.prisms(layout,{sample,step:.15,budget:1}),/piece budget/);
 });

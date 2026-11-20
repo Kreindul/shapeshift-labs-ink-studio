@@ -13,6 +13,10 @@
     sphere: SceneOptics.sphere,
     box: SceneOptics.box,
     shaft: SceneOptics.shaft,
+    field: SceneOptics.field,
+    lighting: SceneOptics.lighting,
+    occluder: SceneOptics.occluder,
+    history: SceneOptics.volumeHistory,
     prepare: SceneOptics.prepareVolumes,
     trace: SceneOptics.trace
   };

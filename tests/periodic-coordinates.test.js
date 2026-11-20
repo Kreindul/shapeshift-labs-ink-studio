@@ -20,3 +20,18 @@ test('unwrapping puts each station in the smallest covering interval in its inpu
   assert.deepEqual(unwrap(new Float32Array([1, .25, .75])), [1, 1.25, .75]);
   near(wrap(unwrap([.99, .01]).reduce((sum, u) => sum + u / 2, 0)), 0);
 });
+
+test('a measured loop maps keyed span positions through unequal spans and repeated turns',()=>{
+  const plan=periodicCoordinates.loop([
+    {key:'a',length:2},{key:'b',length:.5},{key:'c',length:3.5}
+  ]);
+  assert.equal(plan.length,6);
+  assert.equal(plan.station('c',.5),4.25);
+  assert.deepEqual(plan.locate(plan.station('c',.5)-12),{key:'c',fraction:.5});
+  assert.deepEqual(plan.locate(plan.station('a',1)),{key:'b',fraction:0});
+  assert.deepEqual(plan.locate(plan.station('a',1.125)),{key:'b',fraction:.5});
+  assert.deepEqual(plan.locate(18),{key:'a',fraction:0});
+  assert.throws(()=>plan.station('missing',0),/known span/);
+  assert.throws(()=>plan.locate(Infinity),/finite/);
+  assert.throws(()=>periodicCoordinates.loop([{key:'a',length:1},{key:'a',length:1}]),/unique/);
+});

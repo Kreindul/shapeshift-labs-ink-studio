@@ -25,7 +25,7 @@
       if (!drawing) throw new Error('Frame splat commands are only available inside its draw callback');
     }
 
-    function style({ width = 0.04, color = 1, rgb, density = 2, emissive = true }) {
+    function style({ width = 0.04, color = 1, rgb, density = 2, emissive = true, depth = false }) {
       if (
         !(width > 0) ||
         !Number.isFinite(width) ||
@@ -38,7 +38,7 @@
       }
       const packed = rgb === undefined ? palette[color] :
         Math.round(rgb[0] * 255) + Math.round(rgb[1] * 255) * 256 + Math.round(rgb[2] * 255) * 65536;
-      return { width, packed, density, flags: emissive ? NO_DEPTH | EMISSIVE : NO_DEPTH };
+      return { width, packed, density, flags: (depth ? 0 : NO_DEPTH) | (emissive ? EMISSIVE : 0) };
     }
 
     function putStreak(a, b, paint) {
@@ -53,6 +53,10 @@
     }
 
     const draw = Object.freeze({
+      get count() {
+        requireFrame();
+        return used;
+      },
       point(position, options) {
         return draw.streak(position, position, options);
       },
@@ -67,7 +71,7 @@
         return true;
       },
 
-      model(model, at, { matrix = identity, opacity = 1 } = {}) {
+      model(model, at, { matrix = identity, opacity = 1, deform, color } = {}) {
         requireFrame();
         const rows = models.get(model);
         if (
@@ -76,18 +80,22 @@
           !finiteVector(matrix, 9) ||
           !Number.isFinite(opacity) ||
           opacity < 0 ||
-          opacity > 1
+          opacity > 1 ||
+          (deform !== undefined && typeof deform !== 'function')
         ) {
           throw new Error('A model instance needs a captured model, finite transform and opacity from 0 to 1');
         }
         if (!opacity) return true;
         if (used + model.count > capacity) return false;
         const D = stage.D;
+        const tint = color === undefined ? undefined : style({ color }).packed;
         const transpose = M.tr(matrix);
         for (let r = 0; r < rows.length; r += SNAPSHOT_STRIDE) {
           const i = pool.first + used++;
           const o = i * 16;
-          const [x, y, z] = M.app(matrix, rows.subarray(r, r + 3));
+          const point = rows.subarray(r, r + 3);
+          const p = deform ? Array.from(point) : point;
+          const [x, y, z] = M.app(matrix, deform ? deform(p) : p);
           D[o] = x + at[0];
           D[o + 1] = y + at[1];
           D[o + 2] = z + at[2];
@@ -99,16 +107,72 @@
             c12 = rows[r + 9],
             c22 = rows[r + 10];
           const covariance = [c00, c01, c02, c01, c11, c12, c02, c12, c22];
-          const C = M.mul(M.mul(matrix, covariance), transpose);
+          const linear = deform ? M.mul(matrix, K.deform.jac(deform, p)) : matrix;
+          const C = M.mul(M.mul(linear, covariance), deform ? M.tr(linear) : transpose);
           D[o + 4] = C[0];
           D[o + 5] = C[1];
           D[o + 6] = C[2];
-          D[o + 7] = rows[r + 7];
+          D[o + 7] = tint ?? rows[r + 7];
           D[o + 8] = C[4];
           D[o + 9] = C[5];
           D[o + 10] = C[8];
           D[o + 11] = rows[r + 11];
           stage.touch(i);
+        }
+        return true;
+      },
+
+      sweep(sections, { width = 0.06, spacing = 0.05, color = 1, density = 3.5, emissive = false } = {}) {
+        requireFrame();
+        if (!Array.isArray(sections) || sections.length < 2 || sections.length > 25 ||
+            sections.some(section => !finiteVector(section?.base, 3) || !finiteVector(section?.tip, 3)) ||
+            !Number.isFinite(width) || width <= 0 || !Number.isFinite(spacing) || spacing <= 0)
+          throw new Error('A sweep needs two to 25 sections, positive thickness and spacing');
+        const paint = style({ color, density, emissive, depth: true, width: spacing * 0.65 });
+        if (!density) return true;
+        let side;
+        const centers = sections.map(({ base, tip }) => V.lerp(base, tip, 0.5));
+        const rings = sections.map(({ base, tip }, i) => {
+          const axis = V.norm(V.sub(tip, base));
+          const motion = V.sub(centers[Math.min(i + 1, sections.length - 1)], centers[Math.max(0, i - 1)]);
+          const next = V.cross(axis, motion);
+          let across = V.len(next) > 1e-7 ? V.norm(next) : side ?? V.perp(axis);
+          across = V.norm(V.mad(across, axis, -V.dot(across, axis)), V.perp(axis));
+          if (side && V.dot(across, side) < 0) across = V.mul(across, -1);
+          side = across;
+          return [V.mad(base, side, -width), V.mad(tip, side, -width),
+            V.mad(tip, side, width), V.mad(base, side, width)];
+        });
+        const faces = [];
+        function face(a, b, c, d) {
+          const u = Math.max(V.dist(a, b), V.dist(d, c));
+          const v = Math.max(V.dist(a, d), V.dist(b, c));
+          if (Math.min(u, v) < 1e-8) return;
+          const along = Math.min(48, Math.ceil(u / spacing)), across = Math.min(48, Math.ceil(v / spacing));
+          faces.push({ a, b, c, d, along, across, size: Math.max(paint.width, 0.65 * Math.max(u / along, v / across)) });
+        }
+        for (let i = 1; i < rings.length; i++) {
+          const a = rings[i - 1], b = rings[i];
+          for (let edge = 0; edge < 4; edge++) {
+            const next = (edge + 1) % 4;
+            face(a[edge], a[next], b[next], b[edge]);
+          }
+        }
+        face(...rings[0]);
+        face(...rings.at(-1));
+        if (used + faces.reduce((n, f) => n + f.along * f.across, 0) > capacity) return false;
+        for (const { a, b, c, d, along, across, size } of faces) for (let j = 0; j < across; j++) {
+          const v = (j + 0.5) / across;
+          const left = V.lerp(a, d, v), right = V.lerp(b, c, v);
+          for (let i = 0; i < along; i++) {
+            const u = (i + 0.5) / along;
+            const normal = V.cross(V.sub(right, left), V.lerp(V.sub(d, a), V.sub(c, b), u));
+            if (V.len(normal) < 1e-10) continue;
+            const [x, y, z] = V.lerp(left, right, u);
+            const index = pool.first + used++;
+            pool.put(stage, index, x, y, z, size, paint.packed, paint.density, V.norm(normal), size * 0.16);
+            stage.D[index * 16 + 11] = paint.flags;
+          }
         }
         return true;
       },
@@ -188,7 +252,7 @@
     };
   };
 
-  K.frameSplats.capture = (world, origin = [0, 0, 0]) => {
+  K.frameSplats.capture = (world, origin = [0, 0, 0], { indices } = {}) => {
     if (
       !(world?.data instanceof Float32Array) ||
       !Number.isSafeInteger(world.count) ||
@@ -200,7 +264,14 @@
     }
     const { data, count } = world;
     const visible = [];
-    for (let i = 0; i < count; i++) if (data[i * 16 + 3] > 0) visible.push(i * 16);
+    if (indices === undefined) {
+      for (let i = 0; i < count; i++) if (data[i * 16 + 3] > 0) visible.push(i * 16);
+    } else {
+      for (const i of indices) {
+        if (!Number.isInteger(i) || i < 0 || i >= count) throw new RangeError('Captured splat indices must belong to the world');
+        if (data[i * 16 + 3] > 0) visible.push(i * 16);
+      }
+    }
     const rows = new Float32Array(visible.length * SNAPSHOT_STRIDE);
     for (let i = 0; i < visible.length; i++) {
       const r = i * SNAPSHOT_STRIDE;

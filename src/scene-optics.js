@@ -4,6 +4,8 @@ const SceneOptics = (() => {
   const { planeDistance, reflectedView, captureView } = reflection;
   const ripples = typeof RippleField === 'undefined' ? require('./ripple-field.js') : RippleField;
   const { field: ripple, ringSampler } = ripples;
+  const densities = typeof VolumeField === 'undefined' ? require('./volume-field.js') : VolumeField;
+  const volumeLight = typeof VolumeLight === 'undefined' ? require('./volume-light.js') : VolumeLight;
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const sub = (a, b) => a.map((v, i) => v - b[i]);
   const length = v => Math.hypot(...v);
@@ -43,7 +45,7 @@ const SceneOptics = (() => {
   function volumeColor(value, palette) {
     if (typeof value === 'string' && /^#[\da-f]{6}$/i.test(value)) value = parseInt(value.slice(1), 16);
     else if (Number.isInteger(value)) value = palette[value];
-    else if (Array.isArray(value)) return point(value, 'Volume colour').map(clamp);
+    else if (Array.isArray(value)) return point(value, 'Volume colour').map(n => Math.max(0, Math.min(1, n)));
     if (!Number.isInteger(value))
       throw new TypeError('Volume colour must be a palette index, hex colour or RGB triple');
     return [((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255];
@@ -86,7 +88,19 @@ const SceneOptics = (() => {
     return { type: 'shaft', ...common(options), from, to, radius: positive(options.radius, 'Shaft radius') };
   }
 
-  const volumeKinds = { fog, sphere, box, shaft };
+  function field(options = {}) {
+    const { field, step = .16, lit = true, anisotropy = .15, ramp, emissive = '#000000', emissiveGain = 0 } = options;
+    if (typeof field?.sample !== 'function') throw new TypeError('Expected a bounded density field');
+    const { min, max } = densities.bounds(field.bounds);
+    if (!Number.isFinite(step) || step <= 0 || step > 100 || typeof lit !== 'boolean' ||
+        !Number.isFinite(anisotropy) || Math.abs(anisotropy) > .85 ||
+        !Number.isFinite(emissiveGain) || emissiveGain < 0 || emissiveGain > 64 ||
+        (ramp !== undefined && (!Array.isArray(ramp) || !ramp.length || ramp.length > 32)))
+      throw new RangeError('Invalid density march or optical settings');
+    return { type: 'field', ...common(options), field, min, max, step, lit, anisotropy, ramp, emissive, emissiveGain };
+  }
+
+  const volumeKinds = { fog, sphere, box, shaft, field };
   function prepareVolumes(list, palette = []) {
     if (!Array.isArray(list)) throw new TypeError('Atmosphere must be a list of volumes');
     return list
@@ -94,6 +108,10 @@ const SceneOptics = (() => {
         if (!d || !Object.hasOwn(volumeKinds, d.type)) throw new TypeError('Unknown atmosphere volume');
         const volume = volumeKinds[d.type](d);
         volume.rgb = volumeColor(volume.color, palette);
+        if (volume.type === 'field') {
+          volume.ramp = volume.ramp?.map(color => volumeColor(color, palette));
+          volume.emissiveRgb = volumeColor(volume.emissive, palette);
+        }
         if (volume.type === 'shaft') {
           const span = sub(volume.to, volume.from);
           volume.height = length(span);
@@ -130,6 +148,7 @@ const SceneOptics = (() => {
       case 'fog':
         return slab(range, from[1], dir[1], volume.bottom ?? -Infinity, volume.top ?? Infinity) ? range : null;
       case 'box':
+      case 'field':
         return [0, 1, 2].every(i => slab(range, from[i], dir[i], volume.min[i], volume.max[i])) ? range : null;
       case 'sphere': {
         const delta = sub(from, volume.at);
@@ -148,13 +167,15 @@ const SceneOptics = (() => {
   }
 
   // Integrate overlapping constant-density media in front-to-back depth order.
-  function trace(volumes, origin, direction, stop, result = [0, 0, 0, 1]) {
+  function trace(volumes, origin, direction, stop, result = [0, 0, 0, 1], options) {
     const hits = [];
     for (const volume of volumes) {
       const range = interval(volume, origin, direction, stop);
       if (range) hits.push([range[0], volume, 1], [range[1], volume, -1]);
     }
     hits.sort((a, b) => a[0] - b[0]);
+    if (hits.some(([, volume]) => volume.type === 'field'))
+      return volumeLight.integrate(hits, origin, direction, stop, result, options);
     result[0] = result[1] = result[2] = 0;
     result[3] = 1;
     const rgb = [0, 0, 0];
@@ -173,6 +194,8 @@ const SceneOptics = (() => {
     return result;
   }
 
-  return { plane, planeDistance, reflectedView, captureView, fog, sphere, box, shaft, prepareVolumes, trace, ripple, ringSampler };
+  return { plane, planeDistance, reflectedView, captureView, fog, sphere, box, shaft, field, prepareVolumes,
+    trace, lighting: (settings, palette) => volumeLight.lighting(settings, volumeColor, palette),
+    occluder: volumeLight.occluder, volumeHistory: volumeLight.history, ripple, ringSampler };
 })();
 if (typeof module !== 'undefined') module.exports = SceneOptics;

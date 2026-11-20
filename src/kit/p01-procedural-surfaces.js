@@ -47,7 +47,37 @@
     }
     return near;
   }
-  A.spatial = { bounds, overlap, contains, expand, boxOf, rayBox };
+  // Snapshot the bounds. Leaves still test each bound exactly after pruning.
+  function pointIndex(records) {
+    function build(rows) {
+      if (!rows.length) return null;
+      const extent = boxOf(rows.flatMap(row => [row.box.min, row.box.max]));
+      if (rows.length <= 8) return { extent, rows };
+      const centres = boxOf(rows.map(row => row.centre));
+      let axis = 0;
+      for (let i = 1; i < 3; i++)
+        if (centres.max[i] - centres.min[i] > centres.max[axis] - centres.min[axis]) axis = i;
+      rows.sort((a, b) => a.centre[axis] - b.centre[axis] || a.index - b.index);
+      const middle = Math.floor(rows.length / 2);
+      return { extent, left: build(rows.slice(0, middle)), right: build(rows.slice(middle)) };
+    }
+    const tree = build(records.map((record, index) => {
+      const box = bounds(record.bounds);
+      return { box, centre: box.min.map((v, i) => v / 2 + box.max[i] / 2), record, index };
+    }));
+    function visit(node, point, match) {
+      if (!node || !contains(node.extent, point)) return;
+      if (node.rows) {
+        for (const row of node.rows)
+          if (contains(row.box, point)) match(row.record);
+        return;
+      }
+      visit(node.left, point, match);
+      visit(node.right, point, match);
+    }
+    return (point, match) => visit(tree, point, match);
+  }
+  A.spatial = { bounds, overlap, contains, expand, boxOf, rayBox, pointIndex };
   function plane(raw) {
     const d = clone(raw);
     if (!d || !name(d.id) || !vector(d.origin) || !vector(d.u) || !vector(d.v))
@@ -60,11 +90,15 @@
     const normal = V.norm(V.cross(d.u, d.v)),
       tangent = V.norm(d.u),
       bitangent = V.norm(d.v);
-    function sample(at) {
+    function planePoint(at) {
       if (!Array.isArray(at) || at.length !== 2 || !at.every(Number.isFinite))
         throw new Error('Surface coordinates must be two finite numbers');
+      return V.add(d.origin, V.add(V.mul(d.u, at[0]), V.mul(d.v, at[1])));
+    }
+    const samplePointNormal = at => ({ p: planePoint(at), n: normal.slice() });
+    function sample(at) {
       return {
-        p: V.add(d.origin, V.add(V.mul(d.u, at[0]), V.mul(d.v, at[1]))),
+        p: planePoint(at),
         n: normal.slice(),
         tangent: tangent.slice(),
         bitangent: bitangent.slice(),
@@ -137,6 +171,8 @@
       data: freeze(d),
       bounds: freeze(b),
       sample,
+      samplePointNormal,
+      planePoint,
       project,
       closest,
       raycast
@@ -304,6 +340,8 @@
     const inverse = M.inv(pose.R), normalMatrix = M.tr(inverse);
     const worldNormal = n => V.norm(M.app(normalMatrix, n));
     const unpoint = p => M.app(inverse, V.sub(p, pose.t));
+    const planePoint = surface.planePoint && (at => point(pose, surface.planePoint(at)));
+    const planeNormal = planePoint && worldNormal(surface.sample([0, 0]).n);
     function sample(at) {
       const s = surface.sample(at);
       return {
@@ -315,6 +353,7 @@
       };
     }
     function samplePointNormal(at) {
+      if (planePoint) return { p: planePoint(at), n: planeNormal.slice() };
       const s = surface.samplePointNormal ? surface.samplePointNormal(at) : surface.sample(at);
       return { p: point(pose, s.p), n: worldNormal(s.n) };
     }
@@ -405,6 +444,7 @@
       bounds: freeze(transformBounds(pose, surface.bounds)),
       sample,
       samplePointNormal,
+      ...(planePoint ? { planePoint } : {}),
       project,
       closest,
       raycast

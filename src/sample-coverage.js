@@ -1,7 +1,7 @@
-/* A deterministic withdrawal order for retained samples. The packed rank is
+/* A deterministic transition order for retained samples. The packed rank is
    independent of the low motion bits and stays exact in a Float32. */
 const SampleCoverage = (() => {
-  const bins = 128, stride = 65536, enabled = 32768;
+  const bins = 128, stride = 65536, enabled = 32768, entering = 8388608;
 
   function cohort(x, y, z, spacing, seed) {
     if (![x, y, z, spacing, seed].every(Number.isFinite) || spacing <= 0)
@@ -13,10 +13,11 @@ const SampleCoverage = (() => {
     return ((mixed ^ (mixed >>> 16)) >>> 0) % bins;
   }
 
-  function pack(rank) {
+  function pack(rank, enter = false) {
     if (!Number.isInteger(rank) || rank < 0 || rank >= bins)
       throw new RangeError('Sample coverage rank must be between 0 and ' + (bins - 1));
-    return enabled + rank * stride;
+    if (typeof enter !== 'boolean') throw new TypeError('Sample coverage direction must be a boolean');
+    return enabled + rank * stride + (enter ? entering : 0);
   }
 
   function amount(value) {
@@ -26,14 +27,18 @@ const SampleCoverage = (() => {
   }
 
   function visible(code, withdrawal) {
-    return !(code & enabled) || withdrawal < (Math.floor(code / stride) + .5) / bins;
+    if (!(code & enabled)) return true;
+    const passed = withdrawal >= (((code >>> 16) & (bins - 1)) + .5) / bins;
+    return passed === !!(code & entering);
   }
 
   const glsl = `
 bool sampleCoverageVisible(int code, float withdrawal) {
-  return (code & ${enabled}) == 0 || withdrawal < (float(code / ${stride}) + 0.5) / ${bins}.0;
+  if ((code & ${enabled}) == 0) return true;
+  bool passed = withdrawal >= (float((code / ${stride}) & ${bins - 1}) + 0.5) / ${bins}.0;
+  return passed == ((code & ${entering}) != 0);
 }
 `;
-  return Object.freeze({ bins, enabled, cohort, pack, amount, visible, glsl });
+  return Object.freeze({ bins, enabled, entering, cohort, pack, amount, visible, glsl });
 })();
 if (typeof module !== 'undefined') module.exports = SampleCoverage;

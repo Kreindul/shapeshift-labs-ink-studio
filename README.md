@@ -2,7 +2,7 @@
 
 A JavaScript toolkit for sculpting signed-distance solids, baking them into pixel-art Gaussian splats, and making them move, react, break, grow and remember what happened to them. Use it from Node, drive it through the `ink-studio` command, or embed the source bundle in an Inkwell or browser application.
 
-The package includes geometry, materials, lighting, animation, character controls, particles, physics, procedural generation, retained authoring and a headless renderer. Scene authors can use JavaScript or JSON. A host application supplies its own interactive viewport and editor interface.
+The package includes geometry, materials, lighting, animation, character controls, particles, physics, procedural generation, and retained authoring. Write scenes in JavaScript or JSON, render images through the CPU-based Node and CLI tools, or draw into a canvas with the default WebGL 2 browser renderer. Browser hosts supply the editor UI and advance the scene.
 
 ## Contents
 
@@ -20,11 +20,14 @@ The package includes geometry, materials, lighting, animation, character control
 - [Importing depth maps](#importing-depth-maps)
 - [Procedural worlds](#procedural-worlds)
 - [Retained authoring](#retained-authoring)
+- [Headless world simulation](docs/headless-worlds.md)
 - [Rendering and command reference](#rendering-and-command-reference)
 - [View-dependent surface materials](#view-dependent-surface-materials)
 - [Projected and procedural effects](#projected-and-procedural-effects)
 - [Reflections, ripples and atmosphere](#reflections-ripples-and-atmosphere)
 - [Embedding and custom scene collections](#embedding-and-custom-scene-collections)
+- [Browser renderer](#browser-renderer)
+- [Screen transitions](#screen-transitions)
 - [Module reference](#module-reference)
 - [Validation and development](#validation-and-development)
 
@@ -136,7 +139,11 @@ The package entry point exposes:
 | `demoFiles()` | Absolute demo source paths. |
 | `bundle()` | Toolkit source as one script string, without demo scenes. |
 | `demos()` | Demo source that appends to an existing `SCENES` array. |
-| `readMesh(file)` | Read an OBJ, glTF or GLB file and its supported companion files. |
+| `readMesh(file, { attributes })` | Read an OBJ, glTF or GLB file and its supported companion files. Request UV and material attributes where the format supplies them. |
+| `readAsset(file, options)` | Read a portable GLB with textures. PNG decoding is included. Supply a decoder for JPEGs. |
+| `readRasterAsset(file)` | Load a raster JSON manifest, including layer frames backed by PNG files, into the procedural graph's raster interface. |
+| `render(world, options)` | Return a CPU-rendered art frame with `w`, `h`, `rgb`, and `px`. Request named diagnostic buffers with `passes`. |
+| `spriteAtlas(world, options)` | Render a directional RGBA atlas with metadata and optional related maps. |
 | `exportGlb(modelOrFile, { out, ...options })` | Export indexed authoring geometry or an input mesh file as a self-contained GLB. |
 | `lint(files)` | Return lines rejected by the source comment guard. |
 | `EXPORTS` | Comma-separated names defined by the source bundle. |
@@ -348,6 +355,18 @@ console.log(pose.head.rot);
 Clip pose rotations use degrees; matrix rotations and many geometry options use radians. Check the relevant module's opening API comment before combining the two.
 
 Additional animation APIs include `K.anim.machine`, `K.anim.face`, `K.anim.path`, `K.anim.steer`, `K.anim.track` and `K.anim.support`. Deformation maps include body squash/stretch, noodles, folds, lattices, morphs, smears, reaction fields, foliage and line boil. Apply maps on the CPU with `K.deform.apply`, or use puppet/bone skinning with an appropriate host renderer.
+
+Use [pose blocking and the pose shelf](docs/pose-blocking.md) to hold named story poses, draft in-betweens, and apply reusable poses to a puppet. The `pose-review` command checks the same landmarks as silhouettes at the size and angles of a directional sprite atlas.
+
+Use [Motion Review](docs/motion-review.md) to inspect loop pops, spacing spikes, arc kinks, and foot drift on solved puppet motion. Audition one beat at a time and apply, mute, or remove corrective layers.
+
+Use [clip sequencing](docs/clip-sequence.md) to trim and retime instances, inspect handoffs, and audition Once, Loop, or Travel loop playback. Keys and cues follow their clip instances through timing changes.
+
+Use [authored contacts and prop handoffs](docs/authored-contacts.md) to pin a hand or foot over an interval, key a prop between sockets, and audition the reach, switch, and settle.
+
+Use [Motion FX](docs/motion-fx.md) to time stretch, smear, trails, and solid splat sweeps independently. Each effect has its own intensity keys and part mask.
+
+Use [Cloth Review](docs/cloth-review.md) to paint pin, free, and protected regions, preview the existing XPBD solver from a captured pose, and bake a settled take.
 
 `K.character(B, spec, lane)` creates an input-driven character with movement, running, jumping, dashing, attacks, casting and crouching. Its specification supplies geometry and rig points; it is a toolkit for authoring a character, rather than a bundled cast of character assets. The API is documented at the top of [kk-character.js](src/kit/kk-character.js).
 
@@ -564,7 +583,7 @@ A custom indexed mesh supplies `points` and triangle or quad `faces`. It may pro
 | --- | --- | --- |
 | Noise and scalar fields | Seeded simplex noise and analytic derivatives, ridged and billow noise, anisotropic noise, domain warps, periodic and looped noise, terraces, distance fields and serializable composition for displacement, masks and placement. | [Composable fields](docs/procedural.md#composable-procedural-fields) |
 | Sampling and placement | Poisson disk with variable radius and anisotropy, chunk-stable spacing and species exclusion, progressive sample elimination, Lloyd relaxation, stratified surface sampling, geodesic spacing and curvature weighting. | [Stable spacing](docs/procedural.md#stable-spacing-and-finite-poisson-sampling), [Progressive samples](docs/procedural.md#progressive-samples-and-surface-detail) |
-| Terrain, rivers and habitats | Depression filling and breaching, D8 and D-infinity drainage, catchments and stream order, channel incision, meanders and cutoffs, levees and floodplains, marching-squares shorelines and climate and habitat fields. | [Watersheds](docs/procedural.md#watersheds-and-river-networks), [River editing](docs/procedural.md#river-editing-and-habitats) |
+| Terrain, rivers and habitats | Depression filling and breaching, D8 and D-infinity drainage, catchments and stream order, channel incision, meanders and cutoffs, levees and floodplains, marching-squares shorelines, climate and habitat fields, and 3D biome and water queries. | [Watersheds](docs/procedural.md#watersheds-and-river-networks), [River editing](docs/procedural.md#river-editing-and-habitats), [Biome queries](docs/procedural.md#world-space-biome-queries) |
 | Routes, networks and settlements | Terrain-aware A* with slope and clearance, visibility paths and clearance-tested splines, fast-marching travel times, Delaunay networks and minimum spanning trees, Steiner approximations, tensor and agent-grown streets, frontage parcels and medial paths. | [Terrain routes](docs/procedural.md#terrain-routes-between-pins), [Branching networks](docs/procedural.md#triangulation-and-branching-networks), [Street systems](docs/procedural.md#street-systems-parcels-and-medial-paths) |
 | Buildings and construction | Split, repeat and inset grammars with pinned bays, fitted courses and ribbons, panel frames and attachment slots, dimensioned socket assemblies, load paths, damage rules, adjacency floor plans and packing, signed footprint offsets and weighted roofs with per-edge pitches. | [Shape grammar](docs/procedural.md#shape-grammar-and-pinned-bays), [Socket assemblies](docs/procedural.md#socket-assemblies-supports-and-damage), [Weighted roofs](docs/procedural.md#footprints-and-weighted-pitched-roofs) |
 | Constraints and layouts | Socket-constrained and overlapping Wave Function Collapse, constraint propagation and backtracking with pins, Wang and hierarchical tiling, grid and graph rewrite rules, binary space partitioning and connected cellular caves. | [Socket tiling](docs/procedural.md#socket-tiling-and-learned-swatches), [Rewriting](docs/procedural.md#grid-and-graph-rewriting), [Rooms and caves](docs/procedural.md#rooms-caves-and-packing) |
@@ -614,7 +633,19 @@ Use `ink-studio catalog <words>` to search catalog entries and follow their `whe
 
 `KIT.authoring.context` adds spatial queries, raycasts, named surface anchors, transform resolution, and rules that respond to changes in related entities. `KIT.authoring.groups` supports batch transforms, copying, deletion and named selections. `KIT.procedural.chunks` rebuilds affected preview or final chunks and cancels superseded work. See the [retained authoring API](docs/procedural.md#optional-retained-authoring), [incremental realization](docs/procedural.md#incremental-realization) and [runnable example](examples/procedural/authoring-example.js).
 
+The [headless authoring guide](docs/headless-authoring.md) covers typed graphs,
+cached simulation, attribute transfer, mesh paths, layered artwork, animation
+state graphs and the retained Flooded Shrine recipe. The [procedural API guide](docs/procedural.md)
+also covers chart batching, blind recesses, incremental visibility, and retained
+sample withdrawal.
+
+[Headless worlds](docs/headless-worlds.md) adds declarative simulation scenes,
+shared world queries, timed actions, checkpoints, replay and branch comparison.
+The watershed and quarry examples run entirely from the CLI.
+
 ## Rendering and command reference
+
+The CLI and Node `render()` use the CPU renderer. Use the [browser renderer](docs/browser-renderer.md) for an interactive WebGL canvas. The two backends share scene data and several pixel-art controls. Use the same backend when recording and checking exact image baselines.
 
 | Command | Purpose |
 | --- | --- |
@@ -623,6 +654,15 @@ Use `ink-studio catalog <words>` to search catalog entries and follow their `whe
 | `catalog [words] [--full]` | Search feature names, descriptions and tags. |
 | `acts` | List action clips, reactions, easing names and cues. |
 | `render <scene> --t 1.5` | Render one PNG at a chosen time. |
+| `passes <scene>` | Save art-pixel coverage, depth, normals, IDs and emission previews. |
+| `atlas <scene> --directions 8` | Export an RGBA atlas with registered pivots and optional relighting maps. |
+| `pose-review <scene> --directions 8` | Render named poses and breakdowns as color and silhouette tiles at sprite resolution. |
+| `motion-review <scene> [--finding kind-or-id]` | Report motion findings, focus ranges, and evidence from a scene that exposes Motion Review. |
+| `clip-sequence <scene> [--handoff 0]` | Report clip instances, retimed keys and cues, and measured handoffs. |
+| `authored-contacts <scene> [--at seconds]` | Report authored contact ranges, transfer timing, and optional pose evidence. |
+| `motion-fx <scene> [--at seconds]` | Report Motion FX timing, part masks, and sampled splat or deformation counts. |
+| `cloth-review <scene> [--pose seconds] [--bake take.json]` | Run a captured cloth pose and optionally bake the settled simulation. |
+| `variants <scene> --seeds 3,7,12` | Render a ranked seed contact sheet for a scene with variant metrics. |
 | `sheet <scene> --from 0 --to 3 --n 12` | Make a labeled sheet of animation frames. |
 | `turn <scene> --n 8` | Make a sheet from multiple viewing angles. |
 | `clip <scene> --from 0 --to 3 --fps 12` | Save an animated PNG. Use `--text ascii\|symbols\|braille\|blocks` for animated text rendering. |
@@ -663,9 +703,15 @@ Common rendering controls:
 | `--w`, `--h`, `--out` | Output viewport size and destination. The renderer resolves a lower-resolution pixel grid derived from the scene's detail settings. |
 | `--px 2` | Use two screen pixels per art pixel. In `compare` and `review`, `--px` specifies the scale of the reference. |
 | `--tone stipple\|off` | Enable the stipple preset or turn off the scene's tone settings. |
+| `--ink off`, `--effects off` | Disable authored selective ink or art-pixel effects. |
+| `--snap`, `--dither-space screen\|world\|object`, `--resolve native\|coverage\|clusters` | Configure camera snapping, dither coordinates, and pixel resolve. Use `--stable off` to disable the scene's stability profile. |
+| `--splat-order center\|surface` | Choose global center ordering or local ordering using the sampled surface plane. |
+| `--volume-scale`, `--volume-steps`, `--volume-jitter` | Override the atmosphere volume's sampling settings. |
 | `--seed` | Override the scene seed. |
 | `--colored` | Use palette-aware smoothing of silhouettes and body-colored contours. |
 | `--raw` | Bypass palette styling. |
+| `--px1` | Write native art pixels with a scale of one in commands such as `render` and `passes`. |
+| `--text ascii\|symbols\|braille\|blocks`, `--tg`, `--tcolour scene\|ink\|mono` | Draw a text pass in `render`, `sheet`, or `clip`. The still renderer can also save the characters as text. |
 | `--fine` | Bake surface detail tiles for per-pixel color lookup. |
 | `--bounce` | Bake indirect lighting. |
 | `--focus x,y,z,near,far,coarse` | Concentrate surface detail around a point. |
@@ -682,6 +728,10 @@ For per-pixel materials, set `S.pixel = true` before baking and finish the world
 
 `paint export` and `paint absorb` work with per-pixel scenes. By default, files live in `studio/paint/<scene-id>/`, where `<scene-id>` is the ID returned by the scene. Edit `paint.png` in the scene palette and use magenta (`#ff00ff`) to erase earlier paint. If you choose a custom folder with `--dir`, pass the same folder to `paint` and `render`.
 
+The [art-pixel rendering guide](docs/art-passes.md) describes the selectable
+render passes, selective ink, camera snapping, stable dithering, art-pixel
+effects, local fragment ordering and directional export.
+
 ## View-dependent surface materials
 
 `KIT.surface` adds finishes to ordinary sculpt materials. The builder records which finish and surface normal a splat uses. The renderer evaluates the layers with the current camera and light direction, so orbiting needs no rebake. You can use the 40 named presets as supplied, override an individual layer, or compose your own finish. See the [surface material guide](docs/surface-materials.md) for the full preset list, options, JSON examples, and rendering commands.
@@ -691,7 +741,7 @@ For per-pixel materials, set `S.pixel = true` before baking and finish the world
 Use projected material layers to paint animated RGB or RGBA rasters and
 procedural patterns onto splat surfaces. Shared fields let a moving object
 reveal a surface, leave a wake, warp the surface pattern, or drive particle
-emission. The effects also render through the ASCII and Braille passes.
+emission. The CPU renderer also renders these effects through the ASCII and Braille passes.
 See [projected splat effects](docs/projected-effects.md) for recipes and APIs.
 
 ## Reflections, ripples and atmosphere
@@ -711,7 +761,7 @@ const studio = require('@shapeshift-labs/ink-studio');
 fs.writeFileSync('ink-studio.browser.js', studio.bundle());
 ```
 
-The bundle defines `makeBuilder`, `makeSculpt`, `KIT`, `PixelLook` and the other names in `studio.EXPORTS` in script scope. It includes no DOM interface or complete interactive WebGL viewport. A host supplies rendering, calls `world.anim.update(dt, time)`, handles input, and uses changed-row and bone data as appropriate. The included software renderer is used by the CLI.
+The bundle defines `makeBuilder`, `makeSculpt`, `KIT`, `PixelLook` and the other names in `studio.EXPORTS` in script scope. Pass that toolkit to the [browser renderer](#browser-renderer) or to your own rendering code. The host controls input and advances animation.
 
 To append the demos to a browser script, write `const SCENES = [];` after the toolkit bundle and append `studio.demos()`. Keep source files in the order returned by `files()` when embedding individually.
 
@@ -730,15 +780,57 @@ module.exports = {
 
 Then `ink-studio scenes`, `render`, `snap` and other commands operate on that collection. The load callback returns the toolkit exports alongside `SCENES`.
 
+## Browser renderer
+
+In a browser bundler that resolves the package's `browser` entry, import `createRenderer` from `@shapeshift-labs/ink-studio`. This selects the WebGL 2 canvas renderer. For native browser modules, serve `webgl.mjs` and its relative `src/webgl/` files. Both forms create GPU resources when you call `createRenderer`.
+
+The following module can run after `ink-studio.browser.js` loads as a classic script. Adjust the WebGL module URL to the package location your server exposes.
+
+```html
+<canvas id="view" width="320" height="200" style="image-rendering: pixelated"></canvas>
+<script src="./ink-studio.browser.js"></script>
+<script type="module">
+  import { createRenderer } from './ink-studio/webgl.mjs';
+
+  const builder = makeBuilder(7);
+  const sculpt = KIT.sculpt(makeSculpt(builder));
+  sculpt.ball([0, 1, 0], 1, { r: [1, 2, 3, 4] }, { res: 0.15 });
+  sculpt.bake();
+  const world = builder.finish({ cam: { target: [0, 1, 0], dist: 7, yaw: 0.4, pitch: 0.2 } });
+  const renderer = createRenderer(document.querySelector('#view'), { toolkit: { KIT, PixelLook } });
+  renderer.render(world);
+</script>
+```
+
+See the [browser renderer guide](docs/browser-renderer.md) for supported effects,
+frame options, texture updates, and the lower-level integration API.
+
+## Screen transitions
+
+The browser package includes 49 preset transitions, from blackouts and eyelid
+reveals to encounter wipes and memory dissolves. Use the compositor with Ink
+Studio render targets or your own images and textures. Presets expose timing,
+shader parameters, and cue markers. Compose custom sequences and register GLSL
+stages through the same API.
+
+The [screen transition guide](docs/transitions.md) covers each preset, playing
+sound cues, passing masks, and writing shaders. The [transition gallery](examples/transitions/index.html)
+runs from a local server.
+
 ## Module reference
 
 | File in `src/` | Main responsibilities |
 | --- | --- |
 | `builder.js` | Seeded generation, palettes, low-level splat emission and world buffers. |
 | `sculpt.js` | Base distance-field solids, materials, surface attributes, sampling and baking. |
+| `art-passes.js`, `art-ink.js`, `art-effects.js`, `art-stability.js` | Diagnostic channels, selective ink, temporal effects and stable art-pixel sampling. |
+| `airflow.js`, `light-schedule.js`, `splat-effects.js` | Wind, scheduled light, projected layers and emitter inputs. |
 | `pixel-look.js` | Palette-aware pixel resolve and shader helpers. |
 | `surface-look.js` | Reusable view-dependent finish evaluation and splat metadata format. |
 | `scene-optics.js` | Reflected camera transforms, normal slopes and ray integration through atmosphere. |
+| `reflection-plane.js`, `ripple-field.js`, `volume-field.js`, `volume-light.js` | Scene optics data, sampling and lighting primitives. |
+| `route-visibility.js`, `sample-coverage.js`, `sample-visibility.js`, `splat-order.js`, `swept-disc.js` | Route and splat culling, stable coverage, depth ordering, and swept-disc queries. |
+| `webgl/` | Browser draw pipeline, camera and depth order, shaders, upload and framebuffer management. |
 | `kit/k0-math.js` | Vectors, matrices, easing, keyed values and springs. |
 | `kit/k1-stage.js` | Stage, painter stack, rigs, pools, selection, sockets and bones. |
 | `kit/k2-motion.js` | Spines, IK, clips, state machines, ropes and gait. |

@@ -61,10 +61,11 @@
     return forward <= Math.PI ? forward : backward;
   }
 
-  function ramp(input, { steps = 7, space = 'lab', hue = 'short' } = {}) {
+  function ramp(input, { steps = 7, space = 'lab', hue = 'short', interpolation = 'linear' } = {}) {
     if (!Array.isArray(input) || input.length < 2 || input.length > 64 ||
       !Number.isSafeInteger(steps) || steps < 2 || steps > 4096 ||
-      !['lab','lch'].includes(space) || !['short','long','increasing','decreasing'].includes(hue))
+        !['lab','lch'].includes(space) || !['short','long','increasing','decreasing'].includes(hue) ||
+        !ColorCurves.modes.includes(interpolation))
       throw new Error('Palette ramps need ordered anchors, steps and a perceptual interpolation mode');
     let previous = -1;
     const stops = input.map((entry, i) => {
@@ -79,9 +80,11 @@
     function sample(t) {
       if (!Number.isFinite(t)) throw new Error('Palette ramp coordinates must be finite');
       t = clamp(t);
-      const high = stops.findIndex(p => p.at >= t), b = stops[high];
+      const high = ColorCurves.segmentIndex(stops, t), b = stops[high];
       if (b.at === t || high === 0) return b.color.slice();
-      const a = stops[high - 1], w = (t - a.at) / (b.at - a.at);
+      const a = stops[high - 1];
+      if (interpolation === 'step') return a.color.slice();
+      const w = ColorCurves.weight(interpolation, (t - a.at) / (b.at - a.at));
       if (space === 'lab') return gamut(a.lab.map((v,i) => lerp(v,b.lab[i],w)));
       const [L1,C1,H1] = a.lch, [L2,C2,H2] = b.lch,
         h1 = C1 < 1e-6 ? H2 : H1, h2 = C2 < 1e-6 ? H1 : H2,
@@ -93,4 +96,5 @@
   }
 
   P.materials.ramp = ramp;
+  P.materials.colorCurves = ColorCurves;
 })(KIT);

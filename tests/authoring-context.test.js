@@ -46,6 +46,33 @@ test('surface coordinates round-trip, skewed planes project correctly, and rays 
   near(closest.p[1], 0);
 });
 
+test('ray filters receive immutable per-query options and can reveal farther hits', () => {
+  const d=A.document(),c=A.context(d);
+  c.register('sheet',{
+    describe(e){
+      const surface=P.surface.plane({id:'face',origin:[-1,0,e.parameters.z],u:[2,0,0],v:[0,2,0]});
+      return {bounds:surface.bounds,surfaces:[surface]};
+    }
+  });
+  d.create('sheet',{id:'front',parameters:{z:3}});
+  d.create('sheet',{id:'rear',parameters:{z:1}});
+  const dispose=c.rayFilter('pick-context',(hit,entity,context,query)=>{
+    assert.equal(context,c);
+    assert(Object.isFrozen(query));
+    assert.equal(hit.id,entity.id);
+    return entity.id!=='front'||!query.skipFront;
+  });
+  const pick=options=>c.raycast([0,1,5],[0,0,-1],options)?.id;
+  assert.equal(pick(),'front');
+  assert.equal(pick({skipFront:true}),'rear');
+  assert.equal(pick({skipFront:true,maxDistance:3}),undefined);
+  assert.equal(pick({skipFront:true,rayFilters:false}),'front');
+  assert.equal(pick(),'front');
+  dispose();
+  assert.equal(pick({skipFront:true}),'front');
+  c.dispose();
+});
+
 test('cylindrical and elliptical hosts wrap normalized anchors and return actual ray intersections', () => {
   const s = P.surface.cylinder({ id: 'wall', origin: [0, 1, 0], radius: 2, height: 4 });
   const q = s.sample([1.25, 0.5]);
@@ -449,4 +476,83 @@ test('an explicit environment key excludes presentation without masking physical
   assert(runs > count);
   c.dispose();
   assert.throws(() => A.context(d, { environmentKey: 42 }), /settings/);
+});
+
+test('a watched intent value invalidates descriptors and rules when its result changes', () => {
+  const d = A.document(), c = A.context(d);
+  const size = scene => scene.entities.measure?.parameters.size ?? 1;
+  let describes = 0, generates = 0;
+  c.register('receiver', { describe(e, ctx) {
+    describes++;
+    return { bounds: box(ctx.watch(size) * 5, .2) };
+  } });
+  c.rule({ id: 'transfer', types: ['receiver'], generate(e, ctx) {
+    generates++;
+    return [{ key:'measurement', type:'reading', parameters:{ size:ctx.watch(size) } }];
+  } });
+  d.create('receiver', {id:'target'});
+  const prepared = describes, generated = generates;
+  d.create('setting', {id:'other',parameters:{size:99}});
+  assert.equal(describes, prepared);
+  assert.equal(generates, generated);
+  d.create('setting', {id:'measure',parameters:{size:2}});
+  assert.equal(c.query(box(10,.2))[0].id,'target');
+  assert.equal(d.entities('reading')[0].parameters.size,2);
+  d.update('measure',{parameters:{size:3}});
+  assert.equal(c.query(box(10,.2)).length,0);
+  assert.equal(c.query(box(15,.2))[0].id,'target');
+  d.undo();
+  assert.equal(c.query(box(10,.2))[0].id,'target');
+  assert.equal(d.entities('reading')[0].parameters.size,2);
+  c.dispose();
+});
+
+test('spatial rules track matching records as they enter and leave filtered queries', () => {
+  const d = A.document(), c = A.context(d);
+  c.register('sensor',{describe:()=>({bounds:box(0)})});
+  for (const type of ['block','ornament']) c.register(type,{describe:e=>({
+    bounds:box(e.parameters.x || 0,.3),tags:[e.parameters.tag || 'solid']
+  })});
+  let runs = 0;
+  c.rule({id:'sense',types:['sensor'],generate(e,ctx){
+    runs++;
+    const hits = ctx.query(box(0),{types:['block'],tags:['solid'],exclude:['skip']});
+    return [{key:'reading',type:'reading',parameters:{ids:hits.map(hit=>hit.id)}}];
+  }});
+  d.create('sensor',{id:'sensor'});
+  const initial = runs;
+  d.create('ornament',{id:'bush'});
+  d.create('block',{id:'skip'});
+  d.create('block',{id:'moving',parameters:{tag:'decoration'}});
+  assert.equal(runs,initial);
+  d.update('moving',{parameters:{tag:'solid'}});
+  assert.deepEqual(d.entities('reading')[0].parameters.ids,['moving']);
+  d.update('moving',{parameters:{x:10}});
+  assert.deepEqual(d.entities('reading')[0].parameters.ids,[]);
+  d.update('moving',{parameters:{x:0}});
+  assert.deepEqual(d.entities('reading')[0].parameters.ids,['moving']);
+  d.update('moving',{parameters:{tag:'decoration'}});
+  assert.deepEqual(d.entities('reading')[0].parameters.ids,[]);
+  c.dispose();
+});
+
+test('parameter-scoped collections update only when an entity enters, leaves or changes within the filter',()=>{
+  const d=A.document(),c=A.context(d),queries=[];
+  c.register('probe',{describe(e,ctx){
+    queries.push(ctx.collection({type:'stroke',parameters:{layer:'water'}}).map(item=>item.id));
+    return {bounds:box(0)};
+  }});
+  d.create('probe',{id:'probe'});
+  assert.deepEqual(queries,[[]]);
+  d.create('stroke',{id:'track',parameters:{layer:'path'}});
+  d.update('track',{parameters:{width:2}});
+  assert.deepEqual(queries,[[]]);
+  d.update('track',{parameters:{layer:'water'}});
+  assert.deepEqual(queries.at(-1),['track']);
+  d.update('track',{parameters:{width:3}});
+  assert.deepEqual(queries.at(-1),['track']);
+  d.update('track',{parameters:{layer:'plants'}});
+  assert.deepEqual(queries,[[],['track'],['track'],[]]);
+  assert.throws(()=>c.collection({parameters:{layer:['path']}}),/named scalar/);
+  c.dispose();
 });

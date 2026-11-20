@@ -19,6 +19,20 @@
   const documentSnapshots = new WeakSet(),
     validatedViews = new WeakSet();
   const same = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
+  function sameEntries(a, b, equals = same) {
+    if (a === b) return true;
+    const keys = Object.keys(a),
+      other = Object.keys(b);
+    if (keys.length !== other.length) return false;
+    // Match the serialized key order as well as values.
+    return keys.every((key, i) => key === other[i] && equals(a[key], b[key], key));
+  }
+  const sameDocument = (a, b) =>
+    sameEntries(a, b, (left, right, key) =>
+      key === 'entities' || key === 'styles' ? sameEntries(left, right) : same(left, right)
+    );
+  // The editable maps and counter are private. All nested records are replaced on write.
+  const checkpoint = state => ({ ...state, entities: { ...state.entities }, styles: { ...state.styles } });
   const slot = (rule, key) => JSON.stringify([rule, key]);
   const derivedId = (owner, rule, key) => '@/' + [owner, rule, key].map(encodeURIComponent).join('/');
   const idOK = id => typeof id === 'string' && id.length > 0 && !['__proto__', 'prototype', 'constructor'].includes(id);
@@ -92,6 +106,20 @@
     validatedViews.add(value);
     return value;
   }
+  // Preserve unchanged records while validating a patch received from another process.
+  function patchDocumentView(source, { metadata = {}, upserts = {}, removed = [] } = {}) {
+    if (!record(metadata) || !record(upserts) || own(metadata, 'entities') ||
+        !Array.isArray(removed) || !removed.every(idOK))
+      throw new Error('Invalid document view patch');
+    const before = documentView(source);
+    const entities = { ...before.entities, ...json(upserts) };
+    for (const id of removed) delete entities[id];
+    const next = freeze(validate({ ...before, ...json(metadata), entities }));
+    documentSnapshots.add(next);
+    validatedViews.add(next);
+    return next;
+  }
+
   function buildRecord(type, fields, id, seed) {
     if (!idOK(type)) throw new Error('Entity type must be a non-empty string');
     const out = Object.assign(
@@ -200,6 +228,7 @@
     freeze,
     isImmutable,
     documentView,
+    patchDocumentView,
     isDocumentView: value => documentSnapshots.has(value),
     merge,
     hash,
@@ -210,8 +239,13 @@
   };
   A.document = (initial, options) => {
     options = options || {};
+    const {prepareSnapshot}=options;
+    if(prepareSnapshot!==undefined&&typeof prepareSnapshot!=='function')
+      throw Error('Document snapshot preparation needs a function');
+    const loadSnapshot=prepareSnapshot===undefined?read:input=>
+      checkpoint(documentView(prepareSnapshot(documentView(input))));
     let state = initial
-      ? read(initial)
+      ? loadSnapshot(initial)
       : {
           format: FORMAT,
           version: VERSION,
@@ -232,7 +266,8 @@
     // same compiled fields instead of cloning an entire scene on every read.
     let view = null,
       styleView = null;
-    const copies = new WeakMap();
+    const copies = new WeakMap(),
+      journalText = new WeakMap();
     function immutable(value) {
       if (!value || typeof value !== 'object') return value;
       if (!copies.has(value)) copies.set(value, freeze(json(value)));
@@ -258,13 +293,6 @@
     const limit = options.historyLimit === undefined ? 100 : options.historyLimit;
     if (!Number.isSafeInteger(limit) || limit < 0) throw new Error('historyLimit must be a non-negative integer');
     const doc = { listenerErrors: [], storageError: null };
-    // Only maps and the serial counter are mutated in place. Record replacement
-    // leaves earlier checkpoints valid and supports structural sharing in history.
-    const copy = () => ({
-      ...state,
-      entities: { ...state.entities },
-      styles: { ...state.styles }
-    });
     function notify(set, event) {
       for (const fn of [...set]) {
         try {
@@ -280,23 +308,29 @@
         label,
         revision,
         changed: diff(before, state),
-        stylesChanged: !same(before.styles, state.styles),
+        stylesChanged: !sameEntries(before.styles, state.styles),
         environmentChanged: !same(before.environment, state.environment)
       };
     }
     function save(label) {
       if (!binding) return;
       try {
-        if (journal.length && same(journal[journal.length - 1].snapshot, state)) {
+        if (journal.length && sameDocument(journal[journal.length - 1].snapshot, state)) {
           doc.storageError = null;
           return;
         }
         const serial = journal.length ? journal[journal.length - 1].serial + 1 : 1;
-        const item = { id: 'save-' + serial, serial, label, revision, snapshot: copy() };
+        const item = { id: 'save-' + serial, serial, label, revision, snapshot: checkpoint(state) };
         const next = journal.concat([item]).slice(-binding.backups - 1);
+        const entries = next.map(entry => {
+          // String labels keep the entire saved entry stable across writes.
+          if (typeof entry.label !== 'string') return JSON.stringify(entry);
+          if (!journalText.has(entry)) journalText.set(entry, JSON.stringify(entry));
+          return journalText.get(entry);
+        });
         binding.storage.setItem(
           binding.key,
-          JSON.stringify({ format: 'ink-studio/journal', version: 1, entries: next })
+          '{"format":"ink-studio/journal","version":1,"entries":[' + entries.join(',') + ']}'
         );
         journal = next;
         doc.storageError = null;
@@ -313,7 +347,11 @@
         resolving = false;
       }
     }
+    function finishScheduled() {
+      if (transaction?.scheduled && !resolving) doc.commit();
+    }
     function mutate(label, fn) {
+      finishScheduled();
       if (transaction) return fn();
       return doc.transact(label, fn);
     }
@@ -378,17 +416,18 @@
       return () => hooks.delete(fn);
     };
     doc.begin = label => {
+      finishScheduled();
       if (transaction) throw new Error('A document transaction is already active');
-      transaction = { label: label || 'Edit', before: copy() };
+      transaction = { label: label || 'Edit', before: checkpoint(state) };
       return doc;
     };
     doc.preview = () => {
-      if (!transaction) throw new Error('No active transaction');
+      if (!transaction || transaction.scheduled) throw new Error('No active transaction');
       try {
         resolve();
         validate(state);
       } catch (err) {
-        const before = copy(),
+        const before = state,
           tx = transaction;
         transaction = null;
         state = tx.before;
@@ -399,6 +438,19 @@
       notify(previewListeners, event('preview', transaction.before, transaction.label));
       return doc.snapshot();
     };
+    function recordCommit(tx) {
+      transaction = null;
+      if (sameDocument(tx.before, state)) return false;
+      if (limit) {
+        past.push({ label: tx.label, before: tx.before, after: checkpoint(state) });
+        if (past.length > limit) past.shift();
+      }
+      future.length = 0;
+      revision++;
+      save(tx.label);
+      notify(listeners, event('commit', tx.before, tx.label));
+      return true;
+    }
     doc.commit = () => {
       if (!transaction) throw new Error('No active transaction');
       const tx = transaction;
@@ -411,21 +463,41 @@
         transaction = null;
         throw err;
       }
-      transaction = null;
-      if (same(tx.before, state)) return false;
-      if (limit) {
-        past.push({ label: tx.label, before: tx.before, after: copy() });
-        if (past.length > limit) past.shift();
+      return recordCommit(tx);
+    };
+    // The caller supplies the same resolution hooks in its background worker.
+    // Ignore any reply after that transaction has already settled locally.
+    doc.scheduleCommit = async resolver => {
+      if(!transaction||transaction.scheduled||resolving||typeof resolver!=='function')
+        throw new Error('A scheduled commit needs one active transaction and a resolver');
+      const tx=transaction,draft=doc.snapshot();
+      tx.scheduled=true;
+      const registered=[...hooks];
+      try{
+        const result=await resolver(draft);
+        if(transaction!==tx)return false;
+        if(registered.length!==hooks.size||registered.some(fn=>!hooks.has(fn)))
+          throw new Error('Resolution hooks changed after scheduling');
+        const next=read(result);
+        if(next.id!==draft.id||next.seed!==draft.seed)
+          throw new Error('Resolved draft belongs to a different document');
+        for(const [id,entity] of Object.entries(next.entities))
+          if(same(state.entities[id],entity))next.entities[id]=state.entities[id];
+        if(sameEntries(state.styles,next.styles))next.styles=state.styles;
+        if(same(state.environment,next.environment))next.environment=state.environment;
+        state=next;invalidateStyles();
+        return recordCommit(tx);
+      }catch(error){
+        if(transaction!==tx)return false;
+        // The synchronous resolver is authoritative if the background job
+        // could not finish, including unavailable workers and stale rules.
+        tx.scheduled=false;
+        return doc.commit();
       }
-      future.length = 0;
-      revision++;
-      save(tx.label);
-      notify(listeners, event('commit', tx.before, tx.label));
-      return true;
     };
     doc.cancel = () => {
       if (!transaction) return false;
-      const before = copy(),
+      const before = state,
         label = transaction.label;
       state = transaction.before;
       invalidateStyles();
@@ -449,11 +521,12 @@
       }
     };
     function travel(from, to, key, type) {
+      finishScheduled();
       if (transaction) throw new Error('Finish the active transaction before ' + type);
       if (!from.length) return false;
       const entry = from.pop(),
-        before = copy();
-      state = { ...entry[key], entities: { ...entry[key].entities }, styles: { ...entry[key].styles } };
+        before = state;
+      state = checkpoint(entry[key]);
       invalidateStyles();
       to.push(entry);
       revision++;
@@ -560,7 +633,7 @@
       });
     doc.restore = snapshot =>
       mutate('Restore document', () => {
-        state = read(snapshot);
+        state = loadSnapshot(snapshot);
         invalidateStyles();
       });
     doc.autosave = (storage, key, settings) => {
@@ -588,10 +661,12 @@
       return doc;
     };
     doc.flush = () => {
+      finishScheduled();
       save('Save');
       return !doc.storageError;
     };
-    doc.backups = () => freeze(json(journal));
+    doc.backups = () =>
+      freeze(journal.map(entry => (typeof entry.label === 'string' ? immutable(entry) : json(entry))));
     doc.recover = index => {
       if (typeof index === 'string') index = journal.findIndex(entry => entry.id === index);
       if (!journal[index]) throw new Error('Unknown backup: ' + index);

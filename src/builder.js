@@ -82,7 +82,9 @@ function makeNoise(seed) {
 }
 
 // ---------------- shared builder: splat storage plus shape helpers ----------------
-function makeBuilder(seed, hex) {
+function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 15 } = {}) {
+  if (!Number.isSafeInteger(initialCapacity) || initialCapacity < 1 || initialCapacity > Number.MAX_SAFE_INTEGER / 16)
+    throw new RangeError('Initial splat capacity must be a positive integer');
   seed = seed >>> 0;
   let gen = mulberry32(seed ^ 0x5bd1e995);
   const R = () => gen(),
@@ -121,7 +123,7 @@ function makeBuilder(seed, hex) {
     return [r * Math.cos(a), y, r * Math.sin(a)];
   };
 
-  let cap = 1 << 15,
+  let cap = initialCapacity,
     n = 0,
     data = new Float32Array(cap * 16);
   const moving = [],
@@ -129,6 +131,53 @@ function makeBuilder(seed, hex) {
     cidx = [],
     nrms = [];
   let curN = null;
+  let ownerRows, materialRows, muteEmission;
+  let unnamedOwners = new WeakMap(), unnamedMaterials = new WeakMap();
+  const ownerIds = new Map(), materialIds = new Map();
+  const ownerNames = [null], materialNames = [null];
+  function renderId(value, labels, unnamed, names) {
+    if (value == null) return 0;
+    const hasLabel = typeof value === 'string' || typeof value === 'number';
+    const ids = hasLabel ? labels : unnamed;
+    let id = ids.get(value);
+    if (id === undefined) {
+      id = names.length;
+      ids.set(value, id);
+      names.push(hasLabel ? value : null);
+    }
+    return id;
+  }
+  // Labels can be shared across several solids or supplied for splats built directly.
+  function describeSplats(first, end, { object, material } = {}) {
+    if (!renderMetadata || first === end) return;
+    if (!Number.isSafeInteger(first) || !Number.isSafeInteger(end) || first < 0 || end < first || end > n)
+      throw new RangeError('Splat metadata range must belong to the builder');
+    if (!ownerRows || ownerRows.length < cap) {
+      const owners = new Uint32Array(cap), materials = new Uint32Array(cap);
+      if (ownerRows) {
+        owners.set(ownerRows);
+        materials.set(materialRows);
+      }
+      ownerRows = owners;
+      materialRows = materials;
+    }
+    ownerRows.fill(renderId(object, ownerIds, unnamedOwners, ownerNames), first, end);
+    materialRows.fill(renderId(material, materialIds, unnamedMaterials, materialNames), first, end);
+  }
+
+  function renderRows() {
+    if (!renderMetadata) return undefined;
+    const normals = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) if (nrms[i]) normals.set(nrms[i], i * 3);
+    return {
+      normals,
+      muteEmission: muteEmission?.slice(0, n),
+      objectIds: ownerRows?.slice(0, n),
+      materialIds: materialRows?.slice(0, n),
+      objects: ownerNames.slice(),
+      materials: materialNames.slice()
+    };
+  }
   /* the birth time given to the dabs laid next (null: there from the start). The motions that use the last number for themselves
      (falling, rising, flapping, swelling, writhing, a placed copy's sway) cannot grow */
   let bornV = null,
@@ -297,13 +346,21 @@ function makeBuilder(seed, hex) {
     cidx.push(P.indexOf(col));
     nrms.push(curN);
     if (an) {
+      if (renderMetadata && an.em && an.emission === false) {
+        if (!muteEmission || muteEmission.length < cap) {
+          const next = new Uint8Array(cap);
+          if (muteEmission) next.set(muteEmission);
+          muteEmission = next;
+        }
+        muteEmission[n] = 1;
+      }
       // kind, plus flags: 16 = leave out of outlines, 32 = glows (ignores haze and relighting)
       // 64 = behind everything, 256 = glass, 8192 = responds to horizontal airflow, 2048 = drawn as text where a page offers it
       // (K.ascii), with its own set in 4096 and 16384 (as: 1 ascii, 2 symbols, 3 braille; as: true, the page's)
       const asSet = an.as && an.as !== true ? Math.max(0, Math.min(3, an.as | 0)) : 0;
       data[o + 11] = (an.k || 0) + (an.nd ? 16 : 0) + (an.em ? 32 : 0) + (an.bk ? 64 : 0) + (an.gl ? 256 : 0) + (an.wind ? 8192 : 0)
         + (an.as ? 2048 + (asSet & 1 ? 4096 : 0) + (asSet & 2 ? 16384 : 0) : 0)
-        + (an.coverage === undefined ? 0 : SampleCoverage.pack(an.coverage));
+        + (an.coverage === undefined ? 0 : SampleCoverage.pack(an.coverage, an.coverageEnter));
       if (an.bk) back.push(n);
       data[o + 12] = an.ph || 0;
       data[o + 13] = an.sp || 0;
@@ -881,6 +938,7 @@ function makeBuilder(seed, hex) {
       {
         data: data.subarray(0, n * 16),
         count: n,
+        renderMetadata: renderRows(),
         attr: attr ? Float32Array.from({ length: n * 4 }, (_, i) => attr[i] || 0) : undefined,
         pix: pix ? Float32Array.from({ length: n * 8 }, (_, i) => pix[i] || 0) : undefined,
         ramps: pix ? ramps.map(r => r.slice()) : undefined,
@@ -905,6 +963,10 @@ function makeBuilder(seed, hex) {
       },
       meta
     );
+    if (world.look?.colorLut !== undefined && world.look.colorLut !== false)
+      world.look = { ...world.look, colorLut: ColorLUT.normalize(world.look.colorLut) };
+    if (world.look?.colorStack !== undefined && world.look.colorStack !== false)
+      world.look = { ...world.look, colorStack: ColorStack.normalize(world.look.colorStack) };
     if (world.surfaceEffects) world.surfaceEffects = KIT.splatEffects.context(world.surfaceEffects);
     return world;
   }
@@ -924,6 +986,12 @@ function makeBuilder(seed, hex) {
     bounced = 0;
     cidx.length = 0;
     nrms.length = 0;
+    ownerRows = materialRows = muteEmission = undefined;
+    unnamedOwners = new WeakMap();
+    unnamedMaterials = new WeakMap();
+    ownerIds.clear();
+    materialIds.clear();
+    ownerNames.length = materialNames.length = 1;
     moving.length = 0;
     back.length = 0;
     return out;
@@ -948,6 +1016,7 @@ function makeBuilder(seed, hex) {
   };
   return {
     count: () => n,
+    describeSplats: renderMetadata ? describeSplats : undefined,
     born: v => (bornV = v === undefined || v === null || !isFinite(v) ? null : v),
     wet: v => (wetV = v === undefined || v === null || !isFinite(v) ? null : v),
     fineTile,

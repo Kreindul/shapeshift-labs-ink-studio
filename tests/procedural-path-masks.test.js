@@ -33,3 +33,16 @@ test('a reversal does not remove a path end and empty masks leave fields unchang
   assert.equal(surfaceCells.pathMask([]).distance(0, 0), Infinity);
   assert.throws(() => surfaceCells.pathMask([{ points: [[0, 0]], radius: 0 }]), /radii/);
 });
+
+test('immutable mask strokes reuse compilation while live inputs reflect edits', () => {
+  const {procedural:P}=require('..').load().KIT;
+  const points=P.data.freeze({id:'retained',points:[[0,0],[2,0]],width:1});
+  assert.equal(P.masks.stroke(points),P.masks.stroke(points));
+  const mutable={id:'mutable',points:[[0,0],[2,0]],width:1};
+  const old=P.masks.stroke(mutable);
+  mutable.points[1][0]=4;
+  const next=P.masks.stroke(mutable);
+  assert.notEqual(old,next);
+  assert(old.distance([3,0])>0);
+  assert(next.distance([3,0])<0);
+});

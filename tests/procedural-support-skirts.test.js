@@ -70,6 +70,30 @@ test('fitted support courses recess their joints and keep the same bearing and c
   assert(samples.some(p=>Math.abs(p[1]-y)<1e-6&&skirt.horizontal(p[0],p[2])<-.02));
   assert(samples.every(p=>Math.abs(finish.distance(p))<.001));
 });
+test('omitted support blocks recess both sides of the periodic seam and keep their ground-clipped backing', () => {
+  const skirt=A.supportSkirt({outline:loop,ground}), spec={unit:[.45,.22],joint:.04,depth:.045};
+  const fitted=A.supportCourses(skirt,spec), y=fitted.top-1.5*fitted.layout.unit[1];
+  const points=[[-.92,y,-1],[-1,y,-.92]],key=fitted.lookup(points[0]).cell.id;
+  assert.equal(fitted.lookup(points[1]).cell.id,key);
+  const open=A.supportCourses(skirt,{...spec,omit:[key]});
+  for(const p of points){
+    near(fitted.distance(p),0);
+    assert(open.lookup(p).omitted);
+    assert(open.distance(p)>.01);
+  }
+  const adjacent=[-.62,y,-1],bearing=[-.92,y,-.91];
+  assert(!open.lookup(adjacent).omitted);
+  near(open.distance(adjacent),fitted.distance(adjacent));
+  assert(open.distance(bearing)<-.01);
+  assert.equal(open.frontage(key).length,2,'one logical block can front both sides of a corner');
+  assert(open.frontage(key).every(({points})=>points.every(([x,y,z])=>
+    y>=skirt.bottom(x,z)-1e-9&&y<=skirt.top(x,z)+skirt.overlap+1e-9)));
+  const samples=[];
+  open.sample(.11,p=>samples.push(p));
+  assert(samples.some(p=>open.lookup(p).omitted&&open.lookup(p).side<-.02));
+  assert(samples.every(p=>Math.abs(open.distance(p))<.001));
+  assert.throws(()=>A.supportCourses(skirt,{...spec,omit:['invalid']}),/bounded course dimensions/);
+});
 test('skirt validation and budgets reject invalid or unbounded geometry before expensive allocation', () => {
   for (const raw of [
     {

@@ -3,6 +3,18 @@ const assert = require('node:assert/strict');
 const { KIT } = require('..').load();
 const { sampling } = KIT.procedural;
 
+test('a centered grid window retains the original phase and includes exact boundary centers',()=>{
+  const axis=[-.67,3.91],count=237;
+  const points=Array.from({length:count},(_,i)=>axis[0]+(axis[1]-axis[0])*((i+.5)/count));
+  for(const region of [[-4,-2],[4,8],[-1,.2],[.35,.36],[points[33],points[80]],[points[7],points[7]],axis]){
+    const [start,end]=sampling.centeredGridRange(axis,count,region);
+    assert.deepEqual(points.slice(start,end),points.filter(x=>x>=region[0]&&x<=region[1]));
+  }
+  assert.deepEqual(sampling.centeredGridRange(axis,count),[0,count]);
+  assert.throws(()=>sampling.centeredGridRange(axis,0),/positive sample count/);
+  assert.throws(()=>sampling.centeredGridRange(axis,100,[2,1]),/finite intervals/);
+});
+
 function nearestGap(set) {
   let min = Infinity;
   for (const [i, p] of set.entries())

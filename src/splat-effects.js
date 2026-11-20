@@ -1,5 +1,15 @@
 /* Projected surface effects shared by the software renderer and browser hosts. */
 const SplatEffects = (() => {
+  let curves, luts, stacks;
+  try {
+    curves = ColorCurves;
+    luts = ColorLUT;
+    stacks = ColorStack;
+  } catch {
+    curves = require('./color-curves.js');
+    luts = require('./color-lut.js');
+    stacks = require('./color-stack.js');
+  }
   const clamp = x => Math.min(1, Math.max(0, x));
   const fract = x => x - Math.floor(x);
   const vector = (value, n) => Array.isArray(value) && value.length === n && Array.from(value).every(Number.isFinite);
@@ -140,6 +150,80 @@ const SplatEffects = (() => {
     };
   }
 
+  function outputColors(values, resolveColor) {
+    if (values === undefined) return undefined;
+    if (!Array.isArray(values) || !values.length || values.length > 48 || !Array.from(values).every(value => value !== undefined))
+      throw new TypeError('Surface output palettes need 1–48 colors');
+    return values.map(resolveColor);
+  }
+
+  function curveSource(source, context) {
+    if (source === 'luminance') return null;
+    if (source === 'height') return sample => (sample.worldPosition ?? sample.position)[1];
+    if (source === 'depth') return sample => sample.depth;
+    if (typeof source === 'function') return source;
+    if (!source || Object.getPrototypeOf(source) !== Object.prototype || typeof source.field !== 'string' || !source.field.trim())
+      throw new TypeError('Color ramps need luminance, height, depth, a sampler or a named field');
+    if (source.fallback !== undefined && !Number.isFinite(source.fallback))
+      throw new TypeError('Color ramp fallback must be finite');
+    if (source.channel !== undefined) {
+      if (typeof source.channel !== 'string' || !source.channel)
+        throw new TypeError('Projected color ramps need a named channel');
+      const lookup = coordinates(source, [source.channel], context);
+      return sample => lookup(sample)?.at(source.channel) ?? source.fallback;
+    }
+    if (typeof context?.query?.probe !== 'function')
+      throw new TypeError('A world field ramp needs a scene query snapshot');
+    const path = source.path ?? [];
+    if (!Array.isArray(path) || path.length > 64 || !Array.from(path).every(key =>
+      typeof key === 'string' && key.length || Number.isSafeInteger(key) && key >= 0))
+      throw new TypeError('Color ramp query paths need property names or array indices');
+    if (source.args !== undefined && (!source.args || Object.getPrototypeOf(source.args) !== Object.prototype))
+      throw new TypeError('Color ramp query arguments need a settings object');
+    return sample => {
+      const result = context.query.probe(source.field, sample.worldPosition ?? sample.position, source.args);
+      let value = result.status === 'ok' ? result.value : undefined;
+      for (const key of path) value = value != null && Object.hasOwn(value, key) ? value[key] : undefined;
+      return Number.isFinite(value) ? value : source.fallback;
+    };
+  }
+
+  function colorCurve({ ramp, channels, color, source = 'luminance', outputPalette }, context, resolveColor) {
+    if (ramp === undefined && source !== 'luminance')
+      throw new TypeError('A color curve source requires a ramp');
+    const transfer = curves.prepare({ ramp, channels, color }, resolveColor);
+    const lookup = ramp === undefined ? null : curveSource(source, context);
+    const result = [0, 0, 0, 0, 1, 0];
+    return {
+      palette: outputColors(outputPalette, resolveColor),
+      depth: source === 'depth',
+      sample(sample, base) {
+        const value = lookup?.(sample, base);
+        result[3] = lookup && !Number.isFinite(value) ? 0 : 1;
+        if (result[3]) transfer(base, result, value);
+        return result;
+      }
+    };
+  }
+
+  function rgbEffect(transfer, outputPalette, resolveColor) {
+    const result = [0, 0, 0, 1, 1, 0];
+    return {
+      palette: outputColors(outputPalette, resolveColor),
+      sample(sample, base) { return transfer(base, result); }
+    };
+  }
+
+  function colorLut({ lut, outputPalette }, resolveColor) {
+    return rgbEffect(luts.prepare(lut).apply, outputPalette, resolveColor);
+  }
+
+  function colorStack({ stack, outputPalette }, resolveColor) {
+    const plan = stacks.prepare(stack, { resolveColor });
+    if (!plan) throw new TypeError('A colorStack layer needs a stack definition');
+    return rgbEffect(plan.sample, outputPalette, resolveColor);
+  }
+
   function layer(definition, context, resolveColor) {
     const { projection = {}, space = 'rest', field, maskChannel, revealChannel, contourChannel,
       warpChannels, warp = 1, range = [0, 1], scroll = [0, 0], scale = 1, width = 0.16,
@@ -157,12 +241,9 @@ const SplatEffects = (() => {
     if (custom !== null && typeof custom !== 'function') throw new TypeError('A projected shader must be a function');
     if (!pixels && !custom && !['solid', 'contour'].includes(pattern) && !Object.hasOwn(motifs, pattern))
       throw new RangeError('Unknown projected pattern: ' + pattern);
-    if (outputPalette !== undefined && (!Array.isArray(outputPalette) || !outputPalette.length ||
-        outputPalette.length > 48 || !Array.from(outputPalette).every(value => value !== undefined)))
-      throw new TypeError('Projected output palettes need 1–48 colors');
     if (colors !== undefined && (!Array.isArray(colors) || colors.length < 2 || !Array.from(colors).every(value => value !== undefined)))
       throw new TypeError('Projected color ramps need at least two colors');
-    const palette = outputPalette?.map(resolveColor);
+    const palette = outputColors(outputPalette, resolveColor);
     const ramp = colors?.map(resolveColor);
     const tint = resolveColor(color);
     const result = new Float64Array(6); // RGB, amount, coverage, glint
@@ -209,6 +290,6 @@ const SplatEffects = (() => {
     };
   }
 
-  return { project, layer, fieldMask, clamp, vector };
+  return { project, layer, colorCurve, colorLut, colorStack, fieldMask, clamp, vector };
 })();
 if (typeof module !== 'undefined') module.exports = SplatEffects;

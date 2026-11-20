@@ -18,20 +18,20 @@
       const next = values[j];
       const p = points[i];
       if (d <= EPS) kept.push(p);
-      if (Math.abs(d) <= EPS) collect(p);
+      if (Math.abs(d) <= EPS) collect?.(p);
       if ((d < -EPS && next > EPS) || (d > EPS && next < -EPS)) {
         const crossing = V.mad(p, V.sub(points[j], p), d / (d - next));
         kept.push(crossing);
-        collect(crossing);
+        collect?.(crossing);
       }
     }
     return kept;
   }
 
-  function clipConvexFaces(faces, planes, { capTag } = {}) {
+  function validate(faces, planes, minimum) {
     if (
       !Array.isArray(faces) ||
-      faces.length < 4 ||
+      faces.length < minimum ||
       faces.length > 1024 ||
       !Array.from(faces).every(face =>
         Array.isArray(face?.points) && face.points.length >= 3 && face.points.length <= 512 &&
@@ -43,22 +43,46 @@
         finite(plane?.normal) && V.len(plane.normal) > EPS && Number.isFinite(plane.offset)
       )
     ) throw new Error('Convex face clipping needs bounded finite faces and half spaces');
+  }
+
+  function planeValues(points, plane) {
+    let min = Infinity;
+    let max = -Infinity;
+    const values = points.map(point => {
+      const d = evalPlane(plane, point);
+      min = Math.min(min, d);
+      max = Math.max(max, d);
+      return d;
+    });
+    return { values, min, max };
+  }
+
+  function clipPlanarFaces(faces, planes) {
+    validate(faces, planes, 0);
+    const out = [];
+    for (const face of faces) {
+      let points = face.points;
+      for (const plane of planes) {
+        const { values, min, max } = planeValues(points, plane);
+        points = cutPolygon(points, values, min, max);
+        if (points.length < 3) break;
+      }
+      if (points.length >= 3) out.push({ ...face, points });
+    }
+    return out;
+  }
+
+  function clipConvexFaces(faces, planes, { capTag } = {}) {
+    validate(faces, planes, 4);
     let shell = faces.map(face => ({ points: face.points, tag: face.tag }));
     for (const plane of planes) {
       let inside = false;
       let outside = false;
       const faceValues = shell.map(({ points }) => {
-        let min = Infinity;
-        let max = -Infinity;
-        const values = points.map(point => {
-          const d = evalPlane(plane, point);
-          min = Math.min(min, d);
-          max = Math.max(max, d);
-          return d;
-        });
-        inside ||= min < -EPS;
-        outside ||= max > EPS;
-        return { values, min, max };
+        const span = planeValues(points, plane);
+        inside ||= span.min < -EPS;
+        outside ||= span.max > EPS;
+        return span;
       });
       if (!outside) continue;
       if (!inside) return [];
@@ -94,4 +118,5 @@
   }
 
   P.geometry.clipConvexFaces = clipConvexFaces;
+  P.geometry.clipPlanarFaces = clipPlanarFaces;
 })(KIT);

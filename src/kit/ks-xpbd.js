@@ -36,6 +36,8 @@
     return [v[0] / l, v[1] / l, v[2] / l];
   };
   const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const validPose = (positions, length) => (Array.isArray(positions) || ArrayBuffer.isView(positions)) &&
+    positions.length === length && (Array.isArray(positions) ? Array.from(positions) : positions).every(Number.isFinite);
   const vn = (x, y, z) => {
     // a little smooth noise for gusts
     const s = Math.sin(x * 1.7 + y * 0.3) * Math.sin(z * 1.3 + 0.7 * x) + Math.sin(x * 0.61 + z * 0.93 + y * 0.2) * 0.6;
@@ -112,6 +114,15 @@
         },
         get X() {
           return X;
+        },
+        resetPose(positions) {
+          if (!validPose(positions, n * 3))
+            throw new TypeError('An XPBD pose needs one finite XYZ position per point');
+          X.set(positions);
+          P.set(positions);
+          V.fill(0);
+          near = null;
+          nearAge = 99;
         },
         point(p, w, r) {
           if (n === cap) grow();
@@ -395,40 +406,42 @@
           ? o.mass
           : ((o.density === undefined ? 0.25 : o.density) * Math.hypot(...U) * Math.hypot(...Vv)) / (nu * nv);
     if (!sim.wind && o.wind) sim.wind = o.wind;
-    const id = (i, j) => base0 + j * nu + i,
-      base0 = sim.n,
-      rest = [],
-      EH = new Int32Array(nu * nv).fill(-1), // the link along each cell's top edge, and down its left side
-      EV = new Int32Array(nu * nv).fill(-1);
+    const rest = [];
     for (let j = 0; j < nv; j++)
       for (let i = 0; i < nu; i++) {
         const u = i / (nu - 1),
           v = j / (nv - 1),
           p = [at[0] + U[0] * u + Vv[0] * v, at[1] + U[1] * u + Vv[1] * v, at[2] + U[2] * u + Vv[2] * v];
         rest.push(p);
-        sim.point(p, 1 / mass, cell * 0.35);
       }
-    for (let j = 0; j < nv; j++)
-      for (let i = 0; i < nu; i++) {
-        if (pins(i, j)) {
-          const p0 = rest[j * nu + i];
-          sim.pin(id(i, j), o.pinAt ? t => o.pinAt(i, j, p0, t) : () => p0);
+    function linkGrid(solver, anchors, anchorAt, tear) {
+      const base0 = solver.n, id = (i, j) => base0 + j * nu + i;
+      const EH = new Int32Array(nu * nv).fill(-1), EV = new Int32Array(nu * nv).fill(-1);
+      for (const p of rest) solver.point(p, 1 / mass, cell * 0.35);
+      for (let j = 0; j < nv; j++)
+        for (let i = 0; i < nu; i++) {
+          if (anchors(i, j)) {
+            const p0 = rest[j * nu + i];
+            solver.pin(id(i, j), anchorAt ? t => anchorAt(i, j, p0, t) : () => p0);
+          }
+          // (o.tear: how far a thread stretches before it breaks, or (u, v) -> that, so the cloth can be weaker in places: a worn hem)
+          const tr = typeof tear === 'function' ? tear(i / (nu - 1), j / (nv - 1)) : tear || 0;
+          if (i < nu - 1)
+            EH[j * nu + i] = solver.link(id(i, j), id(i + 1, j), o.stretch === undefined ? 1e-6 : o.stretch, tr);
+          if (j < nv - 1)
+            EV[j * nu + i] = solver.link(id(i, j), id(i, j + 1), o.stretch === undefined ? 1e-6 : o.stretch, tr);
+          if (i < nu - 1 && j < nv - 1) {
+            solver.link(id(i, j), id(i + 1, j + 1), o.shear === undefined ? 1e-5 : o.shear, tr * 1.3);
+            solver.link(id(i + 1, j), id(i, j + 1), o.shear === undefined ? 1e-5 : o.shear, tr * 1.3);
+            solver.face(id(i, j), id(i + 1, j), id(i, j + 1), o.air === undefined ? 1.2 : o.air);
+            solver.face(id(i + 1, j), id(i + 1, j + 1), id(i, j + 1), o.air === undefined ? 1.2 : o.air);
+          }
+          if (i < nu - 2) solver.link(id(i, j), id(i + 2, j), o.bend === undefined ? 2e-3 : o.bend, tr * 1.1);
+          if (j < nv - 2) solver.link(id(i, j), id(i, j + 2), o.bend === undefined ? 2e-3 : o.bend, tr * 1.1);
         }
-        // (o.tear: how far a thread stretches before it breaks, or (u, v) -> that, so the cloth can be weaker in places: a worn hem)
-        const tr = typeof o.tear === 'function' ? o.tear(i / (nu - 1), j / (nv - 1)) : o.tear || 0;
-        if (i < nu - 1)
-          EH[j * nu + i] = sim.link(id(i, j), id(i + 1, j), o.stretch === undefined ? 1e-6 : o.stretch, tr);
-        if (j < nv - 1)
-          EV[j * nu + i] = sim.link(id(i, j), id(i, j + 1), o.stretch === undefined ? 1e-6 : o.stretch, tr);
-        if (i < nu - 1 && j < nv - 1) {
-          sim.link(id(i, j), id(i + 1, j + 1), o.shear === undefined ? 1e-5 : o.shear, tr * 1.3);
-          sim.link(id(i + 1, j), id(i, j + 1), o.shear === undefined ? 1e-5 : o.shear, tr * 1.3);
-          sim.face(id(i, j), id(i + 1, j), id(i, j + 1), o.air === undefined ? 1.2 : o.air);
-          sim.face(id(i + 1, j), id(i + 1, j + 1), id(i, j + 1), o.air === undefined ? 1.2 : o.air);
-        }
-        if (i < nu - 2) sim.link(id(i, j), id(i + 2, j), o.bend === undefined ? 2e-3 : o.bend, tr * 1.1);
-        if (j < nv - 2) sim.link(id(i, j), id(i, j + 2), o.bend === undefined ? 2e-3 : o.bend, tr * 1.1);
-      }
+      return { base0, EH, EV };
+    }
+    const { base0, EH, EV } = linkGrid(sim, pins, o.pinAt, o.tear);
     // its dabs: per x per in every cell, each knowing where in the cell it sits and what colours it takes
     const first = B.count(),
       dabs = [];
@@ -448,88 +461,104 @@
       amb = o.amb === undefined ? 0.3 : o.amb,
       k = o.sunK === undefined ? 0.75 : o.sunK,
       NRM = new Float32Array(nu * nv * 3);
+    function draw(st, X, offset, torn) {
+      const id = (i, j) => offset + j * nu + i;
+      // a normal at every point, from its neighbours
+      for (let j = 0; j < nv; j++)
+        for (let i = 0; i < nu; i++) {
+          const a = id(Math.max(0, i - 1), j) * 3,
+            b = id(Math.min(nu - 1, i + 1), j) * 3,
+            c = id(i, Math.max(0, j - 1)) * 3,
+            d = id(i, Math.min(nv - 1, j + 1)) * 3,
+            du = [X[b] - X[a], X[b + 1] - X[a + 1], X[b + 2] - X[a + 2]],
+            dv = [X[d] - X[c], X[d + 1] - X[c + 1], X[d + 2] - X[c + 2]],
+            nn = norm(cross(du, dv)),
+            q = (j * nu + i) * 3;
+          NRM[q] = nn[0];
+          NRM[q + 1] = nn[1];
+          NRM[q + 2] = nn[2];
+        }
+      for (let m = 0; m < dabs.length; m++) {
+        const [i, j, fu, fv, cols] = dabs[m],
+          c00 = id(i, j) * 3,
+          c10 = id(i + 1, j) * 3,
+          c01 = id(i, j + 1) * 3,
+          c11 = id(i + 1, j + 1) * 3,
+          n00 = (j * nu + i) * 3,
+          n10 = n00 + 3,
+          n01 = n00 + nu * 3,
+          n11 = n01 + 3;
+        let w00 = (1 - fu) * (1 - fv),
+          w10 = fu * (1 - fv),
+          w01 = (1 - fu) * fv,
+          w11 = fu * fv;
+        /* torn: a corner on the far side of a broken thread from the dab's own corner no longer carries it, so the cell parts along
+           the tear instead of stretching across it */
+        if (torn) {
+          const top = sim.broken(EH[j * nu + i]),
+            bot = sim.broken(EH[(j + 1) * nu + i]),
+            lef = sim.broken(EV[j * nu + i]),
+            rig = sim.broken(EV[j * nu + i + 1]);
+          if (top || bot || lef || rig) {
+            // the corners 0 (top left), 1 (top right), 2 (bottom left), 3 (bottom right), and which edges still join them: walk
+            // from the dab's own corner along the edges that are whole
+            const own = (fu < 0.5 ? 0 : 1) + (fv < 0.5 ? 0 : 2),
+              E = [
+                [0, 1, !top],
+                [2, 3, !bot],
+                [0, 2, !lef],
+                [1, 3, !rig]
+              ],
+              seen = [false, false, false, false];
+            seen[own] = true;
+            for (let it = 0; it < 3; it++)
+              for (const [a, b, ok] of E) if (ok && seen[a] !== seen[b]) seen[a] = seen[b] = true;
+            const joined = (a, b) => seen[a + b * 2];
+            if (!joined(0, 0)) w00 = 0;
+            if (!joined(1, 0)) w10 = 0;
+            if (!joined(0, 1)) w01 = 0;
+            if (!joined(1, 1)) w11 = 0;
+            const ws = w00 + w10 + w01 + w11 || 1;
+            w00 /= ws;
+            w10 /= ws;
+            w01 /= ws;
+            w11 /= ws;
+          }
+        }
+        const nn = norm(
+            [0, 1, 2].map(q => NRM[n00 + q] * w00 + NRM[n10 + q] * w10 + NRM[n01 + q] * w01 + NRM[n11 + q] * w11)
+          ),
+          x = X[c00] * w00 + X[c10] * w10 + X[c01] * w01 + X[c11] * w11,
+          y = X[c00 + 1] * w00 + X[c10 + 1] * w10 + X[c01 + 1] * w01 + X[c11 + 1] * w11,
+          z = X[c00 + 2] * w00 + X[c10 + 2] * w10 + X[c01 + 2] * w01 + X[c11 + 2] * w11,
+          nl = nn[0] * sun[0] + nn[1] * sun[1] + nn[2] * sun[2],
+          // both faces of cloth are lit; the one turned from the sun a little less (light comes through it)
+          l = amb + k * (nl > 0 ? nl : -nl * 0.75),
+          ci = Math.max(0, Math.min(cols.length - 1, Math.floor(l * cols.length)));
+        put(st, first + m, x, y, z, nn, R, thin, cols[ci]);
+      }
+    }
     const sys = {
       sim,
       first,
+      nu,
+      nv,
       shared: !!o.sim,
       count: dabs.length,
+      restPose: () => Float32Array.from(rest.flat()),
+      makeProxy({ pins = () => false, pinAt, ...options } = {}) {
+        const solver = K.xpbd.sim({ ...o, ...options });
+        linkGrid(solver, pins, pinAt, 0);
+        return solver;
+      },
+      drawPose(st, positions) {
+        if (!validPose(positions, rest.length * 3))
+          throw new TypeError('A cloth pose needs one finite XYZ position per point');
+        draw(st, positions, 0, false);
+      },
       update(dt, t, st) {
         if (!sys.shared) sim.step(dt, t);
-        const X = sim.X;
-        // a normal at every point, from its neighbours
-        for (let j = 0; j < nv; j++)
-          for (let i = 0; i < nu; i++) {
-            const a = id(Math.max(0, i - 1), j) * 3,
-              b = id(Math.min(nu - 1, i + 1), j) * 3,
-              c = id(i, Math.max(0, j - 1)) * 3,
-              d = id(i, Math.min(nv - 1, j + 1)) * 3,
-              du = [X[b] - X[a], X[b + 1] - X[a + 1], X[b + 2] - X[a + 2]],
-              dv = [X[d] - X[c], X[d + 1] - X[c + 1], X[d + 2] - X[c + 2]],
-              nn = norm(cross(du, dv)),
-              q = (j * nu + i) * 3;
-            NRM[q] = nn[0];
-            NRM[q + 1] = nn[1];
-            NRM[q + 2] = nn[2];
-          }
-        for (let m = 0; m < dabs.length; m++) {
-          const [i, j, fu, fv, cols] = dabs[m],
-            c00 = id(i, j) * 3,
-            c10 = id(i + 1, j) * 3,
-            c01 = id(i, j + 1) * 3,
-            c11 = id(i + 1, j + 1) * 3,
-            n00 = (j * nu + i) * 3,
-            n10 = n00 + 3,
-            n01 = n00 + nu * 3,
-            n11 = n01 + 3;
-          let w00 = (1 - fu) * (1 - fv),
-            w10 = fu * (1 - fv),
-            w01 = (1 - fu) * fv,
-            w11 = fu * fv;
-          /* torn: a corner on the far side of a broken thread from the dab's own corner no longer carries it, so the cell parts along
-             the tear instead of stretching across it */
-          if (sim.torn) {
-            const top = sim.broken(EH[j * nu + i]),
-              bot = sim.broken(EH[(j + 1) * nu + i]),
-              lef = sim.broken(EV[j * nu + i]),
-              rig = sim.broken(EV[j * nu + i + 1]);
-            if (top || bot || lef || rig) {
-              // the corners 0 (top left), 1 (top right), 2 (bottom left), 3 (bottom right), and which edges still join them: walk
-              // from the dab's own corner along the edges that are whole
-              const own = (fu < 0.5 ? 0 : 1) + (fv < 0.5 ? 0 : 2),
-                E = [
-                  [0, 1, !top],
-                  [2, 3, !bot],
-                  [0, 2, !lef],
-                  [1, 3, !rig]
-                ],
-                seen = [false, false, false, false];
-              seen[own] = true;
-              for (let it = 0; it < 3; it++)
-                for (const [a, b, ok] of E) if (ok && seen[a] !== seen[b]) seen[a] = seen[b] = true;
-              const joined = (a, b) => seen[a + b * 2];
-              if (!joined(0, 0)) w00 = 0;
-              if (!joined(1, 0)) w10 = 0;
-              if (!joined(0, 1)) w01 = 0;
-              if (!joined(1, 1)) w11 = 0;
-              const ws = w00 + w10 + w01 + w11 || 1;
-              w00 /= ws;
-              w10 /= ws;
-              w01 /= ws;
-              w11 /= ws;
-            }
-          }
-          const nn = norm(
-              [0, 1, 2].map(q => NRM[n00 + q] * w00 + NRM[n10 + q] * w10 + NRM[n01 + q] * w01 + NRM[n11 + q] * w11)
-            ),
-            x = X[c00] * w00 + X[c10] * w10 + X[c01] * w01 + X[c11] * w11,
-            y = X[c00 + 1] * w00 + X[c10 + 1] * w10 + X[c01 + 1] * w01 + X[c11 + 1] * w11,
-            z = X[c00 + 2] * w00 + X[c10 + 2] * w10 + X[c01 + 2] * w01 + X[c11 + 2] * w11,
-            nl = nn[0] * sun[0] + nn[1] * sun[1] + nn[2] * sun[2],
-            // both faces of cloth are lit; the one turned from the sun a little less (light comes through it)
-            l = amb + k * (nl > 0 ? nl : -nl * 0.75),
-            ci = Math.max(0, Math.min(cols.length - 1, Math.floor(l * cols.length)));
-          put(st, first + m, x, y, z, nn, R, thin, cols[ci]);
-        }
+        draw(st, sim.X, base0, sim.torn);
       }
     };
     return sys;

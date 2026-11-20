@@ -34,13 +34,13 @@
     return a.bounds.min.every((v, i) => v === b.bounds.min[i] && a.bounds.max[i] === b.bounds.max[i]);
   }
 
-  function create({ preview, refine = preview } = {}) {
+  function realizer({ preview, refine = preview }, initial, sequence) {
     if (typeof preview !== 'function' || typeof refine !== 'function') {
       throw new Error('A chunk realizer needs preview and refinement builders');
     }
-    let current = new Map(),
+    let current = initial,
       active = null,
-      serial = 0;
+      serial = sequence;
     let dirtyIds = new Set(),
       dirtyRegions = [],
       allDirty = false;
@@ -149,10 +149,11 @@
     return Object.freeze({
       update,
       cancel,
+      fork: () => realizer({ preview, refine }, current, serial),
       get: key => current.get(key) ?? null,
       entries: () => Object.freeze([...current.values()])
     });
   }
 
-  P.chunks = { create };
+  P.chunks = { create: (options = {}) => realizer(options, new Map(), 0) };
 })(KIT);
