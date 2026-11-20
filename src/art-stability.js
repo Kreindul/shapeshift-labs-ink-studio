@@ -55,25 +55,47 @@ const ArtStability = (() => {
     return settings;
   }
 
-  function coordinates(rule, point, x, y) {
-    if (!point || rule.dither === 'screen') return [x, y];
-    const cell = i => Math.floor((point[i] - rule.origin[i]) / rule.spacing + 1e-5);
+  function coordinates(rule, point, x, y, scale = 1) {
+    if (!point || !rule || rule.dither === 'screen') return [x / scale, y / scale];
+    const cell = i => Math.floor((point[i] - rule.origin[i]) / (rule.spacing * scale) + 1e-5);
     const ix = cell(0), iy = cell(1), iz = cell(2);
-    if (![ix, iy, iz].every(Number.isFinite)) return [x, y];
+    if (![ix, iy, iz].every(Number.isFinite)) return [x / scale, y / scale];
     // Mixing the three integer axes lets any axis-aligned surface use both pattern dimensions.
     return [ix + 3 * iy + 2 * iz, 2 * ix + iy + 3 * iz];
   }
 
-  function sampleCoordinates(rule, sample, x, y) {
-    const point = rule?.dither === 'object' ? sample?.position : sample?.worldPosition;
-    return rule ? coordinates(rule, point, x, y) : [x, y];
+  function samplePoint(rule, sample) {
+    return rule?.dither === 'object' ? sample?.patternPosition ?? sample?.position :
+      rule?.dither === 'world' ? sample?.worldPosition : undefined;
+  }
+
+  function sampleCoordinates(rule, sample, x, y, scale) {
+    return coordinates(rule, samplePoint(rule, sample), x, y, scale);
+  }
+
+  const hasSurface = (passes, p) => passes &&
+    (passes.depth ? Number.isFinite(passes.depth[p]) : passes.splatId?.[p]);
+
+  function pixelRule(settings, passes, p) {
+    return matching(settings, passes?.objects?.[passes.objectId?.[p]], passes?.materials?.[passes.materialId?.[p]]);
+  }
+
+  function placement(settings, passes, p, x, y, time) {
+    const inherited = settings?.anchorSpaces.size ? pixelRule(settings, passes, p) : undefined;
+    const at = p * 3;
+    const sample = hasSurface(passes, p) ? {
+      position: passes.objectPosition?.subarray(at, at + 3),
+      worldPosition: passes.position?.subarray(at, at + 3),
+      normal: passes.normal?.subarray(at, at + 3),
+      patternPosition: passes.ditherRest?.get(p), time,
+      footprint: passes.ditherFootprint && (space => passes.ditherFootprint(p, space))
+    } : undefined;
+    return { pixel: [x, y], sample, inherited };
   }
 
   function ditherCoordinates(settings, passes, p, x, y, explicit) {
-    if (!(explicit || settings?.anchorSpaces.size) || !passes ||
-        !(passes.depth ? Number.isFinite(passes.depth[p]) : passes.splatId?.[p])) return [x, y];
-    const object = passes.objects?.[passes.objectId?.[p]], material = passes.materials?.[passes.materialId?.[p]];
-    const rule = explicit ?? matching(settings, object, material);
+    if (!(explicit || settings?.anchorSpaces.size) || !hasSurface(passes, p)) return [x, y];
+    const rule = explicit ?? pixelRule(settings, passes, p);
     if (rule.dither === 'screen') return [x, y];
     const buffer = rule.dither === 'object' ? passes.objectPosition : passes.position;
     const point = (rule.dither === 'object' && passes.ditherRest?.get(p)) || buffer?.subarray(p * 3, p * 3 + 3);
@@ -109,7 +131,7 @@ const ArtStability = (() => {
         const nativeShade = [color[c] / 255, color[c + 1] / 255, color[c + 2] / 255];
         const anchor = local.constraints?.[localId - 1]?.anchor;
         const [lx, ly] = anchor ? ditherCoordinates(null, passes, p, x, y, anchor) : [dx, dy];
-        const index = pixelLook.localIndex(local, localId, nativeShade, lx, ly, !detail[p]);
+        const index = pixelLook.localIndex(local, localId, nativeShade, lx, ly, !detail[p], x, y);
         use[index]++;
         const packed = local.output.packed[index];
         rgb[q] = packed >> 16; rgb[q + 1] = (packed >> 8) & 255; rgb[q + 2] = packed & 255;
@@ -153,6 +175,6 @@ const ArtStability = (() => {
     return { w, h, rgb, use, detail, ...((local || tone) && { palette: local?.output.packed || tone.palette }) };
   }
 
-  return Object.freeze({ prepare, pattern, snapView, modulo, ditherCoordinates, sampleCoordinates, coordinates, matching, protectedPixel, resolve });
+  return Object.freeze({ prepare, pattern, snapView, modulo, ditherCoordinates, sampleCoordinates, samplePoint, placement, coordinates, matching, protectedPixel, resolve });
 })();
 if (typeof module !== 'undefined') module.exports = ArtStability;

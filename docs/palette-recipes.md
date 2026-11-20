@@ -351,7 +351,7 @@ improves the error.
 
 Choose `size: [width, height]` in native pixels. It defaults to `[32, 24]`.
 The fit uses the policy's Bayer, checker, or seeded blue-noise pattern, with
-a fixed top-left origin. It searches the coverage levels in that exact crop,
+a fixed top-left origin and the base cell scale. It searches the coverage levels in that exact crop,
 including partial patterns at the edges. The fitted texture has an explicit
 coverage. The policy's automatic strength and matching priority still govern
 the ordinary scene resolve. `pattern: "none"` and an empty `pairs` list each

@@ -21,7 +21,7 @@
       throw new RangeError('Dither fit width and height must be integers in [1, 256]');
     if (!Array.isArray(policy?.dither?.pairs))
       throw new TypeError('Dither fitting needs an explicit dither.pairs list');
-    const plan = PixelLook.preparePalette(policy, { palette, roles, blueNoise: materials.blueNoise, prepareDitherTile: true });
+    const plan = PixelLook.preparePalette(policy, { palette, roles, blueNoise: materials.blueNoise, prepareDitherTile: true, validateOnly: true });
     const [w, h] = size, area = w * h, pattern = policy.dither.pattern ?? 'bayer';
     const targetHex = typeof target === 'string' ? target.toLowerCase() : hex(target);
     const targetRgb = [1, 3, 5].map(i => parseInt(targetHex.slice(i, i + 2), 16) / 255);
@@ -45,7 +45,8 @@
       }
     }
 
-    const rankAt = (x, y) => plan.ranks[x % plan.width + (y % plan.height) * plan.width];
+    const scale = plan.tuning?.scale ?? 1;
+    const rankAt = (x, y) => plan.ranks[Math.floor(x / scale) % plan.width + (Math.floor(y / scale) % plan.height) * plan.width];
     let error = solidError, average = swatches[best], colors = [average], secondPixels = 0, cutoff = -1;
     if (eligible.size) {
       // All attainable coverages, counting repeated ranks and incomplete tiles at the edges.

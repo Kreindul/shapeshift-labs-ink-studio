@@ -526,7 +526,7 @@ const SurfaceLook = (() => {
 
   function prepare(settings, palette = [], lightDirection = [-0.55, 0.72, 0.43], context = {},
     { colorCurves = true, colorLut = true, colorStack = true, paletteConstraints = true, paletteRoles, blueNoise, onPaletteClip,
-      transmission = true, detailKits = true, validateOnly = false } = {}) {
+      transmission = true, detailKits = true, validateOnly = false, skipMasks = false } = {}) {
     if (!isRecord(settings)) throw new TypeError('Surface settings must be an object');
     if (validateOnly && settings.renderStages !== undefined) {
       const stages = typeof RenderStages === 'undefined' ? require('./render-stages.js') : RenderStages;
@@ -742,7 +742,7 @@ const SurfaceLook = (() => {
       finishBeforeFog: thin || driven || hasKits || paintsBase || layers.some(layer => layer.type === 'tint'), sun: unit(vector(lightDirection, AXES.y)),
       paletteConstraint: paletteConstraints && settings.paletteConstraint !== undefined
         ? pixelLook.prepareLookPolicy(settings.paletteConstraint, { palette, roles: paletteRoles, blueNoise, context, validateOnly, onPaletteClip,
-          skipMaskedStacks: !colorStack }) : null,
+          skipMaskedStacks: !colorStack, skipMasks }) : null,
       projected: Boolean(settings.rainRipple) || driven || weather || hasKits || layers.some(layer => layer.effect || layer.spatialMask),
       depth: layers.some(layer => layer.effect?.depth),
       reveals: layers.some(layer => layer.effect?.reveals)

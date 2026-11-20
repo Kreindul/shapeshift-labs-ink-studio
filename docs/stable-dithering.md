@@ -68,6 +68,56 @@ a world-space stone stipple on the same move.
 ink-studio clip examples/palette-dither-spaces.js --ortho --w 288 --h 152 --px 1 --target -.45,1.47,-.05 --camera-pan .9,0,0 --from 0 --to 4 --fps 12 --out workshop.png
 ```
 
+## Tune dither by region and scale
+
+Set `dither.scale` to change the size of each pattern cell. A value of
+`2` makes screen cells two art pixels wide, or doubles `spacing` in
+world or rest space. A value of `0.5` uses half-size cells. A scale of
+`1` preserves the original pattern.
+
+```json
+{
+  "pattern": "bayer",
+  "strength": 1,
+  "space": "object",
+  "spacing": 0.08,
+  "scale": 0.7,
+  "fade": [0.75, 1.5],
+  "regions": [
+    {
+      "mask": { "type": "axis", "space": "rest", "axis": "y", "range": [0.4, 0.6] },
+      "scale": 1.6
+    }
+  ]
+}
+```
+
+`regions` accepts the same axis, texture, projected field and scene query
+masks as [look policies](pixel-look.md#spatial-and-field-masks). Each region sets a cell scale,
+a relative dither strength in `[0, 1]`, or both. Mask weights feather
+those settings. Regions apply in authoring order, so a fully weighted
+later region can override an earlier one. Set a region's strength to
+zero to keep an eye or a printed mark solid while preserving its nearest
+palette swatch. The policy's authorized pairs and reserved swatches
+still apply. `--look-masks off` skips the region masks.
+
+`fade: [low, high]` measures cell width in native art pixels. At or
+below `low`, Ink uses the nearest solid swatch. Between the bounds, the
+ordered pattern gains dots until it reaches full density at `high`.
+World and object cells use the surface footprint of one art pixel,
+including perspective, surface angle and the object's pose. Screen
+cells have a fixed size at a given art resolution. Omit `fade` to keep
+the authored pattern density at every distance.
+
+The headless renderer uses all these settings. WebGL scene targets use
+the base scale and fade on the screen grid. `look inspect --renderer webgl`
+identifies policies with regional or spatial settings outside that path.
+
+```sh
+ink-studio render examples/palette-dither-scale.js --w 300 --h 162 --px 1 --t 0.35 --out near.png
+ink-studio clip examples/palette-dither-scale.js --w 300 --h 162 --px 1 --fps 12 --out dither-scale.png
+```
+
 ## Check a slow camera move
 
 The [tidal observatory example](../examples/stable-dithering.js) uses world space on its stonework and object space on the turning lantern. Render at `--px 1` to examine the actual output pixels.

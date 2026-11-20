@@ -32,9 +32,12 @@
     }
     const { assetId, driver, mask, stack, palette, remap, field, source } = definition;
     if (assetId) add('asset', assetId);
-    if (mask?.type === 'query') add('query', mask.field);
-    if (mask?.type === 'field') add('field', mask.field, { channel: mask.channel });
-    if (mask?.type === 'texture') add('texture');
+    const regions = palette?.dither?.regions;
+    for (const shape of [mask, ...(Array.isArray(regions) ? regions.map(region => region?.mask) : [])]) {
+      if (shape?.type === 'query') add('query', shape.field);
+      if (shape?.type === 'field') add('field', shape.field, { channel: shape.channel });
+      if (shape?.type === 'texture') add('texture');
+    }
     if (field) add('field', field);
     if (source?.field) add(source.channel ? 'field' : 'query', source.field, source.channel ? { channel: source.channel } : {});
     for (const input of [driver?.inputs.strength, ...Object.values(driver?.inputs.params ?? {})]) {
@@ -100,6 +103,8 @@
           else if (mode === 'surface') unsupported(path, 'does not evaluate surface look layers');
           else if (['world', 'object'].includes(definition.palette?.dither?.space))
             unsupported(path, 'uses screen space for palette dither');
+          else if (definition.palette?.dither?.regions?.length)
+            unsupported(path, 'uses base palette dither settings without regional tuning');
           else if (definition.mask && !ContributionRules.supportsMask(definition.mask))
             unsupported(path, 'evaluates axis masks and planar raster masks');
           else if (matched.some(row => (mode === 'optics' || row.target.kind === 'medium') && !waterGroup(row)))
@@ -210,7 +215,7 @@
         throw new TypeError('Invalid native ' + name + ' swatches');
       const contextDependent = !palette.palette || paletteSwatches(palette).some(paletteReference);
       PixelLook.preparePalette(contextDependent ? { ...palette, palette: ['#000000'], reserved: [] } : palette,
-        { blueNoise: K.procedural.materials.blueNoise, deferDitherColors: contextDependent });
+        { blueNoise: K.procedural.materials.blueNoise, deferDitherColors: contextDependent, validateOnly: true });
     }
     SplatEffects.prepareMask(mask, undefined, { validateOnly: true });
     const issues = [];
@@ -220,6 +225,8 @@
       issues.push({ code: 'unsupported-renderer', message: 'webgl does not evaluate spatial look masks' });
     else if (renderer === 'webgl' && ['world', 'object'].includes(palette?.dither?.space))
       issues.push({ code: 'unsupported-renderer', message: 'webgl uses screen space for palette dither' });
+    else if (renderer === 'webgl' && palette?.dither?.regions?.length)
+      issues.push({ code: 'unsupported-renderer', message: 'webgl uses base palette dither settings without regional tuning' });
     return { ...definitionInfo(definition, params), stage: stage ?? null, issues };
   }
   W.lookReport = Object.freeze({ scene, standalone });

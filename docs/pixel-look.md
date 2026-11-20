@@ -385,6 +385,8 @@ in `render` or `sim render`. `off` bypasses the target policies.
 
 To place the dither pattern per palette policy, set
 [`dither.space` and optional grid settings](stable-dithering.md#choose-the-space-per-palette-policy).
+Set [cell scale, regional masks and a native-pixel fade](stable-dithering.md#tune-dither-by-region-and-scale)
+to protect fine features and reduce subpixel stipple.
 
 ### Authorize dither pairs
 

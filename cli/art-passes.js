@@ -1,5 +1,6 @@
 const ArtPasses = require('../src/art-passes.js');
 const EmissiveFinishes = require('../src/emissive-finishes.js');
+const { ditherFootprint } = require('./dither-footprint.js');
 const { surfacePoint } = require('./scene-optics.js');
 
 const SplatFrames = require('../src/splat-frames.js');
@@ -133,6 +134,16 @@ function createArtPasses(request, w, h, emissiveSlots) {
       if (normalOut) result.normal = topDown(normalOut, 3);
       if (positionOut) result.position = topDown(positionOut, 3);
       if (objectOut) result.objectPosition = topDown(objectOut, 3);
+      if (geometry.ditherPixelStep && result.position) {
+        result.ditherFootprint = (p, space) => {
+          const x = p % w, y = h - 1 - Math.floor(p / w), bottom = y * w + x;
+          const atlas = atlasOwners?.get(bottom);
+          const frame = frames.get(owner[bottom]);
+          const footprint = ditherFootprint(geometry.rayAt, x + .5, y + .5, result.position.subarray(p * 3, p * 3 + 3),
+            atlas ? atlas.normal : frame?.normal, geometry.ditherPixelStep, space === 'object' ? frame?.localOffset : undefined);
+          return space === 'object' && atlas?.objectScale ? footprint / atlas.objectScale : footprint;
+        };
+      }
     }
     for (const [channel, ids] of [['motion', owner], ['emissionMotion', emissionOwner]]) {
       if (!selected.has(channel)) continue;

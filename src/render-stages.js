@@ -147,6 +147,8 @@ const RenderStages = (() => {
     const owner = postMask || scene.some(rule => post(rule) && rule.select) || surfaces.some(rules => rules.some(post));
     return {
       at, post: all.some(post), postMask, owner, anchorSpaces,
+      ditherRegions: all.some(rule => post(rule) && rule.palette?.tuning?.regions.length),
+      ditherFade: all.some(rule => post(rule) && rule.palette?.tuning?.fade),
       palettes: [...new Set(all.flatMap(rule => rule.palette?.packed ?? []))],
       outputPalettes: [...new Set(all.filter(post).flatMap(rule => rule.palette?.packed ?? []))],
       surfaceMask: all.some(rule => !post(rule) && rule.mask)
@@ -166,7 +168,7 @@ const RenderStages = (() => {
     };
   }
 
-  function evaluate(rules, rgb, sample, x, y, contributions, visit, anchorAt) {
+  function evaluate(rules, rgb, sample, x, y, contributions, visit, anchorAt, placement) {
     if (!rules) return rgb;
     let result = rgb;
     for (const rule of rules) {
@@ -180,7 +182,8 @@ const RenderStages = (() => {
         const anchor = dither && rule.palette.anchor;
         const [dx, dy] = anchor ? anchorAt ? anchorAt(anchor) :
           stability.sampleCoordinates(anchor, sample, x, y) : [x, y];
-        transformed = result = rule.palette.swatches[rule.palette.index(input, dx, dy, dither)];
+        const site = rule.palette.tuning && (placement?.() ?? { pixel: [x, y], sample });
+        transformed = result = rule.palette.swatches[rule.palette.index(input, dx, dy, dither, site)];
       } else if (applied) {
         transformed = rule.stack.sample(input);
         result = amount === 1 ? transformed : transformed.map((n, i) => input[i] + (n - input[i]) * amount);
@@ -228,7 +231,7 @@ const RenderStages = (() => {
     return evaluate(rules, rgb, sample, x, y);
   }
 
-  function finish(frame, plan, passes, time, visitPixel, audit, ditherAt) {
+  function finish(frame, plan, passes, time, visitPixel, audit, ditherAt, stable) {
     const { w, h, rgb } = frame;
     const swatches = new Map(plan.outputPalettes.map((color, i) => [color, i]));
     const use = new Uint32Array(swatches.size);
@@ -252,8 +255,9 @@ const RenderStages = (() => {
       const palette = rules.palette || rules.frame?.some(rule => rule.palette);
       const [dx,dy] = palette && ditherAt ? ditherAt(x,y) : [x,y];
       const anchorAt = plan.anchorSpaces?.size ? anchor => stability.ditherCoordinates(null, passes, p, x, y, anchor) : undefined;
-      const graded = evaluate(rules.frame, original, sample, dx, dy, undefined, visit, anchorAt);
-      const color = evaluate(rules.palette, graded, sample, dx, dy, undefined, visit, anchorAt);
+      const placement = () => stability.placement(stable, passes, p, x, y, time);
+      const graded = evaluate(rules.frame, original, sample, dx, dy, undefined, visit, anchorAt, placement);
+      const color = evaluate(rules.palette, graded, sample, dx, dy, undefined, visit, anchorAt, placement);
       if (audit) audit.pixel('frame', p, color[0], color[1], color[2]);
       const index = swatches.get(pack(color));
       if (index !== undefined) use[index]++;

@@ -7,7 +7,7 @@ function contributionLook(palettes, policies, targets, targetOffset, fallback, s
   const spatial = anchor => anchor && anchor.dither !== 'screen';
   function needsSample(i, layer, anchor) {
     const policy = policies?.[slot(i, layer) - 1], explicit = policy?.anchor;
-    return Boolean(policy && (policy.mask || spatial(explicit ?? anchor)));
+    return Boolean(policy && (policy.mask || policy.tuning?.regions.length || spatial(explicit ?? anchor)));
   }
   function shade(i, layer, rgb, x, y, sample, dither, visit, inherited) {
     const id = slot(i, layer);
@@ -19,7 +19,8 @@ function contributionLook(palettes, policies, targets, targetOffset, fallback, s
     const options = { scene, grade, useDither: dither };
     const index = plan => {
       const [dx, dy] = ArtStability.sampleCoordinates(plan.anchor ?? inherited, sample, x, y);
-      return PixelLook.paletteIndex(plan, rgb, dx, dy, options);
+      return PixelLook.paletteIndex(plan, rgb, dx, dy, plan.tuning ?
+        { ...options, placement: { pixel: [x, y], inherited, sample } } : options);
     };
     if (amount === 1) return policy.swatches[index(policy)];
 

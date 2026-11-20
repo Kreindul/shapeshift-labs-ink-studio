@@ -315,7 +315,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       if (key === constraintKey && world === constraintWorld && world.renderMetadata === constraintMetadata &&
           world.count === constraintCount) return constraintPlan;
       const plan = toolkit.PixelLook.preparePaletteConstraints(definition, {
-        palette: world.pal, roles: world.paletteRoles, blueNoise: toolkit.KIT?.procedural?.materials?.blueNoise, skipMasks,
+        palette: world.pal, roles: world.paletteRoles, blueNoise: toolkit.KIT?.procedural?.materials?.blueNoise, skipMasks, skipDitherRegions: true,
         maskSupported:mask=>Boolean(coverageRules?.supportsMask(mask))
       });
       if (plan) {
@@ -339,6 +339,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
           rows[offset + 15] = palette.mapOnly ? 2 : Number(Boolean(palette.grade));
           rows[offset + 19] = palette.matchId ?? 0;
           rows[offset + 23] = palette.pairs ? palette.pairs.length+1 : 0;
+          rows[offset + 27] = palette.tuning?.scale ?? 1;
+          rows[offset + 31] = palette.tuning?.screenGain ?? 1;
           palette.pairs?.forEach(({slots,lightness},j)=>
             rows.set([...slots,...(lightness ?? [-1,1])],offset+(constraintPairs+j)*4));
           palette.lab?.forEach((row,j)=>rows.set(row,offset+(constraintLab+j)*4));

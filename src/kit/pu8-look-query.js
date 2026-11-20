@@ -46,7 +46,7 @@
         const underlying = surfacePalettes.get(binding), fallback = plan && plan.palettes[plan.defaultSlot - 1];
         const policy = id ? plan.palettes[id - 1] : target.kind === 'splat' && !projected && (underlying || fallback);
         const useDither = target.kind === 'splat';
-        const packedFor = local => local.packed[PixelLook.paletteIndex(local, input, ...pixel, { scene, grade, useDither })];
+        const packedFor = local => local.packed[PixelLook.paletteIndex(local, input, ...pixel, { scene, grade, useDither, placement: { pixel, sample } })];
         const rowPalette = policy ? policy.packed : projected ? projected.map(color => pack(color)) :
           !coverageAware && target.kind === 'splat' ? palette : null;
         let packed = input && (policy ? packedFor(policy) : projected ? rowPalette[PixelLook.nearest(input, projected, false)] :

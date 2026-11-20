@@ -595,10 +595,13 @@ vec3 paletteRow(int slot, vec3 inputColor, ivec2 p) {
   if (hasGradedReserve) { return gradedReserve; }
   vec3 color = best;
   float amount = texelFetch(u_constraintRows, ivec2(1, row), 0).a;
-  if (count < 2 || amount == 0.0) return color;
+  float gain = texelFetch(u_constraintRows, ivec2(7, row), 0).a;
+  if (count < 2 || amount == 0.0 || gain <= 0.0) return color;
   ivec2 size = ivec2(settings.zw);
-  int cell = (p.y % size.y) * size.x + p.x % size.x;
-  float rank = texelFetch(u_constraintRows, ivec2(49 + cell / 4, row), 0)[cell & 3];
+  float scale = texelFetch(u_constraintRows, ivec2(6, row), 0).a;
+  ivec2 grid = ivec2(floor(vec2(p) / scale));
+  int cell = (grid.y % size.y) * size.x + grid.x % size.x;
+  float rank = texelFetch(u_constraintRows, ivec2(49 + cell / 4, row), 0)[cell & 3] / gain;
   if (rank >= .5) return color;
   int pairCount = int(texelFetch(u_constraintRows,ivec2(5,row),0).a)-1;
   if (pairCount >= 0) {

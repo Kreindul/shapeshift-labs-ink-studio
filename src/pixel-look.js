@@ -2,6 +2,7 @@
    No per-frame palette fitting, camera movement or black ink. */
 const PixelLook = (() => {
   const stability = typeof ArtStability === 'undefined' ? require('./art-stability.js') : ArtStability;
+  const detail = typeof StableDetail === 'undefined' ? require('./stable-detail.js') : StableDetail;
   const selectors = typeof TargetSelectors === 'undefined' ? require('./target-selectors.js') : TargetSelectors;
   let curves, luts, stacks, spaces;
   try {
@@ -265,7 +266,29 @@ const PixelLook = (() => {
     return distance;
   }
 
-  function preparePalette(definition, { palette = [], roles = {}, blueNoise, deferDitherColors = false, prepareDitherTile = false } = {}) {
+  function prepareDitherTuning(dither, { context, validateOnly, skipMasks }) {
+    const { scale = 1, fade, regions = [] } = dither;
+    const validScale = value => Number.isFinite(value) && value >= 1/64 && value <= 64;
+    if (!validScale(scale)) throw new RangeError('Dither scale must be in [1/64, 64]');
+    if (fade !== undefined && (!Array.isArray(fade) || fade.length !== 2 ||
+        !Array.from(fade).every(Number.isFinite) || fade[0] < 0 || fade[0] >= fade[1]))
+      throw new RangeError('Dither fade needs an increasing nonnegative art-pixel range');
+    if (!Array.isArray(regions) || regions.length > 32) throw new TypeError('Dither accepts up to 32 regional rules');
+    const effects = regions.length && (typeof SplatEffects === 'undefined' ? require('./splat-effects.js') : SplatEffects);
+    const rules = Array.from(regions, rule => {
+      if (!record(rule) || Object.keys(rule).some(key => !['mask', 'scale', 'strength'].includes(key)) ||
+          !record(rule.mask) || rule.scale === undefined && rule.strength === undefined)
+        throw new TypeError('A dither region needs a mask and a scale or strength');
+      if (rule.scale !== undefined && !validScale(rule.scale) || rule.strength !== undefined && !fraction(rule.strength))
+        throw new RangeError('Dither region scale must be in [1/64, 64] and strength in [0, 1]');
+      return { scale: rule.scale, strength: rule.strength,
+        mask: effects.prepareMask(rule.mask, context, { validateOnly: validateOnly || skipMasks }) };
+    });
+    if (dither.scale === undefined && fade === undefined && !rules.length) return undefined;
+    return { scale, fade: fade?.slice(), regions: skipMasks ? [] : rules, screenGain: detail.weight(fade, scale) };
+  }
+
+  function preparePalette(definition, { palette = [], roles = {}, blueNoise, deferDitherColors = false, prepareDitherTile = false, context, validateOnly, skipMasks, skipDitherRegions } = {}) {
     if (!record(definition) || Object.keys(definition).some(key => !['palette', 'reserved', 'dither', 'source', 'match'].includes(key)))
       throw new TypeError('A palette constraint accepts palette, reserved, dither, source and match settings');
     const { source = 'lit', match = 'rgb' } = definition;
@@ -294,8 +317,8 @@ const PixelLook = (() => {
     const swatches = packed.map(unpack), exact = new Map(reserved.map((color, index) => [color, candidates.length + index]));
     const lab = matchId ? swatches.map(labPoint) : undefined;
     const dither = definition.dither ?? {};
-    if (!record(dither) || Object.keys(dither).some(key => !['pattern', 'strength', 'seed', 'pairs', 'space', 'spacing', 'origin'].includes(key)))
-      throw new TypeError('Palette dither accepts pattern, strength, seed, pairs, space, spacing and origin settings');
+    if (!record(dither) || Object.keys(dither).some(key => !['pattern', 'strength', 'seed', 'pairs', 'space', 'spacing', 'origin', 'scale', 'fade', 'regions'].includes(key)))
+      throw new TypeError('Invalid palette dither settings');
     const { pattern = 'bayer', strength = 0, seed = 0 } = dither;
     if (!['none', 'checker', 'bayer', 'blue-noise'].includes(pattern) || !fraction(strength) || !Number.isSafeInteger(seed))
       throw new RangeError('Palette dither requires a valid pattern, strength in [0, 1] and integer seed');
@@ -303,6 +326,7 @@ const PixelLook = (() => {
       throw new TypeError('Set a dither space to use spacing or origin');
     const anchor = dither.space === undefined ? undefined :
       stability.pattern({ dither: dither.space, spacing: dither.spacing, origin: dither.origin });
+    const tuning = prepareDitherTuning(dither, { context, validateOnly, skipMasks: skipMasks || skipDitherRegions });
     let pairs, partners;
     if (dither.pairs !== undefined) {
       if (!Array.isArray(dither.pairs) || dither.pairs.length > 256)
@@ -352,7 +376,7 @@ const PixelLook = (() => {
     const count = candidates.length;
     const mod = (n, size) => ((Math.floor(n) % size) + size) % size;
     const reservedIndex = rgb => exact.size ? exact.get(packedRgb(rgb)) : undefined;
-    function index(rgb, x = 0, y = 0, useDither = true) {
+    function index(rgb, x = 0, y = 0, useDither = true, placement) {
       const locked = reservedIndex(rgb);
       if (locked !== undefined) return locked;
       const sites = lab ?? swatches, input = lab ? labPoint(rgb) : rgb;
@@ -368,7 +392,25 @@ const PixelLook = (() => {
         }
       }
       if (!amount || !useDither || count < 2) return best;
-      const rank = ranks[mod(y, height) * width + mod(x, width)];
+      let gain = 1;
+      if (tuning) {
+        const { sample, pixel = [x, y], inherited } = placement ?? {};
+        let scale = tuning.scale;
+        if (sample) for (const region of tuning.regions) {
+          const weight = region.mask(sample);
+          if (region.scale !== undefined) scale += (region.scale - scale) * weight;
+          if (region.strength !== undefined) gain += (region.strength - gain) * weight;
+        }
+        const rule = anchor ?? inherited, point = stability.samplePoint(rule, sample);
+        if (tuning.fade) {
+          const footprint = point && sample.footprint?.(rule.dither);
+          const pixels = point ? footprint ? rule.spacing * scale / footprint : Infinity : scale;
+          gain *= detail.weight(tuning.fade, pixels);
+        }
+        if (gain <= 0) return best;
+        [x, y] = stability.coordinates(rule, point, ...pixel, scale);
+      }
+      const rank = ranks[mod(y, height) * width + mod(x, width)] / gain;
       if (rank >= .5) return best;
       if (partners) {
         second = best;
@@ -401,7 +443,7 @@ const PixelLook = (() => {
       }
       return projection >= threshold * length ? second : best;
     }
-    return { packed, swatches, count, width, height, ranks, amount, source, match, matchId, lab, pairs, anchor, reservedIndex, index };
+    return { packed, swatches, count, width, height, ranks, amount, source, match, matchId, lab, pairs, anchor, tuning, reservedIndex, index };
   }
 
   function prepareLookPolicy(definition, options = {}) {
@@ -481,7 +523,7 @@ const PixelLook = (() => {
     return { packed, rows };
   }
 
-  function paletteIndex(policy, rgb, x, y, { scene, grade, useDither } = {}) {
+  function paletteIndex(policy, rgb, x, y, { scene, grade, useDither, placement } = {}) {
     const input = policy.sourceSwatches ?? scene;
     const mapping = policy.grade || (policy.source === 'graded' ? grade : undefined);
     if (input && mapping) {
@@ -491,12 +533,13 @@ const PixelLook = (() => {
       if (policy.mapOnly) return at;
       rgb = mapping.slice(at * 3, at * 3 + 3);
     }
-    return policy.index(rgb, x, y, useDither);
+    return policy.index(rgb, x, y, useDither, placement);
   }
 
-  function localIndex(local, id, rgb, x, y, useDither) {
+  function localIndex(local, id, rgb, x, y, useDither, screenX, screenY) {
     const row = id - 1, policy = local.constraints?.[row];
-    const slot = policy ? paletteIndex(policy, rgb, x, y, { scene: local.scene, grade: local.grade, useDither }) :
+    const slot = policy ? paletteIndex(policy, rgb, x, y, { scene: local.scene, grade: local.grade, useDither,
+      placement: policy.tuning && local.placement?.(screenX, screenY) }) :
       nearest(rgb, local.palettes[row], false);
     return local.output.rows[row][slot];
   }
@@ -529,7 +572,7 @@ const PixelLook = (() => {
       if (localId) {
         const rule = local.constraints?.[localId - 1]?.anchor;
         const [dx, dy] = (rule ? localDitherAt?.(rule, x, y) : anchor) ?? [x, height - 1 - y];
-        const index = localIndex(local, localId, native, dx, dy);
+        const index = localIndex(local, localId, native, dx, dy, true, x, height - 1 - y);
         const tone = local.output.packed[index], q = ((height - 1 - y) * width + x) * 3;
         rgb[q] = tone >> 16;
         rgb[q + 1] = (tone >> 8) & 255;

@@ -94,7 +94,7 @@ function rasterize(placements, settings) {
               return gain===1 ? value : clamp(Math.max(0,value-glow)*gain+glow,0,1);
             });
             results.push({p,...hit,alpha:sample.alpha*opacity,color,normal,emission,protection,
-              objectPosition:local(rotation,position.map((n,i)=>(n-at[i])/placement.scale)),
+              objectPosition:local(rotation,position.map((n,i)=>(n-at[i])/placement.scale)), objectScale:placement.scale,
               ...(objectDither && mode==='card' && { patternPosition:[(uAt-px)*tile.unitsPerPixel,(py-vAt)*tile.unitsPerPixel,0] })});
           }
         }

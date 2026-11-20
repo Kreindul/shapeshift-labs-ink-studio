@@ -37,7 +37,7 @@ function surfaceShading(world, options, camera) {
     const material = SurfaceLook.prepare(SurfaceLook.withLightRamps(settings, ramps), world.pal, liveLight ?? light, world.surfaceEffects,
       { colorCurves: options.colorCurves !== false, colorLut: options.colorLut !== false, colorStack: options.colorStack !== false,
         paletteConstraints: options.paletteConstraints !== false && (options.lookMasks !== false || !settings.paletteConstraint?.mask),
-        transmission: options.transmission !== false, detailKits:options.surfaceDetailKits!==false,
+        skipMasks: options.lookMasks === false, transmission: options.transmission !== false, detailKits:options.surfaceDetailKits!==false,
         paletteRoles: world.paletteRoles, blueNoise, onPaletteClip: camera.onPaletteClip });
     if (bevelDistance && material.needsDistance) material.bevelDistance = bevelDistance;
     return material;
