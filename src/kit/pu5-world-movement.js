@@ -219,6 +219,8 @@
     const initialRoster=starting.finish();
     const policy = config.decisions === undefined ? null : W.agentDecisions.create(config.decisions, initial);
     const species=Object.keys(profiles).sort();
+    const staticFit=!config.bed&&!config.support&&!config.water&&!config.clearance&&!config.habitat;
+    const settled=new WeakSet();
     const replan=config.replanTicks??24;
     check(Number.isSafeInteger(replan)&&replan>=1&&replan<=10000,'Invalid movement replanning interval');
     function fit(ctx,profile,p){
@@ -460,6 +462,7 @@
     },step(state,ctx){
       const roster=S.get(state), draft=S.edit(roster);
       const contacts=[], decisions=policy?{}:null, dirty=ctx.spatial?.changes().length>0;
+      const skipRest=staticFit&&settled.has(roster);
       function store(slot,before,next,task=next.task){
         const velocity=S.sameVector(before.position,next.position)?S.zero:
           next.position.map((n,i)=>(n-before.position[i])/ctx.dt);
@@ -467,8 +470,10 @@
         draft.update(slot,before,{...next,velocity,task});
       }
       for(const slot of S.order(roster)){
-        const agent=S.read(roster,slot), key=agent.id;
-        if(!policy?.managed(key)){
+        const key=slot.id, managed=policy?.managed(key);
+        if(!managed&&skipRest&&S.atRest(roster,slot))continue;
+        const agent=S.read(roster,slot);
+        if(!managed){
           store(slot,agent,one(agent,ctx,contacts,dirty));
           continue;
         }
@@ -500,7 +505,9 @@
         decisions[key]=policy.observe(next,moved,ctx,movement);
         store(slot,agent,moved,decisions[key].choice?.activity??null);
       }
-      return packed(draft.finish(),contacts,decisions);
+      const next=draft.finish();
+      if(staticFit)settled.add(next);
+      return packed(next,contacts,decisions);
     },*poseEntities(state){
       if(state)for(const page of S.get(state).pages)for(const row of page.details)yield row.entity;
     },pose(state,entity){

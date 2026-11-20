@@ -40,6 +40,10 @@
     const slot=find(roster,name);
     return slot&&read(roster,slot);
   }
+  function atRest(roster,{p,i}){
+    const {details,positions,velocities}=roster.pages[p], row=details[i], at=i*3;
+    return row.mode==='rest'&&row.goal.every((n,axis)=>n===positions[at+axis]&&velocities[at+axis]===0);
+  }
   function rows(roster){
     if(!projections.has(roster))
       projections.set(roster,freeze(Object.fromEntries(order(roster).map(slot=>[slot.id,read(roster,slot)]))));
@@ -176,5 +180,5 @@
     check(names.size<=maxAgents,'Agent checkpoint exceeds capacity');
     return names;
   }
-  W.agentStorage=Object.freeze({empty,zero,count,order,find,read,select,rows,edit,get,view,validate,sameVector,legacyState});
+  W.agentStorage=Object.freeze({empty,zero,count,order,find,read,select,atRest,rows,edit,get,view,validate,sameVector,legacyState});
 })(KIT);
