@@ -1013,6 +1013,7 @@
         first: nb,
         maps: (s.maps || []).slice(),
         frame: [],
+        visual: [],
         A: ID.slice(),
         t: [0, 0, 0],
         P: ID.slice(),
@@ -1148,6 +1149,10 @@
       parts[name].frame.push(map);
       return pup;
     };
+    pup.deformVisual = (name, map) => {
+      parts[name].visual.push(map);
+      return pup;
+    };
     pup.look = (name, target, o) => {
       o = o || {};
       pup.solve();
@@ -1216,7 +1221,10 @@
     };
     pup.clear = () => {
       for (const k in pup.pose) delete pup.pose[k];
-      for (const n of names) parts[n].frame.length = 0;
+      for (const n of names) {
+        parts[n].frame.length = 0;
+        parts[n].visual.length = 0;
+      }
       return pup;
     };
     /* write the bones */
@@ -1233,7 +1241,8 @@
           }
           continue;
         }
-        p.skin.fill(Mx, p.first, p.D, { A: p.A, t: p.t });
+        const shape = p.visual.length ? D.chain(p.D, ...p.visual) : p.D;
+        p.skin.fill(Mx, p.first, shape, { A: p.A, t: p.t });
       }
       return pup;
     };

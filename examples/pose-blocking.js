@@ -1,7 +1,7 @@
 /* One puppet and one pose sampler, shared by Node and the browser preview. */
-function buildSignalCourier({ makeBuilder, makeSculpt, KIT: K }, seed, decorate) {
+function buildSignalCourier({ makeBuilder, makeSculpt, KIT: K }, seed, decorate, extraPalette = []) {
   const B = makeBuilder(seed, [0x111923, 0x17343e, 0x25666d, 0x39a6a1, 0x83ded0,
-    0x112529, 0x294951, 0x557179, 0x80949a, 0x884726, 0xca6830, 0xf29b47, 0xffdc83, 0xeff8df]);
+    0x112529, 0x294951, 0x557179, 0x80949a, 0x884726, 0xca6830, 0xf29b47, 0xffdc83, 0xeff8df, ...extraPalette]);
   const S = K.sculpt(makeSculpt(B)), tags = K.deform.tags(S);
   const teal = { r: [1, 2, 3, 4] }, steel = { r: [5, 6, 7, 8] }, brass = { r: [9, 10, 11, 12] };
   const light = { r: [10, 11, 12, 13], em: true };
@@ -43,7 +43,7 @@ function buildSignalCourier({ makeBuilder, makeSculpt, KIT: K }, seed, decorate)
     boot.box([hip, 0.32, 0], [0.15, 0.245, 0.15], teal);
     boot.box([hip, 0.13, -0.1], [0.20, 0.13, 0.255], brass);
   }
-  decorate?.({ S, define });
+  decorate?.({ B, S, define });
   S.bake();
   for (const [name, part] of Object.entries(parts)) part.ids = tags[name];
   const world = B.finish({

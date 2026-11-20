@@ -330,6 +330,7 @@ const CMD = {
         '  motion-review <id> [--finding kind-or-id] [--out report.json]  inspect motion findings and focused playback ranges',
         '  clip-sequence <id> [--handoff 0] [--out report.json]  inspect clip instances, retimed cues, and handoffs',
         '  authored-contacts <id> [--at seconds] [--out report.json]  inspect contact ranges and socket transfer timing',
+        '  motion-fx <id> [--at seconds] [--out report.json]  inspect keyed FX layers and sampled effect output',
         '  passes <id> [--channels coverage,depth,normal,objectId,materialId,emission]  save art-pixel render pass previews',
         '  shimmer <id> [--mode orbit|zoom|pan|still --frames 24]  how many pixels flicker over a move, and a GIF of it',
         '  crisp <id ...|all> [--t 2 --map]   how crisp at its own pixel size: stray pixels, specks, flat area, finest frequencies,',
@@ -641,6 +642,21 @@ const CMD = {
     const sample = opt.at === undefined ? undefined : timeline.inspect(num('at'));
     const report = JSON.stringify({ scene: world.id, duration, contacts,
       handoffs: handoffs.map(key => ({ ...key, focus: timeline.focus(key.id) })), sample }, null, 2) + '\n';
+    if (!opt.out) process.stdout.write(report);
+    else {
+      const file = path.resolve(opt.out);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, report);
+      console.log('wrote', file);
+    }
+  },
+  'motion-fx'() {
+    const world = build(pos[0]), fx = world.motionFx;
+    if (!fx?.effects || !fx.at) die('motion-fx needs a scene with an authored Motion FX stack');
+    const time = opt.at === undefined ? undefined : num('at');
+    const sample = time === undefined ? undefined : world.motionFxDemo?.update?.(time) ?? { time, layers: fx.at(time) };
+    const report = JSON.stringify({ scene: world.id, duration: fx.duration,
+      capacity: fx.capacity, effects: fx.effects(), sample }, null, 2) + '\n';
     if (!opt.out) process.stdout.write(report);
     else {
       const file = path.resolve(opt.out);
