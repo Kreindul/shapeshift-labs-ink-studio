@@ -99,6 +99,12 @@
     for(let i=1;i>=0;i=previous[i])route.unshift(points[i]);
     return {status:'ok',points:route,length:cost[1]};
   }
+  function routeDependencies(config) {
+    const {min,max} = config.bounds;
+    const area = {axes:'xz',min:[min[0],min[2]],max:[max[0],max[2]]};
+    return {reads:['bed','support','clearance','water','wear'].flatMap(key=>
+      typeof config[key] === 'string' ? [{field:config[key],bounds:area}] : [])};
+  }
   function navigation(config) {
     bounds(config.bounds);
     check(Number.isFinite(config.cell??.25)&&(config.cell??.25)>0&&Number.isFinite(config.wearWeight??.8)&&
@@ -111,7 +117,7 @@
       return Q.ok(mode==='walk'?groundPlan({query},config,target.point,args.to,args):
         spatialPlan({query},config,target.point,args.to,{mode,radius,entity:args.exclude}));
     }
-    return {initial:()=>null,fields:{
+    return {initial:()=>null,dependencies:routeDependencies(config),fields:{
       height:{type:'number',units:'world',read:({query,target})=>target.point?
         Q.ok(heightAt({query},config,target.point[0],target.point[2])):Q.missing('point required')}
     },traces:{route:{run:route}}};
@@ -222,7 +228,7 @@
       }
       return null;
     }
-    function one(agent,ctx,contacts){
+    function one(agent,ctx,contacts,dirty){
       const raw=profiles[agent.species], profile={radius:.15,maxWade:.14,entity:agent.entity,...raw};
       let position=fit(ctx,profile,agent.position), previous=agent;
       if(!position){
@@ -238,12 +244,21 @@
       const goal=choose(ctx,agent,profile);
       if(!goal)return {...previous,position,mode:'waiting',route:[],cursor:0};
       if(V.dist(position,goal)<profile.radius*.65)return {...previous,position,mode:'rest',route:[],cursor:0};
-      if(ctx.tick>=retry||!route.length){
+      let corridor;
+      if (dirty && route.length) {
+        const envelope = P.spatial.boxOf([position,...route.slice(cursor)]);
+        envelope.min[1] = Math.min(0,envelope.min[1]-(profile.drop??.5));
+        envelope.max[1] = Math.max(0,envelope.max[1]+(profile.height??profile.radius*2));
+        const area = P.spatial.expand(envelope,profile.radius);
+        if (ctx.spatial.changes(area).length) corridor=area;
+      }
+      if(ctx.tick>=retry||!route.length||corridor){
         const result=profile.mode==='walk'?groundPlan(ctx,config,position,goal,profile):
           spatialPlan(ctx,config,position,goal,profile);
         route=result.points??[];
         cursor=route.length>1?1:0;
         retry=ctx.tick+(route.length?replan:Math.min(6,replan));
+        if (corridor) ctx.spatial.rebuilt('agent-route',{entity:agent.entity,status:result.status},corridor);
       }
       if(!route[cursor])return {...previous,position,mode:'blocked',route,cursor,retry};
       const aim=V.sub(route[cursor],position), distance=V.len(aim), step=Math.min(distance,(profile.speed??1)*ctx.dt);
@@ -295,7 +310,7 @@
       });
       return {...previous,position:moved,direction,route,cursor,retry,mode:profile.mode,travel,footprints,limbs};
     }
-    return {initial:()=>({agents:initial,contacts:[]}),validateState(state){
+    return {initial:()=>({agents:initial,contacts:[]}),dependencies:routeDependencies(config),validateState(state){
       check(record(state?.agents)&&Array.isArray(state.contacts)&&Object.keys(state.agents).length===Object.keys(initial).length&&
         Object.entries(state.agents).every(([key,agent])=>own(initial,key)&&own(profiles,agent.species)&&vector(agent.position)&&
           vector(agent.goal)&&vector(agent.direction)&&Array.isArray(agent.route)&&agent.route.every(p=>vector(p))),
@@ -308,8 +323,8 @@
         return {...state,agents:{...state.agents,[agent]:{...state.agents[agent],goal:to,route:[],cursor:0,retry:0}}};
       }
     },step(state,ctx){
-      const contacts=[], agents={};
-      for(const key of Object.keys(state.agents).sort())agents[key]=one(state.agents[key],ctx,contacts);
+      const contacts=[], agents={}, dirty=ctx.spatial?.changes().length>0;
+      for(const key of Object.keys(state.agents).sort())agents[key]=one(state.agents[key],ctx,contacts,dirty);
       return {agents,contacts};
     },*poseEntities(state){
       for(const agent of Object.values(state?.agents??{}))yield agent.entity;

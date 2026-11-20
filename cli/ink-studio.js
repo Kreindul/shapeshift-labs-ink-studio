@@ -330,6 +330,7 @@ const CMD = {
         '  scene apply|stamp|remix|capture|history|promote <world> ...  edit or derive a world manifest',
         '    scene apply <scene> <edits.json> --dry-run   preview edited paths and look targets',
         '  sim run|resume|fork|reset|replay|diff|sweep|render ...  run or compare fixed-tick simulations',
+        '    sim dependencies <scene|run|driver.js> [--ticks N] [--actions file] [--out report.json]   report spatial rebuilds',
         '    sim sweep <world|run> <cases.json>   use look cases to compare one fixed simulation snapshot',
         '  compare <scene|run> --looks cases.json [--out sheet.png]   compare look variants on the same view',
         '  look inspect <scene|run|look-file> [--renderer headless|webgl]   list bindings, dependencies and targets',

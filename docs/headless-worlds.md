@@ -268,6 +268,56 @@ To drive requests from a model, implement
 `{from, to, amount, mode?, id?}` objects. Use `checkTransfers(validate)`
 to validate fixed endpoint references during world validation.
 
+## Spatial dependency reports
+
+Registered simulation systems can declare the fields and regions
+they read and write. A declaration can name a whole field or a
+bounded region. Use `axes` for lower-dimensional domains such as
+`xz` on a terrain grid. A read can add `padding` for nearby samples.
+
+```js
+dependencies: {
+  reads: [{field: 'river/bed', bounds: {axes: 'xz', min: [0, 0], max: [8, 4]}, padding: 0.25}],
+  writes: ['route-cost']
+}
+```
+
+An action or step calls `ctx.spatial.write(field, bounds, reason)`
+after changing a declared field. Use `null` for a whole-field
+change. Short write names belong to the system publishing them.
+Action writes are visible to readers on the same tick. Step writes
+become visible on the next tick alongside the new state, and
+checkpoints preserve any pending writes.
+
+A consumer can call `ctx.spatial.changes(bounds)` to get the
+overlapping writes that match its read declaration. Call
+`ctx.spatial.rebuilt(kind, detail, bounds)` after doing the work.
+The report lists affected readers independently of the recorded
+rebuilds. Built-in field region edits and water bed edits publish
+spatial writes. Active agents replan when a reported change overlaps
+their remaining route. Routine simulation and unreported changes
+still use each solver's normal update rules.
+
+```sh
+ink-studio sim dependencies examples/world-watershed.json --ticks 31 \
+  --actions examples/spatial-bed-edit.json --out runtime-dependencies.json
+ink-studio sim dependencies examples/spatial-rebuild.js --out retained-dependencies.json
+```
+
+The runtime report includes the changed field and bounds, affected
+systems, and measured work such as the number of water bed cells
+sampled and changed. A recorded run is played from its starting
+checkpoint to recover this timeline. A retained driver exports
+`dependencies(kit)` and supplies its own edit sequence.
+
+The retained biome pipeline uses the same tracker for terrain spans,
+connected flooding, water boundaries, traversal links, and splat
+chunks. The report links recorded work to its input changes using
+`because` IDs. Flooding can publish changes beyond the edited region.
+Painting a material can rebuild nearby splats using retained surface
+geometry. Physical spans and route links can stay cached. Ordinary
+`sim render` still assembles a fresh headless render scene.
+
 ## Author a world
 
 A manifest has `format: "ink-studio/world"`, `version: 1`, a stable `id`,

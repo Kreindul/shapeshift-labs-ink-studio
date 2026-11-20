@@ -369,18 +369,27 @@
     let published, queue = Promise.resolve();
     const initial = P.chunks.create({ preview: ({ input }, { previous }) =>
       build(input.frame, input.index, input.reuseGeometry ? geometry.get(previous) : undefined) });
-    async function realize(frame, indices, { previous } = {}) {
+    async function realize(frame, indices, { previous, changes } = {}) {
       if (!frames.has(frame) || !Array.isArray(indices) || indices.length > 4096)
         throw new Error('Expected a prepared frame and a bounded chunk set');
       const old = realizations.get(previous);
       if (previous !== undefined && !old) throw new TypeError('Expected a realization from this biome compiler');
       const requests = indices.map(address);
-      const before = previous?.frame, intent = before && frame.view.changesFrom(before.view);
-      const water = before ? frame.water.changesFrom(before.water) : [];
-      const changedBricks = before && (frame.bricks?.changesFrom(before.bricks) ?? before.bricks?.changesFrom(null));
-      const geometryDirty = before ? [...intent.regions, ...(changedBricks ?? [])] : [];
-      const dirty = [...geometryDirty, ...water];
-      const global = before && (intent.global || before.time !== frame.time), all = global || dirty.length > 4096;
+      const before = previous?.frame;
+      let geometryDirty = [], dirty = [], global = false;
+      if (before && changes) {
+        const relevant = changes.filter(row=>row.field !== 'render/layout');
+        geometryDirty = relevant.filter(row=>row.field === 'terrain/solid' && row.bounds).map(row=>row.bounds);
+        dirty = relevant.filter(row=>row.bounds).map(row=>row.bounds);
+        global = relevant.some(row=>row.bounds === null);
+      } else if (before) {
+        const intent = frame.view.changesFrom(before.view);
+        const changedBricks = frame.bricks?.changesFrom(before.bricks) ?? before.bricks?.changesFrom(null) ?? [];
+        geometryDirty = [...intent.regions,...changedBricks];
+        dirty = [...geometryDirty,...frame.water.changesFrom(before.water)];
+        global = intent.global || before.time !== frame.time;
+      }
+      const all = global || dirty.length > 4096;
       const shareCarrier = before && (frame.water === before.water || frames.get(frame).carrier && frames.get(before).carrier);
       const horizontal = box => ({ min: [box.min[0], bottom * cell, box.min[2]], max: [box.max[0], top * cell, box.max[2]] });
       const dirtySurfaces = geometryDirty.map(horizontal), cache = (old ?? initial).fork();

@@ -554,12 +554,12 @@
     return result;
   }
 
-  function sceneFromSpans(tiles, { previous, optics: look } = {}) {
+  function sceneFromSpans(tiles, { previous, optics: look, onWork } = {}) {
     const old = tileScenes.get(previous);
     if (!Array.isArray(tiles) || tiles.length > 4096 || new Set(tiles).size !== tiles.length ||
         !Array.from(tiles).every(P.verticalSpans.isGrid) ||
-        (previous !== undefined && !old))
-      throw new TypeError('Expected span grids and an optional previous span water scene');
+        (previous !== undefined && !old) || onWork !== undefined && typeof onWork !== 'function')
+      throw new TypeError('Expected span grids and an optional previous span water scene and work callback');
     const key = typeof look === 'function' ? look : JSON.stringify(optics(look ?? undefined));
     const cached = old?.key === key ? old.bodies : new Map();
     const wet = tiles.filter(grid => grid.hasWater || grid.hasNamedAir);
@@ -568,6 +568,14 @@
     for (const grid of wet) {
       const id = 'span/' + grid.bounds.min.join('/');
       bodies.set(grid, cached.get(grid) ?? fromSpans(grid, { id, optics: look ?? undefined }));
+    }
+    if (onWork) {
+      const byId = new Set([...bodies.values()].map(body=>body.id));
+      onWork(P.data.freeze({
+        rebuilt:wet.filter(grid=>!cached.has(grid)).map(grid=>bodies.get(grid).id),
+        reused:wet.filter(grid=>cached.has(grid)).map(grid=>bodies.get(grid).id),
+        removed:[...(old?.bodies.values() ?? [])].filter(body=>!byId.has(body.id)).map(body=>body.id)
+      }));
     }
     if (old?.key === key && bodies.size === cached.size && wet.every(grid => cached.has(grid))) return previous;
     const result = scene([...bodies.values()]);

@@ -200,6 +200,37 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions}
     run.advance(at);
     return run.checkpoint();
   }
+  function dependencyReport(file) {
+    ensure(typeof file==='string','Supply a world, recording or retained dependency driver');
+    if (/\.(js|cjs)$/i.test(file)) {
+      const source = require(path.resolve(file));
+      if (typeof source.dependencies === 'function') {
+        ensure(['ticks','steps','t','actions'].every(key=>opt[key]===undefined),
+          'Retained dependency drivers supply their own edits');
+        return Promise.resolve(source.dependencies(kit)).then(respond);
+      }
+    }
+    const input = load(file);
+    let run = runtime(input);
+    if (input.log) {
+      const origin = input.log.origin;
+      run = R.create(origin.world,{checkpoint:origin});
+      run.schedule(input.log.commands);
+    }
+    schedule(run);
+    const start = run.view().tick;
+    const end = input.log && opt.ticks===undefined && opt.steps===undefined && opt.t===undefined ? input.log.end.tick : to(run);
+    const ticks = [];
+    run.advance(end,{onTick(view) {
+      const {changes,affected,work,pending} = run.dependencies();
+      if (changes.length || work.length || pending.length) {
+        ensure(ticks.length<10000,'Spatial dependency report exceeds its tick budget');
+        ticks.push({tick:view.tick,changes,affected,work,...(pending.length && {pending})});
+      }
+    }});
+    return respond({format:'ink-studio/spatial-dependencies',version:1,id:run.view().world.id,
+      fromTick:start,toTick:end,declarations:run.dependencies().declarations,ticks});
+  }
   function sim([mode,file,other]) {
     switch (mode) {
       case 'run':
@@ -213,6 +244,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions}
         finish(run);
         break;
       }
+      case 'dependencies': return dependencyReport(file);
       case 'reset': {
         const input=load(file);
         finish(input.log?R.create(input.log.origin.world,{checkpoint:input.log.origin}):runtime(input));
@@ -284,7 +316,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions}
         require('./png.js').write(output,image.w,image.h,image.rgb);
         break;
       }
-      default: throw Error('Use sim run|resume|fork|reset|replay|diff|sweep|render');
+      default: throw Error('Use sim run|resume|fork|reset|replay|diff|sweep|render|dependencies');
     }
   }
   function applyEdits(input, edits, { dryRun = false } = {}) {
@@ -400,7 +432,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions}
         break;
       }
       case 'scene': scene(pos); break;
-      case 'sim': sim(pos); break;
+      case 'sim': return sim(pos);
       default: throw Error('Unknown world command');
     }
   }

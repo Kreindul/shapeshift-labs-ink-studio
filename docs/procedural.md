@@ -1717,6 +1717,12 @@ await world.undo();
   are reused when the edit only changes water in that chunk. Use `update`
   for the compiler-only publishing API.
 
+A committed revision includes `dependencies`, which records the fields
+and regions that changed, causes linking derived changes to their inputs,
+and the actual span, flood, water, traversal, and splat work. Run the
+[headless dependency report](headless-worlds.md#spatial-dependency-reports)
+to inspect a local edit from the command line.
+
 ### Connected flooding
 
 `P.spanFlood.create({tiles, sources, previous, origin, opening, maxChecks})`

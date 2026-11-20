@@ -68,7 +68,8 @@
       check(own(descriptors,field),'Unknown spatial field '+field);
       checkRegion(descriptors[field],region);
     }
-    return {initial:() => initial,fields:descriptors,
+    return {initial:() => initial,fields:descriptors,dependencies:{writes:entries.map(([name])=>name)},
+
       validateState(state) {
         check(record(state) && Object.keys(state).length === entries.length &&
           entries.every(([name]) => own(state,name)), 'Invalid saved spatial fields');
@@ -79,6 +80,8 @@
         set(state,{field,region},ctx) {
           check(state[field].length < 4096,'Spatial field region budget exceeded');
           ctx.emit('field-edit',{field,bounds:region.bounds});
+          const {space,axes} = descriptors[field].spatial;
+          ctx.spatial?.write(field,space==='world'?{...region.bounds,axes}:null,'field-region-edited');
           return {...state,[field]:[...state[field],region]};
         }
       }};
@@ -128,7 +131,7 @@
     return {combinational:stateless,initial:() => initial,inputs,outputs,step,output:state =>
       Object.fromEntries(Object.keys(outputs).map(key => [key,state[key]]))};
   }
-  function water(config) {
+  function water(config,{id:system} = {}) {
     const {width,height,cell=1,origin=[0,0]} = config;
     const [dx,dz] = Array.isArray(cell) ? cell : [cell,cell];
     check(Number.isSafeInteger(width) && Number.isSafeInteger(height) && width>0 && height>0 && width*height<=65536 &&
@@ -180,6 +183,16 @@
         ...(withTerrain?{terrain:(x,z)=>regions(bed,[x,z],config.base??0),initial:(x,z)=>regions(seed,[x,z])}:{})});
     }
     const solver = makeSolver();
+    function terrainCells(area) {
+      const result = [];
+      const [a,b] = area.min.map((n,i)=>Math.max(0,Math.floor((n-origin[i])/(i?dz:dx)-.5)));
+      const [c,d] = area.max.map((n,i)=>Math.min((i?height:width)-1,Math.ceil((n-origin[i])/(i?dz:dx)-.5)));
+      for (let z=b;z<=d;z++) for (let x=a;x<=c;x++) {
+        const cell=z*width+x;
+        if (zone(point(cell),area)) result.push(cell);
+      }
+      return result;
+    }
     function sample(state,x,z,i=index(x,z)) {
       if (i<0) return null;
       const depth=state.fluid.depth[i], b=state.fluid.bed[i];
@@ -239,7 +252,10 @@
     }
     const terrainQuery=config.obstacle;
     check(terrainQuery===undefined || typeof terrainQuery==='string','Invalid obstacle field');
+    const dependencyBounds = {axes:'xz',min:origin,max:[origin[0]+width*dx,origin[1]+height*dz]};
     return {inputs,outputs,...(exchanging && {accounts}),
+      dependencies:{reads:[{field:system+'/bed',bounds:dependencyBounds},
+        ...(terrainQuery ? [{field:terrainQuery,bounds:dependencyBounds}] : [])],writes:[system+'/bed']},
       initial:() => ({fluid:makeSolver(true).checkpoint(),gate:gateInit,pump:pumpInit,terrain:[],manual:{},
         ...(exchanging && {exchange:{sent:0,received:0}})}),
       validateState(state) {
@@ -249,7 +265,10 @@
         'Invalid water transfer balance');
       },
       checkAction(type,args){
-        if(type==='bed')patchList([{bounds:args.bounds,value:args.height}],2);
+        if(type==='bed'){
+          patchList([{bounds:args.bounds,value:args.height}],2);
+          check(Math.abs(args.height)<=1e7,'Shallow water terrain height exceeds its range');
+        }
         if(type==='gate')check(own(gates,args.gate)&&Number.isFinite(args.opening)&&args.opening>=0&&args.opening<=1,'Invalid gate command');
         if(type==='pump')check(own(pumps,args.pump)&&Number.isFinite(args.rate)&&args.rate>=0&&args.rate<=1e9,'Invalid pump command');
         if(type==='release')check(own(inputs,args.port),'Unknown water control');
@@ -284,7 +303,18 @@
         bed(state,{bounds:area,height:value},ctx) {
           check(state.terrain.length<4096,'Water terrain edit budget exceeded');
           ctx.emit('bed-edit',{bounds:area,height:value});
-          return {...state,terrain:[...state.terrain,{bounds:area,value}]};
+          const cells = terrainCells(area), previous = state.fluid.bed;
+          const changed = cells.filter(index=>previous[index]!==value);
+          const scope = {...area,axes:'xz'};
+          let fluid = state.fluid;
+          if (changed.length) {
+            const bed = previous.slice();
+            for (const index of changed) bed[index] = value;
+            fluid = {...fluid,bed};
+            ctx.spatial?.write('bed',scope,'bed-edited');
+          }
+          ctx.spatial?.rebuilt('water-bed',{sampled:cells.length,changed:changed.length,total:width*height},scope);
+          return {...state,fluid,terrain:[...state.terrain,{bounds:area,value,applied:true}]};
         },
         gate(state,{gate,opening},ctx) {
           ctx.emit('gate-set',{gate,opening});
@@ -302,7 +332,8 @@
       },
       step(state,ctx) {
         solver.restore(state.fluid);
-        if (state.terrain.length) solver.setTerrain((x,z,i,old)=>regions(state.terrain,[x,z],old));
+        if (state.terrain.some(row=>!row.applied))
+          solver.setTerrain((x,z,i,old)=>regions(state.terrain,[x,z],old));
         const gate={}, pump={};
         for (const key of Object.keys(gates)) gate[key]=clamp(state.manual['gate.'+key]??ctx.input['gate.'+key],0,1);
         for (const key of Object.keys(pumps)) pump[key]=clamp(state.manual['pump.'+key]??ctx.input['pump.'+key],0,1e9);

@@ -52,6 +52,19 @@
       const query = Q.create({world},systems);
       for (const system of consumers) system.checkFields(query);
     }
+    const systemDependencies = Object.entries(systems).filter(([,system])=>system.dependencies !== undefined);
+    let fieldQuery;
+    function canonical(entry,writer) {
+      const name = typeof entry === 'string' ? entry : entry?.field;
+      const field = typeof name === 'string' && !name.includes('/') ? (writer ? writer+'/'+name : (fieldQuery ??= Q.create({world},systems)).field(name)?.name ?? name) : name;
+      return typeof entry === 'string' ? field : {...entry,field};
+    }
+    const dependencies = P.spatialDependencies.create(Object.fromEntries(systemDependencies.map(([name,system])=>{
+      const spec = system.dependencies;
+      check(record(spec) && Array.isArray(spec.reads ?? []) && Array.isArray(spec.writes ?? []),
+        'Invalid spatial dependencies for '+name);
+      return [name,{reads:(spec.reads ?? []).map(entry=>canonical(entry)),writes:(spec.writes ?? []).map(entry=>canonical(entry,name))}];
+    })));
     const transfers = W.transfers.bind(systems);
     for (const name of transfers.producers) systems[name].checkTransfers?.(transfers.validate);
     const incoming = new Map(), edges = new Map(), indegree = new Map();
@@ -85,7 +98,7 @@
       }
     }
     check(order.length === names.length, 'Instantaneous signal cycle; use a delay or a stateful system');
-    return {world,systems,ports,incoming,order,names,transfers};
+    return {world,systems,ports,incoming,order,names,transfers,dependencies};
   }
   function actionCheck(raw, plan, min = 1) {
     check(record(raw) && tickOK(raw.tick) && raw.tick >= min && record(raw.args ?? {}) &&
@@ -168,7 +181,7 @@
       world=result.world;
     }
     const {plan}=result;
-    const {systems,ports,incoming,order,names,transfers} = plan;
+    const {systems,ports,incoming,order,names,transfers,dependencies} = plan;
     const projection = Q.projection(systems);
     const rootInputs = Object.fromEntries(Object.entries(ports.inputs).map(([name,port]) => [name,port.default]));
     const rootOutputs = Object.fromEntries(Object.entries(ports.outputs).map(([name,port]) => [name,port.default]));
@@ -180,15 +193,16 @@
     const historyLimit = world.history?.limit ?? 10000;
     let tick = 0, states = {}, outputs = rootOutputs, manual = rootInputs, delays = rootDelays,
       history = [], dropped = 0, lastEvents = [], scenario = {status:'running',score:0,matched:{},metrics:{}};
+    let pendingWrites = [], lastDependencies = null;
     let currentQuery, lastTransfers = [], lastSignals = {...rootInputs,...rootOutputs};
 
     function view(worldValue = world, statesValue = states, signals = lastSignals, tickValue = tick, receipts = lastTransfers) {
       return Object.freeze({world:worldValue,states:statesValue,signals,tick:tickValue,time:tickValue*worldValue.dt,history,dropped,
         ...(receipts.length && {transfers:receipts})});
     }
-    function context(name, worldValue, statesValue, at, input, emit, query) {
+    function context(name, worldValue, statesValue, at, input, emit, query, spatial) {
       return Object.freeze({world:worldValue,query,id:name,states:statesValue,tick:at,time:at*worldValue.dt,dt:worldValue.dt,
-        input,emit,random:key => P.data.hash(name+'/'+at+'/'+String(key),worldValue.seed)/4294967296});
+        input,emit,...(spatial && {spatial}),random:key => P.data.hash(name+'/'+at+'/'+String(key),worldValue.seed)/4294967296});
     }
     function rootedState(value) {
       return P.data.isImmutable(value) ? value : freeze(copy(value));
@@ -236,7 +250,8 @@
     function save() {
       return freeze({format:checkpointFormat,version:1,tick,world,states,outputs,manual,delays,history,dropped,
         signals:lastSignals,events:lastEvents,pending:packCommands(),scenario,
-        ...(lastTransfers.length && {transfers:lastTransfers})});
+        ...(lastTransfers.length && {transfers:lastTransfers}),
+        ...(pendingWrites.length && {dependencyWrites:pendingWrites})});
     }
     function restore(saved) {
       check(record(saved) && saved.format === checkpointFormat && saved.version === 1 && equal(saved.world,world) && tickOK(saved.tick),
@@ -258,6 +273,11 @@
       transfers.validateBalances(payload.states);
       if (own(payload,'transfers')) transfers.validateReceipts(payload.transfers,payload.tick);
       lastTransfers = payload.transfers ?? [];
+      if (own(payload,'dependencyWrites')) {
+        check(Array.isArray(payload.dependencyWrites),'Invalid saved spatial writes');
+        dependencies.begin(payload.dependencyWrites);
+        pendingWrites = payload.dependencyWrites;
+      }
       ({tick,states,outputs,manual,delays,history,dropped,scenario,signals:lastSignals,events:lastEvents} = payload);
       enqueue(payload.pending,false);
     }
@@ -312,6 +332,22 @@
       check(tickOK(at),'Tick budget exceeded');
       let nextWorld = world, changedEntities = new Set();
       const drafts = {...states}, nextManual = {...manual}, requests = [];
+      let trace = pendingWrites.length ? dependencies.begin(pendingWrites) : null;
+      const nextWrites = [], activeTrace = () => trace ??= dependencies.begin();
+      function spatial(name, stepping) {
+        if (!systems[name].dependencies) return undefined;
+        return Object.freeze({
+          changes:bounds=>trace?.affected(name,bounds) ?? [],
+          write(field,bounds,reason) {
+            check(typeof field === 'string','Spatial writes need a field name');
+            const canonical = field.includes('/') ? field : name+'/'+field;
+            if (!stepping) return activeTrace().change(name,canonical,bounds,reason);
+            check(nextWrites.length < P.spatialDependencies.limit,'Spatial write budget exceeded');
+            nextWrites.push(dependencies.write(name,canonical,bounds,reason));
+          },
+          rebuilt:(kind,detail,bounds)=>activeTrace().recordWork(name,kind,detail,bounds)
+        });
+      }
       const makeEmit = system => (kind,detail = {}) => {
         check(id(kind) && record(detail) && events.length < 10000, 'Invalid event or per-tick event budget exceeded');
         events.push(freeze({...copy(detail),kind,system,tick:at,id:at+'.'+events.length}));
@@ -340,7 +376,7 @@
           if (key === 'transfer') requests.push({name,request:item.args});
         } else {
           const actionQuery = Q.create(view(nextWorld,{...drafts}),systems,projection);
-          const ctx = context(name,nextWorld,Object.freeze({...drafts}),at,{},emit,actionQuery);
+          const ctx = context(name,nextWorld,Object.freeze({...drafts}),at,{},emit,actionQuery,spatial(name,false));
           drafts[name] = rootedState(systems[name].actions[key](drafts[name],item.args,ctx));
         }
       }
@@ -370,7 +406,7 @@
         const system = systems[name];
         const input = currentValues(name,nextManual,immediate,outputs,delays);
         for (const [key,value] of Object.entries(input)) observed[name+'/'+key] = value;
-        const ctx = context(name,nextWorld,committed,at,input,makeEmit(name),previousQuery);
+        const ctx = context(name,nextWorld,committed,at,input,makeEmit(name),previousQuery,spatial(name,true));
         const start = profile ? clock() : 0;
         nextStates[name] = system.step ? rootedState(system.step(committed[name],ctx)) : committed[name];
         readOutputs(name,nextStates[name],ctx,nextOutputs);
@@ -381,6 +417,7 @@
         [edge.to,[...delays[edge.to].slice(1),nextOutputs[edge.from]]]));
       const publishedSignals = freeze({...observed,...nextOutputs});
       const memory = historyWith(events,nextWorld.history);
+      const dependencyReport = trace && trace.report();
       const nextScenario = evaluateScenario({...view(nextWorld,freeze(nextStates),publishedSignals,at,receipts),...memory},events);
       tick = at;
       world = nextWorld;
@@ -393,6 +430,8 @@
       dropped = memory.dropped;
       lastEvents = freeze(events);
       lastTransfers = receipts;
+      pendingWrites = freeze(nextWrites);
+      lastDependencies = dependencyReport;
       scenario = nextScenario;
       scheduled.delete(at);
       currentQuery = undefined;
@@ -421,6 +460,8 @@
         return {scheduled:all.length,applied:all.filter(command=>command.tick<=tick).length,pending:packCommands().length};
       },
       profile:() => Object.fromEntries(metrics),
+      dependencies:() => ({declarations:dependencies.describe,
+        ...(lastDependencies ?? {changes:[],affected:[],work:[]}),pending:pendingWrites}),
       fork:() => create(world,{checkpoint:save(),implementations,profile,validated:true}),
       reset:() => create(origin.world,{checkpoint:origin,implementations,profile,validated:true})});
   }

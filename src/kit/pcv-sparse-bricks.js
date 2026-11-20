@@ -33,11 +33,11 @@
       if (!field(v)) throw new RangeError('Sparse brick distances must be finite and representable');
       return v;
     };
-    const equal = (a, b) => a === b || channels.every(channel => {
-      const p = a[channel], q = b[channel];
+    function sameChannel(p, q) {
       return p === q || (p != null && q != null && typeof p === 'object' && typeof q === 'object' &&
         p.every((value, i) => value === q[i]));
-    });
+    }
+    const equal = (a,b) => a === b || channels.every(channel => sameChannel(a[channel],b[channel]));
     function box(index) {
       const first = index.map(v => v * brickSize);
       return { min: first.map(v => (v - 1) * cell), max: first.map(v => (v + brickSize) * cell) };
@@ -138,7 +138,8 @@
         });
         return snapshot(next);
       }
-      function changesFrom(previous) {
+      function changesFrom(previous, {channel} = {}) {
+        if (channel !== undefined && !channels.includes(channel)) throw new TypeError('Unknown sparse brick channel');
         if (previous === result) return [];
         const old = previous == null ? null : states.get(previous);
         if (previous != null && !old) throw new TypeError('Expected a sparse brick snapshot');
@@ -146,8 +147,10 @@
         if (old && (old.cell !== cell || old.brickSize !== brickSize))
           return freeze([...old.map.keys()].map(key => old.box(at(key))).concat([...map.keys()].map(key => box(at(key)))));
         const previousMap = old?.map ?? new Map();
-        return freeze([...new Set([...previousMap.keys(), ...map.keys()])].sort().filter(key =>
-          !equal(previousMap.get(key) ?? empty, map.get(key) ?? empty)).map(key => box(at(key))));
+        return freeze([...new Set([...previousMap.keys(), ...map.keys()])].sort().filter(key => {
+          const a = previousMap.get(key) ?? empty, b = map.get(key) ?? empty;
+          return channel === undefined ? !equal(a,b) : !sameChannel(a[channel],b[channel]);
+        }).map(key => box(at(key))));
       }
       let uniform = 0, sculpted = 0;
       const columns = new Set();
