@@ -16,7 +16,7 @@ export function createSplatPipeline(gl, { ascii, specialize = true, sampleCovera
     const variants = new Map();
     let plain, plainUnavailable = false;
     let disposed = false;
-    let orderCapacity = 0, orderCount = 0;
+    let orderCapacity = 0, orderCount = 0, hasReferences = false;
     const vao = resources.allocate('VertexArray');
     gl.bindVertexArray(vao);
     const cornerBuffer = resources.allocate('Buffer');
@@ -41,12 +41,13 @@ export function createSplatPipeline(gl, { ascii, specialize = true, sampleCovera
       // explicitly be false before the shader can omit their work.
       programFor(features) {
         check();
-        if (features?.water || features?.portal) {
+        if (features?.water || features?.portal || features?.instances) {
           const water = Boolean(features.water), portal = Boolean(features.portal);
           const airPockets = Boolean(features.airPockets), layered = Boolean(features.layered), atlas = Boolean(features.atlas);
-          const key = +airPockets + 2 * layered + 4 * atlas + 8 * water + 16 * portal;
+          const instances = Boolean(features.instances);
+          const key = +airPockets + 2 * layered + 4 * atlas + 8 * water + 16 * portal + 32 * instances;
           if (!variants.has(key)) {
-            const shader = splatShaderSources(ascii, sampleCoverage, { water, airPockets, layered, atlas, portal });
+            const shader = splatShaderSources(ascii, sampleCoverage, { water, airPockets, layered, atlas, portal, instances });
             variants.set(key, resources.program(shader.vertex, shader.fragment));
           }
           return variants.get(key);
@@ -64,15 +65,27 @@ export function createSplatPipeline(gl, { ascii, specialize = true, sampleCovera
         }
         return plain;
       },
-      setOrder(indices) {
+      setOrder(indices, references = false) {
         check();
-        if (!(indices instanceof Int32Array)) throw new TypeError('Draw order must be an Int32Array');
+        if (!(indices instanceof Int32Array) || references && indices.length % 2)
+          throw new TypeError('Draw order must be an Int32Array with the selected stride');
         gl.bindBuffer(gl.ARRAY_BUFFER, orderBuffer);
         if (indices.byteLength > orderCapacity) {
           gl.bufferData(gl.ARRAY_BUFFER, indices, gl.DYNAMIC_DRAW);
           orderCapacity = indices.byteLength;
         } else if (indices.length) gl.bufferSubData(gl.ARRAY_BUFFER, 0, indices);
-        orderCount = indices.length;
+        if (references !== hasReferences) {
+          gl.bindVertexArray(vao);
+          gl.vertexAttribIPointer(1, 1, gl.INT, references ? 8 : 0, 0);
+          if (references) {
+            gl.enableVertexAttribArray(2);
+            gl.vertexAttribIPointer(2, 1, gl.INT, 8, 4);
+            gl.vertexAttribDivisor(2, 1);
+          } else gl.disableVertexAttribArray(2);
+          gl.bindVertexArray(null);
+          hasReferences = references;
+        }
+        orderCount = indices.length / (references ? 2 : 1);
       },
       // The host sets the framebuffer, program uniforms, and blend state.
       draw(count = orderCount, geometry = vao) {

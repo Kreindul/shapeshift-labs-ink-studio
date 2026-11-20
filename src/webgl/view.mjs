@@ -65,16 +65,39 @@ export function withCameraPose(camera, { eye, right, up, back }) {
   ]) };
 }
 
+function placedDepth(row, i, project) {
+  const src = row.asset.data, a = row.matrix, at = row.at;
+  const x = src[i], y = src[i+1], z = src[i+2], f = Math.fround;
+  return f(project(f(a[0]*x + a[1]*y + a[2]*z + at[0]),
+    f(a[3]*x + a[4]*y + a[5]*z + at[1]), f(a[6]*x + a[7]*y + a[8]*z + at[2])));
+}
+
+function depthBounds(row, view) {
+  const a = row.matrix, at = row.at, { sortLo, sortHi } = row.asset;
+  const x = view[2]*a[0] + view[6]*a[3] + view[10]*a[6];
+  const y = view[2]*a[1] + view[6]*a[4] + view[10]*a[7];
+  const z = view[2]*a[2] + view[6]*a[5] + view[10]*a[8];
+  const mid = view[2]*at[0] + view[6]*at[1] + view[10]*at[2] + view[14];
+  const largest = sortHi.reduce((sum,n,i)=>sum+Math.max(Math.abs(n),Math.abs(sortLo[i])),0);
+  // Bound rounding in the three packed world coordinates and final sort depth.
+  const slack = 1e-6 * (1+Math.abs(mid)+Math.abs(at[0])+Math.abs(at[1])+Math.abs(at[2])+largest*row.authored.scale);
+  return [mid + Math.min(x*sortLo[0],x*sortHi[0]) + Math.min(y*sortLo[1],y*sortHi[1]) + Math.min(z*sortLo[2],z*sortHi[2]) - slack,
+    mid + Math.max(x*sortLo[0],x*sortHi[0]) + Math.max(y*sortLo[1],y*sortHi[1]) + Math.max(z*sortLo[2],z*sortHi[2]) + slack];
+}
+
 export function createDepthSorter() {
   const counts = new Uint32Array(65536);
   let depth, keys, order;
-  return function sort(world, view, time) {
+  return function sort(world, view, time, instances, placements) {
     const { count, data } = world;
-    if (!order || order.length !== count) {
-      depth = new Float32Array(count);
-      keys = new Uint16Array(count);
-      order = new Int32Array(count);
+    const stride = instances ? 2 : 1;
+    const total = count + (instances?.reduce((sum,row) => sum + row.asset.count, 0) ?? 0);
+    if (!depth || depth.length < total) {
+      const capacity = Math.max(total, Math.ceil((depth?.length ?? 0) * 1.25));
+      depth = new Float32Array(capacity);
+      keys = new Uint16Array(capacity);
     }
+    if (!order || order.length < total * stride) order = new Int32Array(depth.length * stride);
     const m2 = view[2], m6 = view[6], m10 = view[10], m14 = view[14];
     const project = (x, y, z) => m2 * x + m6 * y + m10 * z + m14;
     for (let i = 0, o = 0; i < count; i++, o += 16)
@@ -108,22 +131,56 @@ export function createDepthSorter() {
       };
       depth[i] = project(position(0), position(1), position(2));
     }
+    let nextInstance = count;
+    for (const row of instances ?? [])
+      for (let o = 0; o < row.asset.data.length; o += 16) depth[nextInstance++] = placedDepth(row,o,project);
     let min = Infinity, max = -Infinity;
-    for (const z of depth) {
+    for (let i = 0; i < total; i++) {
+      const z = depth[i];
       if (z < min) min = z;
       if (z > max) max = z;
+    }
+    // Keep the same quantization as the fully expanded world. Most culled
+    // placements cannot change the extrema and need only an AABB test.
+    if (placements && instances.length < placements.length) {
+      let visibleIndex = 0;
+      for (const row of placements) {
+        if (row === instances[visibleIndex]) { visibleIndex++; continue; }
+        const [lo,hi] = depthBounds(row,view);
+        if (lo >= min && hi <= max) continue;
+        for (let o = 0; o < row.asset.data.length; o += 16) {
+          const z=placedDepth(row,o,project);
+          if (z < min) min = z;
+          if (z > max) max = z;
+        }
+      }
     }
     for (const i of world.back ?? []) if (i < count) depth[i] = min;
     const scale = 65535 / (max - min || 1);
     counts.fill(0);
-    for (let i = 0; i < count; i++) counts[keys[i] = (depth[i] - min) * scale | 0]++;
+    for (let i = 0; i < total; i++) counts[keys[i] = (depth[i] - min) * scale | 0]++;
     let next = 0;
     for (let bucket = 0; bucket < counts.length; bucket++) {
       const size = counts[bucket];
       counts[bucket] = next;
       next += size;
     }
-    for (let i = 0; i < count; i++) order[counts[keys[i]]++] = i;
-    return order;
+    if (!instances) {
+      for (let i = 0; i < count; i++) order[counts[keys[i]]++] = i;
+    } else {
+      for (let i = 0; i < count; i++) {
+        const j = counts[keys[i]]++ * 2;
+        order[j] = i; order[j+1] = 0;
+      }
+      let i = count;
+      for (const row of instances) {
+        const start = count + row.start, ref = row.index + 1;
+        for (let n = 0; n < row.asset.count; n++, i++) {
+          const j = counts[keys[i]]++ * 2;
+          order[j] = start + n; order[j+1] = ref;
+        }
+      }
+    }
+    return order.length === total * stride ? order : order.subarray(0,total * stride);
   };
 }

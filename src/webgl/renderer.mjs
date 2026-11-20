@@ -5,6 +5,8 @@ import { pixelShaderSources } from './shaders.mjs';
 import { createDepthSorter, makeCamera, cameraPose, withCameraPose } from './view.mjs';
 import { waterBackgroundShader } from './water-optics.mjs';
 import { portalComposite } from './portal-composite.mjs';
+import { createExpandedInstances, createInstanceDraw, groupVisibility } from './instance-draw.mjs';
+import { instancePlan, validateSize } from './instances.mjs';
 
 const zero = new Float32Array(4);
 const empty = new Float32Array(0);
@@ -106,9 +108,9 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     let simple, simpleUnavailable = false, keyProgram, damp, copy, spriteProgram, spriteLayer, spriteTable, anchors;
     let lastWorld, lastData, lastCount, lastOutput, fineValues, materials, anchorCount = 0;
     let packed = empty, historyIndex = 0, historyValid = false, previousVP, previousColorGrade;
-    let toneKey, tone, sorted;
+    let toneKey, tone, sorted, instanceDraw, expandInstances, lastInstances;
 
-    function orderFor(world, frame, camera, time, isNew) {
+    function orderFor(world, frame, camera, time, isNew, plan, width, height, scale) {
       if (frame.order) {
         pipeline.setOrder(frame.order);
         sorted = null;
@@ -117,10 +119,14 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const moving = world.moving ?? [], back = world.back ?? [];
       const canReuse = reuseOrder && !world.anim?.bones?.length;
       const clock = moving.length ? time : 0;
-      if (canReuse && !isNew && frame.changedRows?.length === 0 && sorted?.clock === clock &&
+      const viewport = plan ? [width,height,scale,camera.tangent,camera.clipNear,+camera.ortho] : [];
+      if (canReuse && !isNew && (frame.changedRows?.length === 0 || plan && !world.count && !frame.changedRows) &&
+          sorted?.clock === clock && sorted.revision === plan?.orderRevision && sameValues(sorted.viewport,viewport) &&
           sameValues(sorted.view, camera.view) && sameValues(sorted.moving, moving) && sameValues(sorted.back, back)) return;
-      pipeline.setOrder(sort(world, camera.view, time));
-      sorted = canReuse ? { view: camera.view, moving: Int32Array.from(moving), back: Int32Array.from(back), clock } : null;
+      const visible = plan && groupVisibility(plan,camera,width,height,scale);
+      pipeline.setOrder(sort(world, camera.view, time, visible, plan?.rows), !!plan);
+      sorted = canReuse ? { view: camera.view, moving: Int32Array.from(moving), back: Int32Array.from(back),
+        clock, revision:plan?.orderRevision, viewport } : null;
     }
 
     function resolveProgram(patterned, glass, ao, definition, grade) {
@@ -344,7 +350,17 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     function render(world, frame, width, height, output, cameraOverride, plane = zero, cover) {
       const { raw = false, outline = true, dither = 0.35, scale = 1 } = frame;
       const look = world.look ?? {};
-      const constraints = !raw && prepareConstraints(world, frame.paletteConstraints ?? look.paletteConstraints);
+      const constraintDefinition = frame.paletteConstraints ?? look.paletteConstraints;
+      let group = frame.instances;
+      // Per-pixel material and constraint resolves index the expanded world.
+      if (group && (frame.order || !raw && (constraintDefinition || look.pixel && world.pix))) {
+        expandInstances ??= createExpandedInstances();
+        const expanded = expandInstances(world,group,frame.changedRows);
+        world = expanded.world;
+        frame = { ...frame, changedRows:expanded.changedRows };
+        group = undefined;
+      }
+      const constraints = !raw && prepareConstraints(world, constraintDefinition);
       const sourceWater = frame.water !== false && world.water?.count ? world.water : null;
       const drivenOptics = Array.isArray(look.optics) && look.optics.some(rule => rule.driver);
       const inputTime = drivenOptics ? frame.time ?? world.lookSnapshot?.time ?? 0 : undefined;
@@ -372,7 +388,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         wetContours ??= target(3);
       }
       const geometry = waterScene ? wetGeometry : dryGeometry, contours = waterScene ? wetContours : dryContours;
-      const isNew = world !== lastWorld || world.data !== lastData || world.count !== lastCount;
+      const isNew = world !== lastWorld || world.data !== lastData || world.count !== lastCount || group !== lastInstances;
       const pixel = toolkit.KIT?.pixel;
       const patterned = !raw && !!(look.pixel && world.pix && pixel?.gpu);
       const colored = !raw && !patterned && (frame.colored ?? true);
@@ -411,13 +427,17 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const palCount = Math.min(world.pal.length, 64);
       const fog = world.fog ?? {};
       const dirty = isNew ? undefined : frame.changedRows;
-      data.upload(world.data, world.count * 16, dirty);
+      let plan;
+      if (group) {
+        instanceDraw ??= createInstanceDraw(table,data,maxSize);
+        plan = instanceDraw.bind(group,world,dirty,lastInstances !== group);
+      } else data.upload(world.data, world.count * 16, dirty);
       if (hasFine && (isNew || fineValues !== world.fine)) {
         fine.upload(world.fine, world.count * 12);
         fineValues = world.fine;
       } else fine.bind();
       uploadBones(world.anim?.bones);
-      orderFor(world, frame, camera, time, isNew);
+      orderFor(world, frame, camera, time, isNew, plan, width, height, scale);
       if (patterned) {
         if (isNew || materials?.world !== world || materials.values !== world.pix ||
             materials.ramps !== world.ramps || materials.rampOff !== world.rampOff || materials.patterns !== world.pats) {
@@ -436,12 +456,13 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       gl.depthMask(true);
       gl.blendEquation(gl.FUNC_ADD);
       const shader = pipeline.programFor({
-        water: !!wet, airPockets: wet?.airPockets, layered: wet?.layered, atlas: wet?.atlas, portal: plane !== zero || !!cover
+        water: !!wet, airPockets: wet?.airPockets, layered: wet?.layered, atlas: wet?.atlas, portal: plane !== zero || !!cover,
+        instances: !!plan
       });
       gl.useProgram(shader.p);
       const growth = world.grow ?? {};
       shader.set({
-        u_data: 0, u_bones: 4, u_fine: 7, u_fineOn: +hasFine, u_fpal: pal, u_view: camera.view,
+        u_data: 0, u_bones: 4, u_fine: 7, ...(plan && { u_instances: 15 }), u_fineOn: +hasFine, u_fpal: pal, u_view: camera.view,
         u_proj: camera.projection, u_time: time, u_scale: scale, u_ortho: +camera.ortho,
         u_arrivalPlane: plane, u_splatPlane: clip,
         u_sampleWithdrawal: sampleCoverage?.amount(frame.sampleWithdrawal ?? world.sampleWithdrawal ?? 0) ?? 0,
@@ -579,6 +600,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       }
       gl.activeTexture(gl.TEXTURE0);
       lastWorld = world;
+      lastInstances = group;
       lastData = world.data;
       lastCount = world.count;
       lastOutput = output;
@@ -661,9 +683,12 @@ export function createRenderer(canvas, { toolkit, specialize = true, reuseOrder 
       throw new TypeError('Render expects a world with packed splats, a count, and a palette');
     if (world.fine && world.fine.length < world.count * 12 || world.pix && world.pix.length < world.count * 8)
       throw new RangeError('Ink Studio material data is shorter than the splat count');
+    const plan = frame.instances === undefined ? null : instancePlan(frame.instances);
+    if (plan) validateSize(world.count,plan);
+    const logicalCount = world.count + (plan?.count ?? 0);
     if (frame.order !== undefined &&
-        (!(frame.order instanceof Int32Array) || frame.order.length !== world.count ||
-         frame.order.some(index => index < 0 || index >= world.count)))
+        (!(frame.order instanceof Int32Array) || frame.order.length !== logicalCount ||
+         frame.order.some(index => index < 0 || index >= logicalCount)))
       throw new TypeError('Draw order must contain valid Int32 splat indices');
     if (frame.changedRows !== undefined &&
         (!Array.isArray(frame.changedRows) || frame.changedRows.some(row =>

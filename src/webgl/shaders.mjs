@@ -10,7 +10,7 @@ vec3 axialPosition(vec2 pixel, float axial, vec2 size) {
 }`;
 
 export function splatShaderSources(ascii, sampleCoverage, {
-  water = false, airPockets = false, layered = false, atlas = false, portal = false
+  water = false, airPockets = false, layered = false, atlas = false, portal = false, instances = false
 } = {}) {
   const SPLAT_VS = `#version 300 es
 precision highp float; precision highp int;
@@ -34,6 +34,7 @@ uniform vec4 u_arrivalPlane;
 uniform vec4 u_fogp;   // haze start, haze max, depth range near, depth range far
 layout(location=0) in vec2 a_corner;
 layout(location=1) in int a_index;
+${instances ? 'layout(location=2) in int a_instance; uniform highp sampler2D u_instances;' : ''}
 out vec2 v_d; out vec3 v_conic; out vec4 v_color; out float v_depth;
 ${portal ? 'flat out vec3 v_portalDepth;' : 'flat out float v_ownerDepth;'}
 out float v_gl; out float v_as; out float v_ast; uniform vec4 u_az[4]; uniform int u_azn; uniform float u_asoft, u_azst;
@@ -46,14 +47,49 @@ uniform highp sampler2D u_fine; uniform float u_fineOn;
 uniform vec4 u_lamp[8]; uniform float u_lamps[8]; uniform int u_lampN; uniform float u_lampGain; uniform vec3 u_lpal[48]; uniform int u_lup[48];
 flat out vec4 v_fm; flat out vec4 v_ft; flat out float v_fk; flat out float v_lit; flat out float v_ix;
 void main(){
-  int row = a_index >> 9, col = (a_index & 511) << 2; v_ix = float(a_index);
+  int record = a_index;
+  ${instances ? `ivec2 inst = ivec2((a_instance & 15) * 16, a_instance >> 4);
+  vec4 meta;
+  if (a_instance != 0) {
+    meta = texelFetch(u_instances, inst + ivec2(3, 0), 0);
+    record += int(meta.x);
+  }` : ''}
+  int row = record >> 9, col = (record & 511) << 2; v_ix = float(a_index);
   vec4 t0 = texelFetch(u_data, ivec2(col, row), 0);
   vec4 t1 = texelFetch(u_data, ivec2(col + 1, row), 0);
   vec4 t2 = texelFetch(u_data, ivec2(col + 2, row), 0);
-  vec4 t3 = texelFetch(u_data, ivec2(col + 3, row), 0);
+  vec4 t3 = ${instances ? 'a_instance != 0 ? vec4(0.0) : ' : ''}texelFetch(u_data, ivec2(col + 3, row), 0);
   vec3 pos = t0.xyz; float alpha = t0.w;
   if (alpha <= 0.0 || pos.y < -30.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }   // (what is put away is put far below: it is not drawn from there)
   mat3 cov = mat3(t1.x, t1.y, t1.z,  t1.y, t2.x, t2.y,  t1.z, t2.y, t2.z);
+  ${instances ? `if (a_instance != 0) {
+    int options = int(meta.w);
+    if ((options & 2) != 0) {
+      vec4 cut = texelFetch(u_instances, inst + ivec2(4, 0), 0);
+      vec3 delta = pos - cut.xyz;
+      if (dot(delta, delta) <= cut.w) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+    }
+    if ((options & 1) != 0) {
+      vec4 axis = texelFetch(u_instances, inst + ivec2(13, 0), 0);
+      pos = pos * axis.w + axis.xyz;
+      cov *= axis.w * axis.w;
+    } else {
+      vec4 a = texelFetch(u_instances, inst, 0);
+      vec4 b = texelFetch(u_instances, inst + ivec2(1, 0), 0);
+      vec4 c = texelFetch(u_instances, inst + ivec2(2, 0), 0);
+      mat3 transform = transpose(mat3(a.xyz, b.xyz, c.xyz));
+      pos = transform * pos + vec3(a.w, b.w, c.w);
+      cov = transform * cov * transpose(transform);
+    }
+    if (pos.y < -30.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+    alpha *= meta.z;
+    if (meta.y > 0.0) for (int i = 0; i < 16; i++) {
+      if (i >= int(meta.y)) break;
+      vec4 pair = texelFetch(u_instances, inst + ivec2(5 + i / 2, 0), 0);
+      vec2 swap = i % 2 == 0 ? pair.xy : pair.zw;
+      if (t1.w == swap.x) { t1.w = swap.y; break; }
+    }
+  }` : ''}
   vec3 color = vec3(mod(t1.w, 256.0), mod(floor(t1.w / 256.0), 256.0), floor(t1.w / 65536.0)) / 255.0;
   vec3 color0 = color; mat3 FM = mat3(1.0); v_fk = -1.0; v_lit = 0.0; v_fm = vec4(0.0); v_ft = vec4(0.0);
   int kraw = int(t2.w), flags = kraw / 16, kind = kraw - flags * 16;
@@ -193,7 +229,7 @@ ${water && !portal ? '  v_waterAxial = -cam.z;' : ''}
   v_d = a_corner * ext;
   if (stat) { for (int i = 0; i < 4; i++) { vec4 h4 = u_hitf[i]; if (h4.w > 0.0 && distance(pos, h4.xyz) < h4.w) color = vec3(1.0, 0.97, 0.88); } }
   else { float ai = float(a_index); for (int i = 0; i < 8; i++) { vec3 f3 = u_fl[i]; if (f3.z > 0.0 && ai >= f3.x && ai < f3.y) color = vec3(1.0, 0.97, 0.88); } }
-  if (u_fineOn > 0.5 && plain && color == colorF) {   // (a dab that has been recoloured since it was baked, by anything, is drawn plain)
+  if (${instances ? 'a_instance == 0 && ' : ''}u_fineOn > 0.5 && plain && color == colorF) {   // (a dab that has been recoloured since it was baked, by anything, is drawn plain)
     ivec2 fq = ivec2((a_index & 511) * 3, row); vec4 f1 = texelFetch(u_fine, fq + ivec2(1, 0), 0), f2 = texelFetch(u_fine, fq + ivec2(2, 0), 0);
     if (f2.w > 0.5 && f1.w == t1.w) { vec3 pu = T * (FM * f1.xyz) * sc, pw = T * (FM * f2.xyz) * sc; float dt = pu.x * pw.y - pw.x * pu.y;
       if (abs(dt) > 1e-4 * (abs(pu.x * pw.y) + abs(pw.x * pu.y) + 1e-9)) { v_fm = vec4(pw.y, -pw.x, -pu.y, pu.x) / dt; v_ft = texelFetch(u_fine, fq, 0); v_fk = fogk; } } }

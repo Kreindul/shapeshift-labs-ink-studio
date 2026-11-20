@@ -63,6 +63,59 @@ Set `frame.target` to a same-context framebuffer descriptor with `framebuffer`,
 the frame. The [screen transition compositor](transitions.md#render-ink-studio-worlds-directly-into-a-transition)
 can create these targets and reuse their color textures on the GPU.
 
+## Shared baked splat instances
+
+Use `createSplatInstances(prototypes, placements)` when a scene repeats finished,
+stationary assets such as trees, doors, or crates. Prototypes are ordinary
+`builder.finish()` worlds drawn around their local origin. The renderer stores one
+copy of each prototype's packed geometry. It culls offscreen placements and
+sorts the remaining splats together with the base world before blending.
+
+```js
+import { createRenderer, createSplatInstances } from './webgl.mjs';
+
+const copies = createSplatInstances({ oak: bakedOak }, [
+  { id: 'oak-west', prototype: 'oak', position: [-2, 0, 0] },
+  { id: 'oak-east', prototype: 'oak', position: [2, 0, 0], scale: 1.2 }
+]);
+const renderer = createRenderer(canvas, { toolkit });
+renderer.render(terrain, { instances: copies, changedRows: [] });
+
+copies.update('oak-east', {
+  palette: { '#517046': '#936540' },
+  damage: { center: [0, 1.4, .2], radius: .5 }
+});
+renderer.render(terrain, { instances: copies, changedRows: [] });
+```
+
+A placement also accepts a right-handed row-major 3-by-3 `rotation`, a positive
+uniform `scale`, an `opacity` multiplier for native splat density, and
+`visible`. Palette replacements match the original baked RGB exactly. A
+damage sphere hides splats whose local centers lie inside it. Clear the sphere
+with `damage: null`. Transforms update only the placement table and draw order.
+Palette and damage edits preserve the order when the camera stays still.
+`changedRows` still describes rows edited in the **base** world.
+
+`copies.get(id)` returns the authored placement. `copies.owner(index, terrain.count)`
+maps a logical renderer splat index to the stable placement ID, prototype ID,
+and local splat index. Placement IDs and logical ranges stay fixed while you
+edit or hide copies. Create a new collection to change its membership.
+`copies.flatten(terrain)` produces ordinary expanded world data with placement
+provenance for tooling that requires packed per-placement rows.
+
+This path uses baked lighting. Use `S.template()` and `S.place()` when each
+placement needs lighting or burial tested against its surroundings during
+sculpting. Shared prototypes require stationary splats without fine-tile or
+per-pixel surface payloads. The renderer uses expanded rows when the frame
+supplies an explicit draw order or uses per-pixel material or palette-constraint
+passes. The base scene can contain animated splats.
+
+Run `node scripts/benchmark-splat-instances.js` to compare the same authored
+woodland and street scenes with shared and expanded geometry on Chrome's
+hardware WebGL backend. The benchmark reports readback-fenced frame times,
+texture storage, submitted splats, edit uploads, and framebuffer parity. Use
+`--software` to run the same comparison on SwiftShader.
+
 ## Water optics
 
 Attach a [water scene](procedural.md#water-bodies) as `world.water`.
