@@ -274,13 +274,9 @@ const asciiFrame = (image, world) => lib().KIT.ascii.draw(image, {
 });
 const displayFrame = (image, world) => opt.text ? asciiFrame(image, world) : R.upscale(image, opt.px1 ? 1 : image.px);
 function buildPreview() {
-  const prior = globalThis.INK_LOOK_ALBEDO;
-  if (opt.look !== undefined && opt.look !== 'off') globalThis.INK_LOOK_ALBEDO = true;
-  try {
-    return require('./look-preview.js').override(build(pos[0]), opt, lib());
-  } finally {
-    globalThis.INK_LOOK_ALBEDO = prior;
-  }
+  const Preview = require('./look-preview.js');
+  const world = opt.look !== undefined && opt.look !== 'off' ? Preview.withAlbedo(() => build(pos[0])) : build(pos[0]);
+  return Preview.override(world, opt, lib());
 }
 const previewPasses = () => require('./look-preview.js').preview(opt);
 const textSidecar = file => file.replace(/\.(?:a?png)$/i, '') + '.txt';
@@ -296,7 +292,7 @@ function die(m) {
   console.error(m);
   process.exit(1);
 }
-const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt});
+const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view});
 const worldCommands = new Set(['inspect','probe','trace','field','scene','sim']);
 const CMD = {
   help() {
@@ -313,6 +309,8 @@ const CMD = {
         '  scene apply|stamp|remix|capture|history|promote <world> ...  edit or derive a world manifest',
         '    scene apply <scene> <edits.json> --dry-run   preview edited paths and look targets',
         '  sim run|resume|fork|reset|replay|diff|sweep|render ...  run or compare fixed-tick simulations',
+        '    sim sweep <world|run> <cases.json>   use look cases to compare one fixed simulation snapshot',
+        '  compare <scene|run> --looks cases.json [--out sheet.png]   compare look variants on the same view',
         '  look inspect <scene|run|look-file> [--renderer headless|webgl]   list bindings, dependencies and targets',
         '  look sample <look-file> [--look pack/look] [--colors JSON | --chart] [--out file.json|chart.png]',
         '  look import <file> [--out pack.json] [--id pack/look]   import a LUT or palette as a versioned look',
@@ -1609,9 +1607,35 @@ const CMD = {
     );
   },
   compare() {
-    const C = require('./crisp.js'),
-      [id, ref] = pos;
+    const [id, ref] = pos;
+    if (opt.looks !== undefined || /\.json$/i.test(ref ?? '')) {
+      const file = opt.looks ?? ref;
+      if (!id || typeof file !== 'string') die('compare needs a scene and --looks cases.json');
+      if (opt.out !== undefined && (typeof opt.out !== 'string' || !/\.png$/i.test(opt.out)))
+        die('A look comparison image needs --out sheet.png');
+      if (typeof opt.report === 'string' && (path.resolve(id) === path.resolve(opt.report) ||
+        opt.out && path.resolve(opt.out) === path.resolve(opt.report))) die('--report needs a separate path');
+      const cases = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const Preview = require('./look-preview.js');
+      let world = worldCLI().lookSnapshot(id);
+      if (!world) {
+        world = Preview.withAlbedo(() => build(id));
+        pose(world, num('t', 0));
+      }
+      const time = world.lookSnapshot?.time ?? num('t', 0);
+      const { report, frames } = require('./look-compare.js').compare(world, cases, lib(),
+        view({ t: time, px: num('px', 1) }), { opt, file, images: Boolean(opt.out) });
+      if (opt.out) {
+        const up = num('up', 1), cols = num('cols', Math.min(4, frames.length));
+        if (![up, cols].every(n => Number.isSafeInteger(n) && n > 0)) die('--up and --cols need positive integers');
+        const sheet = R.grid(frames.map(frame => R.upscale(frame, up)), cols, report.results.map(row => String(row.id)));
+        fs.mkdirSync(path.dirname(path.resolve(opt.out)), { recursive: true });
+        PNG.write(opt.out, sheet.w, sheet.h, sheet.rgb);
+      }
+      return require('./look.js').report(report, { out: opt.report }, file);
+    }
     if (!id || !ref) die('compare <id> <reference.png> [--px 2 --up 3]');
+    const C = require('./crisp.js');
     const k = num('px', 1),
       src = PNG.read(path.resolve(ref)),
       W = Math.floor(src.w / k),
@@ -1629,7 +1653,7 @@ const CMD = {
       seen.add((rimg.rgb[i * 3] << 16) | (rimg.rgb[i * 3 + 1] << 8) | rimg.rgb[i * 3 + 2]);
     if (seen.size > 256 || opt.colours) Object.assign(rimg, C.quantize(rimg, num('colours', 32)));
     const t = num('t', 2),
-      w = build(id);
+      w = buildPreview();
     pose(w, t);
     // Use one art pixel per reference pixel, regardless of the scene's detail setting.
     const im = R.render(w, view({ t, w: W, h: H, px: 1 })),

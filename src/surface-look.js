@@ -295,7 +295,7 @@ const SurfaceLook = (() => {
   }
 
   function prepare(settings, palette = [], lightDirection = [-0.55, 0.72, 0.43], context = {},
-    { colorCurves = true, colorLut = true, colorStack = true, paletteConstraints = true, paletteRoles, blueNoise,
+    { colorCurves = true, colorLut = true, colorStack = true, paletteConstraints = true, paletteRoles, blueNoise, onPaletteClip,
       validateOnly = false } = {}) {
     if (!isRecord(settings)) throw new TypeError('Surface settings must be an object');
     if (validateOnly && settings.renderStages !== undefined) {
@@ -443,7 +443,7 @@ const SurfaceLook = (() => {
     return {
       settings, normal, layers, sun: unit(vector(lightDirection, AXES.y)),
       paletteConstraint: paletteConstraints && settings.paletteConstraint !== undefined
-        ? pixelLook.prepareLookPolicy(settings.paletteConstraint, { palette, roles: paletteRoles, blueNoise, context, validateOnly,
+        ? pixelLook.prepareLookPolicy(settings.paletteConstraint, { palette, roles: paletteRoles, blueNoise, context, validateOnly, onPaletteClip,
           skipMaskedStacks: !colorStack }) : null,
       projected: layers.some(layer => layer.effect || layer.spatialMask),
       depth: layers.some(layer => layer.effect?.depth),
@@ -454,7 +454,7 @@ const SurfaceLook = (() => {
   /* Inputs are RGB in 0..1 and a world-space sample. Output packs RGB, the opacity
      multiplier, a glint mask and, for projected paint, an optional local palette.
      Supply a normal Array when you want to retain the palette reference. */
-  function shade(prepared, sample, base, output = [0, 0, 0, 1, 0], trace, visit) {
+  function shade(prepared, sample, base, output = [0, 0, 0, 1, 0], trace, visit, onClip) {
     const { settings, layers } = prepared;
     const sun = sample.lightDirection ?? prepared.sun;
     const { position, normal, view } = sample;
@@ -529,11 +529,15 @@ const SurfaceLook = (() => {
         output[3] *= mix(1, clamp(result[4]), strength);
         output[4] = Math.max(output[4], clamp(result[5] * strength));
         if (amount >= 0.5) output[5] = layer.effect.palette;
+        let clipped;
         for (let i = 0; i < 3; i++) {
           const next = layer.blend === 'add' ? output[i] + result[i] :
             layer.blend === 'multiply' ? output[i] * result[i] : result[i];
-          output[i] = clamp(mix(output[i], next, amount));
+          const value = mix(output[i], next, amount);
+          if (onClip && (value < 0 || value > 1)) (clipped ??= [0, 0, 0])[i] = value;
+          output[i] = clamp(value);
         }
+        if (clipped) onClip(...clipped);
         if (step) Object.assign(step, { applied: amount > 0, effectiveWeight: amount, output: output.slice(0, 3) });
         if (amount && visit) visit(layer, layer.mask ? maskWeight : null, amount, settings);
         continue;

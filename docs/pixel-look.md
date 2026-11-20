@@ -620,6 +620,46 @@ animated PNG for each pass at the same frame rate. The `-passes.json`
 file lists the outputs and maps false colors to the bindings and
 material IDs. See [art pass formats](art-passes.md).
 
+## Compare looks on a fixed view
+
+Give `compare` a case file with two or more entries. The first is the
+baseline. A row with only an ID uses the authored scene look. A row's
+`look` can be an asset binding with strength, parameters, and palette
+overrides, an inline scene look object, a look JSON file relative to the
+case file, or `"off"`.
+
+```json
+[
+  { "id": "authored" },
+  { "id": "softer", "look": { "asset": "relay/glazed-enamel", "strength": 0.45, "select": { "entity": "sea-glaze" } } },
+  { "id": "warmer", "look": { "palette": ["#391e21", "#ad603f", "#f0bc86"], "select": { "entity": "sea-glaze" } } }
+]
+```
+
+```sh
+node cli/ink-studio.js compare examples/look-assets.json --looks cases.json \
+  --asset-pack examples/relay-look-pack.json --t 0 --ortho \
+  --out comparison.png --report comparison.json
+node cli/ink-studio.js sim sweep checkpoint.json cases.json \
+  --asset-pack examples/relay-look-pack.json --out comparison.json
+```
+
+Every case renders the same baked scene and camera. For a simulation,
+the cases share one saved tick, or a tick chosen with `--ticks`. Common
+simulation actions can be passed with `--actions`. Put the camera and
+render settings on the command.
+
+The report includes changed-pixel counts and signed and absolute RGB
+deltas in 8-bit channel units. It groups the results by visible scene
+target and by the dominant look binding. Pixels without a solid owner
+are grouped under `target: null`. Cases that switch render stages can
+change palette resolution across the frame.
+
+Clipping tracks out-of-range samples at renderer clamp sites and lists
+clipped palette inputs separately. Swatch usage counts exact RGB
+matches in the saved color frame after blending and masks.
+`swatches.unused` lists available swatches with zero matches.
+
 ## Shared look selectors
 
 Use `finish.look.targets` in a diorama, `visual.look.targets` on a world,

@@ -30,7 +30,7 @@ function target(opt) {
   return {};
 }
 
-module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
+module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions}) {
   const W = kit.KIT.world, R = W.runtime;
   const args = () => opt.args ? parse(opt.args) : {};
   const respond = value => {
@@ -42,7 +42,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
     const packs = require('./asset-pack.js').install(kit.KIT.authoring.assetPacks, world.assetPacks, opt['asset-pack']);
     return {world:{...world,assetPacks:packs}};
   }
-  function load(file) {
+  function load(file, { lookPreview = false } = {}) {
     ensure(typeof file === 'string','Expected a scene or run file');
     if (/\.(js|cjs)$/i.test(file)) {
       const factory = require(path.resolve(file)), value = typeof factory === 'function' ? factory(kit) : factory;
@@ -51,7 +51,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
     if (/\.json$/i.test(file)) {
       const value = read(file);
       if (value.format === W.format) return document(value);
-      if ([R.checkpointFormat,R.runFormat].includes(value.format))
+      if (!lookPreview && [R.checkpointFormat,R.runFormat].includes(value.format))
         ensure(opt['asset-pack']===undefined,'Recorded runs and checkpoints keep their original asset packs');
       if (value.format === R.checkpointFormat) return {world:value.world,checkpoint:value};
       if (value.format === R.runFormat) return {world:value.end.world,checkpoint:value.end,log:value};
@@ -77,6 +77,25 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
   }
   function schedule(run) {
     if (opt.actions) run.schedule(read(opt.actions));
+  }
+  function visualSnapshot(input) {
+    let run = runtime(input);
+    const tick = opt.steps === undefined && opt.ticks === undefined && opt.t === undefined ? run.view().tick : to(run);
+    if (input.log && tick < run.view().tick) {
+      const origin = input.log.origin;
+      run = runtime({ world: origin.world, checkpoint: origin });
+      run.schedule(input.log.commands);
+    }
+    schedule(run);
+    run.advance(tick);
+    const view = run.view(), Preview = require('./look-preview.js');
+    const world = Preview.withAlbedo(() => W.visual(kit, view, run.query()));
+    return { ...world, id: view.world.id, assetPacks: view.world.assetPacks,
+      ...(!input.checkpoint && { lookPreviewPacks: view.world.assetPacks }) };
+  }
+  function lookSnapshot(file) {
+    const input = load(file, { lookPreview: true });
+    return input.world ? visualSnapshot(input) : null;
   }
   function view(file) {
     const input = load(file);
@@ -207,9 +226,18 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
         break;
       }
       case 'sweep': {
-        const input=load(file), spec=read(other);
+        const spec=read(other);
         ensure(Array.isArray(spec) && spec.length>0 && spec.length<=2000,'Expected a bounded sweep list');
+        const lookPreview = spec.some(row => row && Object.hasOwn(row, 'look'));
+        const input=load(file,{lookPreview});
         ensure(input.world,'Sweep needs a simulation world');
+        if (lookPreview) {
+          const { report } = require('./look-compare.js').compare(visualSnapshot(input), spec, kit,
+            renderOptions({ w: Number(opt.w ?? 720), h: Number(opt.h ?? 475) }), { opt, file: other });
+          const { results, ...summary } = report;
+          respond({ ...summary, runs: results });
+          break;
+        }
         const runs=spec.map((row,i)=>{
           let source=input.world;
           if (row.edits || row.seed!==undefined) {
@@ -407,5 +435,5 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
     respond({valid:true,format:raw.format});
     return true;
   }
-  return {execute,validate,inspectLook};
+  return {execute,validate,inspectLook,lookSnapshot};
 };

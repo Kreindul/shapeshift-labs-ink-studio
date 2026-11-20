@@ -29,7 +29,7 @@ function surfaceShading(world, options, camera) {
     SurfaceLook.prepare(settings, world.pal, liveLight ?? light, world.surfaceEffects,
       { colorCurves: options.colorCurves !== false, colorLut: options.colorLut !== false, colorStack: options.colorStack !== false,
         paletteConstraints: options.paletteConstraints !== false && (options.lookMasks !== false || !settings.paletteConstraint?.mask),
-        paletteRoles: world.paletteRoles, blueNoise }));
+        paletteRoles: world.paletteRoles, blueNoise, onPaletteClip: camera.onPaletteClip }));
   const ids = new Map();
   const palettes = [], constraints = [];
   for (const material of materials) {
@@ -144,7 +144,7 @@ function surfaceShading(world, options, camera) {
     rgb[0] = r;
     rgb[1] = g;
     rgb[2] = b;
-    SurfaceLook.shade(prepared, sample, rgb, result, undefined, visit);
+    SurfaceLook.shade(prepared, sample, rgb, result, undefined, visit, camera.onSurfaceClip);
     if (ids.size) result[5] = ids.get(result[5]) || 0;
     return result;
   }

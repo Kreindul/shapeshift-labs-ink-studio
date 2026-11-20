@@ -67,6 +67,9 @@ to a tick using the scene timestep. Use one of these per invocation.
 For sweeps from a checkpoint, use actions to vary the branches. A probe entry
 contains `field`, optional `at`, and optional `args`.
 
+When a case supplies `look`, the sweep renders every case from the same
+simulation snapshot. [Look cases and color metrics](pixel-look.md#compare-looks-on-a-fixed-view) use the same format as `compare`.
+
 `--assert checks.json` accepts an array of field checks with `field`, optional
 `at`, optional `args`, optional expected `status` (default `ok`), and a
 `when` condition. Use `tick` to check one earlier frame or `byTick` to allow

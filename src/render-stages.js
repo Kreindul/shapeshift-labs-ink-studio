@@ -97,7 +97,8 @@ const RenderStages = (() => {
     function matching(target) {
       return rules.filter(rule => targets.matches(rule.select, target));
     }
-    return Object.freeze({ matching, transform(target) {
+    const palettes = [...new Set(rules.flatMap(rule => rule.palette?.packed ?? []))];
+    return Object.freeze({ matching, palettes, transform(target) {
       const layers = matching(target);
       if (layers.length) return (rgb, visit) => apply(layers, rgb, undefined, visit).map(value => Math.max(0, Math.min(1, value)));
     } });
@@ -212,7 +213,7 @@ const RenderStages = (() => {
     return evaluate(rules, rgb, sample, x, y);
   }
 
-  function finish(frame, plan, passes, time, visitPixel) {
+  function finish(frame, plan, passes, time, visitPixel, audit) {
     const { w, h, rgb } = frame;
     const swatches = new Map(plan.palettes.map((color, i) => [color, i]));
     const use = new Uint32Array(swatches.size);
@@ -234,6 +235,7 @@ const RenderStages = (() => {
       const visit = visitPixel && visitPixel(p);
       const graded = apply(rules.frame, original, sample, visit);
       const color = evaluate(rules.palette, graded, sample, p % w, Math.floor(p / w), undefined, visit);
+      if (audit) audit.pixel('frame', p, color[0], color[1], color[2]);
       const index = swatches.get(pack(color));
       if (index !== undefined) use[index]++;
       if (color !== original) for (let k = 0; k < 3; k++) rgb[offset + k] = byte(color[k]);

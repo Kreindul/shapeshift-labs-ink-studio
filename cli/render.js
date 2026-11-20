@@ -14,6 +14,7 @@ const ArtStability = require('../src/art-stability.js');
 const { footprint, sampledDepth } = require('./splat-sampling.js');
 const { createMaskResolve, applyMasks } = require('./look-mask-resolve.js');
 const { createLookPass } = require('./look-pass.js');
+const { createAudit } = require('./render-audit.js');
 const { contributionLook, contributionLayers } = require('./look-contributions.js');
 const blueNoiseTiles = new WeakMap();
 function blueNoise(world, { seed }) {
@@ -95,6 +96,8 @@ function render(world, o, preparedPalettes) {
     cw = o.w || 900,
     ch = o.h || 620;
   const look = world.look || {};
+  const audit = o.lookAudit === true ? createAudit() : o.lookAudit;
+  const onPaletteClip = audit && ((scope, i, r, g, b) => audit.palette(scope, world.pal[i], r, g, b));
   const transparent = !!o.transparent && !o.captureCoverage;
   const integrateFootprint = o.splatFilter === 'footprint';
   const orderMode = o.splatOrder ?? look.splatOrder ?? 'center';
@@ -143,7 +146,10 @@ function render(world, o, preparedPalettes) {
     if (effects) frame = ArtEffects.apply(frame, passes, effects, t, {
       history: o.artHistory, world, palette: world.pal, motionReference: frame.motionReference
     });
-    if (styled && stages?.post) RenderStages.finish(frame, stages, passes, t, lookPass?.post);
+    if (styled && stages?.post) RenderStages.finish(frame, stages, passes, t, lookPass?.post, audit);
+    if (audit) {
+      frame.lookAudit = audit.report();
+    }
     if (!o.captureMotion) delete frame.motionReference;
     if (requestedPasses.length) frame.passes = ArtPasses.subset(passes, requestedPasses);
     return frame;
@@ -153,14 +159,22 @@ function render(world, o, preparedPalettes) {
   const tone = legacyLook ? PixelLook.prepareTone(o.tone ?? look.tone, settings => blueNoise(world, settings)) : null;
   const paletteRules = legacyLook || coverageAware ? PixelLook.preparePaletteConstraints(o.paletteConstraints ?? look.paletteConstraints, {
     palette: world.pal, roles: world.paletteRoles, blueNoise: settings => blueNoise(world, settings),
-    context: world.surfaceEffects, skipMasks: o.lookMasks === false, skipMaskedStacks: o.colorStack === false
+    context: world.surfaceEffects, skipMasks: o.lookMasks === false, skipMaskedStacks: o.colorStack === false, onPaletteClip
   }) : preparedPalettes;
   const animationGrade = o.ignoreLookGrade ? undefined : an.grade;
   const colorGrade = (legacyLook || coverageAware) && !tone && PixelLook.colorGrade(world.pal, world.paletteRoles, animationGrade,
     o.paletteRemap ?? look.paletteRemap, o.colorCurves ?? look.colorCurves, o.colorLut ?? look.colorLut,
-    o.colorStack ?? look.colorStack);
+    o.colorStack ?? look.colorStack,
+    onPaletteClip && ((i, r, g, b) => onPaletteClip({
+      assetId: o.colorStack === undefined ? look.colorStackAssetId : undefined, stack: (o.colorStack ?? look.colorStack)?.name
+    }, i, r, g, b)));
   const grade = colorGrade || animationGrade;
   const evaluatedPalette = colorGrade ? PixelLook.gradePalette(grade) : undefined;
+  if (audit) {
+    if (legacyLook) audit.addPalette(tone?.palette || evaluatedPalette || (grade ? PixelLook.gradePalette(grade) : world.pal));
+    audit.addPalette(stages?.palettes);
+    audit.addPalette(optics?.palettes);
+  }
   const globalPaletteMark = passSelection.has('target') && (tone || grade) ?
     { assetId: look.colorStackAssetId, stackName: tone ? 'Tone' : (o.colorStack ?? look.colorStack)?.name } : null;
   const rel = c.dist / dist0,
@@ -176,7 +190,7 @@ function render(world, o, preparedPalettes) {
   if (legacyLook && (specializedResolve || (o.colored && !tone))) {
     const native = render(world, Object.assign({}, o, { colored: false, samples: true, worked: true, px, passes: [...passSelection], artInkActive: !!ink,
       captureMotion, motionFrom, maskGrade: !tone && grade, reflectionTint: effects?.reflection,
-      previewPalette: globalPaletteMark,
+      previewPalette: globalPaletteMark, lookAudit: audit,
       captureFog: o.captureFog || ink?.ramps.has('fog') }), paletteRules);
     const samples = render(
       world,
@@ -193,7 +207,8 @@ function render(world, o, preparedPalettes) {
         volumeHistory: null,
         artInkActive: !!ink,
         captureMotion: false, motionFrom: undefined, reflectionTint: effects?.reflection,
-        passes: specializedResolve ? ['coverage'] : false
+        passes: specializedResolve ? ['coverage'] : false,
+        lookAudit: false
       })
     );
     const basePalette = tone?.palette || world.pal;
@@ -294,6 +309,7 @@ function render(world, o, preparedPalettes) {
               reflectionTint,
               captureMotion: false,
               fragmentProbe: undefined,
+              lookAudit: false,
               atmosphere: false,
               water: false,
               reflections: false,
@@ -311,7 +327,8 @@ function render(world, o, preparedPalettes) {
     parallel: ortho ? [V[2], V[6], V[10]] : null,
     footprint: (dist * 2) / (tp * H),
     time: t,
-    blueNoise: settings => blueNoise(world, settings)
+    blueNoise: settings => blueNoise(world, settings), onPaletteClip,
+    onSurfaceClip: audit && ((r, g, b) => audit.sample('surface', r, g, b))
   });
   const surfaceGlint = surface ? new Uint8Array(W * H) : null;
   const layerPalettes = surface?.palettes ?? [];
@@ -319,6 +336,7 @@ function render(world, o, preparedPalettes) {
     ? Object.assign(Array(layerPalettes.length).fill(undefined), surface?.constraints).concat(paletteRules.palettes)
     : surface?.constraints;
   const localPalettes = paletteRules ? layerPalettes.concat(paletteRules.palettes.map(policy => policy.swatches)) : layerPalettes;
+  if (audit && !o.raw) audit.addPalette(PixelLook.outputPalettes([], localPalettes).packed);
   const localAt = localPalettes.length && !o.raw && !retainContributions ? new Uint32Array(W * H) : null;
   const targetSlots = paletteRules?.slots(world);
   const defaultSlot = paletteRules?.defaultSlot || 0;
@@ -685,6 +703,7 @@ function render(world, o, preparedPalettes) {
     }
     const coat = !retainLayers && PIX && hasSurface && (!writesDepth || reflectInRaster || surface.reveals(i));
     if (coat && !surfaceOverlay) surfaceOverlay = new Float32Array(W * H * 4);
+    if (audit && (r > 1 || g > 1 || b > 1)) audit.sample('splat', Math.max(0, r), Math.max(0, g), Math.max(0, b));
     r = Math.min(r, 1);
     g = Math.min(g, 1);
     b = Math.min(b, 1);
@@ -1298,6 +1317,10 @@ function render(world, o, preparedPalettes) {
       const [dx, dy] = passes?.splatId && stable ? ArtStability.ditherCoordinates(stable, passes, y * W + x, x, y) : [x, y];
       masks.record(p, c2[q], c2[q + 1], c2[q + 2], dx, dy);
     }
+    if (audit) for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 3;
+      audit.pixel('interior', (H - 1 - y) * W + x, c2[i], c2[i + 1], c2[i + 2]);
+    }
     return {
       w: W, h: H, color: Uint8Array.from(c2, v => Math.round(clamp(v, 0, 1) * 255)), depth: dep, drawn,
       ...(localAt && { localAt, localPalettes, localConstraints }), ...(detail && { detail }), ...(passes && { passes }), ...(motionReference && { motionReference }),
@@ -1370,6 +1393,7 @@ function render(world, o, preparedPalettes) {
         b *= k;
       }
       if (o.raw) {
+        if (audit) audit.pixel('composite', q / 3, r, g, b);
         out[q] = Math.round(clamp(r, 0, 1) * 255);
         out[q + 1] = Math.round(clamp(g, 0, 1) * 255);
         out[q + 2] = Math.round(clamp(b, 0, 1) * 255);
@@ -1400,6 +1424,7 @@ function render(world, o, preparedPalettes) {
         b = line[2];
       }
       if (retainContributions) {
+        if (audit) audit.pixel('composite', q / 3, r, g, b);
         out[q] = Math.round(clamp(r, 0, 1) * 255);
         out[q + 1] = Math.round(clamp(g, 0, 1) * 255);
         out[q + 2] = Math.round(clamp(b, 0, 1) * 255);

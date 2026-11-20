@@ -111,13 +111,14 @@ const PixelLook = (() => {
     return Object.freeze({
       target,
       protects: index => locked.has(index),
-      grade(prior, amount = 1) {
+      grade(prior, amount = 1, onClip) {
         if (!fraction(amount)) throw new RangeError('Palette remap strength must be in [0, 1]');
         const output = base.slice();
         if (prior) output.set(prior.subarray ? prior.subarray(0, output.length) : prior.slice(0, output.length));
         for (const i of overrides.keys()) {
           const input = applyTarget && prior?.length >= i * 3 + 3 ? prior.slice(i * 3, i * 3 + 3) : undefined;
           const rgb = target(i, input);
+          if (onClip) onClip(i, ...rgb.map((n, k) => base[i * 3 + k] + (n - base[i * 3 + k]) * amount));
           for (let channel = 0; channel < 3; channel++) {
             const key = i * 3 + channel;
             output[key] = clamp(base[key] + (rgb[channel] - base[key]) * amount);
@@ -138,11 +139,11 @@ const PixelLook = (() => {
     return stacks.prepare(stack, { paletteRemap: (definition, color) => prepareRemap(definition, palette, roles, color) });
   }
 
-  function colorGrade(palette, roles, prior, remap, definition, lut, stack) {
+  function colorGrade(palette, roles, prior, remap, definition, lut, stack, onClip) {
     const transfer = curves.prepare(definition), plan = prepareRemap(remap, palette, roles);
     const lookup = lut === undefined || lut === false ? null : luts.prepare(lut);
     const ordered = prepareColorStack(stack, palette, roles);
-    if (!transfer && !lookup && !ordered) return plan ? plan.grade(prior) : null;
+    if (!transfer && !lookup && !ordered) return plan ? plan.grade(prior, 1, onClip) : null;
     const grade = new Float32Array(palette.length * 3), result = [0, 0, 0], protectedSlots = [];
     for (let i = 0; i < palette.length; i++) {
       const offset = i * 3;
@@ -157,9 +158,12 @@ const PixelLook = (() => {
       if (ordered) shaped = ordered.sample(shaped, result, i);
       grade.set(shaped, offset);
     }
-    const resolved = plan ? plan.grade(grade) : grade;
+    const resolved = plan ? plan.grade(grade, 1, onClip) : grade;
     if (plan) for (const i of protectedSlots) resolved.set(grade.subarray(i * 3, i * 3 + 3), i * 3);
-    for (let i = 0; i < resolved.length; i++) resolved[i] = clamp(resolved[i]);
+    for (let i = 0; i < resolved.length; i += 3) {
+      if (onClip) onClip(i / 3, resolved[i], resolved[i + 1], resolved[i + 2]);
+      for (let channel = 0; channel < 3; channel++) resolved[i + channel] = clamp(resolved[i + channel]);
+    }
     return resolved;
   }
 
@@ -307,7 +311,8 @@ const PixelLook = (() => {
     const { stack, assetId, mask, ...policy } = definition;
     const active = options.skipMaskedStacks && mask ? undefined : stack;
     if (stack && !active && !Object.keys(policy).length) return null;
-    const grade = active && colorGrade(options.palette, options.roles, undefined, false, false, false, active);
+    const grade = active && colorGrade(options.palette, options.roles, undefined, false, false, false, active,
+      options.onPaletteClip && ((i, r, g, b) => options.onPaletteClip({ assetId, stack: active.name }, i, r, g, b)));
     const mapOnly = Boolean(grade && !Object.keys(policy).length);
     const plan = preparePalette(mapOnly ? { palette: ['#000000'] } : policy, options);
     if (mapOnly) {
