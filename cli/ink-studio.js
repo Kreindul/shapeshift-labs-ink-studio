@@ -410,9 +410,12 @@ function spriteAtlasOption() {
   if (value==='off') return false;
   if (value==='on' || value===true) return true;
   if (!inputSpriteAtlas) {
-    const atlas=require('./sprite-atlas.js').readSpriteAtlas(path.resolve(value));
+    const edits=opt['sprite-cels'];
+    if (edits!==undefined&&typeof edits!=='string') die('--sprite-cels needs a JSON path or off');
+    const atlas=require('./sprite-atlas.js').readSpriteAtlas(path.resolve(value),
+      { cels: edits==='off'?false:edits&&path.resolve(edits) });
     inputSpriteAtlas=[lib().KIT.sprite.placeAtlas({
-      atlas,at:opt['sprite-at']?list('sprite-at'):[0,0,0],scale:num('sprite-scale',1)
+      atlas,at:opt['sprite-at']?list('sprite-at'):[0,0,0],scale:num('sprite-scale',1),playback:opt['sprite-playback']
     })];
   }
   return inputSpriteAtlas;
@@ -905,6 +908,7 @@ const CMD = {
         'socket emitter options: --atmosphere-emitters on|off|file.json',
         'animated splat options: --splat-fields on|off|file.json',
         'sprite options: --sprite-atlas on|off|atlas.json --sprite-at x,y,z --sprite-scale n --sprite-atlas-mode card|impostor|scenery',
+        '                --sprite-cels edits.json|off --sprite-playback once|loop',
         'shaped fog options: --shaped-atmosphere on|off|file.json --volume-cutouts on|off|file.json',
         'fog lighting options: --volume-local-lights on|off --volume-local-shadows on|off',
         'silhouette protection: --silhouette-protection on|off|file.json',
