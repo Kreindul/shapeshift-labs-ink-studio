@@ -224,7 +224,7 @@ function pose(w, t) {
 const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
 if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
   die('--px needs a positive integer');
-let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, inputSpriteAtlas;
+let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, splatFieldsOverride, inputSpriteAtlas;
 function skyProfileOverrides(value) {
   if (typeof value !== 'string') die('--sky-profile expects track=profile pairs');
   const pairs = value.split(',').map(entry => entry.split('=').map(part => part.trim()));
@@ -302,6 +302,14 @@ function sceneExposureOption() {
   if (value === true || value === 'on') return true;
   return sceneExposureOverride ??= require('../src/scene-exposure.js').compile(
     JSON.parse(fs.readFileSync(path.resolve(value), 'utf8')));
+}
+
+function splatFieldsOption() {
+  const value = opt['splat-fields'];
+  if (value === undefined) return undefined;
+  if (value === 'off') return false;
+  if (value === 'on' || value === true) return true;
+  return splatFieldsOverride ??= lib().KIT.splatFields.compile(JSON.parse(fs.readFileSync(path.resolve(value), 'utf8')));
 }
 
 function spriteAtlasOption() {
@@ -436,6 +444,7 @@ const view = extra =>
       atmosphere: opt.atmosphere === 'off' ? false : undefined,
       shapedAtmosphere: shapedAtmosphereOption(),
       volumeCutouts: volumeCutoutsOption(),
+      splatFields: splatFieldsOption(),
       spriteAtlases: spriteAtlasOption(),
       spriteAtlasMode: opt['sprite-atlas-mode'],
       aerialPerspective: aerialOption(),
@@ -584,6 +593,7 @@ const CMD = {
         'exposure options: --scene-exposure on|off|file.json',
         'aerial options: --aerial-perspective on|off --aerial-start units --aerial-density per-unit --aerial-contrast 0..1',
         'view options: --surface off (no finish layers) --water off --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --px1 (native art pixels) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (remove lone pixels) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n',
+        'animated splat options: --splat-fields on|off|file.json',
         'sprite options: --sprite-atlas on|off|atlas.json --sprite-at x,y,z --sprite-scale n --sprite-atlas-mode card|impostor',
         'shaped fog options: --shaped-atmosphere on|off|file.json --volume-cutouts on|off|file.json',
         'fog lighting options: --volume-local-lights on|off --volume-local-shadows on|off',

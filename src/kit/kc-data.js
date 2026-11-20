@@ -295,6 +295,11 @@
       }
     }
     try {
+      K.splatFields.settings(st.finish.splatFields);
+    } catch (error) {
+      bad('finish.splatFields', error.message);
+    }
+    try {
       VolumeCutouts.settings(st.finish.volumeCutouts);
     } catch (error) {
       bad('finish.volumeCutouts', error.message);

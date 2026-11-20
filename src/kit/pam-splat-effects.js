@@ -218,6 +218,18 @@
     };
   }
 
+  function* births({ rate, start, end, lifetime, seed }, time) {
+    const first = Math.max(0, Math.ceil((time - start - lifetime[1]) * rate));
+    const last = Math.floor((Math.min(end, time) - start) * rate);
+    for (let serial = first; serial <= last; serial++) {
+      const random = K.grow.dice(K.procedural.data.hash('splat-emitter:' + serial, seed));
+      const birth = start + serial / rate;
+      const life = K.mix(lifetime[0], lifetime[1], random());
+      const age = time - birth;
+      if (age >= 0 && age < life) yield { serial, birth, age, phase: age / life, random };
+    }
+  }
+
   function emitter(builder, { source, rate = 36, start = 0, end = Infinity, lifetime = [0.25, 0.55], size = 0.006,
     speed = 0.18, spread = 0.12, drift = [0, 0, 0], gravity = [0, 0, 0], density = 0.9,
     color, seed = 1 } = {}) {
@@ -234,15 +246,7 @@
     const capacity = Math.ceil(rate * lifetime[1]) + 1;
     if (capacity > 4096) throw new RangeError('Emitter exceeds its live particle budget');
     const system = K.frameSplats(builder, capacity, (draw, dt, time) => {
-      const first = Math.max(0, Math.ceil((time - start - lifetime[1]) * rate));
-      const last = Math.floor((Math.min(end, time) - start) * rate);
-      for (let serial = first; serial <= last; serial++) {
-        // A birth has the same random stream even when a render seeks past it.
-        const random = K.grow.dice(K.procedural.data.hash('splat-emitter:' + serial, seed));
-        const birth = start + serial / rate;
-        const life = K.mix(lifetime[0], lifetime[1], random());
-        const age = time - birth;
-        if (age < 0 || age >= life) continue;
+      for (const { serial, birth, age, phase, random } of births({ rate, start, end, lifetime, seed }, time)) {
         const hit = source(birth, serial, random);
         if (hit == null) continue;
         if (!vector(hit.position, 3) || (hit.normal !== undefined && !vector(hit.normal, 3)))
@@ -250,7 +254,6 @@
         const normal = hit.normal || [0, 1, 0];
         const velocity = drift.map((v, i) => v + normal[i] * speed + (random() * 2 - 1) * spread);
         const position = hit.position.map((value, i) => value + velocity[i] * age + 0.5 * gravity[i] * age * age);
-        const phase = age / life;
         const alpha = density * Math.min(1, phase * 12) * (1 - phase ** 2);
         const chosen = typeof color === 'function' ? color(hit, random) : color;
         draw.point(position, { width: size * (0.75 + 0.5 * random()), density: alpha,
@@ -265,5 +268,5 @@
     return system;
   }
 
-  K.splatEffects = Object.freeze({ project: SplatEffects.project, prepareMask: SplatEffects.prepareMask, field, context, surfaceSource, emitter });
+  K.splatEffects = Object.freeze({ project: SplatEffects.project, prepareMask: SplatEffects.prepareMask, field, context, surfaceSource, emitter, births });
 })(KIT);

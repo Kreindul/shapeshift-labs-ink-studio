@@ -161,11 +161,15 @@ function createArtPasses(request, w, h) {
     for (const [channel, ids] of [['motion', owner], ['emissionMotion', emissionOwner]]) {
       if (!selected.has(channel)) continue;
       const vectors = new Float32Array(size * 2);
-      const previous = geometry.motionFrom;
+      const previous = geometry.motionFrom, current = geometry.motionReference;
       if (previous?.w === w && previous.h === h && previous.centers.length === geometry.centers.length) {
         for (let p = 0; p < size; p++) {
           const i = ids[p] * 2;
           if (i < 0 || !Number.isFinite(previous.centers[i]) || !Number.isFinite(geometry.centers[i])) continue;
+          const ownerId = ids[p];
+          if (current?.birthIds && ownerId >= current.baseCount &&
+              (current.splatSource !== previous.splatSource || current.baseCount !== previous.baseCount ||
+                current.birthIds[ownerId] !== previous.birthIds?.[ownerId])) continue;
           vectors[p * 2] = geometry.centers[i] - previous.centers[i];
           vectors[p * 2 + 1] = geometry.centers[i + 1] - previous.centers[i + 1];
         }

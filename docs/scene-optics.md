@@ -13,6 +13,8 @@ The [WebGL canvas renderer](browser-renderer.md) supports the shared glass-beam 
 
 For moving directional light and cast shadows on solid geometry, see [Live sun lighting](live-sun.md). See [Moving cloud shadows](cloud-shadows.md) for a shared coverage grid that shades the terrain, fog, and water. Use [Authored lightning](lightning.md) to time flashes that light clouds, appear in water reflections, and reveal nearby geometry. See [Indoor and outdoor exposure](scene-exposure.md) for rain boundaries and shelter for fog, light, and wind.
 
+Use [Animated splat fields](animated-splat-fields.md) for drifting particles, aurora curtains, dust walls, and wakes that follow a route.
+
 ## Planar reflections
 
 ```js

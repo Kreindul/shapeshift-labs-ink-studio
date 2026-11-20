@@ -44,6 +44,7 @@ const Precipitation = require('./precipitation.js');
 const RainImpacts = require('./rain-impacts.js');
 const AtlasSprites = require('../src/atlas-sprites.js');
 const AtlasRaster = require('./atlas-sprites.js');
+let SplatFields;
 const { cameraRays, surfacePoint, reflectionSampler, atmosphereQuality, mediaSampler, applyAtmosphere } = require('./scene-optics.js');
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x),
   sstep = (a, b, x) => {
@@ -262,8 +263,7 @@ function render(world, o, preparedPalettes) {
     near = Math.max(0.4, 0.15 * dist),
     tp = 1 / tangent,
     asp = W / H,
-    N = world.count,
-    d = world.data,
+    baseCount = world.count,
     R = world.radius;
   const hex = i => {
       const h = world.pal[i];
@@ -299,6 +299,22 @@ function render(world, o, preparedPalettes) {
     ? (time,x,z,_fallback,y=0) => flow.sample(x,y,z,time) : weatherWindHere;
   const airAt = (x,y,z) => localWind ? Airflow.frame(localWind(skyTime,x,z,wind.velocity,y)) : wind;
   const windAt = flow ? flow.open : weatherWindAt;
+  const splatSource = o.splatFields === true ? world.splatFields : o.splatFields ?? world.splatFields;
+  const fields = splatSource && (SplatFields ??= require('../index.js').load().KIT.splatFields).compile(splatSource);
+  const N = baseCount + (fields?.count ?? 0);
+  const birthIds = fields?.count && captureMotion ? new Float64Array(N) : undefined;
+  let d = world.data;
+  if (fields?.count) {
+    d = new Float32Array(N * 16);
+    d.set(world.data.subarray(0, baseCount * 16));
+    fields.write(d, baseCount, t, {
+      birthIds,
+      travel(at, birth, time) {
+        const age = time - birth;
+        return flow ? flow.travel(...at, skyTime - age, skyTime) : airAt(...at).velocity.map(v => v * age);
+      }
+    });
+  }
   const mediumLook = medium => optics?.transform(medium) ?? PixelLook.mediumTransform(paletteRules, medium);
   const atmosphereSources = o.atmosphere === false ? [] : [
     ...(world.atmosphere||[]), ...SceneOptics.shapedVolumes(world.shapedAtmosphere,o.shapedAtmosphere)
@@ -312,7 +328,7 @@ function render(world, o, preparedPalettes) {
   const glassIndex = optics && TargetSelectors.index(world);
   const glassLooks = glassIndex && new Map();
   const centers = captureMotion ? new Float32Array(N * 2).fill(NaN) : null;
-  const motionReference = centers && { w: W, h: H, centers };
+  const motionReference = centers && { w: W, h: H, centers, ...(birthIds && { birthIds, baseCount, splatSource }) };
   const art = createArtPasses([...passSelection].filter(name => name !== 'target' && name !== 'mask'), W, H);
   const rayAt = cameraRays(V, eye, W, H, focal, ortho);
   const sky = environment?.sky;
@@ -480,7 +496,7 @@ function render(world, o, preparedPalettes) {
     overlay.owners[pixel] = i;
     return unmasked(layer) || unmasked(fallbackSlot) || 0;
   }
-  const hasEffectInk = world.effectParticles?.length || world.surfaces?.some(({ settings }) =>
+  const hasEffectInk = fields?.count || world.effectParticles?.length || world.surfaces?.some(({ settings }) =>
     Object.values(settings.layers || {}).some(layer => layer?.type === 'projected'));
   const detail = hasEffectInk ? new Uint8Array(W * H) : null;
   // where each splat is at this moment, and what it looks like
@@ -607,7 +623,7 @@ function render(world, o, preparedPalettes) {
     live = LiveSun.create(sun, world, { x: X, y: Y, z: Z, alpha: AL, scale: SC }, normalAt, cloudShadow, exposure?.light);
   }
   let mn = Infinity;
-  for (let i = 0; i < N; i++) if (depth[i] < mn) mn = depth[i];
+  for (let i = 0; i < N; i++) if ((i < baseCount || AL[i] > 0) && depth[i] < mn) mn = depth[i];
   const mediumHorizon = aerial ? Math.max(horizon, -mn + R) : horizon;
   if (world.back) for (let j = 0; j < world.back.length; j++) depth[world.back[j]] = mn;
   const order = new Uint32Array(N);
@@ -631,7 +647,7 @@ function render(world, o, preparedPalettes) {
   let drawn = 0;
   // colour per pixel (look.pixel): which dab is in front at each pixel, to be coloured afterwards from where the pixel lands on it
   const PIX =
-      (o.pixel || (world.look && world.look.pixel)) && !o.raw && world.pix && world.pix.length >= N * 8
+      (o.pixel || (world.look && world.look.pixel)) && !o.raw && world.pix && world.pix.length >= baseCount * 8
         ? world.pix
         : null,
     win = PIX ? new Int32Array(W * H).fill(-1) : null;
@@ -644,10 +660,12 @@ function render(world, o, preparedPalettes) {
   const stagedFrames = stageMasks ? sampleFrames(world, t) : null;
   const maskFrames = stagedFrames && new Map();
   function stageFrame(i) {
+    if (i >= baseCount) return { normal: null };
     if (!maskFrames.has(i)) maskFrames.set(i, stagedFrames(i));
     return maskFrames.get(i);
   }
   function stageSample(i, point) {
+    if (i >= baseCount) return { position: point, worldPosition: point, normal: null, time: t };
     const { rest, normal, localOffset } = stageFrame(i);
     const offset = localOffset(point[0] - X[i], point[1] - Y[i], point[2] - Z[i]);
     return { position: Array.from(rest, (n, k) => n + offset[k]), worldPosition: point, normal, time: t };
@@ -659,7 +677,7 @@ function render(world, o, preparedPalettes) {
   let pixed = null,
     sprM = null;
   const FN =
-      (o.fine || (world.look && world.look.fine)) && world.fine && world.fine.length >= N * 12 ? world.fine : null,
+      (o.fine || (world.look && world.look.fine)) && world.fine && world.fine.length >= baseCount * 12 ? world.fine : null,
     FPAL = FN ? world.pal.map((h, i) => hex(i)) : null;
   let deferred = sortedSurfaces ? new Map() : null, deferredCount = 0, orderFallback = false;
   function composite(p, i, z, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, mark,
@@ -763,7 +781,8 @@ function render(world, o, preparedPalettes) {
       flags = Math.floor(kraw / 16),
       s2 = SC[i] * SC[i],
       pk = d[q + 7];
-    const staged = stages ? stages.at(i) : null;
+    const fieldParticle = i >= baseCount;
+    const staged = stages ? stages.at(fieldParticle ? -1 : i) : null;
     lookPass?.begin();
     const materialSample = staged?.material?.some(rule => rule.mask) ? stageSample(i, [x, y, z]) : undefined;
     const litMask = staged?.lit?.some(rule => rule.mask);
@@ -860,11 +879,11 @@ function render(world, o, preparedPalettes) {
     const projected = surface?.projected(i);
     const reflectedSky = !skyOverlay && surface?.environment(i);
     const fragmentSurface = !pixelSurface && (planar || projected || reflectedSky || liveNormal && hasSurface);
-    const detailParticle = world.effectParticles?.some(({ first, count }) => i >= first && i < first + count);
+    const detailParticle = fieldParticle || world.effectParticles?.some(({ first, count }) => i >= first && i < first + count);
     if (hasSurface && !pixelSurface && !fragmentSurface) {
       [r, g, b, coverage, glint, centerPalette] = surface.shade(i, x, y, z, x, y, z, r, g, b, undefined, undefined, lookPass?.surface);
     }
-    const splatFlash = flash && !(flags & 6) ? flash.light(x, y, z, liveNormal || geometrySample(i).normal) : null;
+    const splatFlash = flash && !(flags & 6) ? flash.light(x, y, z, liveNormal || (!fieldParticle ? geometrySample(i).normal : null)) : null;
     if (pixelSurface && splatFlash) patternFlashes.set(i, splatFlash);
     const coverGain = !liveNormal && !(flags & 6) && exposure?.light ?
       .24 + .76 * exposure.light(x,y,z) : 1;
@@ -890,7 +909,7 @@ function render(world, o, preparedPalettes) {
       if (!glassLooks.has(target)) glassLooks.set(target, optics.transform(target));
       glassLook = glassLooks.get(target);
     }
-    const coat = !retainLayers && PIX && hasSurface && (!writesDepth || reflectInRaster || surface.reveals(i));
+    const coat = !retainLayers && PIX && (fieldParticle || hasSurface && (!writesDepth || reflectInRaster || surface.reveals(i)));
     if (coat && !surfaceOverlay) surfaceOverlay = new Float32Array(W * H * 4);
     if (audit && (r > 1 || g > 1 || b > 1)) audit.sample('splat', Math.max(0, r), Math.max(0, g), Math.max(0, b));
     r = Math.min(r, 1);
@@ -922,7 +941,8 @@ function render(world, o, preparedPalettes) {
     }
     const bakedCloud = cloudShadow && !liveNormal && !(flags & 6);
     const wantsDepth = probe || deferred || aerial || cloudView;
-    const probeNormal = wantsDepth || bakedCloud ? geometrySample(i).normal : null, probeCenter = wantsDepth && [x, y, z];
+    const probeNormal = !fieldParticle && (wantsDepth || bakedCloud) ? geometrySample(i).normal : null;
+    const probeCenter = wantsDepth && [x, y, z];
     const probeReach = wantsDepth ? 3 * Math.sqrt(c00 + c11 + c22) : 0;
     const centerMark = lookPass && { ...lookPass.mark };
     for (let iy = y0; iy <= y1; iy++) {
@@ -1290,7 +1310,8 @@ function render(world, o, preparedPalettes) {
           pixed[p] = 1;
         }
         if (!PALC[ci]) continue;
-        const staged = stages ? stages.at(i) : null;
+        const fieldParticle = i >= baseCount;
+    const staged = stages ? stages.at(fieldParticle ? -1 : i) : null;
         lookPass?.begin();
         const masked = staged?.material?.some(rule => rule.mask) || staged?.lit?.some(rule => rule.mask);
         const sample = masked ? stageSample(i, [HX[p], HY[p], HZ[p]]) : undefined;
@@ -1496,7 +1517,7 @@ function render(world, o, preparedPalettes) {
     if (quality.stats) volumeStats = atmosphere.stats;
   }
   let passes = art?.finalize(world, t, { x: X, y: Y, z: Z, rayAt, span: R,
-    detail, sprM, surfaceGlint, centers, motionFrom });
+    detail, sprM, surfaceGlint, centers, motionFrom, motionReference });
   if (o.captureCoverage) {
     if (reflectionTint && passes?.emission) ArtEffects.tintReflection(col, captured, passes.emission, W, H, reflectionTint, t);
     const reflectionLook = reflectionPlane && optics?.transform(TargetSelectors.medium(reflectionPlane.id, 'reflection', reflectionPlane.tags));
