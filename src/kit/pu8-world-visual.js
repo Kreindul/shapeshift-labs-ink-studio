@@ -7,21 +7,79 @@
     0x173047,0x1c475b,0x226a78,0x329393,0x64b8aa,0xa9ded2,
     0x4e302a,0x815032,0xab6e3b,0xd29f55,0xf0cb7b,0xf8edd0
   ];
+  function visualLooks(world, catalog) {
+    const config = world.visual ?? {}, entities = world.entities;
+    const assets = K.authoring.looks, paletteOptions = { palette: config.palette ?? palette,
+      roles: config.paletteRoles, blueNoise: K.procedural.materials.blueNoise };
+    const look = assets.scene(config.look, catalog), inherited = new Map(), surfaces = new Map();
+    function surface(binding) {
+      if (!surfaces.has(binding)) {
+        const { surface: settings } = assets.material({}, binding, catalog);
+        surfaces.set(binding, settings);
+      }
+      return surfaces.get(binding);
+    }
+    function material(base, binding) {
+      const settings = surface(binding);
+      return settings ? SurfaceLook.material(base, settings) : base;
+    }
+    function forEntity(id) {
+      if (id == null || !Object.hasOwn(entities, id)) return undefined;
+      const explicit = entities[id].visual?.lookAsset;
+      if (explicit !== undefined) return explicit;
+      let current = id, binding;
+      const path = [];
+      while (current != null && Object.hasOwn(entities, current) && !inherited.has(current)) {
+        const entity = entities[current];
+        path.push(current);
+        if (entity.lookAsset !== undefined) {
+          binding = entity.lookAsset;
+          break;
+        }
+        current = entity.anchor?.entity ?? entity.parent;
+      }
+      if (inherited.has(current)) binding = inherited.get(current);
+      for (const key of path) inherited.set(key, binding);
+      return binding;
+    }
+    function validate() {
+      if (Object.hasOwn(config.look ?? {}, 'asset')) {
+        PixelLook.prepareColorStack(look.colorStack, paletteOptions.palette, paletteOptions.roles);
+        PixelLook.preparePaletteConstraints(look.paletteConstraints, paletteOptions);
+      }
+      const checked = new Set();
+      function check(binding) {
+        if (binding === undefined || checked.has(binding)) return;
+        const settings = surface(binding);
+        if (settings) SurfaceLook.prepare(settings, paletteOptions.palette, undefined, undefined,
+          { paletteRoles: paletteOptions.roles, blueNoise: paletteOptions.blueNoise });
+        checked.add(binding);
+      }
+      check(config.terrainLookAsset);
+      for (const entity of Object.values(entities)) {
+        check(entity.lookAsset);
+        check(entity.visual?.lookAsset);
+      }
+    }
+    return { look, material, forEntity, validate };
+  }
+
   function visual({makeBuilder,makeSculpt},view,query) {
     const config=view.world.visual ?? {}, region=W.fields.bounds(config.bounds ?? {min:[-5,-1,-5],max:[5,5,5]});
     const {min,max}=region, span=Math.max(max[0]-min[0],max[2]-min[2],1), resolution=config.resolution??Math.max(.08,span/100);
     W.data.check(Number.isFinite(resolution)&&resolution>=.02&&resolution<=10&&span/resolution<=256,'Render grid exceeds its sample budget');
     const B=makeBuilder(view.world.seed,config.palette??palette), S=K.sculpt(makeSculpt(B));
-    if(config.look?.pixel)S.pixel=true;
+    const catalog = view.world.assetPacks?.length ? K.authoring.assetPacks.create({ packs: view.world.assetPacks }) : undefined;
+    const looks = visualLooks(view.world, catalog);
+    if(looks.look?.pixel)S.pixel=true;
     const mid=min.map((n,i)=>(n+max[i])/2);
     const fields=config.fields??{}, terrain=fields.bed, water=fields.water, wear=fields.wear;
-    const earth={r:[7,8,9,10,11],materialId:'terrain',rf(x,y,z,ny) {
+    const earth=looks.material({r:[7,8,9,10,11],materialId:'terrain',surface:config.terrainSurface,rf(x,y,z,ny) {
       if (ny<.4) return [19,20,21,22];
       const result=wear&&query.probe(wear,[x,y,z]);
       return result?.status==='ok'&&result.value>.18?[19,20,21,22,23]:null;
-    }};
-    let hasSurface=Boolean(config.terrainSurface);
-    if(hasSurface)earth.surface=config.terrainSurface;
+    }}, config.terrainLookAsset);
+    let hasSurface=Boolean(earth.surface);
     const height=(x,z)=>{
       const result=terrain&&query.probe(terrain,[x,0,z]);
       return result?.status==='ok'?result.value:config.ground??0;
@@ -40,7 +98,9 @@
       const ramp=entry.look??[1,2,3,4,5,6];
       const rotation=entry.rotation??M.id();
       const axis=[0,1,2].map(i=>[rotation[i],rotation[i+3],rotation[i+6]]);
-      S.box(entry.position,entry.half,{r:ramp,materialId:entry.material??'body'},{ax:axis,res:resolution*.72,
+      const finish=looks.material({r:ramp,materialId:entry.material??'body'},looks.forEntity(entry.entity??entry.id));
+      hasSurface ||= Boolean(finish.surface);
+      S.box(entry.position,entry.half,finish,{ax:axis,res:resolution*.72,
         rd:Math.min(.055,...entry.half)*.4,tag:entry.id});
     }
     for (const [id,entity] of Object.entries(view.world.entities)) {
@@ -48,8 +108,9 @@
       const pose=query.target({entity:id}), point=pose?.point;
       if (!point) continue;
       const {half,ramp,surface}=entity.visual;
-      hasSurface ||= Boolean(surface);
-      S.box(point,half,{r:ramp??[19,20,21,22,23],surface,materialId:'entity'}, {res:resolution*.72,tag:id});
+      const finish=looks.material({r:ramp??[19,20,21,22,23],surface,materialId:'entity'},looks.forEntity(id));
+      hasSurface ||= Boolean(finish.surface);
+      S.box(point,half,finish,{res:resolution*.72,tag:id});
     }
     for (const field of fields.agents??[]) {
       const reading=query.probe(field);
@@ -57,11 +118,16 @@
       for (const [id,agent] of Object.entries(reading.value)) {
         if (!agent.position || agent.mode==='dormant') continue;
         const r=agent.radius??.16, p=agent.position, face=agent.direction??[1,0,0];
-        S.ball(V.add(p,[0,r*.7,0]),[r*1.27,r*.78,r*.76],{r:agent.look??[4,5,6,24],materialId:'agent'},{objectId:id,res:resolution*.64});
-        S.ball(V.mad(V.add(p,[0,r,0]),face,r),r*.48,{r:[19,20,23],materialId:'agent'},{objectId:id,res:resolution*.64});
+        const binding=looks.forEntity(agent.entity??id);
+        const body=looks.material({r:agent.look??[4,5,6,24],materialId:'agent'},binding);
+        const head=looks.material({r:[19,20,23],materialId:'agent'},binding);
+        hasSurface ||= Boolean(body.surface);
+        S.ball(V.add(p,[0,r*.7,0]),[r*1.27,r*.78,r*.76],body,{objectId:id,res:resolution*.64});
+        S.ball(V.mad(V.add(p,[0,r,0]),face,r),r*.48,head,{objectId:id,res:resolution*.64});
+        const toes=looks.material({r:[19,20,21,22],materialId:'agent'},binding);
         for(const limb of agent.limbs??[]){
           const top=V.add(limb.point,[0,r*.42,0]);
-          S.tube([limb.point,top],r*.18,r*.18,{r:[19,20,21,22],materialId:'agent'},{objectId:id,res:resolution*.6});
+          S.tube([limb.point,top],r*.18,r*.18,toes,{objectId:id,res:resolution*.6});
         }
       }
     }
@@ -80,8 +146,9 @@
       B.describeSplats?.(first,B.count(),{material:'water'});
     }
     return B.finish({cam:config.camera??{target:[mid[0],.05,mid[2]],dist:span*1.48,yaw:.62,pitch:.8},
-      radius:span,detail:30,dither:.22,look:config.look,paletteRoles:config.paletteRoles,
+      radius:span,detail:30,dither:.22,look:looks.look,paletteRoles:config.paletteRoles,
       ...((hasSurface||config.surfaceEffects)&&{surfaceEffects:{...config.surfaceEffects,query}})});
   }
   W.visual = visual;
+  W.validateLooks = (world, catalog) => visualLooks(world, catalog).validate();
 })(KIT);

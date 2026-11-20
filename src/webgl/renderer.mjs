@@ -189,6 +189,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
           rows.set([palette.count, palette.packed.length, palette.width, palette.height], offset);
           palette.swatches.forEach((swatch, j) => rows.set(swatch, offset + (j + 1) * 4));
           rows[offset + 7] = palette.amount;
+          rows[offset + 11] = Number(palette.source === 'graded');
           rows.set(palette.ranks, offset + 49 * 4);
         });
         textureUnit(8, constraintRows);

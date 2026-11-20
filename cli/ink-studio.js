@@ -86,6 +86,8 @@ function dataScene(file, override) {
     dir = path.dirname(path.resolve(file)),
     assets = {};
   if (opt.style) spec.style = opt.style;
+  if (opt['asset-pack'] !== undefined)
+    spec.assetPacks = require('./asset-pack.js').install(K.authoring.assetPacks, spec.assetPacks, opt['asset-pack']);
   for (const s of spec.solids || [])
     if (s && s.kind === 'mesh' && typeof s.asset === 'string' && !assets[s.asset]) {
       const f = ['', '.obj', '.glb', '.gltf']
@@ -302,6 +304,7 @@ const CMD = {
         '  stats <id>                  splat counts, colours used, size, cost per frame, warnings',
         '  render <id> [--t 1.5]       one PNG rendered on the CPU',
         '  render <id> --palette-constraints <file.json|off>   override target palettes and dither settings',
+        '  render <scene.json> --asset-pack <pack-or-bundle.json>   install look assets for this invocation',
         '  ramps <id> [--n 12]         the ramps it is shaded on, and which only get darker without turning; a turning one is offered from the same palette',
         '  values <id> [--t 1.5]       the value check: the picture sorted into dark, middle and light, and whether it reads in three tones',
         '  sheet <id> [--from 0 --to 6 --n 12 | --t 0,1,2]   the same view at several moments, on one sheet',

@@ -3018,6 +3018,12 @@ namespaced family ID. Compile an ordered list of active pack IDs for each
 scene. Later entries take precedence. The resulting resolver keeps the
 authored family IDs intact, validates cycles, and reports missing packs.
 
+Packs can also ship `looks`, with or without families. The catalog exposes
+their IDs and pack revisions through `getLook(id)`. Use
+`assetPacks.reviseLook(pack, lookId, patch)` to update a look's label,
+parameters, stack, or palette while keeping its ID. The revision advances
+when the content changes. See [look asset bindings](pixel-look.md#look-assets-and-overrides).
+
 `assetPacks.bundle(packs, ids)` creates one versioned JSON payload for
 sharing packs. Omit `ids` to include all packs. If a selected pack
 replaces a family owned by another installed pack, the bundle includes

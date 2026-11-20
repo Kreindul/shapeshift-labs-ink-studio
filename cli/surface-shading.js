@@ -22,19 +22,25 @@ function surfaceShading(world, options, camera) {
     }
     return rigFrames.get(part);
   }
-  const { eye, forward, parallel, footprint, time, reflection } = camera;
+  const { eye, forward, parallel, footprint, time, reflection, blueNoise } = camera;
   const { STRIDE } = SurfaceLook;
   const liveLight = world.surfaceLight === undefined ? undefined : SurfaceLook.prepareLightTrack(world.surfaceLight)(time);
   const materials = world.surfaces.map(({ settings, light }) =>
     SurfaceLook.prepare(settings, world.pal, liveLight ?? light, world.surfaceEffects,
-      { colorCurves: options.colorCurves !== false, colorLut: options.colorLut !== false, colorStack: options.colorStack !== false }));
+      { colorCurves: options.colorCurves !== false, colorLut: options.colorLut !== false, colorStack: options.colorStack !== false,
+        paletteConstraints: options.paletteConstraints !== false, paletteRoles: world.paletteRoles, blueNoise }));
   const ids = new Map();
-  const palettes = [];
+  const palettes = [], constraints = [];
   for (const material of materials) {
     for (const { effect } of material.layers) {
       if (!effect?.palette) continue;
       palettes.push(effect.palette);
       ids.set(effect.palette, palettes.length);
+    }
+    if (material.paletteConstraint) {
+      const policy = material.paletteConstraint;
+      constraints[palettes.length] = policy;
+      ids.set(policy.swatches, palettes.push(policy.swatches));
     }
   }
   const planarMaterials = materials.map(
@@ -141,7 +147,7 @@ function surfaceShading(world, options, camera) {
   }
 
   return {
-    has, normalAt, surfaceNormal, planar, shade, palettes,
+    has, normalAt, surfaceNormal, planar, shade, palettes, constraints,
     projected,
     reveals: i => materials[surfaceData[i * STRIDE] - 1]?.reveals
   };

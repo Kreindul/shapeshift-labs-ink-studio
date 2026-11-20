@@ -184,6 +184,7 @@
     seed: 'num',
     style: 'style',
     palette: 'list',
+    assetPacks: 'list',
     roles: 'obj',
     camera: 'obj',
     light: 'obj',
@@ -249,6 +250,12 @@
     const { preset, ...settings } = definition;
     return preset === undefined ? K.surface.material(material, settings) : K.surface.preset(preset, material, settings);
   }
+  const lookCatalog = spec => spec.assetPacks === undefined ? undefined :
+    K.authoring.assetPacks.create({ packs: spec.assetPacks });
+  function materialLook(base, settings, catalog) {
+    const surface = settings.surface === undefined ? base : applySurface(base, settings.surface);
+    return K.authoring.looks.material(surface, settings.lookAsset, catalog);
+  }
   DIO.check = (spec, env) => {
     const out = [],
       bad = (path, problem, hint) => out.push({ level: 'error', path, problem, hint: hint || '' }),
@@ -284,7 +291,17 @@
         bad('finish.surfaceEffects', error.message);
       }
     }
-    const look = st.finish.look;
+    let catalog, look = st.finish.look;
+    try {
+      catalog = lookCatalog(spec);
+    } catch (error) {
+      bad('assetPacks', error.message);
+    }
+    try {
+      look = K.authoring.looks.scene(look, catalog);
+    } catch (error) {
+      bad('finish.look.asset', error.message);
+    }
     if (look?.pixelSize !== undefined && (!Number.isSafeInteger(look.pixelSize) || look.pixelSize < 1))
       bad('finish.look.pixelSize', 'pixelSize must be a positive integer');
     try {
@@ -372,7 +389,7 @@
       if (m === undefined) return;
       const role = typeof m === 'string' ? m : m && m.role;
       if (m && typeof m === 'object') {
-        keys(m, path, { role: 1, ramp: 1, noise: 1, scale: 1, glow: 1, over: 1, surface: 1, model: 1 });
+        keys(m, path, { role: 1, ramp: 1, noise: 1, scale: 1, glow: 1, over: 1, surface: 1, model: 1, lookAsset: 1 });
         if (m.model !== undefined) {
           const q = m.model, at = path + '.model', channels = { color: 1, emission: 1, roughness: 1, metallic: 1 };
           if (!q || typeof q !== 'object' || Array.isArray(q)) bad(at, 'model material channels need an object');
@@ -386,11 +403,13 @@
             }
           }
         }
-        if (m.surface !== undefined) {
+        if (m.surface !== undefined || m.lookAsset !== undefined) {
           try {
-            K.surface.prepare(applySurface({}, m.surface).surface, pal, st.sun, surfaceEffects);
+            const { surface } = materialLook({}, m, catalog);
+            if (surface) K.surface.prepare(surface, pal, st.sun, surfaceEffects,
+              { paletteRoles: st.roles, blueNoise: K.procedural.materials.blueNoise });
           } catch (error) {
-            bad(path + '.surface', error.message);
+            bad(path + (m.lookAsset !== undefined ? '.lookAsset' : '.surface'), error.message);
           }
         }
         if (m.ramp) {
@@ -696,12 +715,13 @@
       e.problems = problems;
       throw e;
     }
-    const st0 = styleOf(spec),
+    const st0 = styleOf(spec), catalog = lookCatalog(spec),
       seed = spec.seed === undefined ? 1 : spec.seed,
       effects = spec.effects || [],
       motion = spec.motion || [],
       lamps = effects.filter(e => e.do === 'lamp'),
       loose = effects.some(e => ['dust', 'embers', 'smoke', 'sparks', 'rain'].includes(e.do)) || !!spec.tap;
+    st0.finish.look = K.authoring.looks.scene(st0.finish.look, catalog);
     let pal = st0.palette;
     const meshLooks = {};
     for (const s of spec.solids)
@@ -743,7 +763,7 @@
                 ? r2[K.clamp(Math.floor(t * r2.length), 0, r2.length - 1)]
                 : undefined;
           }
-          if (m.surface !== undefined) return applySurface(out, m.surface);
+          if (m.surface !== undefined || m.lookAsset !== undefined) return materialLook(out, m, catalog);
         }
         return out;
       };

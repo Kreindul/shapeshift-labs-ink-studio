@@ -33,15 +33,22 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
     if (opt.out) write(opt.out,value);
     else process.stdout.write(JSON.stringify(value,null,opt.json?0:2)+'\n');
   };
+  function document(world) {
+    if (opt['asset-pack'] === undefined) return {world};
+    const packs = require('./asset-pack.js').install(kit.KIT.authoring.assetPacks, world.assetPacks, opt['asset-pack']);
+    return {world:{...world,assetPacks:packs}};
+  }
   function load(file) {
     ensure(typeof file === 'string','Expected a scene or run file');
     if (/\.(js|cjs)$/i.test(file)) {
       const factory = require(path.resolve(file)), value = typeof factory === 'function' ? factory(kit) : factory;
-      return value.format===W.format ? {world:value} : value.simulation ? {world:value.simulation} : {legacy:file};
+      return value.format===W.format ? document(value) : value.simulation ? document(value.simulation) : {legacy:file};
     }
     if (/\.json$/i.test(file)) {
       const value = read(file);
-      if (value.format === W.format) return {world:value};
+      if (value.format === W.format) return document(value);
+      if ([R.checkpointFormat,R.runFormat].includes(value.format))
+        ensure(opt['asset-pack']===undefined,'Recorded runs and checkpoints keep their original asset packs');
       if (value.format === R.checkpointFormat) return {world:value.world,checkpoint:value};
       if (value.format === R.runFormat) return {world:value.end.world,checkpoint:value.end,log:value};
       return {legacy:file,document:value};

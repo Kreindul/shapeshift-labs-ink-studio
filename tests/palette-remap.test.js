@@ -118,6 +118,17 @@ function testWebGL(createRenderer, spec) {
   const calibrated = PixelLook.gradePalette(PixelLook.colorGrade(world.pal, world.paletteRoles, null, false, false, managed, false));
   if (!wire.every((color, i) => color === calibrated[world.pal.indexOf(before[i])]))
     throw new Error('WebGL did not use the same linear-light LUT and numeric range as the CPU');
+  const assets = KIT.authoring.assetPacks.create({ packs: [{
+    format: 'ink-studio/asset-pack', version: 1, id: 'test', revision: 1, title: 'Test',
+    looks: [{ id: 'test/contrast', label: 'Contrast', stack: { name: 'Contrast', steps: [
+      { type: 'exposure', stops: -1 }, { type: 'saturation', factor: 0 }
+    ] } }]
+  }] });
+  const assetStack = KIT.authoring.looks.scene({ asset: { asset: 'test/contrast', revision: 1, strength: .65 } }, assets).colorStack;
+  const assetPixels = pixels(false, false, false, assetStack);
+  const assetPalette = PixelLook.gradePalette(PixelLook.colorGrade(world.pal, world.paletteRoles, null, false, false, false, assetStack));
+  if (!assetPixels.every((color, i) => color === assetPalette[world.pal.indexOf(before[i])]))
+    throw new Error('WebGL did not match the scene look asset strength');
   renderer.dispose();
 }
 

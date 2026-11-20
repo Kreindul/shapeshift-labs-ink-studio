@@ -59,7 +59,7 @@
     check(Array.isArray(result.connections) && result.connections.length <= 50000 && Array.isArray(result.commands),
       'World connections and commands must be arrays');
     for (const [key, prefab] of Object.entries(result.prefabs)) {
-      check(Object.keys(prefab).every(name => ['entities','systems','connections','ports','params','revision','source','packs'].includes(name)),
+      check(Object.keys(prefab).every(name => ['entities','systems','connections','ports','params','revision','source','packs','lookAsset'].includes(name)),
         'Unknown prefab property in ' + key);
       check(Number.isSafeInteger(prefab.revision ?? 1) && (prefab.revision ?? 1) > 0, 'Invalid prefab revision for ' + key);
       check(record(prefab.entities ?? {}) && record(prefab.systems ?? {}) && Array.isArray(prefab.connections ?? []) &&
@@ -146,17 +146,18 @@
     const ports=source.entities[key]?.ports;
     return own(ports,pin)?ports[pin]:value;
   }
-  function stamp(source, name, as, {params = {}, position = [0,0,0], overrides = []} = {}) {
+  function stamp(source, name, as, {params = {}, position = [0,0,0], overrides = [], lookAsset} = {}) {
     const definition = source.prefabs[name];
     check(own(source.prefabs,name) && id(as) && vector(position) && record(params), 'Unknown or invalid prefab instance ' + name);
     check(!own(source.entities,as), 'Prefab instance already exists: ' + as);
     for (const key of Object.keys(params)) check(own(definition.params,key), 'Unknown prefab parameter ' + key);
     const values = {...definition.params,...params};
     const dependencies=definition.packs??[];
-    const packs=dependencies.length?K.authoring.assetPacks.create({packs:source.assetPacks}).packs:[];
+    let catalog;
+    const assets = () => catalog ??= K.authoring.assetPacks.create({packs:source.assetPacks});
     for(const item of dependencies){
       const name=typeof item==='string'?item:item.id, revision=typeof item==='string'?undefined:item.revision;
-      check(packs.some(pack=>pack.id===name&&(revision===undefined||pack.revision===revision)),'Missing prefab asset pack '+name);
+      check(assets().packs.some(pack=>pack.id===name&&(revision===undefined||pack.revision===revision)),'Missing prefab asset pack '+name);
     }
     function resolve(value) {
       if (Array.isArray(value)) return value.map(resolve);
@@ -183,7 +184,9 @@
       return nameOf(system) + '/' + pin;
     }
     const ports = Object.fromEntries(Object.entries(definition.ports ?? {}).map(([key,value]) => [key,port(value)]));
-    const entities = {[as]:{kind:'assembly',position,prefab:name,revision:definition.revision ?? 1,ports,packs:dependencies}};
+    const look = K.authoring.looks.override(resolve(definition.lookAsset), lookAsset);
+    const entities = {[as]:{kind:'assembly',position,prefab:name,revision:definition.revision ?? 1,ports,packs:dependencies,
+      ...(look !== undefined && {lookAsset:look})}};
     const systems = {};
     for (const [key, item] of Object.entries(definition.entities ?? {})) {
       const entity = resolve(item);
@@ -198,6 +201,10 @@
       for (const key of Object.keys(entries))
         check((key === as && section === 'entities' || key.startsWith(as + '.')) && !own(source[section],key),
           'Prefab override changes ownership or reuses ID ' + key);
+    }
+    for (const entity of Object.values(instance.entities)) {
+      for (const binding of [entity.lookAsset, entity.visual?.lookAsset])
+        if (binding !== undefined && binding !== false) K.authoring.looks.bind(binding, assets());
     }
     return apply(source,[
       {op:'merge',path:['entities'],value:instance.entities},
@@ -254,7 +261,8 @@
       check(port,'Cannot capture a port outside the assembly: '+key);
       ports[key]=port;
     }
-    const prefab={entities,systems,connections,ports,packs:root.packs??[],revision:1,...(root.prefab?{source:root.prefab}:{})};
+    const prefab={entities,systems,connections,ports,packs:root.packs??[],revision:1,...(root.prefab?{source:root.prefab}:{}),
+      ...(root.lookAsset !== undefined && {lookAsset:root.lookAsset})};
     return apply(source,[{op:'set',path:['prefabs',name],value:prefab}]);
   }
   K.world = {format, manifest, apply, stamp, remix, capture};

@@ -3,6 +3,7 @@
 const SurfaceLook = (() => {
   const optics = typeof SceneOptics === 'undefined' ? require('./scene-optics.js') : SceneOptics;
   const effects = typeof SplatEffects === 'undefined' ? require('./splat-effects.js') : SplatEffects;
+  const pixelLook = typeof PixelLook === 'undefined' ? require('./pixel-look.js') : PixelLook;
   let luts, stacks;
   try {
     luts = ColorLUT;
@@ -294,7 +295,7 @@ const SurfaceLook = (() => {
   }
 
   function prepare(settings, palette = [], lightDirection = [-0.55, 0.72, 0.43], context = {},
-    { colorCurves = true, colorLut = true, colorStack = true } = {}) {
+    { colorCurves = true, colorLut = true, colorStack = true, paletteConstraints = true, paletteRoles, blueNoise } = {}) {
     if (!isRecord(settings)) throw new TypeError('Surface settings must be an object');
     numeric(settings, ['scale', 'seed', 'steps'], 'surface');
     if (settings.layers !== undefined && !isRecord(settings.layers))
@@ -434,6 +435,8 @@ const SurfaceLook = (() => {
       });
     return {
       settings, normal, layers, sun: unit(vector(lightDirection, AXES.y)),
+      paletteConstraint: paletteConstraints && settings.paletteConstraint !== undefined
+        ? pixelLook.preparePalette(settings.paletteConstraint, { palette, roles: paletteRoles, blueNoise }) : null,
       projected: layers.some(layer => layer.effect || layer.fieldMask),
       depth: layers.some(layer => layer.effect?.depth),
       reveals: layers.some(layer => layer.effect?.reveals)
@@ -531,6 +534,7 @@ const SurfaceLook = (() => {
       const amount = steps > 1 ? Math.round(weight * steps) / steps : weight;
       for (let i = 0; i < 3; i++) output[i] = mix(output[i], rgb[i], amount);
     }
+    if (prepared.paletteConstraint) output[5] = prepared.paletteConstraint.swatches;
     return output;
   }
 

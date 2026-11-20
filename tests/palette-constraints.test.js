@@ -105,6 +105,12 @@ function checkWebGL(createRenderer, build, targets, expected) {
   gl.readPixels(40, 39, 4, 1, gl.RGBA, gl.UNSIGNED_BYTE, stripe);
   if (new Set([stripe[0], stripe[4], stripe[8], stripe[12]]).size !== 2 || stripe[0] !== stripe[8] || stripe[4] !== stripe[12])
     throw new Error('GPU did not use the target checker pattern');
+  const paletteConstraints = { default: { source: 'graded', palette: ['#080c10', '#b6ced0'] } };
+  const colorStack = { name: 'Lower exposure', steps: [{ type: 'exposure', stops: -4 }] };
+  expected[0][2] = expected[1][2] = [8, 12, 16];
+  expected[2][2] = [1, 1, 2];
+  check({ colored: false, colorStack, paletteConstraints });
+  check({ colored: true, colorStack, paletteConstraints });
   renderer.dispose();
 }
 

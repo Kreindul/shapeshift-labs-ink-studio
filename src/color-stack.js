@@ -21,10 +21,12 @@ const ColorStack = (() => {
   };
 
   function validateStack(definition) {
-    if (!record(definition) || Object.keys(definition).some(key => key !== 'name' && key !== 'steps') ||
+    if (!record(definition) || Object.keys(definition).some(key => !['name', 'steps', 'amount'].includes(key)) ||
         typeof definition.name !== 'string' || !definition.name.trim() ||
         !Array.isArray(definition.steps) || definition.steps.length > 64)
       throw new TypeError('A color stack needs a name and an array of up to 64 steps');
+    if (definition.amount !== undefined && !unit(definition.amount))
+      throw new RangeError('Color stack amount must be in [0, 1]');
     const ids = new Set();
     for (const step of definition.steps) {
       if (!record(step) || typeof step.type !== 'string' || !Object.hasOwn(fields, step.type))
@@ -116,9 +118,10 @@ const ColorStack = (() => {
     if (definition === undefined || definition === false) return null;
     validateStack(definition);
     const steps = [], locks = [];
+    const strength = definition.amount ?? 1;
     let indexed = false;
     for (const step of definition.steps) {
-      const amount = step.amount ?? 1, active = step.enabled !== false && amount !== 0;
+      const amount = step.amount ?? 1, active = strength !== 0 && step.enabled !== false && amount !== 0;
       if (step.type === 'paletteRemap') {
         if (!paletteRemap) throw new TypeError('Palette remap steps require a scene palette');
         const plan = paletteRemap(step.remap, step.color);
@@ -146,6 +149,7 @@ const ColorStack = (() => {
           throw new TypeError('This color stack needs a palette index');
         const locked = protectedBy(index);
         if (locked) { copy(locked.target(index), out); return out; }
+        const r = rgb[0], g = rgb[1], b = rgb[2];
         copy(rgb, out);
         for (const { amount, run } of steps) {
           run(out, changed, index);
@@ -153,6 +157,11 @@ const ColorStack = (() => {
             if (!Number.isFinite(changed[i])) throw new RangeError('A color stack step produced nonfinite RGB');
             out[i] = amount === 1 ? changed[i] : out[i] * (1 - amount) + changed[i] * amount;
           }
+        }
+        if (strength !== 1 && steps.length) {
+          out[0] = r * (1 - strength) + out[0] * strength;
+          out[1] = g * (1 - strength) + out[1] * strength;
+          out[2] = b * (1 - strength) + out[2] * strength;
         }
         return out;
       }

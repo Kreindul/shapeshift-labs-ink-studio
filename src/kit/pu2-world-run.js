@@ -128,7 +128,8 @@
     const world = W.manifest(source), plan = compile(world,implementations);
     for (const command of world.commands) actionCheck(command,plan);
     scenarioCheck(world.scenario,plan);
-    if(world.assetPacks.length)K.authoring.assetPacks.create({packs:world.assetPacks});
+    const catalog = world.assetPacks.length ? K.authoring.assetPacks.create({packs:world.assetPacks}) : undefined;
+    W.validateLooks(world, catalog);
     check(world.history === undefined || record(world.history), 'Invalid history policy');
     if (world.history?.where !== undefined) Q.condition(world.history.where,{});
     if (world.history?.enabled !== undefined) check(typeof world.history.enabled==='boolean','History enabled must be boolean');
@@ -141,6 +142,7 @@
     for (const [name,prefab] of Object.entries(world.prefabs)) {
       const sandbox = W.manifest({id:'prefab-check',prefabs:{[name]:prefab},assetPacks:world.assetPacks});
       const stamped = W.stamp(sandbox,name,'instance').world;
+      W.validateLooks({...stamped,visual:world.visual}, catalog);
       const prefabPlan = compile(stamped,implementations);
       for (const port of Object.values(stamped.entities.instance.ports))
         check(own(prefabPlan.ports.inputs,port) || own(prefabPlan.ports.outputs,port), 'Invalid public prefab port ' + port);

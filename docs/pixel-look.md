@@ -353,6 +353,8 @@ optional `default` policy to cover foreground surfaces without a target.
   indices, and named palette roles or stops. Omitting `palette` uses the
   scene swatches. `reserved` entries preserve exact matches at 8-bit RGB
   precision and stay out of ordinary quantization and dithering.
+  A policy samples lit color by default. Use `source: "graded"` to
+  sample the graded scene swatches before the final palette selection.
 - `none`, `checker`, `bayer`, and seeded `blue-noise` set the threshold
   pattern. Strength 0 picks the nearest swatch. Increasing strength lets
   more art pixels pick the second swatch near a transition. CLI renders
@@ -374,3 +376,71 @@ node cli/ink-studio.js render examples/palette-constraints.js --ortho --out cons
 
 Use `--palette-constraints rules.json` to override the authored rules
 in `render` or `sim render`. `off` bypasses the target policies.
+
+## Look assets and overrides
+
+An `ink-studio/asset-pack` can carry named `looks`, either on their own or
+alongside geometry families. A look has a namespaced `id`, a `label`, and a
+color `stack`, a `palette` policy, or both. Declare named JSON defaults in
+`params`. Use `{ "$param": "name" }` for values in the stack or palette
+policy. Packs and bundles carry the look data as JSON, including any LUTs
+in the stack.
+
+Bind a look by its ID or use an object to pin the pack revision and
+override one use of the look. A pin must match the installed revision.
+Without a pin the binding follows the installed pack.
+
+```json
+{
+  "asset": "relay/glazed-enamel",
+  "revision": 1,
+  "strength": 0.88,
+  "params": { "shadow": "#4d2435", "mid": "#ae5653", "highlight": "#f4bc86" },
+  "palette": ["#4d2435", "#783747", "#ae5653", "#d48562", "#f4bc86"]
+}
+```
+
+Strength blends the whole completed stack. A strength of zero bypasses the
+look. At any positive strength the palette remains a discrete constraint.
+A swatch list replaces the asset's swatches while keeping its dither and
+reserved settings. Use `palette: false` to omit the palette, or use
+`false` as the binding to omit the look. Parameter overrides must use
+declared names and match the JSON types of the defaults.
+
+- Set `finish.look.asset` on a JSON diorama or `visual.look.asset` on a
+  simulation world. The look supplies the scene stack and a default
+  foreground palette, with inline scene settings taking precedence.
+  When the asset supplies both, the stack grades the source swatches
+  before quantization. The CLI and standard WebGL scene renderer use
+  the resolved look.
+- Set `mat.lookAsset` on a JSON diorama material or `visual.lookAsset`
+  on a simulation entity. The look runs after its other surface layers
+  in the CLI. Simulation terrain also accepts `visual.terrainLookAsset`.
+  Material evaluation is available to custom hosts via `SurfaceLook`.
+  Indexed palette remap steps need a scene binding.
+- Set `lookAsset` on a prefab to give its rendered descendants a
+  shared look. Pass a partial `lookAsset` in stamp arguments to override
+  that instance. An entity with its own binding takes precedence.
+  Capturing an assembly preserves the instance binding.
+
+Add installed packs to `assetPacks` in the scene or world, or install
+a pack or bundle for a CLI invocation using `--asset-pack`.
+`scene stamp` carries the installed pack in the resulting world so it
+can be rendered and checkpointed independently.
+
+```sh
+node cli/ink-studio.js render examples/look-assets.json \
+  --asset-pack examples/relay-look-pack.json --ortho --out relay.png
+node cli/ink-studio.js scene stamp examples/look-prefabs.json relay \
+  --asset-pack examples/relay-look-pack.json --as north \
+  --args '{"lookAsset":{"strength":0.65}}' --out placed.json
+node cli/ink-studio.js sim render placed.json --out placed.png
+```
+
+JavaScript hosts can create a catalog with
+`KIT.authoring.assetPacks.create({ packs })`. Pass it to
+`KIT.authoring.looks.scene(look, catalog)` before `B.finish()`, or use
+`KIT.authoring.looks.material(base, binding, catalog)` when defining a
+material. `looks.bind(binding, catalog)` returns the resolved immutable
+stack and palette. Use `assetPacks.bundle` to share packs and
+`assetPacks.reviseLook` to publish a new revision.

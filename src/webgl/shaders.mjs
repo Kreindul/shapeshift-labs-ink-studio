@@ -283,13 +283,28 @@ bool constrainPalette(ivec2 p, vec3 inputColor, out vec3 color) {
   int count = int(settings.x), total = int(settings.y);
   vec3 bytes = floor(clamp(inputColor, 0.0, 1.0) * 255.0 + 0.5);
   const vec3 weight = vec3(0.30, 0.55, 0.15);
+  vec3 gradedBytes = bytes, gradedReserve = vec3(0.0);
+  bool hasGradedReserve = false;
+  if (u_toneOn < 0.5 && u_grade > 0.5 && texelFetch(u_constraintRows, ivec2(2, row), 0).a > 0.5) {
+    int index = 0; float nearestDistance = 1e9;
+    for (int i = 0; i < 64; i++) {
+      if (i >= u_n) break;
+      vec3 d = inputColor - u_pal[i];
+      float distance = dot(weight, d * d);
+      if (distance < nearestDistance) { index = i; nearestDistance = distance; }
+    }
+    inputColor = u_out[index];
+    gradedBytes = floor(clamp(inputColor, 0.0, 1.0) * 255.0 + 0.5);
+  }
   float firstDistance = 1e9, secondDistance = 1e9;
   vec3 best = vec3(0.0), second = vec3(0.0);
   for (int i = 0; i < 48; i++) {
     if (i >= total) break;
     vec3 swatch = texelFetch(u_constraintRows, ivec2(i + 1, row), 0).rgb;
     if (i >= count) {
-      if (all(equal(bytes, floor(swatch * 255.0 + 0.5)))) { color = swatch; return true; }
+      vec3 code = floor(swatch * 255.0 + 0.5);
+      if (all(equal(bytes, code))) { color = swatch; return true; }
+      if (all(equal(gradedBytes, code))) { gradedReserve = swatch; hasGradedReserve = true; }
       continue;
     }
     vec3 d = inputColor - swatch;
@@ -301,6 +316,7 @@ bool constrainPalette(ivec2 p, vec3 inputColor, out vec3 color) {
       second = swatch; secondDistance = distance;
     }
   }
+  if (hasGradedReserve) { color = gradedReserve; return true; }
   color = best;
   float amount = texelFetch(u_constraintRows, ivec2(1, row), 0).a;
   if (count < 2 || amount == 0.0) return true;

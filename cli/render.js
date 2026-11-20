@@ -171,6 +171,7 @@ function render(world, o, preparedPalettes) {
     const local = native.localAt && {
       at: native.localAt, palettes: native.localPalettes,
       constraints: native.localConstraints,
+      scene: palette, grade: !tone && grade,
       output: PixelLook.outputPalettes(evaluatedPalette || basePalette, native.localPalettes)
     };
     const amount = (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither;
@@ -261,11 +262,14 @@ function render(world, o, preparedPalettes) {
     reflection,
     parallel: ortho ? [V[2], V[6], V[10]] : null,
     footprint: (dist * 2) / (tp * H),
-    time: t
+    time: t,
+    blueNoise: settings => blueNoise(world, settings)
   });
   const surfaceGlint = surface ? new Uint8Array(W * H) : null;
   const layerPalettes = surface?.palettes ?? [];
-  const localConstraints = paletteRules && Array.from({ length: layerPalettes.length }).concat(paletteRules.palettes);
+  const localConstraints = paletteRules
+    ? Object.assign(Array(layerPalettes.length).fill(undefined), surface?.constraints).concat(paletteRules.palettes)
+    : surface?.constraints;
   const localPalettes = paletteRules ? layerPalettes.concat(paletteRules.palettes.map(policy => policy.swatches)) : layerPalettes;
   const localAt = localPalettes.length && !o.raw ? new Uint32Array(W * H) : null;
   const targetSlots = paletteRules?.slots(world);
@@ -549,14 +553,15 @@ function render(world, o, preparedPalettes) {
     }
     if (sx + ex < 0 || sx - ex > W || sy + ey < 0 || sy - ey > H) continue;
     let coverage = 1,
-      glint = 0;
+      glint = 0,
+      centerPalette = 0;
     const planar = surface?.planar(i);
     const pixelSurface = PIX?.[i * 8] && !surface?.reveals(i) && (!planar || (al >= 1 && !(flags & 1)));
     const projected = surface?.projected(i);
     const fragmentSurface = !pixelSurface && (planar || projected);
     const detailParticle = world.effectParticles?.some(({ first, count }) => i >= first && i < first + count);
     if (hasSurface && !pixelSurface && !fragmentSurface) {
-      [r, g, b, coverage, glint] = surface.shade(i, x, y, z, x, y, z, r, g, b);
+      [r, g, b, coverage, glint, centerPalette] = surface.shade(i, x, y, z, x, y, z, r, g, b);
     }
     const fogMix =
       !(flags & 2) && world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dn) * world.fog.max : 0;
@@ -624,7 +629,7 @@ function render(world, o, preparedPalettes) {
           pb = b,
           alpha = coverage,
           highlight = glint,
-          paletteId = 0;
+          paletteId = centerPalette;
         if (fi >= 0) {
           const u = clamp(Math.floor((i00 * dx + i01 * dy) * 2 + 2), 0, 3),
             v = clamp(Math.floor((i10 * dx + i11 * dy) * 2 + 2), 0, 3),
@@ -1142,7 +1147,7 @@ function render(world, o, preparedPalettes) {
     line = hex(world.outline ? world.outline.c : 0),
     dith = (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither,
     localOutput = localAt && PixelLook.outputPalettes(tone?.palette || evaluatedPalette || world.pal, localPalettes),
-    local = localAt && { constraints: localConstraints, palettes: localPalettes, output: localOutput },
+    local = localAt && { constraints: localConstraints, palettes: localPalettes, output: localOutput, scene: pal, grade: !tone && grade },
     use = new Uint32Array(localOutput?.packed.length ?? (tone ? tone.palette.length : np)),
     ln = look.lines ? (look.lines === true ? {} : look.lines) : null,
     lines = !ink && !!ln,

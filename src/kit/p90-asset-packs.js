@@ -9,16 +9,21 @@
   const canonical = value => JSON.stringify(value, (_, node) => object(node)
     ? Object.fromEntries(Object.keys(node).sort().map(key => [key,node[key]]))
     : node);
+  const manifests = new WeakSet();
 
   function manifest(input) {
+    if (manifests.has(input)) return input;
     const value = clone(parse(input));
     if (!object(value) || value.format !== format || value.version !== 1 || !identifier(value.id) ||
         !Number.isSafeInteger(value.revision) || value.revision < 1 ||
-        typeof value.title !== 'string' || !value.title.trim() || value.title.length > 100 ||
-        !Array.isArray(value.families) || !value.families.length)
+        typeof value.title !== 'string' || !value.title.trim() || value.title.length > 100)
       throw Error('Invalid versioned asset pack');
+    const { families: sourceFamilies = [], looks: sourceLooks = [] } = value;
+    if (!Array.isArray(sourceFamilies) || !Array.isArray(sourceLooks) || sourceLooks.length > 128 ||
+        (!sourceFamilies.length && !sourceLooks.length))
+      throw Error('An asset pack needs families or named looks');
     const registry = A.assets();
-    registry.load({ format: 'ink-studio/asset-families', version: 1, families: value.families });
+    registry.load({ format: 'ink-studio/asset-families', version: 1, families: sourceFamilies });
     const families = registry.list();
     for (const family of families) {
       if (!family.id.startsWith(value.id + '/') || !identifier(family.id.slice(value.id.length + 1)))
@@ -29,8 +34,12 @@
     for (const [from, to] of Object.entries(replacements)) {
       if (!from.trim() || !registry.get(to)) throw Error('Replacement must name a family in its own pack');
     }
-    return freeze({ format, version: 1, id: value.id, revision: value.revision, title: value.title.trim(),
-      families, replacements });
+    const looks = sourceLooks.map(look => A.looks.definition(look, value.id));
+    if (new Set(looks.map(look => look.id)).size !== looks.length) throw Error('Duplicate look asset in ' + value.id);
+    const result = freeze({ format, version: 1, id: value.id, revision: value.revision, title: value.title.trim(),
+      families, replacements, ...(looks.length && { looks }) });
+    manifests.add(result);
+    return result;
   }
 
   function packMap(packs) {
@@ -107,12 +116,24 @@
     return manifest({ ...pack, revision: pack.revision + 1, families });
   }
 
+  function reviseLook(input, id, changes) {
+    const pack = manifest(input), looks = pack.looks?.slice() ?? [];
+    const index = looks.findIndex(look => look.id === id);
+    if (index === -1) throw Error('Unknown look asset: ' + id);
+    if (!object(changes) || Object.keys(changes).some(key => !['label', 'params', 'stack', 'palette'].includes(key)))
+      throw Error('Look revision needs editable look fields');
+    looks[index] = A.looks.definition(clone({ ...looks[index], ...changes }), pack.id);
+    if (canonical(looks[index]) === canonical(pack.looks[index])) return pack;
+    return manifest({ ...pack, revision: pack.revision + 1, looks });
+  }
+
   function create({ families = [], packs = [] } = {}) {
     if (!Array.isArray(families)) throw Error('Asset catalog needs a family array');
     const registry = A.assets();
     registry.load({ format: 'ink-studio/asset-families', version: 1, families });
-    const extensions = packMap(packs), owners = new Map();
+    const extensions = packMap(packs), owners = new Map(), looks = new Map();
     for (const pack of extensions.values()) {
+      for (const look of pack.looks ?? []) looks.set(look.id, freeze({ look, pack: pack.id, revision: pack.revision }));
       for (const family of pack.families) {
         if (registry.get(family.id)) throw Error('Duplicate asset family: ' + family.id);
         registry.register(family);
@@ -154,10 +175,12 @@
     return Object.freeze({
       packs: Object.freeze([...extensions.values()]),
       families: listed,
+      looks: Object.freeze([...looks.values()]),
+      getLook: id => looks.get(id) ?? null,
       get: id => byId.get(id) ?? null,
       owner: id => owners.get(id) ?? null,
       compile
     });
   }
-  A.assetPacks = Object.freeze({ create, manifest, bundle, merge, reviseFamily });
+  A.assetPacks = Object.freeze({ create, manifest, bundle, merge, reviseFamily, reviseLook });
 })(KIT);

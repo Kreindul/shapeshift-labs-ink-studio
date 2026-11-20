@@ -225,8 +225,10 @@ const PixelLook = (() => {
   }
 
   function preparePalette(definition, { palette = [], roles = {}, blueNoise } = {}) {
-    if (!record(definition) || Object.keys(definition).some(key => !['palette', 'reserved', 'dither'].includes(key)))
-      throw new TypeError('A palette constraint accepts palette, reserved and dither settings');
+    if (!record(definition) || Object.keys(definition).some(key => !['palette', 'reserved', 'dither', 'source'].includes(key)))
+      throw new TypeError('A palette constraint accepts palette, reserved, dither and source settings');
+    const { source = 'lit' } = definition;
+    if (!['lit', 'graded'].includes(source)) throw new RangeError('Palette source must be lit or graded');
     const select = paletteSelector(palette, roles);
     function colors(values, name) {
       if (!Array.isArray(values) || values.length > 48)
@@ -266,8 +268,9 @@ const PixelLook = (() => {
     }
     const count = candidates.length;
     const mod = (n, size) => ((Math.floor(n) % size) + size) % size;
+    const reservedIndex = rgb => exact.size ? exact.get(packedRgb(rgb)) : undefined;
     function index(rgb, x = 0, y = 0, useDither = true) {
-      const locked = exact.size ? exact.get(packedRgb(rgb)) : undefined;
+      const locked = reservedIndex(rgb);
       if (locked !== undefined) return locked;
       let best = 0, second = 0, firstDistance = Infinity, secondDistance = Infinity;
       for (let i = 0; i < count; i++) {
@@ -291,7 +294,7 @@ const PixelLook = (() => {
       }
       return projection >= (.5 + (rank - .5) * amount) * length ? second : best;
     }
-    return { packed, swatches, count, width, height, ranks, amount, index };
+    return { packed, swatches, count, width, height, ranks, amount, source, reservedIndex, index };
   }
 
   function preparePaletteConstraints(definition, options) {
@@ -351,7 +354,16 @@ const PixelLook = (() => {
 
   function localIndex(local, id, rgb, x, y, useDither) {
     const row = id - 1;
-    const slot = local.constraints?.[row]?.index(rgb, x, y, useDither) ?? nearest(rgb, local.palettes[row], false);
+    const policy = local.constraints?.[row];
+    let slot;
+    if (policy?.source === 'graded' && local.grade && local.scene) {
+      slot = policy.reservedIndex(rgb);
+      if (slot === undefined) {
+        const at = nearest(rgb, local.scene, false) * 3;
+        rgb = local.grade.slice(at, at + 3);
+      }
+    }
+    slot ??= policy?.index(rgb, x, y, useDither) ?? nearest(rgb, local.palettes[row], false);
     return local.output.rows[row][slot];
   }
 
