@@ -954,6 +954,73 @@ ink-studio trace ford.run.json nav/route --at 3.6,0.43,0.62 --args '{"to":[3.6,0
 ink-studio sim render ford.run.json --colored --out ford.png
 ```
 
+## Pressurized pipe networks
+
+A `pipe-network` system stores liquid in a graph and moves it along edges
+in response to hydraulic head. Author the storage vessels and junctions
+as named `nodes`. A node needs `capacity` in cubic world units and accepts
+`initial` volume, `area` (defaults to capacity), `precharge` in units of
+head, and an XYZ `position`. Its hydraulic `elevation` defaults to the
+position's Y. A small effective area gives a stiff storage response.
+
+Pressure head is `precharge + volume / area`. Total head adds elevation.
+The reported gauge pressure multiplies pressure head by `specificWeight`
+(defaults to 9810 for water, yielding pascals when world units are metres).
+Each pipe's `conductance` is the volume per second per unit of head at full
+opening. Flow responds to the head gap with a damped, capacity-limited step.
+This is a lumped model for slow storage and flow changes. It represents
+compressible storage through effective area and precharge.
+
+| Table | Configuration |
+| --- | --- |
+| `pipes` | Each row has `from`, `to`, and `conductance`. Optional `opening` scales conductance. `boost` adds head in the forward direction, `oneWay` acts as a check valve, and `maxFlow` caps the rate in either allowed direction. |
+| `leaks` | Each row has a `node`, `conductance`, optional `opening`, `maxFlow`, and `outsideHead` (defaults to node elevation). Open leaks discharge to the environment according to their head gap and count toward the loss ledger. |
+| `boundaries` | Each row binds a `node` to an external `account` with `conductance`, optional `opening` and `maxFlow`, and `direction` of `in`, `out`, or `both`. Supply a constant `head` or a scalar `headField` in world units and sample point `at` (defaults to node position). |
+
+For a pond intake or irrigation outlet, expose a water grid cell as an account
+and sample the water system's `surface-height` field at that cell. It is bed
+elevation plus depth and reports the bed elevation at a dry cell. Endpoint
+availability still limits the transfer. A pressurized drain can use a boundary
+to deposit its discharge into a surface-water cell. Each node is itself a
+transfer account, with `resource` defaulting to `water` and units of
+`world^3`. Boundaries reuse the world transfer ledger and request from the
+pre-step snapshot once per scheduled update.
+
+To make a hydraulic actuator, add `piston` with `area`, `stroke`, and
+optional `position` and resisting `load` to a pipe. The piston travels
+only as far as actual accepted flow permits, stops at the ends of its
+stroke, and can reverse with the pressure gap. Its ports report
+`position.<pipe>`, `speed.<pipe>`, and available `force.<pipe>`.
+Connect position to a mechanics slider's position drive. The mechanical
+load can be authored or supplied on `load.<pipe>`.
+
+Use `world/input` or signal connections to drive the numeric
+`valve.<pipe>`, `boost.<pipe>`, `leak.<leak>`, and
+`boundary.<boundary>` inputs. Opening values range from zero to one and
+default to one. The network publishes `head.<node>`, `pressure.<node>`,
+`volume.<node>`, signed `flow.<pipe>` (positive from `from` to `to`),
+and outward `leak-flow.<leak>`. Rates are in cubic world units per second.
+Leak flow beginning or ending emits `pipe-leak-start` or `pipe-leak-stop`.
+Probe `nodes`, `pipes`, `leaks`, or `boundaries` by name. Boundary
+probes show actual transfer receipts and signed flow into the network.
+`mass` reports initial and current volume, imports, exports, leaks, and
+balance error. `trace <system>/flow` follows the directions of recently
+accepted pipe flow. Add pipe `guides`, `radius`, and `look`, and bind
+`visual.fields.pipes` to the network's `pipes` field for a splat render.
+
+The [hydraulic yard](../examples/world-hydraulic-yard.json) draws from a
+pond, raises a platform, and feeds a separate irrigation channel. Timed
+commands open a leak, isolate the pump, and restore service.
+
+```sh
+ink-studio sim run examples/world-hydraulic-yard.json --actions examples/world-hydraulic-yard.commands.json --ticks 94 --record yard.run.json
+ink-studio probe yard.run.json --field network/nodes --args '{"node":"header"}'
+ink-studio probe yard.run.json --field network/mass
+ink-studio trace examples/world-hydraulic-yard.json network/flow --ticks 48 --args '{"from":"intake","to":"sprinkler"}'
+ink-studio sim replay yard.run.json
+ink-studio sim render yard.run.json --colored --out hydraulic-yard.png
+```
+
 ## Extend the runtime in JavaScript
 
 ```js

@@ -213,7 +213,7 @@
     S.bake();
     const fabricFields=Array.isArray(fields.deformables)?fields.deformables:fields.deformables?[fields.deformables]:[];
     const sun=V.norm([-.55,.8,.45]);
-    const linkFields=Array.isArray(fields.routedLinks)?fields.routedLinks:fields.routedLinks?[fields.routedLinks]:[];
+    const linkFields=[fields.routedLinks,fields.pipes].filter(Boolean).flat();
     for(const field of linkFields){
       const read=query.probe(field);
       if(read.status!=='ok')continue;

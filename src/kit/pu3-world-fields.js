@@ -356,6 +356,7 @@
       fields:{
         water:{type:'record',units:'world',read:column},
         depth:channel('number','world','depth'),
+        'surface-height':channel('number','world','surface'),
         flow:channel('vec2','world/s','velocity'),
         bed:channel('number','world','bed'),
         ...((legacyErosion||sedimentModel)&&{eroded:{type:'number',units:'world^3',read:({state})=>Q.ok(state.sediment?.totals.eroded??state.eroded)}}),

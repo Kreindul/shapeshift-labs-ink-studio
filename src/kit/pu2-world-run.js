@@ -54,7 +54,8 @@
     const consumers = Object.values(systems).filter(system => system.checkFields);
     const visualFabric=world.visual?.fields?.deformables;
     const visualLinks=world.visual?.fields?.routedLinks;
-    if (consumers.length || world.visual?.fields?.surface!==undefined || visualFabric!==undefined || visualLinks!==undefined) {
+    const visualPipes=world.visual?.fields?.pipes;
+    if (consumers.length || world.visual?.fields?.surface!==undefined || visualFabric!==undefined || visualLinks!==undefined || visualPipes!==undefined) {
       const query = Q.create({world},systems);
       for (const system of consumers) system.checkFields(query);
       W.materials.checkSurface(query,world.visual?.fields?.surface);
@@ -62,6 +63,8 @@
         typeof field==='string'&&query.field(field)?.role==='deformable-surfaces'), 'Invalid visual deformable surface field');
       if(visualLinks!==undefined)check((Array.isArray(visualLinks)?visualLinks:[visualLinks]).every(field=>
         typeof field==='string'&&query.field(field)?.role==='routed-links'), 'Invalid visual routed link field');
+      if(visualPipes!==undefined)check((Array.isArray(visualPipes)?visualPipes:[visualPipes]).every(field=>
+        typeof field==='string'&&query.field(field)?.role==='pipe-network-pipes'), 'Invalid visual pipe field');
     }
     const systemDependencies = Object.entries(systems).filter(([,system])=>system.dependencies !== undefined);
     let fieldQuery;
