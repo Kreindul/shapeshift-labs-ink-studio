@@ -963,6 +963,8 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
       },
       meta
     );
+    if (world.look?.colorLut !== undefined && world.look.colorLut !== false)
+      world.look = { ...world.look, colorLut: ColorLUT.normalize(world.look.colorLut) };
     if (world.surfaceEffects) world.surfaceEffects = KIT.splatEffects.context(world.surfaceEffects);
     return world;
   }

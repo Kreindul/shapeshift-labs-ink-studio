@@ -129,7 +129,7 @@ function render(world, o) {
     throw new RangeError('look.pixelSize must be a positive integer');
   const tone = o.raw || o.samples || o.captureCoverage ? null : toneFor(world, o.tone ?? look.tone);
   const colorGrade = styled && !tone && PixelLook.colorGrade(world.pal, world.paletteRoles, an.grade,
-    o.paletteRemap ?? look.paletteRemap, o.colorCurves ?? look.colorCurves);
+    o.paletteRemap ?? look.paletteRemap, o.colorCurves ?? look.colorCurves, o.colorLut ?? look.colorLut);
   const grade = colorGrade || an.grade;
   const evaluatedPalette = colorGrade ? PixelLook.gradePalette(grade) : undefined;
   const rel = c.dist / dist0,

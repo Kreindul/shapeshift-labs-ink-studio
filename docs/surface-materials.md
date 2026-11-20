@@ -149,6 +149,25 @@ node cli/ink-studio.js render examples/color-curves.js --ortho --color-curves of
 node cli/ink-studio.js render examples/color-curves.js --ortho --out after.png
 ```
 
+## 3D LUTs on surfaces
+
+Add a `colorLut` layer with its imported or native `lut` definition.
+The layer samples the current lit RGB before the surface is blended
+into the frame. It accepts the usual `strength`, `mask`, and color blend
+controls. Use `outputPalette` to preserve the local range of swatches
+during quantization.
+
+```js
+const finish = KIT.surface.material({ r: [1, 2, 3] }, {
+  layers: { patina: { type: 'colorLut', lut: ColorLUT.parseCube(cubeText), strength: 0.7 } }
+});
+```
+
+Surface LUTs run in the Node renderer and in custom browser integrations
+using `SurfaceLook`. The standard WebGL renderer supports
+[scene LUTs](pixel-look.md#3d-color-luts). The CLI flag `--lut off`
+bypasses both the scene LUT and these material layers.
+
 ## Animate the finish light
 
 Set `light.surfaceDirection` in a JSON scene, or pass `surfaceLight` to

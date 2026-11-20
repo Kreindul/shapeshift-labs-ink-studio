@@ -71,8 +71,8 @@ function testWebGL(createRenderer, spec) {
   const canvas = document.querySelector('canvas');
   const renderer = createRenderer(canvas, { toolkit: { KIT, PixelLook } });
   const gl = canvas.getContext('webgl2'), world = KIT.diorama.build(spec);
-  function pixels(paletteRemap, colorCurves) {
-    renderer.render(world, { paletteRemap, colorCurves, ortho: true, colored: false, dither: 0 });
+  function pixels(paletteRemap, colorCurves, colorLut) {
+    renderer.render(world, { paletteRemap, colorCurves, colorLut, ortho: true, colored: false, dither: 0 });
     const rgba = new Uint8Array(canvas.width * canvas.height * 4);
     gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
     return Array.from({ length: rgba.length / 4 }, (_, i) => (rgba[i * 4] << 16) | (rgba[i * 4 + 1] << 8) | rgba[i * 4 + 2]);
@@ -95,10 +95,16 @@ function testWebGL(createRenderer, spec) {
     if (!evaluated.every((color, i) => color === swatches[world.pal.indexOf(before[i])]))
       throw new Error('WebGL color curves differ from the shared CPU palette evaluation');
   }
+  const lut = ColorLUT.normalize({ size: 2,
+    data: Array.from({ length: 8 }, (_, i) => [(i >> 2) & 1, (i >> 1) & 1, i & 1]).flat() });
+  const withLut = pixels(undefined, transfer, lut);
+  const colors = PixelLook.gradePalette(PixelLook.colorGrade(world.pal, world.paletteRoles, null, world.look.paletteRemap, transfer, lut));
+  if (!withLut.every((color, i) => color === colors[world.pal.indexOf(before[i])]))
+    throw new Error('WebGL LUT output differs from the shared CPU palette evaluation');
   renderer.dispose();
 }
 
-test('WebGL matches CPU palette remaps and channel curves with protected swatches', { skip: !process.env.INK_TEST_CHROME }, () => {
+test('WebGL matches CPU remaps, curves and LUTs with protected swatches', { skip: !process.env.INK_TEST_CHROME }, () => {
   const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
   const { execFileSync } = require('node:child_process'), { pathToFileURL } = require('node:url');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ink-remap-')), url = file => pathToFileURL(file).href;

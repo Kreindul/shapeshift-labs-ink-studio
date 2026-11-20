@@ -207,6 +207,7 @@ function pose(w, t) {
 const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
 if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
   die('--px needs a positive integer');
+let lutOverride;
 const view = extra =>
   Object.assign(
     {
@@ -227,6 +228,7 @@ const view = extra =>
       tone: opt.tone === 'off' ? false : opt.tone,
       paletteRemap: opt['palette-remap'] === 'off' ? false : undefined,
       colorCurves: opt['color-curves'] === 'off' ? false : undefined,
+      colorLut: opt.lut === undefined ? undefined : (lutOverride ??= require('./lut.js').override(opt.lut)),
       raw: !!opt.raw,
       colored: !!opt.colored,
       splatOrder: opt['splat-order'],
@@ -287,6 +289,7 @@ const CMD = {
         '  field <scene|run> <name> --spec file.json  export a line, grid or time series',
         '  scene apply|stamp|remix|capture|history|promote <world> ...  edit or derive a world manifest',
         '  sim run|resume|fork|reset|replay|diff|sweep|render ...  run or compare fixed-tick simulations',
+        '  lut import <file.cube|file.json> [--out file.json]  load a 3D color table as native JSON',
         '',
         '  scenes                      list every diorama',
         '  catalog [words]             what the toolkit can do, searchable',
@@ -328,9 +331,17 @@ const CMD = {
         '',
         'any command that plays a diorama takes --poke 2:x,y,z (tap it at 2 seconds, toward that point; several with ;)',
         'view options: --surface off (no finish layers) --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --px1 (native art pixels) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (remove lone pixels) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n',
-        'art options: --palette-remap off --color-curves off --ink off --effects off --stable off --snap --dither-space screen|world|object --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
+        'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --ink off --effects off --stable off --snap --dither-space screen|world|object --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
       ].join('\n')
     );
+  },
+  lut() {
+    const [mode, file] = pos;
+    if (mode !== 'import' || !file || (opt.out !== undefined && typeof opt.out !== 'string'))
+      die('Usage: ink-studio lut import <file.cube|file.json> [--out file.json]');
+    const lut = require('./lut.js'), definition = lut.read(file);
+    if (opt.out) lut.write(opt.out, definition);
+    else process.stdout.write(JSON.stringify(definition) + '\n');
   },
   'export-glb'() {
     const id = pos[0];

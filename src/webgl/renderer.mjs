@@ -426,10 +426,11 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const definition = raw || frame.tone === false ? null : (frame.tone ?? look.tone);
       const remapDefinition = frame.paletteRemap ?? look.paletteRemap;
       const curveDefinition = frame.colorCurves ?? look.colorCurves;
+      const lutDefinition = frame.colorLut ?? look.colorLut;
       const hasColorGrade = (remapDefinition !== undefined && remapDefinition !== false) ||
-        (curveDefinition !== undefined && curveDefinition !== false);
+        (curveDefinition !== undefined && curveDefinition !== false) || (lutDefinition !== undefined && lutDefinition !== false);
       const colorGrade = !raw && !definition && hasColorGrade &&
-        toolkit.PixelLook.colorGrade(world.pal, world.paletteRoles, world.anim?.grade, remapDefinition, curveDefinition);
+        toolkit.PixelLook.colorGrade(world.pal, world.paletteRoles, world.anim?.grade, remapDefinition, curveDefinition, lutDefinition);
       const grade = colorGrade || world.anim?.grade;
       const lineIndex = world.outline?.c ?? 0;
       const glass = raw ? null : world.glass;

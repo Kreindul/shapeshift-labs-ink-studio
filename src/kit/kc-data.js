@@ -312,6 +312,13 @@
     } catch (error) {
       bad('finish.look.colorCurves', error.message);
     }
+    if (look?.colorLut !== undefined && look.colorLut !== false) {
+      try {
+        ColorLUT.normalize(look.colorLut);
+      } catch (error) {
+        bad('finish.look.colorLut', error.message);
+      }
+    }
     if (spec.light?.surfaceDirection !== undefined)
       try {
         SurfaceLook.prepareLightTrack(spec.light.surfaceDirection);

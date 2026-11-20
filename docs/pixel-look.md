@@ -156,3 +156,55 @@ to a ramp sampler to reuse storage. The perceptual
 `interpolation` and keeps its existing color space and default blend.
 See [surface curves](surface-materials.md#color-curves-on-surfaces)
 to bind a ramp to depth or a field.
+
+## 3D color LUTs
+
+A 3D LUT samples all three input channels together. Use one to shift
+blue shadows toward violet while keeping an equally bright red in its
+original hue.
+
+```sh
+node cli/ink-studio.js lut import examples/blue-shadow.cube --out blue-shadow.json
+node cli/ink-studio.js render examples/rgb-lut.js --ortho --lut examples/blue-shadow.cube --out violet.png
+node cli/ink-studio.js render examples/rgb-lut.js --ortho --lut blue-shadow.json --out from-json.png
+node cli/ink-studio.js render examples/rgb-lut.js --ortho --lut off --out before.png
+```
+
+Import standalone 3D `.cube` tables with `LUT_3D_SIZE`, optional
+`TITLE`, and either per-channel `DOMAIN_MIN` and `DOMAIN_MAX` or
+`LUT_3D_INPUT_RANGE`. The CLI can print the native JSON to stdout.
+Both formats store triplets with red varying fastest, then green,
+then blue. [Adobe Cube specification](https://kono.phpage.fr/images/a/a1/Adobe-cube-lut-specification-1.0.pdf) · [Resolve range header reference](https://github.com/AcademySoftwareFoundation/OpenColorIO/blob/main/src/OpenColorIO/fileformats/FileFormatResolveCube.cpp)
+
+This is an identity table in native JSON.
+
+```json
+{
+  "format": "ink-studio/lut",
+  "version": 1,
+  "size": 2,
+  "domainMin": [0, 0, 0],
+  "domainMax": [1, 1, 1],
+  "interpolation": "tetrahedral",
+  "data": [
+    0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0,
+    0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1
+  ]
+}
+```
+
+Use `size³` RGB triplets in one flat array. The domain defaults to
+[0, 1] on all three axes and out-of-domain inputs use the nearest
+boundary. Choose `tetrahedral` (the default) or `trilinear`.
+`ColorLUT.parseCube(text)` returns the same immutable JSON shape from
+JavaScript, and `ColorLUT.prepare(definition).sample(rgb, out)` samples
+it with an optional reusable output array. The sampler keeps finite
+output values outside [0, 1], and the renderers clamp display colors.
+
+Put a native definition in `finish.look.colorLut`, `look.colorLut`
+in `B.finish()`, or `visual.look.colorLut` on a simulation manifest.
+Scene LUTs run during palette resolve in the CLI and standard WebGL
+renderer. They follow the animation grade and channel curves. Palette
+remaps and protected swatches apply last. Raw output and stipple use
+their own resolve paths. See [surface LUTs](surface-materials.md#3d-luts-on-surfaces)
+to transform a material sample before compositing.

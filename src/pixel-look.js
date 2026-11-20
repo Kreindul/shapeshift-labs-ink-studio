@@ -1,7 +1,14 @@
 /* Fixed-grid, palette-aware resolve using coverage and cluster voting.
    No per-frame palette fitting, camera movement or black ink. */
 const PixelLook = (() => {
-  const curves = typeof ColorCurves === 'undefined' ? require('./color-curves.js') : ColorCurves;
+  let curves, luts;
+  try {
+    curves = ColorCurves;
+    luts = ColorLUT;
+  } catch {
+    curves = require('./color-curves.js');
+    luts = require('./color-lut.js');
+  }
   const weights = [0.30, 0.55, 0.15];
   const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
   const stipple = Object.freeze({
@@ -92,14 +99,20 @@ const PixelLook = (() => {
       (byte(grade[i * 3]) << 16) | (byte(grade[i * 3 + 1]) << 8) | byte(grade[i * 3 + 2]));
   }
 
-  function colorGrade(palette, roles, prior, remap, definition) {
+  function colorGrade(palette, roles, prior, remap, definition, lut) {
     const transfer = curves.prepare(definition), plan = prepareRemap(remap, palette, roles);
-    if (!transfer) return plan ? plan.grade(prior) : null;
+    const lookup = lut === undefined || lut === false ? null : luts.prepare(lut);
+    if (!transfer && !lookup) return plan ? plan.grade(prior) : null;
     const grade = new Float32Array(palette.length * 3), result = [0, 0, 0];
     for (let i = 0; i < palette.length; i++) {
       const offset = i * 3;
       const base = prior?.length >= offset + 3 ? prior.slice(offset, offset + 3) : unpack(palette[i]);
-      grade.set(transfer(base, result), offset);
+      const shaped = transfer ? transfer(base, result) : base;
+      if (lookup) {
+        lookup.sample(shaped, result);
+        for (let channel = 0; channel < 3; channel++)
+          grade[offset + channel] = Math.max(0, Math.min(1, result[channel]));
+      } else grade.set(shaped, offset);
     }
     return plan ? plan.grade(grade) : grade;
   }

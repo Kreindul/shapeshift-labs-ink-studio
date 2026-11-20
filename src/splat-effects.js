@@ -1,6 +1,13 @@
 /* Projected surface effects shared by the software renderer and browser hosts. */
 const SplatEffects = (() => {
-  const curves = typeof ColorCurves === 'undefined' ? require('./color-curves.js') : ColorCurves;
+  let curves, luts;
+  try {
+    curves = ColorCurves;
+    luts = ColorLUT;
+  } catch {
+    curves = require('./color-curves.js');
+    luts = require('./color-lut.js');
+  }
   const clamp = x => Math.min(1, Math.max(0, x));
   const fract = x => x - Math.floor(x);
   const vector = (value, n) => Array.isArray(value) && value.length === n && Array.from(value).every(Number.isFinite);
@@ -197,6 +204,14 @@ const SplatEffects = (() => {
     };
   }
 
+  function colorLut({ lut, outputPalette }, resolveColor) {
+    const lookup = luts.prepare(lut), result = [0, 0, 0, 1, 1, 0];
+    return {
+      palette: outputColors(outputPalette, resolveColor),
+      sample(sample, base) { return lookup.sample(base, result); }
+    };
+  }
+
   function layer(definition, context, resolveColor) {
     const { projection = {}, space = 'rest', field, maskChannel, revealChannel, contourChannel,
       warpChannels, warp = 1, range = [0, 1], scroll = [0, 0], scale = 1, width = 0.16,
@@ -263,6 +278,6 @@ const SplatEffects = (() => {
     };
   }
 
-  return { project, layer, colorCurve, fieldMask, clamp, vector };
+  return { project, layer, colorCurve, colorLut, fieldMask, clamp, vector };
 })();
 if (typeof module !== 'undefined') module.exports = SplatEffects;

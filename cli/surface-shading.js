@@ -26,7 +26,8 @@ function surfaceShading(world, options, camera) {
   const { STRIDE } = SurfaceLook;
   const liveLight = world.surfaceLight === undefined ? undefined : SurfaceLook.prepareLightTrack(world.surfaceLight)(time);
   const materials = world.surfaces.map(({ settings, light }) =>
-    SurfaceLook.prepare(settings, world.pal, liveLight ?? light, world.surfaceEffects, { colorCurves: options.colorCurves !== false }));
+    SurfaceLook.prepare(settings, world.pal, liveLight ?? light, world.surfaceEffects,
+      { colorCurves: options.colorCurves !== false, colorLut: options.colorLut !== false }));
   const ids = new Map();
   const palettes = [];
   for (const material of materials) {
