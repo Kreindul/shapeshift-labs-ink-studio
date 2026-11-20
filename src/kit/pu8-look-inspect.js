@@ -10,7 +10,8 @@
     return { ...info, rows: data.length / 3 };
   };
   const stackInfo = stack => ({
-    ...stack, steps: stack.steps.map(step => step.type === 'lut' ? { ...step, lut: lutInfo(step.lut) } : step)
+    ...stack, steps: stack.steps.map(step => step.type === 'lut' ? { ...step, lut: lutInfo(step.lut) } : step),
+    ...(stack.baked && { baked: { ...stack.baked, source: stack.baked.source.name } })
   });
   function maskInfo(mask) {
     if (!mask || typeof mask === 'function') return typeof mask === 'function' ? { type: 'sampler' } : mask ?? null;

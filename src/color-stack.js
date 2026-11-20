@@ -20,13 +20,32 @@ const ColorStack = (() => {
     lut: ['lut'], paletteRemap: ['remap']
   };
 
-  function validateStack(definition) {
-    if (!record(definition) || Object.keys(definition).some(key => !['name', 'steps', 'amount'].includes(key)) ||
+  function validateStack(definition, depth = 0) {
+    if (!record(definition) || Object.keys(definition).some(key => !['name', 'steps', 'amount', 'baked'].includes(key)) ||
         typeof definition.name !== 'string' || !definition.name.trim() ||
         !Array.isArray(definition.steps) || definition.steps.length > 64)
       throw new TypeError('A color stack needs a name and an array of up to 64 steps');
     if (definition.amount !== undefined && !unit(definition.amount))
       throw new RangeError('Color stack amount must be in [0, 1]');
+    if (definition.baked !== undefined) {
+      const { baked, steps: [step] } = definition;
+      if (depth >= 8 || !record(baked) || Object.keys(baked).some(key => !['source', 'palette', 'roles', 'error'].includes(key)) ||
+          definition.steps.length !== 1 || !['lut', 'paletteRemap'].includes(step?.type) ||
+          step.enabled === false || (step.amount ?? 1) !== 1)
+        throw new TypeError('A baked color stack needs one compiled step and an editable source');
+      if (step.type === 'paletteRemap' ? !Array.isArray(baked.palette) || !baked.palette.length ||
+          baked.palette.length > 48 || !Array.from(baked.palette).every(color => Number.isSafeInteger(color) && color >= 0 && color <= 0xffffff)
+        : baked.palette !== undefined || baked.roles !== undefined)
+        throw new TypeError('A baked palette needs up to 48 ordered RGB swatches');
+      if (baked.roles !== undefined && (!record(baked.roles) || !Object.values(baked.roles).every(indices =>
+        Array.isArray(indices) && indices.length && Array.from(indices).every(i =>
+          Number.isSafeInteger(i) && i >= 0 && i < baked.palette.length))))
+        throw new TypeError('Baked palette roles must reference the ordered swatches');
+      if (!record(baked.error) || !['exact', 'sampled'].includes(baked.error.mode) ||
+          !['maxChannelError', 'rmse'].every(key => Number.isFinite(baked.error[key]) && baked.error[key] >= 0))
+        throw new TypeError('A baked color stack needs finite approximation metrics');
+      validateStack(baked.source, depth + 1);
+    }
     const ids = new Set();
     for (const step of definition.steps) {
       if (!record(step) || typeof step.type !== 'string' || !Object.hasOwn(fields, step.type))
@@ -49,7 +68,8 @@ const ColorStack = (() => {
     if (definition === undefined || definition === false) return definition;
     validateStack(definition);
     return { ...definition, steps: definition.steps.map(step =>
-      step.type === 'lut' ? { ...step, lut: luts.normalize(step.lut) } : step) };
+      step.type === 'lut' ? { ...step, lut: luts.normalize(step.lut) } : step),
+      ...(definition.baked && { baked: { ...definition.baked, source: normalize(definition.baked.source) } }) };
   }
 
   function hue({ degrees }) {
@@ -114,11 +134,33 @@ const ColorStack = (() => {
     }
   }
 
-  function prepare(definition, { paletteRemap, resolveColor } = {}) {
+  const same = (actual, expected) => actual?.length === expected.length && expected.every((n, i) => actual[i] === n);
+  function prepare(definition, options = {}) {
     if (definition === undefined || definition === false) return null;
     validateStack(definition);
+    const { paletteRemap, resolveColor, palette, roles } = options;
     const steps = [], locks = [];
     const strength = definition.amount ?? 1;
+    const { baked } = definition;
+    let sampleFallback, inDomain;
+    if (baked) {
+      let sourcePlan;
+      const source = () => sourcePlan ??= prepare({ ...baked.source, amount: (baked.source.amount ?? 1) * strength }, options);
+      if (baked.palette) {
+        if (!same(palette, baked.palette) || !Object.entries(baked.roles ?? {}).every(([key, ramp]) => same(roles?.[key], ramp)))
+          return source();
+        inDomain = (rgb, index) => {
+          const color = baked.palette[index];
+          return color !== undefined && rgb[0] === (color >> 16) / 255 &&
+            rgb[1] === (color >> 8 & 255) / 255 && rgb[2] === (color & 255) / 255;
+        };
+      } else {
+        const { domainMin, domainMax } = luts.normalize(definition.steps[0].lut);
+        inDomain = rgb => rgb[0] >= domainMin[0] && rgb[0] <= domainMax[0] &&
+          rgb[1] >= domainMin[1] && rgb[1] <= domainMax[1] && rgb[2] >= domainMin[2] && rgb[2] <= domainMax[2];
+      }
+      sampleFallback = (rgb, out, index) => source().sample(rgb, out, index);
+    }
     let indexed = false;
     for (const step of definition.steps) {
       const amount = step.amount ?? 1, active = strength !== 0 && step.enabled !== false && amount !== 0;
@@ -148,6 +190,7 @@ const ColorStack = (() => {
           throw new TypeError('A color stack needs finite RGB input');
         if (indexed && (!Number.isSafeInteger(index) || index < 0))
           throw new TypeError('This color stack needs a palette index');
+        if (inDomain && !inDomain(rgb, index)) return sampleFallback(rgb, out, index);
         const locked = protectedBy(index);
         if (locked) { copy(locked.target(index), out); return out; }
         const r = rgb[0], g = rgb[1], b = rgb[2];

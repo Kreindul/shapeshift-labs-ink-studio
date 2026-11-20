@@ -313,6 +313,7 @@ const CMD = {
         '  compare <scene|run> --looks cases.json [--out sheet.png]   compare look variants on the same view',
         '  look inspect <scene|run|look-file> [--renderer headless|webgl]   list bindings, dependencies and targets',
         '  look sample <look-file> [--look pack/look] [--colors JSON | --chart] [--out file.json|chart.png]',
+        '  look bake <look-file> [--format auto|palette|lut] [--swatches file] [--size N] [--out bundle.json]',
         '  look import <file> [--out pack.json] [--id pack/look]   import a LUT or palette as a versioned look',
         '  look export <file> [--out file | --format json|cube|gpl|pal|hex]   convert or sample a look',
         '    --look pack/look --params JSON --size N --swatches palette-file --report report.json --exact',
@@ -383,6 +384,10 @@ const CMD = {
   },
   look() {
     const io = require('./look.js');
+    if (pos[0] === 'bake') {
+      if (pos.length !== 2) die('Usage: ink-studio look bake <look-file> [--format auto|palette|lut]');
+      return io.bake(pos[1], opt, lib());
+    }
     if (pos[0] === 'sample') {
       if (pos.length !== 2) die('Usage: ink-studio look sample <look-file> [--colors JSON | --chart]');
       return io.sample(pos[1], opt, lib());

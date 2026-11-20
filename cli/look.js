@@ -139,7 +139,8 @@ function compile(stack, reference, missingSwatches = 'A .cube has no palette ind
     throw new TypeError(missingSwatches);
   const palette = reference?.rows.map(row => row.color);
   return ColorStack.prepare({ ...stack, steps }, palette ? {
-    paletteRemap: (definition, color) => PixelLook.prepareRemap(definition, palette, {}, color)
+    palette, roles: reference.roles,
+    paletteRemap: (definition, color) => PixelLook.prepareRemap(definition, palette, reference.roles, color)
   } : {});
 }
 
@@ -213,6 +214,11 @@ function toCube(look, options, report) {
   if (!look.stack) throw new TypeError('A .cube needs a continuous RGB stack. Export a palette look as .gpl, .pal or .hex.');
   if (look.palette) note(report, 'omitted-palette', 'The .cube contains the color stack. Palette choices and dithering were omitted.');
   const original = standaloneLUT(look.stack);
+  if (look.stack.baked) {
+    report.baked = look.stack.baked.error;
+    if (report.baked.mode !== 'exact')
+      note(report, 'baked-source', 'The LUT approximates the editable source and the external format omits its outside-domain fallback.');
+  }
   const cube = copiesTable(original, options) ? original : sampleCube(look.stack, options, report, original);
   if (cube.title && /["\r\n]/.test(cube.title)) note(report, 'cube-title', 'Unsupported title characters were replaced with spaces.');
   report.table = { size: cube.size, rows: cube.size ** 3, interpolation: 'reader-defined' };
@@ -220,7 +226,8 @@ function toCube(look, options, report) {
 }
 
 function toPalette(look, options, format, readReference, report) {
-  const reference = options.swatches === undefined ? undefined : readReference(options.swatches);
+  const reference = bakeReference(look.stack, options.swatches === undefined ? undefined : readReference(options.swatches));
+  if (look.stack?.baked) report.baked = look.stack.baked.error;
   let file;
   if (look.stack && reference) {
     const plan = compile(look.stack, reference);
@@ -376,8 +383,32 @@ function sample(file, options, kit) {
   const authoring = kit.KIT.authoring;
   const source = read(file, authoring.assetPacks);
   const look = select(source, options, authoring);
-  const reference = options.swatches && readReference(options.swatches, authoring.assetPacks);
+  const reference = bakeReference(look.stack, options.swatches ? readReference(options.swatches, authoring.assetPacks) : undefined);
   return require('./look-sample.js')({ file, options, source: source.source, look, reference, kit, report, compile });
 }
 
-module.exports = { run, isSource, inspectSource, assertValid, report, sample };
+function bakeReference(stack, reference) {
+  const baked = stack?.baked;
+  if (!baked?.palette) return reference;
+  if (!reference) return { rows: baked.palette.map(color => ({ color })), roles: baked.roles };
+  if (reference.rows.length === baked.palette.length && reference.rows.every((row, i) => row.color === baked.palette[i]))
+    return { ...reference, roles: baked.roles };
+  return reference;
+}
+
+async function bake(file, options, kit) {
+  const authoring = kit.KIT.authoring;
+  const source = read(file, authoring.assetPacks);
+  const result = require('./look-bake.js')({ file, options, source, authoring, select, native, compile,
+    sampleCube, standaloneLUT, readReference });
+  if (options.report) await write([pretty(result.report)], options.report);
+  process.stderr.write('Look bake ' + result.report.compiled + ' (' + result.report.format + ')\n' +
+    JSON.stringify(result.report.error) + '\n');
+  if (options.exact && result.report.error.mode !== 'exact')
+    throw new Error('--exact rejected the sampled look before writing the output');
+  if (options['max-error'] !== undefined && result.report.error.maxChannelError > Number(options['max-error']))
+    throw new Error('Measured channel error exceeds --max-error before writing the output');
+  await write([JSON.stringify(result.bundle) + '\n'], options.out);
+}
+
+module.exports = { run, isSource, inspectSource, assertValid, report, sample, bake };

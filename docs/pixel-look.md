@@ -491,6 +491,47 @@ error and RMSE at cell midpoints using Ink Studio's interpolation.
 Palette sampling reports 8-bit clipping and rounding. Use `--exact`
 to reject lossy or sampled conversions before the output is written.
 
+## Bake a static color stack
+
+`look bake` produces an installable asset bundle containing the
+editable original and a compiled sibling in a separate pack. Existing
+pack IDs and revisions are preserved. Select the sibling with
+`--look pack-baked/look` when rendering or exporting, or name it
+explicitly with `--as new-pack/look`. Parameter overrides passed with
+`--params` are fixed in the bake. Re-bake from the editable source
+after editing the look or changing those parameters.
+
+```sh
+node cli/ink-studio.js look bake examples/relay-look-pack.json \
+  --look relay/glazed-enamel --format lut --size 33 \
+  --out enamel-bundle.json --report enamel-error.json
+node cli/ink-studio.js render examples/look-assets.json \
+  --asset-pack enamel-bundle.json --look relay-baked/glazed-enamel --out enamel.png
+node cli/ink-studio.js look export enamel-bundle.json \
+  --look relay-baked/glazed-enamel --out enamel.cube
+```
+
+- `--format palette` bakes an unstaged stack into an indexed remap
+  for the ordered `--swatches` palette. Supply `--roles roles.json`
+  when the source uses named palette roles. The bake tests every
+  source swatch and preserves protection. Ink Studio uses the
+  editable stack when the palette, roles, or original sample color
+  differs from the bake's reference.
+- `--format lut` samples a continuous RGB stack on a grid. The
+  default edge length is 33. Set `--size` and optional per-channel
+  `--domain-min` and `--domain-max` to change it. Ink Studio evaluates
+  the editable stack outside the sampled domain. Exporting a
+  sampled bake to `.cube` copies the table and reports the measured
+  source error and the loss of that fallback.
+
+`auto` uses a palette remap when an unstaged look has a reference
+palette and no grid options. Use explicit hex or RGB ramp stops in
+bakeable looks because numeric stops depend on the render context.
+The bundle and optional JSON report record maximum channel error
+and RMSE in normalized sRGB. LUT measurements use cell midpoints.
+`--max-error` rejects a bake that exceeds the measured channel
+tolerance, and `--exact` requires an exact representation.
+
 ## Inspect and validate looks
 
 `look inspect` accepts a scene, simulation world, saved checkpoint, run

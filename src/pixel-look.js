@@ -136,7 +136,8 @@ const PixelLook = (() => {
   }
 
   function prepareColorStack(stack, palette, roles) {
-    return stacks.prepare(stack, { paletteRemap: (definition, color) => prepareRemap(definition, palette, roles, color) });
+    return stacks.prepare(stack, { palette, roles,
+      paletteRemap: (definition, color) => prepareRemap(definition, palette, roles, color) });
   }
 
   function colorGrade(palette, roles, prior, remap, definition, lut, stack, onClip) {
