@@ -116,9 +116,10 @@
 
   const lookFields = ['output', 'provenance', 'sample'].map(key => ({name:'look/'+key,type:'record',selector:true}));
   function create(view, systems = {}, projected, visual) {
-    const {world, states = {}, signals = {}, tick = 0, history = [], dropped = 0} = view;
+    const {world, states:visible = {}, signals = {}, tick = 0, history = [], dropped = 0} = view;
+    const states=view[W.simulationAggregate.rawStates]??visible;
     const fields = new Map(), traces = new Map();
-    const base = {world, states, signals, tick, time:view.time ?? tick * world.dt};
+    const base = {world, states:visible, signals, tick, time:view.time ?? tick * world.dt};
     const locations = new Map(), active = new Set();
     let spatialIndex, aliases, appearance, picker, renderScene;
     const scene = () => renderScene ??= (visual ? visual() : W.visual({makeBuilder,makeSculpt},view,api));
@@ -202,6 +203,15 @@
         if(name!==undefined)return own(snapshot.entries,name)?ok(snapshot.entries[name]):missing('unknown simulation chunk','missing');
         return ok(snapshot);
       }}}),
+      ...(world.simulationChunks&&Object.values(systems).some(system=>system.simulationRepresentation)&&{
+        representation:{type:'record',selector:true,read({target:site,args}){
+          const name=args.system??site?.entity;
+          if(name!==undefined)return own(systems,name)&&systems[name].simulationRepresentation&&own(states,name)?
+            ok(systems[name].simulationRepresentation(states[name])):missing('unknown aggregate solver','missing');
+          return ok(Object.fromEntries(Object.entries(systems).flatMap(([key,system])=>
+            system.simulationRepresentation&&own(states,key)?[[key,system.simulationRepresentation(states[key])]]:[])));
+        }}
+      }),
       position:{type:'vec3',units:'world',read:({target:site}) => site.point ? ok(site.point) : missing('point or entity required')},
       history:{type:'records',read:({args}) => {
         const {after=-1e15,before=tick,entity,where,limit=history.length}=args;

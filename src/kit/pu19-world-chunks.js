@@ -36,15 +36,18 @@
     let radius=-1;
     const detail=levels.map((raw,index)=>{
       const asleep=index===levels.length-1;
-      check(keys(raw,['id','within','sleep','every','substeps','systems'])&&id(raw.id)&&!byLevel.has(raw.id)&&
+      check(keys(raw,['id','within','sleep','every','substeps','systems','instances'])&&id(raw.id)&&!byLevel.has(raw.id)&&
         (asleep?raw.sleep===true&&Object.keys(raw).length===2:raw.sleep===undefined&&
           bounded(raw.within,0,1e9)&&raw.within>radius),'Expected increasing active radii followed by a sleeping level');
-      const overrides=raw.systems??{};
-      check(record(overrides)&&Object.keys(overrides).every(key=>kindNames.has(key)&&
-        keys(overrides[key],['every','substeps','tuning'])&&(overrides[key].tuning===undefined||record(overrides[key].tuning))),
+      const overrides=raw.systems??{}, instances=raw.instances??{};
+      const validOption=option=>keys(option,['every','substeps','tuning','aggregate'])&&
+        (option.tuning===undefined||record(option.tuning))&&
+        (option.aggregate===undefined||option.aggregate===false||record(option.aggregate));
+      check(record(overrides)&&Object.keys(overrides).every(key=>kindNames.has(key)&&validOption(overrides[key]))&&
+        record(instances)&&Object.keys(instances).every(key=>own(systems,key)&&validOption(instances[key])),
         'Invalid simulation detail solver overrides');
       if(!asleep){cadence(raw,{});radius=raw.within;}
-      const row={...raw,index,asleep,overrides};
+      const row={...raw,index,asleep,overrides,instances};
       byLevel.set(raw.id,row);
       return row;
     });
@@ -66,17 +69,19 @@
       byChunk.set(name,row);
       for(const system of row.systems){
         check(id(system)&&own(systems,system)&&!owner.has(system),'Chunk system must exist in exactly one chunk: '+system);
-        const {kind,schedule}=world.systems[system], provider=systems[system];
+        const {kind,schedule}=world.systems[system], provider=systems[system], models=new Map();
         const rates=detail.slice(0,-1).map(tier=>{
-          const option=tier.overrides[kind], defined=cadence(tier,schedule??{});
+          const option=own(tier.instances,system)?{...tier.overrides[kind],...tier.instances[system]}:tier.overrides[kind];
+          const defined=cadence(tier,schedule??{});
           const clock=cadence(option??{},defined), tuning=option?.tuning??{};
           check(!provider.requestTransfers||clock.substeps===1,'Transfer producers need one substep inside a simulation chunk');
           check(!Object.keys(tuning).length||typeof provider.checkSimulationLOD==='function',
             'Solver does not support simulation detail tuning: '+system);
           provider.checkSimulationLOD?.(tuning,{...clock,dt:world.dt});
+          if(option?.aggregate)models.set(tier.id,W.simulationAggregate.define(provider,option.aggregate,system+'/'+tier.id));
           return freeze({...clock,tuning});
         });
-        owner.set(system,{rates,maxEvery:Math.max(...rates.map(clock=>clock.every)),
+        owner.set(system,{rates,models,chunk:name,maxEvery:Math.max(...rates.map(clock=>clock.every)),
           schedules:Boolean(provider.step||provider.requestTransfers||provider.output)});
       }
     }

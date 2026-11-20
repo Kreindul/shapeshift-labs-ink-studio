@@ -203,6 +203,7 @@
         route:[],cursor:0,mode:'idle',retry:0,travel:0,footprints:0,limbs:[],look:profiles[spec.species].look??[4,5,6,24]};
     }
     const policy = config.decisions === undefined ? null : W.agentDecisions.create(config.decisions, initial);
+    const species=Object.keys(profiles).sort();
     const replan=config.replanTicks??24;
     check(Number.isSafeInteger(replan)&&replan>=1&&replan<=10000,'Invalid movement replanning interval');
     function fit(ctx,profile,p){
@@ -331,6 +332,9 @@
       return {...previous,position:moved,direction,route,cursor,retry,mode:profile.mode,travel,footprints,limbs};
     }
     return {initial:()=>({agents:initial,contacts:[],...(policy&&{decisions:policy.initial})}),dependencies:routeDependencies(config),
+    simulationAggregate(settings){
+      return W.aggregatePopulation.cohorts(settings,{initial,profiles,fit,bounds:config.bounds,contacts:config.contactEvents});
+    },
     ...(config.contactEvents&&{outputs:{contacts:'event'},output:state=>({contacts:state.contacts})}),
     ...((config.surface!==undefined||policy)&&{checkFields(query){
       if(config.surface!==undefined)W.materials.checkSurface(query,config.surface);
@@ -399,6 +403,7 @@
       return poses.get(entity);
     },fields:{
       agents:{type:'record',read:({state})=>Q.ok(state.agents)},
+      population:{type:'record',read:({state})=>Q.ok(W.aggregatePopulation.population(state.agents,species))},
       contacts:{type:'records',units:'world',read:({state})=>Q.ok(state.contacts)},
       ...(policy&&{decisions:{type:'record',read:({state})=>Q.ok(state.decisions)}})
     },...(policy&&{traces:{why:{run({state,args,target}){

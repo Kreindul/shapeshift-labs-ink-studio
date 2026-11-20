@@ -47,7 +47,8 @@ outgoing radius to prevent rapid demotion at a boundary.
 
 A level can run every several active ticks or take several substeps per
 tick. Solver-kind overrides under `systems` can refine that cadence and
-supply tuning. When a level leaves cadence unspecified, the solver uses
+supply tuning. A level can also choose an [aggregate representation](aggregate-simulation.md)
+per kind or system. When a level leaves cadence unspecified, the solver uses
 its normal schedule. Mechanics accepts `contactIterations`. Water
 accepts `cfl` and `maxDt` within the solver's stability bounds. Transfer
 producers use one substep per due update so the accounting occurs once.
@@ -61,7 +62,8 @@ The usual `ctx.tick` and `ctx.time` continue to represent the world clock.
 An unfinished coarse interval survives sleep. On the first finer substep
 it is applied together with that substep's share of the current tick.
 Sleeping time never enters the interval. Averaged inputs retain their
-active-time weights. Every level uses the same persistent state schema.
+active-time weights. A solver with an aggregate representation saves its
+selected form in the world checkpoint.
 Movable props stay with the system that owns them, even if they cross a
 chunk boundary. Existing field reads, signals and transfers define the
 interfaces between authored systems.

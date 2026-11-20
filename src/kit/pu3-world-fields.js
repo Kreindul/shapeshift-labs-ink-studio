@@ -339,6 +339,13 @@
     const dependencyBounds = {axes:'xz',min:origin,max:[origin[0]+width*dx,origin[1]+height*dz]};
     const phaseFields=['temperature','ice','vapor','humidity','phase','phase-state','water','depth','flow','surface-height'];
     return {inputs,outputs,...(exchanging && {accounts}),
+      simulationAggregate(settings){
+        check(!sedimentModel&&!thermalModel&&!legacyErosion&&!exchanging&&!terrainQuery&&
+          !Object.keys(gates).length&&!Object.keys(pumps).length,
+        'Water blocks require a closed grid without gates, pumps, exchanges, sediments, thermal or obstacle coupling');
+        return W.aggregateWater(settings,{width,height,dx,dz,origin,index,maxDepth,system,sensors,
+          rain:config.rain,drain:config.drain,friction:config.friction});
+      },
       checkSimulationLOD(tuning,{every,dt}){
         const {cfl=.42,maxDt=.055}=tuning;
         check(Object.keys(tuning).every(key=>key==='cfl'||key==='maxDt')&&Number.isFinite(cfl)&&cfl>=.05&&cfl<=.49&&

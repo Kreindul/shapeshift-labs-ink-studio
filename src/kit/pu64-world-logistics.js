@@ -176,14 +176,19 @@
       });
       return Q.ok(bodies);
     }
+    const stockField=records(containers,'container',container);
     return {initial:()=>initial,inputs,outputs,accounts:transferAccounts,checkFields,validateState,output:signals,
+      simulationAggregate(settings){
+        return W.aggregateLogistics(settings,{layout,validateDetail:validateState,accounts:transferAccounts,
+          stocks:stockField.read,stockBodies});
+      },
       step(state,ctx){
         const next=F.advance(layout,state,ctx,row=>obstruction(row,ctx.query));
         emitChanges(state,next,ctx);
         return next;
       },fields:{
         recipes:records(recipes,'recipe',(_,row)=>row),
-        stocks:records(containers,'container',container),
+        stocks:stockField,
         processes:records(processes,'process',(state,row,i)=>({
           id:row.key,recipe:row.recipe,duration:row.duration,remaining:state.jobs[i],completed:state.complete[i],
           ...state.process[i],blocked:state.process[i].blocked.map(part=>({...part,account:pin(part.account)}))

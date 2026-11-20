@@ -48,6 +48,8 @@
         check(id(key) && typeof handler === 'function', 'Invalid action ' + name + '/' + key);
       systems[name] = system;
     }
+    const chunks=W.simulationChunks.compile(world,systems);
+    const aggregates=W.simulationAggregate.bind(systems,chunks);
     if (world.visual?.volume!==undefined) check(typeof world.visual.volume==='string'&&
       own(systems,world.visual.volume)&&typeof systems[world.visual.volume].volumeFrame==='function',
     'Visual volume must name a live volume system');
@@ -101,7 +103,6 @@
     })));
     const transfers = W.transfers.bind(systems);
     for (const name of transfers.producers) systems[name].checkTransfers?.(transfers.validate);
-    const chunks=W.simulationChunks.compile(world,systems);
     const schedule = W.rates.schedules(world,systems,chunks);
     const incoming = new Map(), edges = new Map(), indegree = new Map();
     for (const name of ordered(systems)) {
@@ -137,7 +138,7 @@
     check(order.length === names.length, 'Instantaneous signal cycle; use a delay or a stateful system');
     const causePolicy = W.causality.policy(world.causality);
     const rates = schedule.active ? W.rates.bind(schedule,systems,ports,incoming,order) : null;
-    return {world,systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,causePolicy};
+    return {world,systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,aggregates,causePolicy};
   }
   function actionCheck(raw, plan, min = 1) {
     check(record(raw) && tickOK(raw.tick) && raw.tick >= min && record(raw.args ?? {}) &&
@@ -228,7 +229,7 @@
       world=result.world;
     }
     const {plan, weather = weatherProgram(world)}=result;
-    const {systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,causePolicy} = plan;
+    const {systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,aggregates,causePolicy} = plan;
     const projection = Q.projection(systems);
     const slowReaders = new Map(rates ? dependencies.describe.filter(({id,reads})=>reads.length&&
       (rates.rates[id].every>1||chunks?.managed.get(id)?.schedules))
@@ -249,7 +250,8 @@
 
     function view(worldValue = world, statesValue = states, signals = lastSignals, tickValue = tick, receipts = lastTransfers,
       causes = causalState, chunkView = chunkState) {
-      return Object.freeze({world:worldValue,states:statesValue,signals,tick:tickValue,time:tickValue*worldValue.dt,history,dropped,
+      return Object.freeze({world:worldValue,states:aggregates?.view(statesValue)??statesValue,
+        ...(aggregates&&{[W.simulationAggregate.rawStates]:statesValue}),signals,tick:tickValue,time:tickValue*worldValue.dt,history,dropped,
         ...(receipts.length && {transfers:receipts}),...(causes && {causality:causes}),
         ...(chunkView&&{simulationChunks:chunkView}),
         ...(weatherTrackState && {weatherTrackState})});
@@ -263,7 +265,7 @@
       const lod=detail&&Object.freeze({chunk:detail.chunk,level:detail.level,tuning:detail.tuning,
         activeTicks:detail.activeTicks,time:baseDt*(detail.activeTicks-1+timing.substep/substeps)});
       const randomTick = substeps>1 ? at+'.'+timing.substep : at;
-      return Object.freeze({world:worldValue,query,id:name,states:statesValue,tick:at,time,dt,input,emit,
+      return Object.freeze({world:worldValue,query,id:name,states:aggregates?.view(statesValue)??statesValue,tick:at,time,dt,input,emit,
         ...(timing && {baseDt,every:timing.every,substep:timing.substep,substeps}),...(lod&&{simulationLOD:lod}),
         ...(spatial && {spatial}),...(causal && {causal}),
         random:key => P.data.hash(name+'/'+randomTick+'/'+String(key),worldValue.seed)/4294967296});
@@ -340,6 +342,7 @@
       }
       if(chunks){chunks.validate(payload.simulationChunks,payload.tick);chunkState=payload.simulationChunks;}
       else check(!own(payload,'simulationChunks'),'Unexpected simulation chunk checkpoint data');
+      aggregates?.validate(payload.states,chunkState);
       if (rates) {
         rates.validate(payload.sampling,portValue,payload.tick,chunkState);
         sampling = payload.sampling;
@@ -388,6 +391,10 @@
       if(chunks){
         let focusQuery;
         chunkState=chunks.select(chunks.blank(),at=>(focusQuery??=Q.create(view(),systems,projection)).target(at),0).state;
+        if(aggregates){
+          const draft={...states};
+          if(aggregates.transition(draft,chunkState))states=freeze(draft);
+        }
       }
       const startQuery = Q.create(view(),systems,projection);
       const initialOutputs = {};
@@ -562,6 +569,7 @@
         }
         nextSpatial=freeze(nextSpatial);
       }
+      aggregates?.transition(drafts,nextChunkState,makeEmit('world'));
       const committed = freeze(drafts);
       const spent = {};
       let phaseQuery, phaseStart;
