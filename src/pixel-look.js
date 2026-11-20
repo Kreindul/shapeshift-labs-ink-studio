@@ -244,10 +244,32 @@ const PixelLook = (() => {
     return best;
   }
 
+  const matchModes = Object.freeze(['rgb','perceptual','brightness','chroma','hue']);
+  function labPoint(rgb) {
+    const lab = spaces.toOKLab(rgb);
+    return [...lab,Math.hypot(lab[1],lab[2])];
+  }
+  function hueWeight(chroma) {
+    const t = clamp((chroma-.02)/.04);
+    return .49*t*t*(3-2*t);
+  }
+  function matchDistance(a,b,mode,hue) {
+    if (mode === 0) return weights[0]*(a[0]-b[0])**2+weights[1]*(a[1]-b[1])**2+weights[2]*(a[2]-b[2])**2;
+    let distance = (mode === 2 ? 25 : 1)*(a[0]-b[0])**2+(a[1]-b[1])**2+(a[2]-b[2])**2;
+    if (mode === 3) distance += 25*(a[3]-b[3])**2;
+    if (hue) {
+      const ca = Math.max(.04,a[3]), cb = Math.max(.04,b[3]);
+      distance += hue*((a[1]/ca-b[1]/cb)**2+(a[2]/ca-b[2]/cb)**2);
+    }
+    return distance;
+  }
+
   function preparePalette(definition, { palette = [], roles = {}, blueNoise } = {}) {
-    if (!record(definition) || Object.keys(definition).some(key => !['palette', 'reserved', 'dither', 'source'].includes(key)))
-      throw new TypeError('A palette constraint accepts palette, reserved, dither and source settings');
-    const { source = 'lit' } = definition;
+    if (!record(definition) || Object.keys(definition).some(key => !['palette', 'reserved', 'dither', 'source', 'match'].includes(key)))
+      throw new TypeError('A palette constraint accepts palette, reserved, dither, source and match settings');
+    const { source = 'lit', match = 'rgb' } = definition;
+    const matchId = matchModes.indexOf(match);
+    if (matchId < 0) throw new RangeError('Palette match must be rgb, perceptual, brightness, chroma or hue');
     if (!['lit', 'graded'].includes(source)) throw new RangeError('Palette source must be lit or graded');
     const select = paletteSelector(palette, roles);
     function colors(values, name) {
@@ -269,6 +291,7 @@ const PixelLook = (() => {
     const packed = [...candidates, ...reserved];
     if (!candidates.length || packed.length > 48) throw new RangeError('Use 1 to 48 swatches with at least one unreserved color');
     const swatches = packed.map(unpack), exact = new Map(reserved.map((color, index) => [color, candidates.length + index]));
+    const lab = matchId ? swatches.map(labPoint) : undefined;
     const dither = definition.dither ?? {};
     if (!record(dither) || Object.keys(dither).some(key => !['pattern', 'strength', 'seed'].includes(key)))
       throw new TypeError('Palette dither accepts pattern, strength and seed settings');
@@ -292,10 +315,11 @@ const PixelLook = (() => {
     function index(rgb, x = 0, y = 0, useDither = true) {
       const locked = reservedIndex(rgb);
       if (locked !== undefined) return locked;
+      const sites = lab ?? swatches, input = lab ? labPoint(rgb) : rgb;
+      const hue = matchId === 4 ? hueWeight(input[3]) : 0;
       let best = 0, second = 0, firstDistance = Infinity, secondDistance = Infinity;
       for (let i = 0; i < count; i++) {
-        let distance = 0;
-        for (let k = 0; k < 3; k++) distance += weights[k] * (rgb[k] - swatches[i][k]) ** 2;
+        const distance = matchDistance(input,sites[i],matchId,hue);
         if (distance < firstDistance) {
           second = best; secondDistance = firstDistance;
           best = i; firstDistance = distance;
@@ -306,15 +330,21 @@ const PixelLook = (() => {
       if (!amount || !useDither || count < 2) return best;
       const rank = ranks[mod(y, height) * width + mod(x, width)];
       if (rank >= .5) return best;
+      const threshold = .5 + (rank-.5)*amount;
+      if (lab) {
+        const length = matchDistance(sites[best],sites[second],matchId,hue);
+        // Recover the projection using distances in the same metric used to rank the pair.
+        return length > 0 && .5*(firstDistance+length-secondDistance) >= threshold*length ? second : best;
+      }
       let projection = 0, length = 0;
       for (let k = 0; k < 3; k++) {
         const delta = swatches[second][k] - swatches[best][k];
         projection += weights[k] * delta * (rgb[k] - swatches[best][k]);
         length += weights[k] * delta * delta;
       }
-      return projection >= (.5 + (rank - .5) * amount) * length ? second : best;
+      return projection >= threshold * length ? second : best;
     }
-    return { packed, swatches, count, width, height, ranks, amount, source, reservedIndex, index };
+    return { packed, swatches, count, width, height, ranks, amount, source, match, matchId, lab, reservedIndex, index };
   }
 
   function prepareLookPolicy(definition, options = {}) {

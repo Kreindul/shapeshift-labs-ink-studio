@@ -69,6 +69,7 @@
         }
         const describe = (kind, local, select) => ({ stage: 'palette', kind, select: select ?? null,
           asset: local.assetId ?? null, ...(local.stackName && { stack: local.stackName }),
+          ...(local.matchId && { match: local.match }),
           maskWeight: local.mask ? sample ? local === policy ? amount : local.mask(sample) : null : 1,
           ...(local === policy && selectedSwatch && { selectedSwatch }),
           applied: local === dryPolicy || local === policy && Boolean(input && (!local.mask || amount > 0)) });

@@ -97,7 +97,7 @@ module.exports = function sample({ file, options, source, look, reference, kit, 
   const output = { source, look: look.id ?? null, label: look.label, ...(look.stage && { stage: look.stage }),
     ...(look.paletteStage && { paletteStage: look.paletteStage }),
     maskWeight, ...(sceneMask && { maskNeedsScene: true }),
-    ...(palette && { palette: palette.map(Palette.hex) }), ...(generated && { chart: { columns, rows: 4 } }), samples: rows };
+    ...(palette && { palette: palette.map(Palette.hex) }), ...(policy?.matchId && { match: policy.match }), ...(generated && { chart: { columns, rows: 4 } }), samples: rows };
   if (options.out && /\.png$/i.test(options.out)) {
     if (path.resolve(options.out) === path.resolve(file)) throw new TypeError('--out needs a separate path');
     writeChart(options.out, rows, columns);

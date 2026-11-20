@@ -235,6 +235,23 @@ ink-studio render examples/thin-transmission.js --w 356 --h 172 --px 1 --out lan
 ink-studio render examples/thin-transmission.js --w 356 --h 172 --px 1 --transmission off --out lantern-unlit.png
 ```
 
+## Palette matching
+
+Give a material a `paletteConstraint` to select swatches after shading
+in headless renders and custom hosts. Set `match` to prioritize hue,
+brightness, chroma, or perceptual distance. A
+[material-targeted palette policy](pixel-look.md#choose-a-matching-priority)
+exposes the same matching choices in the standard WebGL renderer.
+
+```js
+const paintedCloth = K.surface.material({ r: [9, 10, 11], materialId: 'cloth' }, {
+  paletteConstraint: {
+    palette: ['#261e36', '#65384f', '#b2788c', '#f0cba8'],
+    match: 'brightness'
+  }
+});
+```
+
 ## Drive finish properties
 
 Name a source in `surface.signals` and bind it to one or more layer

@@ -31,8 +31,11 @@
       if (!record(resolved)) throw Error('A look color stack must be an object');
       ColorStack.normalize(resolved);
     }
-    if (palette !== undefined && !fields(substitute(palette, params), ['palette', 'reserved', 'dither']))
-      throw Error('A look palette needs palette constraint settings');
+    if (palette !== undefined) {
+      const policy = substitute(palette,params);
+      if (!fields(policy,['palette','reserved','dither','match'])) throw Error('A look palette needs palette constraint settings');
+      if (policy.match !== undefined) PixelLook.preparePalette({palette:['#000000'],match:policy.match});
+    }
     SplatEffects.prepareMask(substitute(mask, params), undefined, { validateOnly: true });
     return freeze({ id, label: label.trim(), params, ...(stack !== undefined && { stack }),
       ...(palette !== undefined && { palette }), ...(mask !== undefined && { mask }), ...(stage && { stage }), ...(paletteStage && { paletteStage }),

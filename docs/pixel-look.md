@@ -383,6 +383,45 @@ node cli/ink-studio.js render examples/palette-constraints.js --ortho --out cons
 Use `--palette-constraints rules.json` to override the authored rules
 in `render` or `sim render`. `off` bypasses the target policies.
 
+### Choose a matching priority
+
+Set `match` on a palette policy to choose the closest swatch for the
+input color. This works on a [surface material](surface-materials.md#palette-matching),
+a scene target or default, a look asset's palette, and [explicit stage rules](#explicit-render-stages).
+
+| Setting | Priority |
+| --- | --- |
+| `rgb` | Ink's existing weighted RGB distance. This is the default. |
+| `perceptual` | Distance across all three OKLab components. |
+| `brightness` | Give OKLab lightness extra weight to retain shadows and highlight bands. |
+| `chroma` | Give OKLab chroma extra weight to keep the strength of a color. |
+| `hue` | Favor the hue direction around the OKLab color wheel. Near-neutral inputs fade to perceptual matching. |
+
+The three priorities keep OKLab distance as part of the score. They can
+trade off other attributes when a palette lacks a close swatch. The same
+score selects the dither pair and determines where its transition falls.
+Reserved swatches still take precedence. A tie uses the earliest candidate.
+
+```json
+{
+  "targets": [
+    {"material": "cloth", "palette": ["#261e36", "#65384f", "#b2788c", "#f0cba8"], "match": "brightness"},
+    {"material": "copper", "palette": ["#304b50", "#66372b", "#986047", "#e6b59a"], "match": "hue"}
+  ]
+}
+```
+
+Use the same target policies in the CLI and standard WebGL renderer.
+`look sample` and the `look/output` probe report the selected matching
+mode. The [dye and copper works](../examples/palette-material-matching.js)
+compares two materials with the same candidate swatches in both views.
+
+```sh
+node cli/ink-studio.js render examples/palette-material-matching.js --w 336 --h 160 --px 1 \
+  --params '{"mode":"rgb"}' --out rgb.png
+node cli/ink-studio.js render examples/palette-material-matching.js --w 336 --h 160 --px 1 --out priorities.png
+```
+
 ## Look assets and overrides
 
 An `ink-studio/asset-pack` can carry named `looks`, either on their own or

@@ -159,7 +159,7 @@ const RenderStages = (() => {
       ...(rule.stack && { stack: rule.stack.name, stackAmount: rule.stackAmount }),
       ...(rule.mask && { maskWeight }),
       effectiveWeight: maskWeight === null ? null : rule.weight * rule.stackAmount * maskWeight,
-      ...(rule.palette && { palette: rule.palette.packed })
+      ...(rule.palette && { palette: rule.palette.packed, ...(rule.palette.matchId && { match: rule.palette.match }) })
     };
   }
 
