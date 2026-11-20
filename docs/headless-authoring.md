@@ -463,6 +463,77 @@ node examples/drawing-layout.cjs drawing-layout-review
 ink-studio graph run drawing-layout-review/tide-chart.json --out drawing-layout-review/graph
 ```
 
+## Palette and colour on rasters
+
+Use the stock palette and colour nodes with PNG assets, drawn canvases,
+or any typed raster flowing through the graph. In Node, the same
+operations live at `ink.load().KIT.procedural.rasterColor`.
+
+### Resolve an image to swatches
+
+`palette.resolve` takes a `source` raster and an Ink palette `policy`. The
+policy uses the same `palette`, `reserved`, `match`, and `dither` definitions
+as [scene palette constraints](pixel-look.md#target-palettes-and-dithering). Use up
+to 48 swatches including reserved accents. Link a palette into
+`options.palette` to use named roles or indexed swatch references.
+`palette.recipe` compiles the same definitions as `KIT.palette.recipe` and
+returns the packed swatches and roles together.
+
+| `options.method` | Resolve |
+| --- | --- |
+| `solid` | Use the nearest enabled swatch under the policy's match metric. |
+| `ordered` (default) | Use the authored Bayer, checker, or blue-noise settings. `phase: [x,y]` offsets the pattern in raster pixels. |
+| `diffusion` | Use Floyd–Steinberg error diffusion, with alternating scan directions by default. Set `serpentine: false` for a fixed direction and `strength` in 0–1 to control how much error travels. |
+
+Ordered and diffusion modes respect the approved pairs and their lightness
+ranges. An exact reserved input swatch stays intact and does not relay
+diffusion error. Resolve keeps source alpha. The `palette` output lists
+the resolved swatches and `indices` carries their zero-based slots as a
+one-channel raster, with -1 for transparent or unselected pixels.
+
+Set `options.mask` to an aligned raster to select where the operation
+applies. Read `maskChannel` (default luma) using `maskScale` (default 255).
+Palette resolve selects pixels at or above `maskThreshold` (default .5).
+The other colour transfers use fractional mask coverage.
+
+### Apply a look, map a gradient, or edit colours
+
+| Operation | Inputs and options |
+| --- | --- |
+| `color.look` | Pass a versioned asset `pack` or bundle and a `binding` like `{"asset":"workshop/stone","revision":1}`. The node applies the look's stack, lighting ramp, and palette in that order where present. `metadata` identifies the bound revision and its components. |
+| `color.gradient` | Pass a `ramp` as named role, colour list, explicit stops, palette path, or Ink spectrum, primary, or grayscale definition. The node samples OKLab `lightness` by default. Choose `options.channel` and `range` to drive it from another channel. |
+| `color.stack` | Apply an Ink `stack` of channel mixes, curves, LUTs, exposure, hue, saturation, contrast, or indexed palette remaps. Indexed remaps use exact input swatches when present and choose the nearest supplied swatch for other colours. |
+| `color.channels` | Set `options.order` to three or four selectors. Use `r`, `g`, `b`, `alpha`, `luma`, a byte constant, or a selector such as `{"channel":"g","gain":-1,"bias":255}`. Three selectors keep the source alpha. |
+| `color.key` | Remove a colour with `options.color`, `metric`, `tolerance`, and `softness`. Set `mode: "channel"` with a `channel` and `range` for a channel key. Use `invert` to keep the selected region. The `matte` output contains the resulting alpha bytes. |
+| `color.replace` | Pass `rules` with `from`, `to`, optional `tolerance`, `softness`, `amount`, and `preserveLightness`. The first matching rule uses the original pixel, so replacements do not cascade. |
+
+For colour keys and replacements, `metric` can be `rgb`, `perceptual`
+(OKLab), or `chroma` (the OKLab chroma plane). Distance and softness use
+normalized colour units. Gradient and channel key settings use the
+authored sample range. OKLab lightness is in 0–1 and ordinary RGB channels
+are in 0–255. A numeric channel index can read a signed or fractional
+channel directly.
+
+With `color.look`, `options.channel` and `range` control the lighting
+ramp input. Positive binding strength keeps palette output discrete, and
+rule weight multiplies the mask coverage used for palette selection. Use
+a false binding to bypass the look. The look protects exact reserved accents before its first
+colour transform. Import packs through `jsonAsset` and PNGs through
+`pngAsset`. The graph clock drives animated ramps and look time drivers.
+Standalone ordered patterns use raster coordinates. Supply a raster mask
+when applying a scene-masked look to an image. Scene dither regions use
+the base pattern settings in a standalone graph.
+
+Run the [Salt Sky Observatory example](../examples/raster-palette.cjs) to
+compare solid, ordered, and diffusion resolves, apply a saved look, and
+key and recolour the lantern. The demo writes the source PNGs, versioned
+look pack, graph project, and native outputs.
+
+```sh
+node examples/raster-palette.cjs raster-palette-review
+ink-studio graph run raster-palette-review/raster-palette.json --out raster-palette-review/graph
+```
+
 ## Geometry and attributes
 
 `geometry.meshPaths(mesh, { sources, edgeCost, maxCost })` supports native and imported indexed meshes. It returns per-vertex distances and predecessors, plus `path(vertex)`, `curves(vertices)` and a sampled `distanceAt(point)` field. The cost function receives positions, vertex IDs, length and adjacent faces. Return infinity to block an edge.
