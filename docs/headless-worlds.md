@@ -678,6 +678,7 @@ reaches the feeder.
 | `control` | Typed arithmetic, thresholds, selection, binary logic, pulses, latches, timers and hysteresis. |
 | `store` | Bounded numeric, integer, or vector accounts with named resources and units. |
 | `exchange` | Enabled links that request a fixed amount per tick or a rate per second. |
+| `logistics` | Resource stocks, atomic recipes, scheduled shipments, conservative accounting, and upstream shortage traces. |
 | `water` | Bounded XZ shallow water with live bed edits, fractional face openings, conservative pump transfer, and optional sediment transport, deposition and gate silting. An `obstacle` field may supply signed solid clearance. |
 | `mechanics` | Boxes, capsules and convex compounds with swept contact and shared clearance and support queries. Fixed and powered mounts, transmission ratios and stall reports, physical separation, configurable box fracture, wheel traction, buoyancy, thrust and sail forces. |
 | `deformables` | Checkpointed XPBD cloth and rope with scene attachments, terrain and solid contact, loads, tears, support queries and rain collection. |
@@ -1305,6 +1306,67 @@ ink-studio trace moon.run.json rig/ray --at 3,0,0 --args '{"direction":[-1,0,0],
 ink-studio sim run examples/world-rotating-dock.json --ticks 150 --record dock.run.json
 ink-studio probe dock.run.json --field tank/depth --entity hull
 ink-studio sim replay moon.run.json
+```
+
+## Resources, recipes, and logistics
+
+A `logistics` system models resources such as ingredients, spare parts, or
+nutrients with the same five configuration tables.
+
+| Table | Entry |
+| --- | --- |
+| `resources` | `{ units, type, look? }`. Declare `integer` for countable items or `number` for continuous quantities. The optional `look` is a palette ramp for rendered cargo and stock. |
+| `containers` | `{ position?, stocks }`. Each stock is keyed by resource and accepts `initial` (default zero) and `max` (default unlimited). Optional `display: { at, half }` grows a stock pile from its base point to full height at capacity. |
+| `recipes` | `{ duration, inputs?, outputs? }`. Duration is in simulation seconds. Each side maps resource IDs to positive quantities. Leave the input side empty for a producer or the output side empty for a consumer. |
+| `processes` | `{ recipe, inputs?, outputs?, enabled?, speed?, priority? }`. On each side, bind each ingredient or result to a container ID that holds it. Several processes can use the same recipe independently. |
+| `links` | `{ from, to, resource, amount, travel?, slots?, mode?, enabled?, priority?, guides?, route? }`. Name containers and specify either an `amount` per update or a `rate` per second. `travel` is in simulation seconds. `slots` caps the outstanding shipments. |
+
+Each system update unloads due shipments, advances the recipes, then
+dispatches new shipments. Within each phase, higher priority goes first
+and IDs break ties. A process reserves all inputs together and commits all
+outputs together. If any output is full, the finished batch retains its
+reserved ingredients until all outputs fit. Each process holds one active
+batch and can complete up to `maxBatches` batches per update (default 32).
+
+An instantaneous link settles both ends in the same update. With nonzero
+travel, cargo remains in transit until the destination accepts it. Use
+`mode: "exact"` for all-or-nothing collection and delivery. The default
+`partial` mode can load or unload part of a shipment. Rate-driven integer
+links carry fractional rate credit forward. A scheduled or wired
+`enable-link.<id>` input controls dispatch. Cargo already in transit can
+still unload with dispatch disabled. Use `enable-process.<id>` and
+`speed.<id>` to control processing. Outputs include `stock.<container>.<resource>`,
+`completed.<process>`, `blocked.<process>`, `delivered.<link>`, and
+`link-blocked.<link>`. `completed` counts all completed batches.
+`delivered` reports the quantity delivered this update.
+
+A link can check a live navigation trace using
+`route: { trace: "nav/route", at?, to?, args? }`. The positions default to the
+two container positions. Departures wait for a successful trace and expose
+its obstruction when available. Travel time and optional visual `guides`
+are authored separately. Bind `cargo` and `stock-bodies` to the world's
+`visual.fields.bodies` to render them using the existing splat renderer.
+
+Every stock is a transfer account at `system/container.resource` and can
+receive or send compatible amounts through `world/transfer` or `exchange`.
+Inspect `stocks`, `recipes`, `processes`, and `links` with the usual query
+tools. The `ledger` splits each resource into stored, reserved, and in-transit
+amounts, with production, consumption, receipts, exports, and balance error.
+The `supply` trace walks upstream from a `process`, `link`, or `account`
+within the logistics system. It reports current insufficient inputs, full
+destinations, and route obstructions. A trace can stop at the system boundary
+where another system supplies a transfer account. Use `world/transfers` for
+those receipts. Stock, work in progress, and cargo all resume from checkpoints.
+
+The harvest example closes the grain crossing at tick 51 and reopens it
+at tick 171. At tick 150 the market's missing bread traces through the
+bakery and mill to the gate blocking the grain cart.
+
+```sh
+ink-studio sim run examples/world-harvest-logistics.json --ticks 250 --record harvest.run.json
+ink-studio trace examples/world-harvest-logistics.json flow/supply --ticks 150 --args '{"process":"market"}'
+ink-studio probe harvest.run.json --field flow/ledger
+ink-studio sim replay harvest.run.json
 ```
 
 ## Extend the runtime in JavaScript
