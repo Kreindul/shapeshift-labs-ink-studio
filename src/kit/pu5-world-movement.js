@@ -321,7 +321,7 @@
       if(profile.mode!=='walk')return spatialPlan(ctx,config,from,goal,profile);
       return navigation?ctx.query.navigation(navigation).route(from,goal,profile):groundPlan(ctx,config,from,goal,profile);
     }
-    function one(agent,ctx,contacts,dirty,directed=false,routes,group){
+    function one(agent,ctx,contacts,dirty,directed=false,routes,group,arrival){
       const profile=profileFor(agent);
       let crowdStatus=W.crowd.clear;
       function finish(row,status,reason){
@@ -345,7 +345,7 @@
       const goal=directed ? fit(ctx,profile,agent.goal) :
         queued&&suitable(ctx,agent,queued)?queued:choose(ctx,agent,profile);
       const resting=!goal||directed===true&&!suitable(ctx,agent,goal)?'waiting':
-        V.dist(position,goal)<profile.radius*.65?'rest':null;
+        V.dist(position,goal)<(arrival??profile.radius*.65)?'rest':null;
       if(resting){
         const row=previous.mode===resting&&S.sameVector(position,previous.position)&&!route.length&&!cursor?
           previous:{...previous,position,mode:resting,route:[],cursor:0};
@@ -711,12 +711,12 @@
         const agent=S.read(roster,slot);
         if(O.holding(book)){
           const profile=profileFor(agent), exit=group?.exitGoal(agent);
-          function drive(row,goal,task,priority,direction){
+          function drive(row,goal,task,priority,direction,arrival){
             const nextPriority=row.routing?(priority??book.priorPriority??row.routePriority):undefined;
             const changed=!S.sameVector(goal,row.goal)||row.routePriority!==nextPriority;
             const directed=changed?{...row,goal,route:emptyList,cursor:0,retry:0,
               ...(row.routing&&{routing:RQ.idle,routePriority:nextPriority})}:row;
-            const next=one(directed,ctx,contacts,dirty,direction,directed.routing&&schedule?.session(directed),group);
+            const next=one(directed,ctx,contacts,dirty,direction,directed.routing&&schedule?.session(directed),group,arrival);
             return next.task===task?next:{...next,task};
           }
           function hold(row,task,priority){
@@ -726,15 +726,16 @@
             return {agent:{...row,goal:row.position,route:emptyList,cursor:0,retry:0,mode:'rest',task,
               ...(row.routing&&{routing:RQ.idle,routePriority:priority??row.routePriority}),...(row.crowd&&{crowd:W.crowd.clear})}};
           }
-          const execution=orders.advance(book,agent,ctx,{hold,move(row,point,order){
+          const execution=orders.advance(book,agent,ctx,{hold,move(row,point,order,range){
             if(exit)return {phase:'moving',reason:'crossing',agent:drive(row,exit,order.task,order.priority,'exit')};
             const goal=fit(ctx,profile,point);
             if(!goal)return {...hold(row,order.task),phase:'blocked',reason:'target-unfit'};
-            const moved=drive(row,goal,order.task,order.priority,'order');
+            const arrival=Math.min(range??Infinity,profile.radius*.65);
+            const moved=drive(row,goal,order.task,order.priority,'order',arrival);
             const route=moved.routing?.status;
             if(moved.crowd?.status==='queued')return {agent:moved,phase:'waiting',reason:'crossing'};
             const blocked=['waiting','blocked','dormant'].includes(moved.mode);
-            if(!blocked&&V.dist(moved.position,goal)<=profile.radius*.65+1e-6)
+            if(!blocked&&V.dist(moved.position,goal)<=arrival+1e-6)
               return {agent:moved,arrived:true};
             if(['waiting','safe-segment','limited'].includes(route))
               return {agent:moved,phase:'waiting',reason:route==='limited'?'route-budget':'route-request'};

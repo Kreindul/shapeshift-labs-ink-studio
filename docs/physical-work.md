@@ -10,7 +10,7 @@ access to a workspace, tool, or job also needs to be limited.
 The [workyard example](../examples/world-physical-work.json) hauls three
 timber bundles to a site, uses two workers to build a wall, and trains an
 apprentice with a permit produced by the build. A scout then takes the
-detour computed by the same navigation tiles it used to inspect the open yard.
+detour computed by the navigation tiles after the wall becomes solid.
 
 ## Anchor stock to the world
 
@@ -76,7 +76,7 @@ staged materials if a worker leaves or the site goes to sleep or cohort
 LOD. Worker contributions stop when an order loses its reservation or is
 interrupted. At completion, output capacity and the effect must both
 succeed before the batch posts. The `worksite` query lists live material
-and staffing demand, staged progress, current contributors, and any blocker.
+and staffing demand, staged progress, the last reported contributors, and any blocker.
 The world records `work-demand` when the blocking reason changes and
 `work-completed` when the batch commits.
 

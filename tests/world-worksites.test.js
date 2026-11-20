@@ -194,6 +194,18 @@ test('aggregate logistics preserves material escrow and labor resumes on detail 
   assert.equal(site(run,'train').completed,1);
 });
 
+test('a narrow work radius can draw a worker through its ordinary stopping distance',()=>{
+  const scene=training();
+  const worker=scene.systems.teacher.config.agents.trainer;
+  worker.position=point(.945,.6);
+  scene.systems.stock.config.processes.train.work.radius=.025;
+  const run=W.runtime.create(scene);
+  run.schedule([issue(1,'teacher','trainer','first')]);
+  run.advance(12);
+  assert.equal(site(run,'train').completed,1);
+  assert.equal(orders(run,'teacher','trainer').outcomes[0].phase,'succeeded');
+});
+
 test('wrong worksite references and effects fail validation before any stocks are touched',()=>{
   const scene=training();
   const run=W.runtime.create(scene);
