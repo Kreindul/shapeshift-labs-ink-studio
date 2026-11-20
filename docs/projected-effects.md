@@ -306,6 +306,26 @@ A `colorCurve` layer can also apply a `paletteRamp` to the material's lit lumina
 }
 ```
 
+### Projected chroma fields
+
+Use `pattern: 'chroma-field'` with a [complementary or desaturation definition](palette-recipes.md#complementary-and-desaturation-fields) in `chromaField`. The colour path follows the `along` projection axis and the shadow mix follows `across`. Fit it with `size: [width, height]` in projection units or set `wrap: true` to repeat it. Combine the layer with masks, strength, or specular highlights through the existing surface finish.
+
+```json
+{
+  "type": "projected",
+  "pattern": "chroma-field",
+  "projection": {"along": [1, 0, 0], "across": [0, 1, 0]},
+  "chromaField": {
+    "type": "complementary",
+    "color": "#f39a57",
+    "opposite": "#3998a6",
+    "shadow": "#362839",
+    "shade": [0.77, 0],
+    "size": [2, 3]
+  }
+}
+```
+
 ### Author a shader in JavaScript
 
 A layer can name a shader from `surfaceEffects.shaders` or use a function as

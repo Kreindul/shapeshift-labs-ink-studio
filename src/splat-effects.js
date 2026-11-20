@@ -419,6 +419,7 @@ const SplatEffects = (() => {
     const indexed = pattern === 'indexed' ? indexedRaster(definition.raster, definition.cycles, resolveColor, roles) : null;
     const paletteField = pattern === 'hue-brightness' ? paletteFieldLayer(definition.hueBrightness, resolveColor, 'hueBrightness') :
       pattern === 'polar-colour' ? paletteFieldLayer(definition.polar, resolveColor, 'polar') :
+      pattern === 'chroma-field' ? paletteFieldLayer(definition.chromaField, resolveColor, 'chromaField') :
       pattern === 'palette-coverage' ? paletteFieldLayer(definition.coverage, resolveColor, 'coverage') :
       pattern === 'palette-ramp' ? paletteFieldLayer(definition.paletteRamp, resolveColor, 'ramp') : null;
     const pixels = indexed?.sample ?? paletteField?.sample ?? (pattern === 'raster' ? raster(definition.raster) : null);

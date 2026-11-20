@@ -1027,8 +1027,9 @@ const CMD = {
       if (!input || Array.isArray(input) || typeof input !== 'object') die('A palette field needs a JSON object');
       const { type = 'hue-brightness', ...definition } = input;
       const ramp = ['spectrum','primary','grayscale'].includes(type);
-      if (!ramp && !['hue-brightness','polar','coverage'].includes(type))
-        die('Palette field type must be hue-brightness, polar, coverage, spectrum, primary or grayscale');
+      const chroma = ['complementary','desaturation'].includes(type);
+      if (!ramp && !chroma && !['hue-brightness','polar','coverage'].includes(type))
+        die('Palette field type must be hue-brightness, polar, coverage, complementary, desaturation, spectrum, primary or grayscale');
       if (opt.view !== undefined) {
         if (type !== 'coverage') die('--view applies to coverage fields');
         definition.view = opt.view;
@@ -1036,7 +1037,7 @@ const CMD = {
       if (opt.saturation !== undefined) definition.saturation = num('saturation');
       const polar = type === 'polar', api = lib().KIT.palette;
       const compile = type === 'hue-brightness' ? api.hueBrightness : api[type];
-      const field = ramp ? api.ramp({type,...definition}) : compile(definition);
+      const field = ramp ? api.ramp({type,...definition}) : chroma ? api.chromaField({type,...definition}) : compile(definition);
       const format = opt.format ?? 'png', width = num('w', polar ? 128 : 192);
       if (format === 'data' && type === 'grayscale') {
         const json = JSON.stringify(field.report(width),null,2)+'\n';
@@ -1048,7 +1049,7 @@ const CMD = {
       }
       if (format !== 'png') die('Palette fields use PNG, or data for a grayscale report');
       const image = field.raster(width, num('h', polar ? 128 : ramp ? 32 : 96));
-      const name = ramp ? type+'-ramp' : polar ? 'polar-colour' : type === 'coverage' ? 'palette-coverage' : 'hue-brightness';
+      const name = ramp ? type+'-ramp' : chroma ? type+'-field' : polar ? 'polar-colour' : type === 'coverage' ? 'palette-coverage' : 'hue-brightness';
       save(name+'.png',image,image.alpha);
       return;
     }

@@ -232,6 +232,84 @@ const PaletteFields = (() => {
     return Object.freeze({palette:swatches,outputPalette,index,sample,measure,raster});
   }
 
+  function chromaField(definition, resolveColor = swatch) {
+    if (!record(definition)) throw new TypeError('A chroma field needs complementary or desaturation controls');
+    const {type, color, opposite, neutralLightness, route = 'neutral', shade = [.68,0],
+      shadow = '#000000', steps, palette} = definition;
+    const common = ['type','color','shade','shadow','steps','palette'];
+    const controls = type === 'complementary' ? ['opposite','route','neutralLightness'] :
+      type === 'desaturation' ? ['neutralLightness'] : null;
+    if (!controls || Object.keys(definition).some(key=>!common.includes(key) && !controls.includes(key)))
+      throw new TypeError('Unknown chroma field type or controls');
+    if (!['neutral','increasing','decreasing'].includes(route) || !pair(shade) || !shade.every(fraction) ||
+        (neutralLightness !== undefined && (route !== 'neutral' || !fraction(neutralLightness))))
+      throw new RangeError('Use a neutral or directed hue route, with shade and neutral lightness in [0, 1]');
+    if (steps !== undefined && (!pair(steps) || !steps.every(n=>Number.isInteger(n) && n>=2 && n<=48)))
+      throw new RangeError('Chroma field steps need two integers from 2 to 48');
+
+    const [start,shadowColor] = readSwatches([color,shadow],resolveColor);
+    const a = spaces.toOKLab(start), darkness = spaces.toOKLab(shadowColor);
+    let end;
+    if (opposite !== undefined) [end] = readSwatches([opposite],resolveColor);
+    else if (type === 'complementary') end = spaces.fromOKLab([a[0],-a[1],-a[2]]);
+    const b = end ? spaces.toOKLab(end) : [neutralLightness ?? a[0],0,0];
+    const middle = [neutralLightness ?? (a[0]+b[0])*.5,0,0];
+    const chromaA = Math.hypot(a[1],a[2]), chromaB = Math.hypot(b[1],b[2]);
+    const hueA = chromaA > 1e-6 ? Math.atan2(a[2],a[1]) : Math.atan2(b[2],b[1]);
+    const hueB = chromaB > 1e-6 ? Math.atan2(b[2],b[1]) : hueA;
+    const turn = wrap((hueB-hueA)/(2*Math.PI));
+    const forward = turn < 1e-8 || turn > 1-1e-8 ? 0 : turn;
+    const delta = (route === 'decreasing' && forward > 0 ? forward-1 : forward)*2*Math.PI;
+    const colors = palette === undefined ? undefined : readSwatches(palette,resolveColor);
+    const value = [0,0,0];
+    const mix = (x,y,t)=>x+(y-x)*t;
+    const band = (t,n)=>Math.min(n-1,Math.floor(t*n))/(n-1);
+    const [dim,bright] = shade;
+    function paint(u,v) {
+      checkCoordinates(u,v);
+      let x = coord(u), y = coord(v);
+      if (steps) { x = band(x,steps[0]); y = band(y,steps[1]); }
+      const amount = mix(dim,bright,y);
+      if (amount === 1) return shadowColor;
+      if (amount === 0) {
+        if (x === 0) return start;
+        if (x === 1 && end) return end;
+      }
+      if (route !== 'neutral') {
+        const hue = hueA+delta*x, chroma = mix(chromaA,chromaB,x);
+        value[0] = mix(a[0],b[0],x);
+        value[1] = chroma*Math.cos(hue);
+        value[2] = chroma*Math.sin(hue);
+      } else {
+        let from = a, to = b, t = x;
+        if (type === 'complementary') {
+          if (x <= .5) { to = middle; t = x*2; }
+          else { from = middle; t = x*2-1; }
+        }
+        for (let i=0;i<3;i++) value[i] = mix(from[i],to[i],t);
+      }
+      for (let i=0;i<3;i++) value[i] = mix(value[i],darkness[i],amount);
+      return spaces.fromOKLab(value);
+    }
+    function sample(u,v,out=[0,0,0]) {
+      const raw = paint(u,v), rgb = colors ? colors[pixels.nearest(raw,colors)] : raw;
+      for (let i=0;i<3;i++) out[i] = rgb[i];
+      return out;
+    }
+    function raster(w,h) {
+      rasterSize(w,h);
+      const rgb = new Uint8Array(w*h*3), indices = colors && new Uint8Array(w*h);
+      for (let y=0;y<h;y++) for (let x=0;x<w;x++) {
+        const p = y*w+x, raw = paint((x+.5)/w,1-(y+.5)/h);
+        const slot = colors && (indices[p] = pixels.nearest(raw,colors)), color = colors ? colors[slot] : raw;
+        for (let c=0;c<3;c++) rgb[p*3+c] = Math.round(color[c]*255);
+      }
+      return {w,h,rgb,...(colors && {indices,palette:colors})};
+    }
+    return Object.freeze({type,outputPalette:colors,sample,raster,
+      ...(colors && {index:(u,v)=>pixels.nearest(paint(u,v),colors)})});
+  }
+
   function rampRaster(sample, outputPalette, w, h) {
     rasterSize(w,h);
     const rgb = new Uint8Array(w*h*3), row = new Uint8Array(w*3), color = [0,0,0];
@@ -364,6 +442,6 @@ const PaletteFields = (() => {
     return Object.freeze({type,outputPalette,sample,raster:(w,h)=>rampRaster(sample,outputPalette,w,h)});
   }
 
-  return Object.freeze({ hueBrightness, polar, coverage, ramp });
+  return Object.freeze({ hueBrightness, polar, coverage, chromaField, ramp });
 })();
 if (typeof module !== 'undefined') module.exports = PaletteFields;

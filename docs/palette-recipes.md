@@ -287,3 +287,20 @@ ink-studio render examples/grayscale-ramp-reliefs.js --w 312 --h 124 --px 1 --ra
 ```
 
 Export the strip as a lookup texture for shaded print, halftones, or light-level bands. Use the same definition in a [projected ramp or material colour curve](projected-effects.md#palette-ramps). The [Nautilus press](../examples/grayscale-ramp-reliefs.js) applies both matching methods to the same lit sculpt.
+
+## Complementary and desaturation fields
+
+Compile either field with `K.palette.chromaField(definition)`. Sample it with `sample(u, v)` or export it with `raster(width, height)`. Horizontal position follows the colour path. Vertical position blends that path toward an independent shadow colour. Coordinates range from 0 to 1, with `v = 1` at the top of the texture.
+
+- Set `type: 'complementary'` and a source `color`. By default the other end is the hue opposite in OKLab, at the same lightness and with chroma reduced where needed to fit sRGB. Set `opposite` to use a chosen colour. The default `route: 'neutral'` passes through gray halfway across. Set `neutralLightness` to choose its OKLab lightness, or use `route: 'increasing'` or `'decreasing'` to travel around the OKLCh hue wheel.
+- Set `type: 'desaturation'` to move from `color` to gray at the same OKLab lightness. Use `neutralLightness` to end at a lighter ash or darker neutral.
+- Set `shade: [bottom, top]` to control the OKLab mix toward `shadow`. The default is `[0.68, 0]` toward black. Set `[0, 0]` for a flat strip or use a tinted shadow for glazes and patinas.
+- Set `steps: [columns, rows]` for discrete bands. Each axis accepts 2–48 steps. An odd column count keeps the exact midpoint on a neutral route. Add an optional `palette` of 1–48 swatches for exact palette output. With a palette, `index(u,v)` and `raster(width, height).indices` give the chosen swatch indices.
+
+```sh
+ink-studio palette field examples/complementary-field.json --out copper-to-teal.png
+ink-studio palette field examples/desaturation-field.json --out green-to-ash.png
+ink-studio render examples/chroma-glazes.js --w 312 --h 152 --px 1 --raw --out glaze-trials.png
+```
+
+The [glaze firing trials](../examples/chroma-glazes.js) project both definitions directly onto sculpted ceramics. Use the same approach for oxidation on metal, dyes on cloth, or two-colour decals. [Material setup](projected-effects.md#projected-chroma-fields)
