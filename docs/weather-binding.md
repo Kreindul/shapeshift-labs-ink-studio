@@ -34,7 +34,7 @@ Map any supported channel to a name in your profiles, or set it to `false` to de
 
 The optional surface grid accepts [the existing surface weather settings](procedural.md#weather-and-retained-materials). Its `forcing(x, z, time, state, signal)` callback can override the uniform forcing locally with shelter, runoff, or exposure to precipitation. Fixed simulation steps start at time zero. Seeking back replays the same steps, so exported frames have the same wetness as forward playback. Use a fresh binding descriptor when editing a scene’s configuration.
 
-To render the retained values on a material, put a weather mask on any finish layer. Select `wetness`, `snow`, or `frost`. Use increasing `low` and `high` values to map the retained amount to a smooth blend.
+To render the retained values on a material, put a weather mask on any finish layer. Select `wetness`, `snow`, or `frost`. Grids with [standing water enabled](retained-weather.md) also expose `standingWater`. Use increasing `low` and `high` values to map the retained amount to a smooth blend.
 
 ```js
 const wetStone = K.surface.material(stone, { layers: {

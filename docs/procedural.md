@@ -2704,7 +2704,8 @@ snowfall independently of thermal shelter. For instance, use
 `P.overheadCover.exposure` with the local ground height in the forcing callback.
 Wetness
 moves across the grid and dries as the surface warms. Ice and snow
-release moisture as they melt.
+release moisture as they melt. Enable [standing water](retained-weather.md)
+to store overflow in local basins and feed puddle finishes from the retained depth.
 
 `motion.materialStateGraph({initial, states, transitions}, entities)`
 tracks the state and material data of each named entity. Transitions

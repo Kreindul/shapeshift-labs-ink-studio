@@ -6,14 +6,16 @@ function weatherFrame(world, options, source, environment, parameters, time) {
   if (override === false || source === false || (override === undefined && (authored === undefined || authored === false))) return null;
   const pins = JSON.stringify(Object.entries(options.skyProfiles ?? {}).sort(([a], [b]) => a.localeCompare(b)));
   const track = source === environment ? source : JSON.stringify(source);
+  const retained = options.retainedWeather !== false;
   let cached = sessions.get(world);
-  if (!cached || cached.authored !== authored || cached.override !== override || cached.track !== track || cached.pins !== pins) {
+  if (!cached || cached.authored !== authored || cached.override !== override || cached.track !== track || cached.pins !== pins || cached.retained !== retained) {
     const config = WeatherBinding.settings(authored, override);
+    if (config && !retained) config.surface = undefined;
     const binding = WeatherBinding.bind(environment, config, {
       profiles: options.skyProfiles,
       createSurface: settings => require('../index.js').load().KIT.procedural.motion.surfaceWeather(settings)
     });
-    cached = { authored, override, track, pins, binding };
+    cached = { authored, override, track, pins, retained, binding };
     sessions.set(world, cached);
   }
   return cached.binding?.frame(time, parameters);

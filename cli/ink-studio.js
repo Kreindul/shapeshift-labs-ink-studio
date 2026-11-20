@@ -292,7 +292,7 @@ function rainImpactOption() {
   return rainImpactOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
 }
 
-function volumeToggle(flag) {
+function onOffOption(flag) {
   const value = opt[flag];
   if (value === undefined) return undefined;
   if (value === true || value === 'on') return true;
@@ -346,6 +346,7 @@ const view = extra =>
           JSON.parse(fs.readFileSync(path.resolve(opt['cloud-field']), 'utf8')))),
       cloudShadows: cloudShadowOption(),
       weatherBinding: weatherOption(),
+      retainedWeather: onOffOption('retained-weather'),
       precipitation: precipitationOption(),
       rainImpacts: rainImpactOption(),
       skyTime: num('sky-time'),
@@ -353,8 +354,8 @@ const view = extra =>
       liveSun: liveSunOption(),
       atmosphere: opt.atmosphere === 'off' ? false : undefined,
       aerialPerspective: aerialOption(),
-      volumeLocalLights: volumeToggle('volume-local-lights'),
-      volumeLocalShadows: volumeToggle('volume-local-shadows'),
+      volumeLocalLights: onOffOption('volume-local-lights'),
+      volumeLocalShadows: onOffOption('volume-local-shadows'),
       volumeQuality: opt['volume-scale'] || opt['volume-steps'] || opt['volume-jitter'] ? {
         ...(opt['volume-scale'] && { scale: num('volume-scale') }),
         ...(opt['volume-steps'] && { steps: num('volume-steps') }),
@@ -492,7 +493,7 @@ const CMD = {
         'bounce options: --sky-bounce color|preset|off --ground-bounce color|preset|off --sky-bounce-intensity n --ground-bounce-intensity n',
         'cloud options: --cloud-field file.json|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',
         'sky options: --sky-environment file.json|off --sky-time seconds --sky-profile track=profile --sky-reflections scene|material',
-        'weather options: --weather-binding on|off|file.json --world-precipitation on|off|file.json --rain-impacts on|off|file.json',
+        'weather options: --weather-binding on|off|file.json --retained-weather on|off --world-precipitation on|off|file.json --rain-impacts on|off|file.json',
         'aerial options: --aerial-perspective on|off --aerial-start units --aerial-density per-unit --aerial-contrast 0..1',
         'view options: --surface off (no finish layers) --water off --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --px1 (native art pixels) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (remove lone pixels) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n',
         'fog lighting options: --volume-local-lights on|off --volume-local-shadows on|off',

@@ -143,9 +143,9 @@ const SurfaceLook = (() => {
 
   function weatherMask(mask) {
     const { channel = 'wetness', low = 0, high = 1, invert = false } = mask;
-    if (!['wetness', 'snow', 'frost'].includes(channel) || !Number.isFinite(low) || !Number.isFinite(high) ||
+    if (!['wetness', 'standingWater', 'snow', 'frost'].includes(channel) || !Number.isFinite(low) || !Number.isFinite(high) ||
         low < 0 || high <= low || typeof invert !== 'boolean')
-      throw new RangeError('Weather masks need wetness, snow or frost and increasing nonnegative bounds');
+      throw new RangeError('Weather masks need wetness, standingWater, snow or frost and increasing nonnegative bounds');
     return sample => {
       const [x,,z] = sample.worldPosition ?? sample.position;
       const value = sample.weather?.(x, z)?.[channel];

@@ -24,8 +24,14 @@ const WeatherBinding = (() => {
     const read = raw => raw === undefined || raw === true || raw === false ? {} : record(raw, 'Weather binding');
     const base = read(value), edits = read(override);
     let surface = edits.surface === undefined ? base.surface : edits.surface;
-    if (base.surface && edits.surface && typeof base.surface === 'object' && typeof edits.surface === 'object')
-      surface = { ...record(base.surface, 'Weather surface'), ...record(edits.surface, 'Weather surface') };
+    if (base.surface && edits.surface && typeof base.surface === 'object' && typeof edits.surface === 'object') {
+      const original = record(base.surface, 'Weather surface'), modified = record(edits.surface, 'Weather surface');
+      surface = { ...original, ...modified };
+      if (original.standingWater && modified.standingWater && typeof original.standingWater === 'object' &&
+          typeof modified.standingWater === 'object')
+        surface.standingWater = { ...record(original.standingWater, 'Standing water'),
+          ...record(modified.standingWater, 'Standing water') };
+    }
     const { rainFull = 1, snowFull = 1, windDryingSpeed = 5, fogVolumes } = { ...base, ...edits };
     const channels = { ...base.channels, ...edits.channels };
     for (const raw of [base, edits]) {
