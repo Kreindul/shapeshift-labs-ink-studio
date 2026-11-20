@@ -655,7 +655,8 @@ sample withdrawal.
 [Headless worlds](docs/headless-worlds.md) adds declarative simulation scenes,
 shared world queries, timed actions, checkpoints, replay and branch comparison.
 The watershed and quarry examples run entirely from the CLI. The [puzzle recipes guide](docs/puzzles.md) shows how to wire ordered
-switches to a physical gate, inspect blockers and verify a solution.
+switches to a physical gate, inspect blockers and verify a solution. The [agent decision guide](docs/agent-decisions.md)
+covers reachable activity choices and confirmed arrivals.
 
 ## Rendering and command reference
 
