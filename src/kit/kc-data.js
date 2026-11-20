@@ -295,6 +295,11 @@
       }
     }
     try {
+      VolumeCutouts.settings(st.finish.volumeCutouts);
+    } catch (error) {
+      bad('finish.volumeCutouts', error.message);
+    }
+    try {
       SceneOptics.shapedVolumes(st.finish.shapedAtmosphere);
     } catch (error) {
       bad('finish.shapedAtmosphere', error.message);

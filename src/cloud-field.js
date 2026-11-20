@@ -181,7 +181,7 @@ const CloudField = (() => {
       }
       return cache.get(softness);
     }
-    function frame(time, shadows, light = [-.52, .64, .57], displacement, representation, flashAt) {
+    function frame(time, shadows, light = [-.52, .64, .57], displacement, representation, flashAt, cutouts) {
       const mode=representation ?? (lod || (geometry && lod!==false) ? 'auto' : 'off');
       if (!detail.modes.includes(mode)) throw new RangeError('Unknown cloud representation: ' + mode);
       const useDetail=mode!=='off';
@@ -197,8 +197,18 @@ const CloudField = (() => {
         if (ly > 1e-5) {
           const map = softened(shadows.softness);
           const slopeX=lx/ly, slopeZ=lz/ly;
-          shadow = (x,y,z) => y >= height ? 1 : 1 - shadows.strength * sample(map,
-            x + (height-y)*slopeX, z + (height-y)*slopeZ);
+          shadow = (x,y,z) => {
+            if (y>=height) return 1;
+            const px=x+(height-y)*slopeX,pz=z+(height-y)*slopeZ;
+            const blockage=shadows.strength*sample(map,px,pz);
+            if (!blockage || !cutouts) return 1-blockage;
+            if (!thickness) return 1-blockage*cutouts.gain(px,height,pz);
+            const from=Math.max(y,low);
+            const origin=[x,y,z], direction=[slopeX,1,slopeZ];
+            const cutRay=cutouts.ray(origin,direction,from-y,high-y);
+            const gain=cutRay ? cutRay.distance(from-y,high-y)/(high-from) : 1;
+            return 1-blockage*gain;
+          };
         }
       }
       const sun = style ? style.sun ?? light : [0,0,0];
@@ -220,13 +230,14 @@ const CloudField = (() => {
         const flash=flashAt?.(x,y,z);
         for (let c=0;c<3;c++) out[c]=Math.min(1,(style?mix(rgb[c],style.rgb[c],brightness):rgb[c])+(flash?.[c]??0));
       };
-      const view=useDetail && rendered ? (eye,parallel) => asset.view(eye,parallel,mode,shift,shade,opacity) : null;
-      const reflections=(useDetail || geometry) && rendered ? asset.view([0,0,0],null,'volume',shift,shade,opacity) : null;
+      const view=useDetail && rendered ? (eye,parallel) => asset.view(eye,parallel,mode,shift,shade,opacity,cutouts) : null;
+      const reflections=(useDetail || geometry) && rendered ? asset.view([0,0,0],null,'volume',shift,shade,opacity,cutouts) : null;
       const reflectionSample=[0,0,0,1];
       function paintVolume(origin, ray, out, flashAt) {
         const range = [0,horizon];
         if (!clip(range,origin[1],ray[1],low,high) || (!repeat &&
             (!clip(range,origin[0],ray[0],minX+dx,maxX+dx) || !clip(range,origin[2],ray[2],minZ+dz,maxZ+dz)))) return out;
+        const cutRay=cutouts?.ray(origin,ray,...range);
         const step = (range[1]-range[0])/steps;
         if (!(step>0)) return out;
         const rim = style ? Math.max(0,lx*ray[0]+ly*ray[1]+lz*ray[2])**12 : 0;
@@ -244,7 +255,9 @@ const CloudField = (() => {
               -integral(cap,top,h+half)+integral(cap,top,h-half))/(2*half)
             : smooth(0,.12,h)-smooth(cap,top,h);
           if (body<=0) continue;
-          const weight=through*-Math.expm1(-4.8*density*body*step/thickness);
+          const near=range[0]+i*step;
+          const occupied=cutRay?.distance(near,near+step)??step;
+          const weight=through*-Math.expm1(-4.8*density*body*occupied/thickness);
           const brightness=style ? lit(x,z,h,density,rim) : 0;
           const flash=flashAt?.(x,y,z);
           for (let c=0;c<3;c++)
@@ -266,7 +279,7 @@ const CloudField = (() => {
         const distance=(height-origin[1])/direction[1];
         if (distance <= 0) return out;
         const x = origin[0] + distance * direction[0], z = origin[2] + distance * direction[2];
-        const coverage = sample(cells,x,z), amount = opacity*coverage;
+        const coverage = sample(cells,x,z), amount = opacity*coverage*(cutouts?.gain(x,height,z)??1);
         if (!(amount>0)) return out;
         const flash = light?.(x,height,z);
         const rim = style ? Math.max(0,lx*direction[0]+ly*direction[1]+lz*direction[2])**12 : 0;

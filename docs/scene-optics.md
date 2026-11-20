@@ -83,7 +83,7 @@ Hosts can use `K.atmosphere.prepare(world.atmosphere, world.pal)` and `K.atmosph
 
 ## Bounded density and lit volumes
 
-Use [geometry-shaped atmosphere](geometry-shaped-atmosphere.md) to fit clouds and fog to paths, signed-distance shapes, or terrain.
+Use [geometry-shaped atmosphere](geometry-shaped-atmosphere.md) to fit clouds and fog to paths, signed-distance shapes, or terrain. [Volume cutouts](volume-cutouts.md) clear feathered pockets in those volumes.
 
 ```js
 const D = K.procedural.density;

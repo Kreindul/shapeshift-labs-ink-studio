@@ -37,6 +37,7 @@ const SkyEnvironment = require('../src/sky-environment.js');
 const CloudField = require('../src/cloud-field.js');
 const Lightning = require('../src/lightning.js');
 const SceneExposure = require('../src/scene-exposure.js');
+const VolumeCutouts = require('../src/volume-cutouts.js');
 const weatherFrame = require('./weather.js');
 const WindField = require('../src/wind-field.js');
 const Precipitation = require('./precipitation.js');
@@ -281,6 +282,7 @@ function render(world, o, preparedPalettes) {
   const environment = clock?.frame(skyTime, o.skyProfiles);
   const weather = weatherFrame(world, o, skySource, clock, environment?.parameters, skyTime);
   const exposure = SceneExposure.settings(world.sceneExposure, o.sceneExposure);
+  const cutouts = VolumeCutouts.settings(world.volumeCutouts,o.volumeCutouts)?.frame(t);
   const windConfig = WindField.settings(world.windField, o.windField);
   const fallbackWind = o.wind ?? weather?.wind ?? windConfig?.fallback ?? an.wind ?? (windConfig && world.volumeWind) ?? undefined;
   const weatherWindAt = o.wind == null ? weather?.windAt : undefined;
@@ -324,7 +326,7 @@ function render(world, o, preparedPalettes) {
   const flash = Lightning.settings(world.lightning, o.lightning)?.frame(t);
   const clouds = cloudSource ? CloudField.compile(cloudSource).frame(skyTime, cloudSettings,
     sun?.direction ?? sky?.sun ?? (o.volumeLighting ?? world.volumeLighting)?.sun?.direction,
-    cloudDisplacement, o.cloudRepresentation ?? world.cloudRepresentation, flash?.light) : null;
+    cloudDisplacement, o.cloudRepresentation ?? world.cloudRepresentation, flash?.light, cutouts?.cloud) : null;
   const cloudShadow = clouds?.shadow;
   const cloudEye = ortho ? eye.map((value, i) => value - (eyeD - dist) * V[2 + i * 4]) : eye;
   const cloudView = clouds?.view?.(cloudEye, ortho ? [V[2],V[6],V[10]] : null);
@@ -382,7 +384,7 @@ function render(world, o, preparedPalettes) {
     quality.wind = volumeWind ?? wind.velocity;
     if (volumeFlow) quality.windOffset = volumeFlow.windOffset;
     const media = volumes.some(volume => volume.type === 'field') ? prepareVolumeLight() : undefined;
-    return { ...quality, time: t, cloudShadow, flash, media, exposure, cloud:cloudView,
+    return { ...quality, time: t, cloudShadow, flash, media, exposure, cutouts, cloud:cloudView,
       cloudStart:cloudView && eyeD-dist };
   };
   const geometrySample = probe || sortedSurfaces || aerial || cloudShadow || flash || cloudView ? sampleFrames(world, t) : null;

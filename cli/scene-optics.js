@@ -214,9 +214,10 @@ function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon, quality, ti
   const light = [0, 0, 0, 1], sample = [0, 0, 0, 1];
   const fields = volumes.some(volume => volume.type === 'field' || volume.densityField);
   const query = { ...quality, time, media };
-  // Density history cannot track moving illumination.
-  if (quality.flash) history?.clear();
-  const temporal = fields && !quality.flash && !quality.cloudShadow && !volumes.some(v => v.densityField) && !media?.animatedLocals && quality.jitter === 'spatiotemporal' && history;
+  // Reusing a density history would leave trails on animated lights and clear pockets.
+  const transient = quality.flash || quality.cutouts?.fog;
+  if (transient) history?.clear();
+  const temporal = fields && !transient && !quality.cloudShadow && !volumes.some(v => v.densityField) && !media?.animatedLocals && quality.jitter === 'spatiotemporal' && history;
   const tile = fields && quality.jitter !== 'off' ? volumeNoise(quality.seed) : null;
   const accumulation = temporal ? new Float32Array(W * H * 4) : null;
   const frame = temporal ? Math.floor(time * 60) : 0;

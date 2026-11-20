@@ -45,7 +45,7 @@ const GeometryDensity = (() => {
       segment.max=a.map((v,i)=>Math.max(v,b[i])+reach*(i===1?aspect:1));
       segment.length2=dx*dx+dy*dy+dz*dz;
     }
-    return volume.fromSdf({ ...appearance, feather, bounds:{min,max}, conservative:false,
+    const field=volume.fromSdf({ ...appearance, feather, bounds:{min,max}, conservative:false,
       field(x,y,z) {
         let distance=0;
         for (const {a,dx,dy,dz,length2,r0,r1,min,max} of segments) {
@@ -57,6 +57,8 @@ const GeometryDensity = (() => {
         return distance;
       }
     });
+    return Object.freeze({ ...field, segmentBounds:Object.freeze(segments.map(({min,max}) =>
+      Object.freeze({min:Object.freeze(min),max:Object.freeze(max)}))) });
   }
 
   function terrainSampler(terrain, extent) {

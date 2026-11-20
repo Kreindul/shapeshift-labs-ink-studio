@@ -33,7 +33,7 @@ const CloudDetail = (() => {
     const step=2*radius/steps;
     const tiles=new Map();
 
-    function integrate(o,d,start,stop,out) {
+    function integrate(o,d,start,stop,out,cutRay) {
       let first=start,last=stop;
       for (let i=0;i<3;i++) {
         if (Math.abs(d[i])<1e-10) {
@@ -49,8 +49,9 @@ const CloudDetail = (() => {
       const length=(last-first)/count;
       let optical=0, from=last, to=first;
       for (let i=0;i<count;i++) {
-        const t=first+(i+.5)*length;
-        const mass=length*density(o[0]+t*d[0],o[1]+t*d[1],o[2]+t*d[2]);
+        const edge=first+i*length, t=edge+length*.5;
+        const occupied=cutRay?.distance(edge,edge+length)??length;
+        const mass=occupied*density(o[0]+t*d[0],o[1]+t*d[1],o[2]+t*d[2]);
         if (!mass) continue;
         optical+=mass;
         from=Math.min(from,t-length*.5);
@@ -103,7 +104,7 @@ const CloudDetail = (() => {
       }
     }
 
-    function view(eye,parallel,mode,offset,shade,opacity) {
+    function view(eye,parallel,mode,offset,shade,opacity,cutouts) {
       const localEye=eye.map((x,i)=>x-offset[i]);
       const delta=localEye.map((x,i)=>x-center[i]);
       const distance=Math.hypot(...delta)/radius;
@@ -124,13 +125,14 @@ const CloudDetail = (() => {
           local[c]=origin[c]-offset[c];
           deltaOrigin[c]=center[c]-local[c];
         }
+        const cutRay=cutouts?.ray(origin,dir,start,stop);
         const contribute=(optical,depth,weight) => {
           const alpha=opacity*weight*(-Math.expm1(-optical));
           shade(origin,dir,depth,optical,rgb);
           for (let c=0;c<3;c++) out[c]+=alpha*rgb[c];
           out[3]-=alpha;
         };
-        if (weightVolume && integrate(local,dir,start,stop,hit))
+        if (weightVolume && integrate(local,dir,start,stop,hit,cutRay))
           contribute(hit[0],(hit[1]+hit[2])*.5,weightVolume);
         if (!frame) return out;
         const d=-dot(dir,frame.normal);
@@ -144,7 +146,10 @@ const CloudDetail = (() => {
           if (!sampled[0]) return;
           const near=plane+sampled[1]/(sampled[0]*d), far=plane+sampled[2]/(sampled[0]*d);
           const lo=Math.max(start,near), hi=Math.min(stop,far);
-          if (hi>lo) contribute(sampled[0]*(hi-lo)/((far-near)*d), (lo+hi)*.5,weight);
+          if (hi>lo) {
+            const length=cutRay?.distance(lo,hi)??hi-lo;
+            if (length>0) contribute(sampled[0]*length/((far-near)*d),(lo+hi)*.5,weight);
+          }
         };
         if (billboard) project(billboard,weightCard);
         for (const [texture,weight] of atlas) project(texture,weight*weightImpostor);
