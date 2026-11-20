@@ -491,6 +491,36 @@ error and RMSE at cell midpoints using Ink Studio's interpolation.
 Palette sampling reports 8-bit clipping and rounding. Use `--exact`
 to reject lossy or sampled conversions before the output is written.
 
+## Inspect and validate looks
+
+`look inspect` accepts a scene, simulation world, saved checkpoint, run
+recording, or standalone look file. It reports authored rules in JSON with
+their stages, masks, asset and field dependencies, and matched targets.
+Inspecting a scene uses baked target IDs and counts from the same index
+as `inspect --select` and `probe`. Driven rules also show the parameters
+and strength sampled at that time or tick.
+
+```sh
+node cli/ink-studio.js look inspect examples/driven-look-forge.json --ticks 32
+node cli/ink-studio.js look inspect examples/relay-look-pack.json --look relay/glazed-enamel
+node cli/ink-studio.js validate examples/render-stages.js --renderer headless
+node cli/ink-studio.js validate examples/shared-look-selectors.js --renderer webgl
+node cli/ink-studio.js validate examples/blue-shadow.cube
+```
+
+Use `--renderer headless` (the default) or `--renderer webgl` to check
+compatibility. The report lists explicit stages and surface look layers
+that WebGL cannot evaluate, along with spatial masks, unsupported media,
+and coverage-aware compositing. `validate` exits nonzero for invalid
+bindings, including malformed LUTs, missing scene swatches, and selectors
+with no eligible targets at the inspected tick.
+
+Standalone packs report named parameters, pack revisions, and palette
+references. Scene validation resolves those references against the
+palette and roles of the consuming scene. Use `--asset-pack` to supply
+external packs for a JSON scene and `--out` to save an inspection report.
+JavaScript callers can use `query.inspectLook({ renderer: 'webgl' })`.
+
 ## Shared look selectors
 
 Use `finish.look.targets` in a diorama, `visual.look.targets` on a world,

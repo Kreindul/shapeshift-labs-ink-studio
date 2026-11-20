@@ -54,7 +54,7 @@ const TargetSelectors = (() => {
       }
       return cache.get(group);
     }
-    function groups(selector) {
+    function groups(selector, { includeUnnamed = false } = {}) {
       const result = new Map();
       for (let i = 0; i < world.count; i++) {
         const target = row(i);
@@ -62,7 +62,7 @@ const TargetSelectors = (() => {
         const group = result.get(target);
         if (group) group.count++;
       }
-      return [...result.values()].filter(group => group && (selector || Object.keys(group.target).length > 1));
+      return [...result.values()].filter(group => group && (includeUnnamed || selector || Object.keys(group.target).length > 1));
     }
     return { row, groups };
   }
@@ -76,6 +76,6 @@ const TargetSelectors = (() => {
       ...(world.reflections ?? []).map(item => medium(item.id, 'reflection', item.tags))
     ];
   }
-  return Object.freeze({ prepare, matches, describe, index, name, medium, media });
+  return Object.freeze({ prepare, matches, describe, index, name, medium, media, isGlass: namedGlass });
 })();
 if (typeof module !== 'undefined') module.exports = TargetSelectors;

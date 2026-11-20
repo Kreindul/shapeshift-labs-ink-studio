@@ -299,6 +299,7 @@ const CMD = {
         '  field <scene|run> <name> --spec file.json  export a line, grid or time series',
         '  scene apply|stamp|remix|capture|history|promote <world> ...  edit or derive a world manifest',
         '  sim run|resume|fork|reset|replay|diff|sweep|render ...  run or compare fixed-tick simulations',
+        '  look inspect <scene|run|look-file> [--renderer headless|webgl]   list bindings, dependencies and targets',
         '  look import <file> [--out pack.json] [--id pack/look]   import a LUT or palette as a versioned look',
         '  look export <file> [--out file | --format json|cube|gpl|pal|hex]   convert or sample a look',
         '    --look pack/look --params JSON --size N --swatches palette-file --report report.json --exact',
@@ -327,7 +328,7 @@ const CMD = {
         '                              [--res 0.08 --texture-size 1024 --triangles 16000 --duration 4 --fps 30]',
         '  depth <map.png|map.json> [--image aligned.png --out-dir folder]  import a depth map as splats, a mesh and an SDF',
         '                              [--size 6 --cells 64 --res 0.09 --hues 6 --shades 4 --up z --spin 0.5 --thick 0.1]; a mesh file also works wherever an id does',
-        '  validate <file.json>        check a diorama written as data: every mistake listed, with what was probably meant',
+        '  validate <scene|look-file> [--renderer headless|webgl]   check scene content and look bindings',
         '                              a .json diorama also works wherever an id does; --style slate|moss|ember puts it in another style',
         '  perf <id> [--secs 5 --fps 60 --json]   animation time and planned texture upload size',
         '  selftest                    every lab module checked in numbers, and the lab dioramas run for a while',
@@ -366,7 +367,11 @@ const CMD = {
     );
   },
   look() {
-    return require('./look.js').run(pos, opt, lib().KIT.authoring);
+    const io = require('./look.js');
+    if (pos[0] !== 'inspect') return io.run(pos, opt, lib().KIT.authoring);
+    if (pos.length !== 2) die('Usage: ink-studio look inspect <scene|run|look-file>');
+    const file = pos[1];
+    return io.report(io.isSource(file) ? io.inspectSource(file, opt, lib()) : worldCLI().inspectLook(file), opt, file);
   },
   lut() {
     const [mode, file] = pos;
@@ -1034,10 +1039,15 @@ const CMD = {
     console.log('The browser measures drawing and GPU time separately.');
   },
   validate() {
-    if (lib().KIT.world && worldCLI().validate(pos[0])) return;
     if (!pos[0]) die('validate which file?');
-    const s = dataScene(pos[0]);
-    console.log(pos[0] + ': sound (' + s.id + ', "' + s.name + '")');
+    const io = require('./look.js');
+    if (!opt.world && (opt.kind === 'look' || io.isSource(pos[0])))
+      return io.report(io.assertValid(io.inspectSource(pos[0], opt, lib())), opt, pos[0]);
+    if (lib().KIT.world && worldCLI().validate(pos[0])) return;
+    const report = io.assertValid(worldCLI().inspectLook(pos[0]));
+    if (opt.json || opt.out) return io.report(report, opt, pos[0]);
+    const label = report.scene ? ' (' + report.scene.id + ', "' + report.scene.name + '")' : '';
+    console.log(pos[0] + ': sound' + label);
   },
   depth() {
     require('./depth.js')(pos[0], opt, lib(), path.join(OUT, 'depth-import'));

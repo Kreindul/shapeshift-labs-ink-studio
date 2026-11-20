@@ -307,6 +307,7 @@
         ...(grid ? {grid} : {}),samples:points.map(point => ({point,...api.probe(field,point,args)}))};
     }
     const api = Object.freeze({inspect,spatial,target,select:selector=>look().select(selector),
+      inspectLook:options=>look().inspect(options,api),
       probe:(name,at,args) => execute(fields,name,at,args),
       trace:(name,at,args) => execute(traces,name,at,args),export:exportField});
     return api;
@@ -314,13 +315,14 @@
   function fromScene(w, time=0) {
     if(typeof w.query==='function'){
       const wrapped=w.query(w,time), appearance=W.lookQuery(()=>w,time);
-      return Object.freeze({...wrapped, select:appearance.select,
+      const api = Object.freeze({...wrapped, select:appearance.select, inspectLook:options=>appearance.inspect(options,api),
         inspect(options){
           const result=wrapped.inspect(options);
           return {...result,fields:[...(result.fields??[]).filter(row=>!lookFields.some(field=>field.name===row.name)),...lookFields]};
         },
         probe(name,site,args) {return lookFields.some(field=>field.name===name) ?
           freeze(appearance[name.slice(5)](site,args)) : wrapped.probe(name,site,args);}});
+      return api;
     }
     const descriptors={}, configs={};
     if(w.water?.mediumAt){

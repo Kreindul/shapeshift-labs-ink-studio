@@ -104,6 +104,10 @@
       });
       return W.query.ok({ matched: selected.length, targets: rows });
     }
-    return { select, output, provenance };
+    function inspect(options, query) {
+      setup();
+      return W.lookReport.scene(world, index, media, query, time, options);
+    }
+    return { select, output, provenance, inspect };
   };
 })(KIT);

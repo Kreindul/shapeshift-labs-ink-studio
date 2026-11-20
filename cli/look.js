@@ -315,4 +315,57 @@ async function run(pos, options, authoring) {
   await write(output, options.out);
 }
 
-module.exports = { run };
+function isSource(file) {
+  if (typeof file !== 'string') return false;
+  const format = extension(file);
+  if (format === 'cube' || isPalette(format)) return true;
+  if (format !== 'json') return false;
+  const input = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+  if (Array.isArray(input)) return input.length > 0 && input.every(value =>
+    typeof value === 'number' || typeof value === 'string' || Array.isArray(value));
+  return record(input) && ([packFormat, bundleFormat, 'ink-studio/lut'].includes(input.format) ||
+    Object.hasOwn(input, 'size') && Object.hasOwn(input, 'data') || Object.hasOwn(input, 'steps') ||
+    Object.keys(input).length > 0 && Object.keys(input).every(key => ['palette', 'reserved', 'dither', 'source'].includes(key)));
+}
+
+function inspectSource(file, options, kit) {
+  const { assetPacks, looks } = kit.KIT.authoring, { standalone } = kit.KIT.world.lookReport;
+  const renderer = options.renderer ?? 'headless';
+  if (!['headless', 'webgl'].includes(renderer)) throw new TypeError('Renderer must be headless or webgl');
+  const input = read(file, assetPacks), issues = [], rules = [];
+  if (input.native) {
+    const catalog = assetPacks.create({ packs: input.native.packs ?? [input.native] });
+    for (const { look, revision } of catalog.looks) {
+      if (options.look !== undefined && options.look !== look.id) continue;
+      try {
+        const binding = looks.bind(look.id, catalog);
+        const { issues: checked, ...rule } = standalone({ ...binding, assetId: look.id }, look.params, renderer);
+        for (const issue of checked) issues.push({ path: look.id, ...issue });
+        rules.push({ label: look.label, revision, ...rule });
+      } catch (error) {
+        issues.push({ path: look.id, code: 'invalid-look', message: error.message });
+      }
+    }
+    if (options.look !== undefined && !catalog.getLook(options.look))
+      throw new Error('Unknown look asset: ' + options.look);
+  } else {
+    if (options.look !== undefined) throw new Error('--look selects an asset in a pack or bundle');
+    const { issues: checked, ...rule } = standalone(input, undefined, renderer, { externalPalette: Boolean(input.paletteFile) });
+    rules.push({ label: input.label, ...rule });
+    issues.push(...checked.map(issue => ({ path: file, ...issue })));
+  }
+  return { source: input.source, renderer, valid: !issues.length, rules, issues };
+}
+
+function assertValid(report) {
+  if (!report.valid) throw new Error(report.issues.map(({ path, message }) => path + ': ' + message).join('\n'));
+  return report;
+}
+
+function report(output, options, source) {
+  if (options.out !== undefined && typeof options.out !== 'string') throw new TypeError('--out needs a path');
+  if (options.out && path.resolve(options.out) === path.resolve(source)) throw new TypeError('--out needs a separate path');
+  return write([pretty(output)], options.out);
+}
+
+module.exports = { run, isSource, inspectSource, assertValid, report };

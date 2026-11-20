@@ -153,9 +153,11 @@
     const constraints = inline.paletteConstraints;
     const fallback = bound?.strength && !boundStages.length && (bound.palette || bound.mask) && !Object.hasOwn(constraints || {}, 'default')
       ? { default: bound.mask ? { ...bound.palette, stack: bound.stack, mask: bound.mask, assetId: bound.id } :
-        bound.stack ? { ...bound.palette, source: 'graded' } : bound.palette } : {};
+        { ...bound.palette, ...(bound.stack && { source: 'graded' }), assetId: bound.id } } : {};
     return {
-      ...(bound?.strength && bound.stack && !boundStages.length && !bound.mask && { colorStack: bound.stack }),
+      ...(bound?.strength && bound.stack && !boundStages.length && !bound.mask && {
+        colorStack: bound.stack, ...(inline.colorStack === undefined && { colorStackAssetId: bound.id })
+      }),
       ...inline,
       ...(optics !== undefined && { optics: opticalRules(optics, catalog) }),
       ...((staged.length || renderStages !== undefined) && { renderStages: renderStages === false && !staged.length ? false : staged }),

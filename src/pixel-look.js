@@ -66,12 +66,12 @@ const PixelLook = (() => {
     };
   }
 
-  function prepareRemap(definition, palette, roles = {}, override) {
+  function prepareRemap(definition, palette, roles = {}, override, { deferTargets = false } = {}) {
     if (definition === undefined || definition === false) return null;
     if (!record(definition) || Object.keys(definition).some(key => !['rules', 'protect', 'color'].includes(key)))
       throw new TypeError('Palette remap needs a settings object with rules and optional protect');
     const colors = Array.isArray(palette) || ArrayBuffer.isView(palette) ? Array.from(palette) : [];
-    if (!colors.length || !colors.every(isColor))
+    if (!deferTargets && (!colors.length || !colors.every(isColor)))
       throw new TypeError('Palette remap needs a palette of packed RGB colors');
     const { rules, protect = [] } = definition;
     const contract = spaces.settings(override === undefined ? definition.color : override);
@@ -81,7 +81,11 @@ const PixelLook = (() => {
     }, contract);
     if (!Array.isArray(rules) || rules.length > 1024 || !Array.isArray(protect) || protect.length > 1024)
       throw new TypeError('Palette remap rules and protect must be lists of at most 1024 entries');
-    const select = paletteSelector(colors, roles);
+    const select = deferTargets ? value => {
+      if (!(typeof value === 'string' && value.trim() || Number.isSafeInteger(value) && value >= 0))
+        throw new TypeError('Expected a palette index, #rrggbb swatch or role');
+      return [];
+    } : paletteSelector(colors, roles);
     const overrides = new Map();
     for (const rule of rules) {
       if (!rule || Object.getPrototypeOf(rule) !== Object.prototype ||

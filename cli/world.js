@@ -94,6 +94,9 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
     pose(world,t);
     return W.query.fromScene(world,t);
   }
+  function inspectLook(file) {
+    return view(file).inspectLook({renderer:opt.renderer});
+  }
   function assert(run,rules) {
     ensure(Array.isArray(rules) && rules.length<=10000,'Expected an assertion list');
     const out=[], temporal=[];
@@ -338,8 +341,9 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
   }
   function validate(file) {
     if (opt.select !== undefined) {
-      const selector=target(opt), targets=view(file).select(selector);
+      const query=view(file), selector=target(opt), targets=query.select(selector);
       ensure(targets.length>0,'No render target matches '+JSON.stringify(selector));
+      require('./look.js').assertValid(query.inspectLook({renderer:opt.renderer}));
       respond({valid:true,selector,targets});
       return true;
     }
@@ -369,11 +373,19 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
       return true;
     }
     if (raw.format!==W.format && raw.format!==R.checkpointFormat && raw.format!==R.runFormat) return false;
-    if (raw.format===W.format) R.validate(document(raw).world);
-    else if (raw.format===R.checkpointFormat) R.create(raw.world,{checkpoint:raw});
-    else R.replay(raw);
+    const run = raw.format===R.runFormat ? R.replay(raw) :
+      raw.format===R.checkpointFormat ? R.create(raw.world,{checkpoint:raw}) : undefined;
+    const world = run?.view().world ?? R.validate(document(raw).world);
+    const visual = world.visual;
+    if (opt.renderer || visual?.look || visual?.terrainSurface || visual?.terrainLookAsset ||
+        Object.values(world.entities).some(entity=>entity.lookAsset || entity.visual?.lookAsset || entity.visual?.surface)) {
+      const query = opt.actions || opt.ticks !== undefined || opt.steps !== undefined || opt.t !== undefined ?
+        view(file) : (run ?? R.create(world,{validated:true})).query();
+      const report = require('./look.js').assertValid(query.inspectLook({renderer:opt.renderer}));
+      if (opt.json) { respond({format:raw.format,...report}); return true; }
+    }
     respond({valid:true,format:raw.format});
     return true;
   }
-  return {execute,validate};
+  return {execute,validate,inspectLook};
 };
