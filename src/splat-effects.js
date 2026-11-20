@@ -120,18 +120,19 @@ const SplatEffects = (() => {
   }
 
   function indexedRaster(spec = {}, cycles = {}, resolveColor, roles) {
-    const { width, height, slots, size = [1, 1], wrap = false } = spec;
+    const { width, height, slots, size = [1, 1], wrap = false, palette, origin = 'bottom-left' } = spec;
     if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1 ||
         width * height > 2 ** 20 || !Array.isArray(slots) || slots.length !== width * height ||
-        !vector(size, 2) || size.some(value => value <= 0) || typeof wrap !== 'boolean')
-      throw new TypeError('Indexed rasters need bounded dimensions, one slot per texel and a positive size');
+        !vector(size, 2) || size.some(value => value <= 0) || typeof wrap !== 'boolean' ||
+        !['top-left','bottom-left'].includes(origin))
+      throw new TypeError('Indexed rasters need bounded dimensions, one slot per texel, a valid origin and a positive size');
     if (!cycles || Object.getPrototypeOf(cycles) !== Object.prototype)
       throw new TypeError('Palette cycles must be named in an object');
-    const swatches = new Map();
+    const local = outputColors(palette,resolveColor), swatches = new Map();
     const add = slot => {
-      if (!Number.isInteger(slot) || slot < 0 || slot >= 0xffffffff)
-        throw new RangeError('Indexed raster slots must be nonnegative scene palette indices');
-      if (!swatches.has(slot)) swatches.set(slot, resolveColor(slot));
+      if (!Number.isInteger(slot) || slot < 0 || slot >= (local?.length ?? 0xffffffff))
+        throw new RangeError('Indexed raster slots must be valid palette indices');
+      if (!swatches.has(slot)) swatches.set(slot, local ? local[slot] : resolveColor(slot));
       return slot;
     };
     // Null paint leaves the underlying surface visible. Zero is a palette slot.
@@ -142,6 +143,7 @@ const SplatEffects = (() => {
           Object.keys(cycle).some(key => !['role', 'slots', 'period', 'direction', 'phase'].includes(key)))
         throw new TypeError('Each palette cycle needs a name and cycle settings');
       const { role, slots, period, direction = 'forward', phase = 0 } = cycle;
+      if (role !== undefined && local) throw new TypeError('Palette cycles with a local palette need explicit slots');
       if ((role === undefined) === (slots === undefined))
         throw new TypeError('Palette cycle ' + name + ' needs either a role or a list of slots');
       const order = role === undefined ? slots :
@@ -167,7 +169,8 @@ const SplatEffects = (() => {
         if (!Number.isFinite(u) || !Number.isFinite(v) || (!wrap && (u < 0 || v < 0 || u >= 1 || v >= 1))) return 0;
         const x = Math.min(width - 1, Math.floor(fract(u) * width));
         const y = Math.min(height - 1, Math.floor(fract(v) * height));
-        const slot = texels[y * width + x] - 1;
+        const row = origin === 'top-left' ? height-1-y : y;
+        const slot = texels[row * width + x] - 1;
         if (slot === -1) return 0;
         if (!Number.isFinite(time)) time = 0;
         if (lastTime !== time) {

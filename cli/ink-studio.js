@@ -852,6 +852,7 @@ const CMD = {
         '  curve <family.json> [--distance n] [--text INK] [--out file.json]   sample reusable curve families',
         '  ornament <pattern.json> [--format pigment|relief|tiles] [--out file]   export a wallpaper or frieze pattern',
         '  palette plot <plot.json> [--space rgb|oklab] [--orbit degrees] [--format png|data]   render a palette in 3D',
+        '  palette chart <chart.json> [--type chart] [--format png|data]   export an indexed swatch, bar or pair chart',
         '  palette field <field.json> [--w width --h height] [--format png|data]   render a palette field or report grayscale bands',
         '  palette <recipe.json> [--t seconds] [--out palette.json]   sample palette recipes, paths and animation',
         '  inspect <scene|run>         discover fields, actions, ports and entities',
@@ -1020,6 +1021,7 @@ const CMD = {
   },
   palette() {
     if (pos[0] === 'plot') return require('./palette-plot.js')(pos.slice(1), opt, lib(), outputFile);
+    if (pos[0] === 'chart') return require('./palette-chart.js')(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'field') {
       if (pos.length !== 2 || ['w', 'h', 'saturation', 'view', 'out', 'format'].some(key => opt[key] === true))
         die('Use palette field <field.json> [--saturation 0–1] [--view nearest|error|boundary] [--format png|data] [--w width --h height --out file]');

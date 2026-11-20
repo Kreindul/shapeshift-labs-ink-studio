@@ -326,6 +326,22 @@ Use `pattern: 'chroma-field'` with a [complementary or desaturation definition](
 }
 ```
 
+### Indexed palette charts
+
+Make a [palette chart](palette-recipes.md#swatch-and-mix-charts) with `K.palette.chart()` and place its indexed raster on any projected surface. Chart texels have their own palette and top-left row order. Set `size` in projection units to fit the object.
+
+```js
+const chart = K.palette.chart({ type: 'closest-pairs', palette, limit: 6 });
+const layer = {
+  type: 'projected',
+  pattern: 'indexed',
+  projection: { origin: [-1, 0, 0], along: [1, 0, 0], across: [0, 1, 0] },
+  raster: chart.indexed({ size: [2, 1] })
+};
+```
+
+Use the `raster` object from `palette chart --format data` for the same operation in JSON. An indexed raster can supply its own `palette` of hex colours, normalized RGB triples, or scene palette indices. Its slots then address that list in order. With no local palette, slots address the scene palette directly. Rows default to `origin: 'bottom-left'`. Chart assets set `origin: 'top-left'`. Explicit slot cycles work with an embedded palette, and `null` slots leave the material visible.
+
 ### Author a shader in JavaScript
 
 A layer can name a shader from `surfaceEffects.shaders` or use a function as

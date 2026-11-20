@@ -1,4 +1,4 @@
-// PNG output is 8-bit RGB or RGBA. Import also handles non-interlaced grayscale and indexed PNGs.
+// PNG output supports 8-bit RGB, RGBA and indexed colour. Import also handles non-interlaced grayscale.
 const zlib = require('zlib'),
   fs = require('fs');
 const CRC = new Uint32Array(256);
@@ -22,7 +22,7 @@ const chunk = (type, data) => {
 };
 function scanlines(w, h, pixels, channels) {
   const stride = w * channels;
-  if (![3, 4].includes(channels) || pixels.length !== stride * h) throw new Error('PNG pixel count does not match its shape');
+  if (pixels.length !== stride * h) throw new Error('PNG pixel count does not match its shape');
   const raw = Buffer.alloc((stride + 1) * h);
   for (let y = 0; y < h; y++)
     Buffer.from(pixels.buffer, pixels.byteOffset + y * stride, stride).copy(raw, y * (stride + 1) + 1);
@@ -40,6 +40,7 @@ function withAlpha(rgb, alpha) {
   return rgba;
 }
 function encode(w, h, pixels, channels = 3) {
+  if (![3,4].includes(channels)) throw new Error('PNG pixel count does not match its shape');
   const hd = Buffer.alloc(13);
   hd.writeUInt32BE(w, 0);
   hd.writeUInt32BE(h, 4);
@@ -54,6 +55,40 @@ function encode(w, h, pixels, channels = 3) {
 }
 function write(file, w, h, rgb, alpha) {
   fs.writeFileSync(file, alpha ? encode(w, h, withAlpha(rgb, alpha), 4) : encode(w, h, rgb));
+}
+function writeIndexed(file, w, h, slots, palette) {
+  if (!Number.isSafeInteger(w) || !Number.isSafeInteger(h) || w < 1 || h < 1 ||
+      !Array.isArray(slots) || slots.length !== w*h || !Array.isArray(palette) ||
+      !palette.length || palette.length > 256)
+    throw new Error('Indexed PNG needs dimensions, one slot per pixel and 1–256 RGB entries');
+  const table = Buffer.from(Array.from(palette,color=>{
+    if (!Array.isArray(color) || color.length !== 3 ||
+        !Array.from(color).every(n=>Number.isInteger(n) && n>=0 && n<=255))
+      throw new Error('Indexed PNG palette entries must be RGB bytes');
+    return color;
+  }).flat());
+  const holes = slots.includes(null), empty = palette.length;
+  if (holes && empty === 256) throw new Error('Indexed PNG needs a free slot for transparency');
+  const pixels = Uint8Array.from(slots, slot=>{
+    if (slot === null) return empty;
+    if (!Number.isInteger(slot) || slot < 0 || slot >= palette.length)
+      throw new Error('Indexed PNG pixel references a missing palette slot');
+    return slot;
+  });
+  const hd = Buffer.alloc(13);
+  hd.writeUInt32BE(w,0);
+  hd.writeUInt32BE(h,4);
+  hd[8] = 8;
+  hd[9] = 3;
+  const out = [Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',hd),
+    chunk('PLTE',holes ? Buffer.concat([table,Buffer.alloc(3)]) : table)];
+  if (holes) {
+    const alpha = Buffer.alloc(empty+1,255);
+    alpha[empty] = 0;
+    out.push(chunk('tRNS',alpha));
+  }
+  out.push(chunk('IDAT',scanlines(w,h,pixels,1)),chunk('IEND',Buffer.alloc(0)));
+  fs.writeFileSync(file,Buffer.concat(out));
 }
 function raster(file) {
   const b = Buffer.isBuffer(file) ? file : fs.readFileSync(file);
@@ -189,4 +224,4 @@ function animate(file, frames, fps) {
   out.push(chunk('IEND', Buffer.alloc(0)));
   fs.writeFileSync(file, Buffer.concat(out));
 }
-module.exports = { encode, write, read, raster, animate };
+module.exports = { encode, write, writeIndexed, read, raster, animate };

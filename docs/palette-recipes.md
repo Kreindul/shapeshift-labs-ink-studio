@@ -304,3 +304,28 @@ ink-studio render examples/chroma-glazes.js --w 312 --h 152 --px 1 --raw --out g
 ```
 
 The [glaze firing trials](../examples/chroma-glazes.js) project both definitions directly onto sculpted ceramics. Use the same approach for oxidation on metal, dyes on cloth, or two-colour decals. [Material setup](projected-effects.md#projected-chroma-fields)
+
+## Swatch and mix charts
+
+`K.palette.chart({type, palette})` makes an indexed artwork asset and a table of the values it depicts. The chart accepts 1–48 swatches and keeps their original zero-based order, including duplicates. Choose a chart type for the comparison you want.
+
+| Type | What it shows |
+| --- | --- |
+| `swatches` | Indexed swatches in palette order |
+| `brightness` | OKLab lightness bars in palette order |
+| `saturation` | HSV saturation bars in palette order |
+| `closest-pairs` | Distinct index pairs sorted by Euclidean distance in OKLab, with ties in index order |
+| `dither-pairs` | Bayer dither tiles containing only the two source swatches at each mix share |
+
+Set `cell: [width, height]` and `gap` in native texels. Use `columns` for swatch and closest-pair grids, or set `labels: false` for unlabelled art. Pair charts accept an optional `limit` for the number of automatically ranked pairs. For dithering, supply ordered `pairs` such as `[[0, 5], [2, 10]]`. Each `mix` share gives the requested fraction of the second swatch and defaults to `[0, 0.25, 0.5, 0.75, 1]`. The report includes the actual fraction of texels for each tile. Cell sizes divisible by four fit complete Bayer tiles.
+
+```sh
+ink-studio palette chart examples/palette-charts.json --out swatches.png
+ink-studio palette chart examples/palette-charts.json --type brightness --out brightness.png
+ink-studio palette chart examples/palette-charts.json --type saturation --out saturation.png
+ink-studio palette chart examples/palette-charts.json --type closest-pairs --format data --out pairs.json
+ink-studio palette chart examples/palette-charts.json --type dither-pairs --out mixes.png
+ink-studio render examples/palette-chart-archive.js --w 382 --h 168 --px 1 --raw --out pigment-archive.png
+```
+
+PNG files carry the palette in their indexed colour table and preserve transparent gaps. `chart.raster()` also exposes RGB, alpha and the original swatch indices as typed arrays. The JSON export includes the cell bounds and measurements plus a self-contained `raster` for an [indexed projected material](projected-effects.md#indexed-palette-charts). The [pigment archive](../examples/palette-chart-archive.js) mounts charts on sculpted display boards.
