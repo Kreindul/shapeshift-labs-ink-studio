@@ -125,7 +125,10 @@ declares a `kind` and a `config`. Optional sections include `connections`,
 `scene apply <world> <edits>` applies an ordered array of `set`, `remove`,
 `merge` and `test` operations atomically. Paths accept arrays or JSON
 pointers. Existing branches are shared until changed. `--dry-run` reports
-changed paths. `--out` writes the validated result. The same operations accept retained authoring documents and JSON dioramas. `validate` also checks a
+changed paths and the targets affected by look edits. World manifests
+and JSON dioramas also accept [`bind-look` edits](pixel-look.md#apply-look-bindings-with-scene-patches).
+`--out` writes the validated result. The path-based operations also
+accept retained authoring documents and JSON dioramas. `validate` checks a
 world directly, or accepts `--world manifest.json --kind edits|actions` to
 check a separate file against a world.
 

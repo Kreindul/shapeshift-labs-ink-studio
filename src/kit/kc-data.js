@@ -245,6 +245,7 @@
     }
     return out;
   };
+  DIO.sceneLook = spec => styleOf(spec)?.finish.look;
   function applySurface(material, definition) {
     if (typeof definition === 'string') return K.surface.preset(definition, material);
     if (!definition || typeof definition !== 'object' || Array.isArray(definition))

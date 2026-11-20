@@ -521,6 +521,37 @@ palette and roles of the consuming scene. Use `--asset-pack` to supply
 external packs for a JSON scene and `--out` to save an inspection report.
 JavaScript callers can use `query.inspectLook({ renderer: 'webgl' })`.
 
+## Apply look bindings with scene patches
+
+Use `bind-look` in a `scene apply` patch to attach a named look to a
+shared target selector. Select by material, surface, entity, prefab
+instance, tag, or a combination. A binding accepts an asset ID or the
+usual object with parameters, strength, stage, and other overrides.
+
+```json
+[
+  {
+    "op": "bind-look",
+    "select": { "surface": "west-enamel" },
+    "binding": { "asset": "relay/glazed-enamel", "params": { "mid": "#ae5653" } }
+  }
+]
+```
+
+The same selector replaces the existing rule in place. Set `binding`
+to `null` to remove it. If several authored rules use the same selector,
+edit the specific rule by path. Ordinary `set`, `merge`, and `remove`
+operations also support scene-wide and per-instance bindings, such as
+`/visual/look/asset` and `/entities/west/lookAsset` in a world, or
+`/finish/look/asset` and `/solids/0/mat/lookAsset` in a JSON diorama.
+
+Add `--dry-run` to preview the changed paths and affected material,
+surface, entity, and instance IDs. The preview compares the bindings
+matched by the starting and edited scenes, so it includes targets that
+lose a binding. Edits are checked together against the final scene.
+Supply `--asset-pack` to install a pack in the saved result and
+`--renderer webgl` to check WebGL compatibility.
+
 ## Shared look selectors
 
 Use `finish.look.targets` in a diorama, `visual.look.targets` on a world,

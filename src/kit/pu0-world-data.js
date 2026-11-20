@@ -87,6 +87,33 @@
     }
     return root;
   }
+  function bindLook(source, edit) {
+    check(Object.keys(edit).every(key => ['op','select','binding'].includes(key)) && own(edit,'binding'),
+      'A bind-look edit needs select and binding');
+    const select = TargetSelectors.prepare(edit.select), binding = edit.binding;
+    check(binding === null || typeof binding === 'string' || record(binding) && typeof binding.asset === 'string',
+      'A look binding needs an asset ID, binding object or null');
+    const section = source.format === format ? 'visual' : Array.isArray(source.solids) ? 'finish' : null;
+    check(section, 'A bind-look edit needs a world or JSON diorama');
+    const settings = source[section], ownLook = settings?.look;
+    const look = ownLook ?? (section === 'finish' ? K.diorama.sceneLook(source) : undefined), targets = look?.targets;
+    check((settings === undefined || record(settings)) && (look === undefined || look === false || record(look)) &&
+      (targets === undefined || Array.isArray(targets)), 'Expected a scene look with a target list');
+    const matches = (targets ?? []).flatMap((rule, index) => equal(rule?.select,select) ? [index] : []);
+    check(matches.length <= 1, 'Multiple look bindings match the same selector; edit the specific rule by path');
+    const path = [section,'look','targets'], index = matches[0];
+    if (binding === null && index === undefined) return null;
+    const rule = {select,asset:binding};
+    if (record(ownLook) && targets !== undefined)
+      return binding === null ? {op:'remove',path:[...path,index]} : {op:'set',path:[...path,index ?? targets.length],value:rule};
+    if (record(ownLook)) return {op:'set',path,value:[rule]};
+    const list = (targets ?? []).slice();
+    if (binding === null) list.splice(index,1);
+    else list[index ?? list.length] = rule;
+    const value = {...look,targets:list};
+    if (settings !== undefined) return {op:'set',path:path.slice(0,2),value};
+    return {op:'set',path:[section],value:{look:value}};
+  }
   function apply(source, operations, {validate = manifest} = {}) {
     check(Array.isArray(operations) && operations.length <= 10000, 'Expected a bounded array of world edits');
     let next = source, changed = false;
@@ -118,9 +145,11 @@
       draft[key]=child;
       return draft;
     }
-    for (const [index, edit] of operations.entries()) {
+    for (const [index, original] of operations.entries()) {
       try {
-        check(record(edit), 'Expected an edit record');
+        check(record(original), 'Expected an edit record');
+        const edit = original.op === 'bind-look' ? bindLook(next,original) : original;
+        if (!edit) continue;
         const path = selector(edit.path), before = read(next,path);
         if (edit.op === 'test') {
           check(own(edit,'value') && equal(before, edit.value), 'Test failed at ' + path.join('/'));

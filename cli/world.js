@@ -250,17 +250,34 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
       default: throw Error('Use sim run|resume|fork|reset|replay|diff|sweep|render');
     }
   }
-  function legacyValidator(input) {
-    return value=>input.document.format==='ink-studio/authoring'?
-      kit.KIT.authoring.data.documentView(value):dataScene(input.legacy,value);
+  function applyEdits(input, edits, { dryRun = false } = {}) {
+    const isWorld = Boolean(input.world), retained = input.document?.format === 'ink-studio/authoring';
+    const spec = isWorld || retained ? input.world ?? input.document : document(input.document).world;
+    const validate = isWorld ? R.validate : retained ? kit.KIT.authoring.data.documentView :
+      value => dataScene(input.legacy,value,{installedPacks:true});
+    const before = validate(spec);
+    const source = isWorld ? before : kit.KIT.procedural.data.freeze(W.data.copy(spec));
+    let after;
+    const result = W.apply(source,edits,{validate:value=>{after=validate(value);}});
+    const looks = require('./look-edits.js');
+    if (retained || !looks.touches(source,result.world,result.paths,W.data)) return result;
+    function inspect(value) {
+      const query = isWorld ? R.create(value,{validated:true}).query() : W.query.fromScene(value.build(value.seed));
+      return query.inspectLook({renderer:opt.renderer,definitions:dryRun});
+    }
+    const report = require('./look.js').assertValid(inspect(after));
+    return dryRun ? {...result,lookBindings:looks.impact(inspect(before),report,W.data.equal)} : result;
   }
   function scene([mode,file,reference]) {
     const input=load(file);
-    if (mode==='apply'&&input.document){
-      const validator=legacyValidator(input);
-      validator(input.document);
-      const result=W.apply(kit.KIT.procedural.data.freeze(W.data.copy(input.document)),read(reference),{validate:validator});
-      respond(opt['dry-run']?{changed:result.paths}:result.world);
+    if (mode==='apply'){
+      ensure(input.document || input.world && !input.checkpoint,'Expected a world manifest or JSON scene');
+      const dryRun = Boolean(opt['dry-run']);
+      if (dryRun && typeof opt.out === 'string')
+        ensure(![file,reference].some(input=>typeof input==='string'&&path.resolve(input)===path.resolve(opt.out)),
+          'The dry-run report needs a separate output path');
+      const { world, paths, lookBindings } = applyEdits(input,read(reference),{dryRun});
+      respond(dryRun?{changed:paths,...(lookBindings&&{lookBindings})}:world);
       return;
     }
     if(mode==='promote'){
@@ -276,7 +293,6 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
     const world=R.validate(input.world);
     let result;
     if (mode==='capture') result=W.capture(world,reference,opt.as);
-    else if (mode==='apply') result=W.apply(world,read(reference),{validate:R.validate});
     else if (mode==='stamp') result=W.stamp(world,reference,opt.as,opt.args?args():{});
     else if (mode==='remix') result=W.remix(world,reference,opt.as,opt.edits?read(opt.edits):[]);
     else if (mode==='history') result=W.history.generate(world,read(reference));
@@ -351,16 +367,8 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
       const input=load(opt.world);
       ensure(input.world||input.document,'Provide a scene, world or checkpoint with --world');
       const edits=read(file);
-      if(opt.kind==='edits'){
-        if(input.world){
-          const source=R.validate(input.world);
-          W.apply(source,edits,{validate:R.validate});
-        }else{
-          const validator=legacyValidator(input);
-          validator(input.document);
-          W.apply(kit.KIT.procedural.data.freeze(W.data.copy(input.document)),edits,{validate:validator});
-        }
-      } else if(opt.kind==='actions') runtime(input).schedule(edits);
+      if(opt.kind==='edits') applyEdits(input,edits);
+      else if(opt.kind==='actions') runtime(input).schedule(edits);
       else throw Error('Validation with --world needs --kind edits or actions');
       respond({valid:true,kind:opt.kind});
       return true;

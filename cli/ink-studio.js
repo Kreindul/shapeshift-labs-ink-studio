@@ -80,13 +80,13 @@ function meshScene(file) {
   };
 }
 /* a diorama written as data (see lab/data-shrine.json). --style puts it in another style; meshes it names are looked for beside the file */
-function dataScene(file, override) {
+function dataScene(file, override, { installedPacks = false } = {}) {
   const K = lib().KIT,
     spec = override ? { ...override } : JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')),
     dir = path.dirname(path.resolve(file)),
     assets = {};
   if (opt.style) spec.style = opt.style;
-  if (opt['asset-pack'] !== undefined)
+  if (!installedPacks && opt['asset-pack'] !== undefined)
     spec.assetPacks = require('./asset-pack.js').install(K.authoring.assetPacks, spec.assetPacks, opt['asset-pack']);
   for (const s of spec.solids || [])
     if (s && s.kind === 'mesh' && typeof s.asset === 'string' && !assets[s.asset]) {
@@ -298,6 +298,7 @@ const CMD = {
         '  trace <scene|run> <name>    trace a route, signal or other exposed query',
         '  field <scene|run> <name> --spec file.json  export a line, grid or time series',
         '  scene apply|stamp|remix|capture|history|promote <world> ...  edit or derive a world manifest',
+        '    scene apply <scene> <edits.json> --dry-run   preview edited paths and look targets',
         '  sim run|resume|fork|reset|replay|diff|sweep|render ...  run or compare fixed-tick simulations',
         '  look inspect <scene|run|look-file> [--renderer headless|webgl]   list bindings, dependencies and targets',
         '  look import <file> [--out pack.json] [--id pack/look]   import a LUT or palette as a versioned look',

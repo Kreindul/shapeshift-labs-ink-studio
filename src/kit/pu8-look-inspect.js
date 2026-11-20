@@ -55,7 +55,7 @@
       ...(params && { parameters: params }), ...(driver && { inputs: driver.inputs }), dependencies: dependencies(definition) };
   }
 
-  function scene(world, index, media, query, time, { renderer = 'headless' } = {}) {
+  function scene(world, index, media, query, time, { renderer = 'headless', definitions = false } = {}) {
     if (!['headless', 'webgl'].includes(renderer)) throw new TypeError('Renderer must be headless or webgl');
     const look = world.look ?? {}, issues = [], rules = [];
     const clock = world.lookSnapshot?.time ?? time;
@@ -104,6 +104,7 @@
         rules.push({ path, stage, mode, ...(surface !== undefined && { surfaceSlot: surface }),
           select, ...definitionInfo(definition), ...(resolved && { sampledInputs: { strength: resolved.strength, params: resolved.params } }),
           ...(authored.order !== undefined && { order: authored.order }), ...(authored.weight !== undefined && { weight: authored.weight }),
+          ...(definitions && { definition }),
           matchedTargets: matched.map(({ target, count }) => ({ ...target, count })) });
       });
     }
