@@ -89,6 +89,8 @@ function dataScene(file, override, { installedPacks = false } = {}) {
     spec = override ? { ...override } : JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')),
     dir = path.dirname(path.resolve(file)),
     assets = {};
+  if (spec.dataInputs !== undefined)
+    spec.dataInputs = require('./data-inputs.js').embed(K.dataInputs, spec.dataInputs, file, shot?.dependency);
   if (opt.style) spec.style = opt.style;
   if (opt['shadow-art'] !== undefined)
     spec.finish = { ...spec.finish, look: { ...K.diorama.sceneLook(spec), shadowArt: shadowArtOption() } };
@@ -568,6 +570,15 @@ function sdfAssistOption() {
   return sdfAssistOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
 }
 
+let edgeFilterOverride;
+function edgeFilterOption() {
+  const value = opt['edge-filter'];
+  if (value === undefined) return undefined;
+  if (value === true || value === 'on') return true;
+  if (value === 'off') return false;
+  return edgeFilterOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
+}
+
 const view = extra =>
   Object.assign(
     {
@@ -580,6 +591,7 @@ const view = extra =>
       px: artPixelSize,
       stable: stabilityOption(),
       stableDetail: stableDetailOption(),
+      edgeFilter: edgeFilterOption(),
       artDirection: artDirectionOption(),
       silhouetteProtection: silhouetteOption(),
       horizonBands: horizonOption(),
@@ -697,7 +709,7 @@ function die(m) {
 }
 const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,atmosphereEmittersOption,effectPalettesOption,stabilityOption,artDirectionOption,silhouetteOption,horizonOption,skyTransitionsOption,
   weatherTracksOption:() => onOffOption('weather-tracks'),skyOptions,cameraOptions,shot,shotReplay,shotRender});
-const worldCommands = new Set(['inspect','probe','trace','field','scene','sim']);
+const worldCommands = new Set(['inspect','probe','trace','field','data-inputs','scene','sim']);
 const CMD = {
   help() {
     console.log(
@@ -794,6 +806,7 @@ const CMD = {
         '  motion-review <id> [--finding kind-or-id] [--out report.json]  inspect motion findings and focused playback ranges',
         '  clip-sequence <id> [--handoff 0] [--out report.json]  inspect clip instances, retimed cues, and handoffs',
         '  animation-graph <graph.json> [--at seconds] [--inputs file.json] [--out report.json]  inspect poses and event responses',
+        '  data-inputs <scene or catalog> [dataset] [--sample JSON --t seconds --rows --out report.json]  inspect typed source data',
         '  camera-rig <scene or world> [--at seconds --camera-shot ID --out report.json]  sample a shot and its clearance',
         '  timeline <scene> [--at seconds] [--from seconds --to seconds] [--out report.json]  sample tracks and export cues',
         '  authored-contacts <id> [--at seconds] [--out report.json]  inspect contact ranges and socket transfer timing',
@@ -839,7 +852,7 @@ const CMD = {
         'layered horizon: --horizon-bands on|off|file.json',
         'art direction: --art-direction on|off|painted-pixel|storm-silhouette|soft-dawn|file.json',
         'effect palette options: --effect-palettes on|off|file.json',
-        'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable on|off|file.json --stable-detail on|off|file.json --snap on|off --dither-space screen|world|object --dither-spacing n --dither-origin x,y,z --resolve native|coverage|clusters --splat-order center|surface --splat-coverage legacy|continuous|soft --sdf-assist on|off|file.json --stable-transparency on|off --inspection file.json|off --inspection-focus id --composite file.json|off --render-graph file.json|off --afterimages file.json|off --reconstruction file.json|off --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
+        'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable on|off|file.json --stable-detail on|off|file.json --edge-filter on|off|file.json --snap on|off --dither-space screen|world|object --dither-spacing n --dither-origin x,y,z --resolve native|coverage|clusters --splat-order center|surface --splat-coverage legacy|continuous|soft --sdf-assist on|off|file.json --stable-transparency on|off --inspection file.json|off --inspection-focus id --composite file.json|off --render-graph file.json|off --afterimages file.json|off --reconstruction file.json|off --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
       ].join('\n')
     );
   },

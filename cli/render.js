@@ -26,9 +26,10 @@ const EffectPalettes = require('../src/effect-palettes.js');
 const ArtEffects = require('../src/art-effects.js');
 const ArtStability = require('../src/art-stability.js');
 const StableDetail = require('../src/stable-detail.js');
+const EdgeFilter = require('../src/edge-filter.js');
 const SdfAssist = require('../src/sdf-assist.js');
 const SdfRaster = require('./sdf-assist.js');
-const { footprint, sampledDepth } = require('./splat-sampling.js');
+const { footprint, exportOffsets, sampledDepth } = require('./splat-sampling.js');
 const { createMaskResolve, applyMasks } = require('./look-mask-resolve.js');
 const { createLookPass } = require('./look-pass.js');
 const { createAudit } = require('./render-audit.js');
@@ -109,6 +110,7 @@ function viewMatrix(yaw, pitch, dist, T) {
   ];
 }
 // o: t (seconds), yaw, pitch, dist, target, w, h (the size of the stage in screen pixels), zoom (1 = the diorama's own distance), raw (skip the palette)
+const edgeCoverageThreshold = .03;
 const afterimageRows = Symbol('afterimage rows');
 const reconstructionSource = Symbol('reconstruction source');
 const inspectionCamera = Symbol('inspection camera');
@@ -224,6 +226,7 @@ function renderFrame(world, o, preparedPalettes) {
   const onPaletteClip = audit && ((scope, i, r, g, b) => audit.palette(scope, world.pal[i], r, g, b));
   const transparent = !!o.transparent && !o.captureCoverage;
   const integrateFootprint = o.splatFilter === 'footprint';
+  const edgeStrengthAt = !o.captureCoverage && EdgeFilter.prepare(o.edgeFilter ?? look.edgeFilter)?.bind(world);
   const stableDetail = StableDetail.prepare(o.stableDetail ?? look.stableDetail);
   const coverageMode = ContributionRules.coverageMode(o.splatCoverage ?? look.splatCoverage);
   const orderMode = o.splatOrder ?? look.splatOrder ?? 'center';
@@ -872,6 +875,9 @@ function renderFrame(world, o, preparedPalettes) {
   const bend = world.refract === undefined ? 6 : world.refract;
   const patternFlashes = flash && PIX ? new Map() : null;
   let contributions = retainLayers && PIX ? contributionLayers(col, captured, W, H, true, bend) : null;
+  // The legacy pattern redraw otherwise replaces the composited edge with opaque paint.
+  const edgePatterns = !retainLayers && edgeStrengthAt && PIX ? contributionLayers(col, captured, W, H, true, 0) : null;
+  const edgePixels = !o.raw && edgeStrengthAt ? new Float32Array(W * H) : null;
   const stageMasks = stages?.surfaceMask || contribution && localConstraints?.some(policy => policy?.mask);
   const stagedFrames = stageMasks || anchoring && contribution ? sampleFrames(world, t) : null;
   const maskFrames = stagedFrames && new Map();
@@ -918,7 +924,7 @@ function renderFrame(world, o, preparedPalettes) {
   }
   const foregroundDepth = z => z - (eyeD-dist);
   function composite(p, i, z, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, mark,
-    opticalDepth = z, sprite, haze = 0, rule, reflected) {
+    opticalDepth = z, sprite, haze = 0, rule, reflected, filteredEdge = false) {
     if (surfaceDepth && (!sprite?.surface || sdf) && opticalDepth > surfaceDepth[p]+1e-5) return;
     const p3 = p * 3, ia = 1 - a;
     if (counters) {
@@ -933,6 +939,11 @@ function renderFrame(world, o, preparedPalettes) {
     if (rayMedia) [pr, pg, pb] = rayMedia.shade(p, opticalDepth, [pr, pg, pb], true, rule?.fogScale);
     if (retainLayers && glass && bend && !contributions) contributions = contributionLayers(col, captured, W, H, false, bend);
     if (contributions) contributions.before(p, pr, pg, pb, a, wd && a > .5, glass && !wd, dn);
+    edgePatterns?.before(p, pr, pg, pb, a, wd && a > .5, false, dn);
+    if (edgePixels) {
+      const through = !filteredEdge && wd && a > .5 ? 0 : ia;
+      edgePixels[p] = edgePixels[p] * through + (filteredEdge ? a : 0);
+    }
     col[p3] = pr * a + col[p3] * ia;
     col[p3 + 1] = pg * a + col[p3 + 1] * ia;
     col[p3 + 2] = pb * a + col[p3 + 2] * ia;
@@ -1067,6 +1078,9 @@ function renderFrame(world, o, preparedPalettes) {
       s2 = SC[i] * SC[i],
       pk = d[q + 7];
     const fieldParticle = i >= baseCount;
+    const edgeStrength = edgeStrengthAt && !fieldParticle && !kind && !(kraw & (32 | 64 | 256 | 2048 | 32768)) &&
+      !opticalActive && !(paint && d[q + 14] === paint.marker) ? edgeStrengthAt(i) : 0;
+    const footprintMargin = integrateFootprint ? .25 : edgeStrength > 0 ? exportOffsets.at(-1) : 0;
     const jStyle = i * 4, packedEdge = world.materialPixelStyles?.[jStyle] || 0;
     const edgeStyle = o.raw ? 0 : ContributionRules.materialEdge(packedEdge);
     const mode = ContributionRules.materialCoverage(packedEdge, coverageMode);
@@ -1158,8 +1172,8 @@ function renderFrame(world, o, preparedPalettes) {
     const k0 = C / det,
       k1 = -Bq / det,
       k2 = A / det,
-      ex = Math.min(3 * Math.sqrt(A) + (integrateFootprint ? .25 : 0), 2048),
-      ey = Math.min(3 * Math.sqrt(C) + (integrateFootprint ? .25 : 0), 2048);
+      ex = Math.min(3 * Math.sqrt(A) + footprintMargin, 2048),
+      ey = Math.min(3 * Math.sqrt(C) + footprintMargin, 2048);
     let sx = ortho ? ((cx / (oh * asp)) * 0.5 + 0.5) * W : ((((tp / asp) * cx) / -cz) * 0.5 + 0.5) * W,
       sy = ortho ? ((cy / oh) * 0.5 + 0.5) * H : (((tp * cy) / -cz) * 0.5 + 0.5) * H;
     if (kind === 1) {
@@ -1265,9 +1279,14 @@ function renderFrame(world, o, preparedPalettes) {
       for (let ix = x0; ix <= x1; ix++) {
         const dx = ix + 0.5 - sx,
           pw = -0.5 * (k0 * dx * dx + k2 * dy * dy) - k1 * dx * dy;
-        let a;
+        const centerAlpha = ContributionRules.alpha(pw, al, solid && !softCoverage, edgeStyle, continuousCoverage);
+        let a = centerAlpha;
         if (integrateFootprint) a = footprint(dx, dy, k0, k1, k2, al, solid && !softCoverage, edgeStyle, continuousCoverage);
-        else a = ContributionRules.alpha(pw, al, solid && !softCoverage, edgeStyle, continuousCoverage);
+        else if (edgeStrength > 0) {
+          const average = footprint(dx, dy, k0, k1, k2, al, solid && !softCoverage, edgeStyle, continuousCoverage, exportOffsets);
+          a += (average - a) * edgeStrength;
+        }
+        const filteredEdge = edgeStrength > 0 && Math.abs(a - centerAlpha) >= edgeCoverageThreshold;
         a *= geometryWeight;
         if (a < ContributionRules.minimum) continue;
         const p = iy*W+ix, sdfRow = sdf?.rows[i], sdfHit = sdf?.hits[p];
@@ -1394,13 +1413,13 @@ function renderFrame(world, o, preparedPalettes) {
             transparent: !wd && !exact && !(flags & 4),
             sample: [i, surfaceZ, normalizedDepth(surfaceZ), a, pr, pg, pb,
               wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, lookPass && { ...lookPass.mark },
-              opticalDepth, undefined, fogMix, rule, reflected?.slice()] };
+              opticalDepth, undefined, fogMix, rule, reflected?.slice(), filteredEdge] };
           if (!deferred.has(p)) deferred.set(p, []);
           deferred.get(p).push(entry);
           deferredCount++;
           if (counters) counters.peakDeferredFragments = Math.max(counters.peakDeferredFragments,deferredCount);
         } else composite(p, i, exact?.z ?? -cz, exact ? normalizedDepth(exact.z) : dn, a, pr, pg, pb, wd, emits, highlight,
-          paletteId, detailParticle, projected, coat, glass, lookPass?.mark, opticalDepth, undefined, fogMix, rule, reflected);
+          paletteId, detailParticle, projected, coat, glass, lookPass?.mark, opticalDepth, undefined, fogMix, rule, reflected, filteredEdge);
       }
     }
   }
@@ -1712,6 +1731,10 @@ function renderFrame(world, o, preparedPalettes) {
           if (localAt) localAt[p] = localSlot(i, c[5], p);
           if (detail && surface?.projected(i) && c[4] > 0.22) detail[(H - 1 - y) * W + x] = 1;
         }
+        if (edgePatterns && edgePixels[p] >= edgeCoverageThreshold && edgeStrengthAt(i)) {
+          edgePatterns.replacePattern(p, lit.slice(0, 3).map((value, k) => value + (fog[k] - value) * kf));
+          continue;
+        }
         col[p * 3] = lit[0] + (fog[0] - lit[0]) * kf;
         col[p * 3 + 1] = lit[1] + (fog[1] - lit[1]) * kf;
         col[p * 3 + 2] = lit[2] + (fog[2] - lit[2]) * kf;
@@ -1858,6 +1881,7 @@ function renderFrame(world, o, preparedPalettes) {
         col[q * 3 + 1] = c[1];
         col[q * 3 + 2] = c[2];
         if (transparent) captured[q] = 1;
+        if (edgePixels) edgePixels[q] = 0;
         if (axialDepth) axialDepth[q] = eyeD - R + sprD[q] * 2 * R;
         if (art) art.sprite(q, sprOwner[q], eyeD - R + sprD[q] * 2 * R);
         if (counters) counters.fragments++;
@@ -2057,7 +2081,8 @@ function renderFrame(world, o, preparedPalettes) {
         dm = dc - Math.max(2 * dc - D(x - 1, y) - D(x + 1, y), 2 * dc - D(x, y + 1) - D(x, y - 1));
       // part lines (look.lines), as on the page: the near side of a break in depth, darker, or lighter toward the light
       // (not where an outline was already worked out per pixel)
-      if (lines && !(pixed && pixed[p])) {
+      const filteredEdge = edgePixels?.[p] >= edgeCoverageThreshold;
+      if (!filteredEdge && lines && !(pixed && pixed[p])) {
         const dl = D(x - 1, y),
           dr = D(x + 1, y),
           du = D(x, y + 1),
@@ -2071,7 +2096,7 @@ function renderFrame(world, o, preparedPalettes) {
           b *= k;
         }
       }
-      const outlined = !ink && edge > 0 && dc - dm > edge;
+      const outlined = !filteredEdge && !ink && edge > 0 && dc - dm > edge;
       if (outlined) {
         r = line[0];
         g = line[1];
@@ -2188,7 +2213,7 @@ function renderFrame(world, o, preparedPalettes) {
         const flags = pixelBudgets?.[pixel] ?? 0;
         if (pixelBudgets && !DetailBudgets.cleans(flags, globalCleanup)) continue;
         if (localConstraints?.[(localAt?.[pixel] || 0) - 1] || (alpha && alpha[q / 3] < 128) || sprM?.[pixel] ||
-            surfaceGlint?.[pixel] || detail?.[q / 3] || ArtStability.protectedPixel(stable, passes, q / 3)) continue;
+            edgePixels?.[pixel] >= edgeCoverageThreshold || surfaceGlint?.[pixel] || detail?.[q / 3] || ArtStability.protectedPixel(stable, passes, q / 3)) continue;
         // outlines, as on the page: a notch is filled from what is round it, a bump against the background taken off
         const e0 = empty(x, y),
           en = N4.filter(([dx, dy]) => empty(x + dx, y + dy)).length;
