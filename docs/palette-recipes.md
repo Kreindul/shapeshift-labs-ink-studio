@@ -554,6 +554,53 @@ maxDistance, maxLightnessDelta })` with up to 256 swatches. Read
 alpha bytes.
 
 
+## Review ramp spacing
+
+```sh
+ink-studio palette ramp-review ramp.json --out spacing.json
+ink-studio palette ramp-review --scene examples/palette-remap.json --role stone \
+  --w 240 --h 168 --px 1 --t .75 --out shot-spacing.json
+```
+
+The JSON input can be an ordered array of colours or an object with
+`stops`. Stops can be colours with optional `positions`, or pairs such
+as `[0.4, "#867b6e"]`. Unspecified positions are evenly spaced.
+`direction` defaults to `auto` and accepts `ascending` or `descending`
+to check an explicitly intended order.
+
+The report measures RGB8 stops in OKLab lightness. It includes each
+actual and expected step and flags the following.
+
+- `uneven-step` means a step differs from the lightness slope implied
+  by the endpoints and authored positions by more than `maxDeviation`
+  (default .035).
+- `reversal` means a step moves against the ramp direction by more
+  than `reversalTolerance` (default .005).
+- `missing-midtones` identifies two available lightness levels with no
+  stop between them and a gap greater than `maxGap` (default .22).
+  The report includes the midpoint lightness.
+- `duplicate-stop` and `resolved-collapse` identify adjacent stops
+  that share authored or resolved RGB8 values.
+
+For a shot using the indexed scene palette, use `--role` to track
+the original slots through the sampled time, colour grade, and remap.
+With a ramp file and `--scene`, a stop can bind automatically when its
+RGB identifies exactly one scene slot. The report counts where each
+resulting RGB appears anywhere in the export. Stops that share an RGB
+value report the same count.
+
+For material palettes, tone resolve, or other composited colour,
+pass a list such as `--pixels '[[41,62],[44,62],null]'` with one entry per stop.
+Coordinates are top-down art pixels. Use `null` for an unsampled
+stop. Probes read the final export RGB, including post styling, and
+fully transparent pixels have no reading.
+
+Use `KIT.palette.reviewRamp({ stops, positions, direction, ...thresholds })`
+for authored spacing, or `ink.reviewRampShot(world, { role, pixels, ...view })`
+in Node. The shot API accepts explicit `stops` in place of `role`.
+CLI thresholds are `--max-deviation`, `--reversal-tolerance`, and
+`--max-gap`. Use `--positions` to supply positions for a scene role.
+
 ## Fit a target with two swatches
 
 `K.palette.fitDither({ target, policy, size }, { palette, roles })` searches

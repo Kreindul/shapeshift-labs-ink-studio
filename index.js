@@ -105,6 +105,7 @@ module.exports = {
   ...require('./cli/gltf-asset.js'),
   render: require('./cli/render.js').render,
   paletteUsage: require('./cli/palette-usage.js').paletteUsage,
+  reviewRampShot: require('./cli/ramp-review.js').reviewRampShot,
   exportLayers: require('./cli/export-layers.js').exportLayers,
   exportScene: require('./cli/scene-export.js').exportScene,
   readSceneReplay: require('./cli/scene-replay.js').readSceneReplay,

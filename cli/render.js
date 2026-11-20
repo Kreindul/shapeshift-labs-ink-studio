@@ -352,7 +352,7 @@ function renderFrame(world, o, preparedPalettes) {
       frame = ArtEffects.paletteUse(EmissiveFinishes.applyGlow(frame, passes, emissive.profiles), world.pal);
     }
     const ditherAt = anchoring ? (x,y) => ArtStability.ditherCoordinates(stable, passes, y*frame.w+x, x, y) : undefined;
-    const basePalette = (paletteState || paletteInventory) &&
+    const basePalette = (paletteState || paletteInventory || o.captureScenePalette) &&
       (tone?.palette ?? evaluatedPalette ?? (!o.raw && grade ? PixelLook.gradePalette(grade) : world.pal));
     const ownership = paletteState?.capture?.view(frame,passes,{ ...paletteState,stable,time:t,
       base:basePalette,composited:retainContributions });
@@ -403,6 +403,7 @@ function renderFrame(world, o, preparedPalettes) {
       }
       frame.paletteInventory = { base:basePalette, colors:[...declared].filter(Number.isInteger) };
     }
+    if (o.captureScenePalette) frame.scenePalette = legacyLook && !tone ? basePalette : null;
     if (!o.captureMotion) delete frame.motionReference;
     if (requestedPasses.length) frame.passes = ArtPasses.subset(passes, requestedPasses);
     return frame;
