@@ -163,6 +163,7 @@ function nativeOperations(kit, assets) {
     lessThan:binary(({a,b})=>a<b,'boolean'),
     time:{time:true,outputs:{value:'number'},run(_,ctx){return {value:ctx.time};}},
     random:{outputs:{value:'number'},run(_,ctx){return {value:kit.KIT.grow.dice(ctx.seed)()};}},
+    ...require('./graph-render.js').graph3DOperations(kit),
     pngAsset:asset('png'),
     jsonAsset:asset('json')
   };

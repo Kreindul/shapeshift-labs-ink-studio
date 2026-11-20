@@ -81,6 +81,10 @@
     geometry: value => record(value) && ((value.points && value.faces) || (value.pos && value.tri) || value.positions || mesh(value)),
     field: value => typeof value === 'function' || typeof value?.sample === 'function',
     points: Array.isArray,
+    world: value => record(value) && Number.isSafeInteger(value.count) && value.count >= 0 &&
+      list(value.data) && value.data.length >= value.count * 16,
+    renderFrame: value => record(value) && Number.isSafeInteger(value.w) && value.w > 0 &&
+      Number.isSafeInteger(value.h) && value.h > 0 && list(value.rgb) && value.rgb.length === value.w * value.h * 3,
     image: value => record(value) && Number.isSafeInteger(value.width) && Number.isSafeInteger(value.height) && value.data,
     raster, path, mesh, palette, atlas, audio
   };

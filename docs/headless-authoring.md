@@ -711,6 +711,82 @@ node examples/procedural-generation.cjs procedural-review
 ink-studio graph run procedural-review/storm-relay.json --at 1.22 --out procedural-review/graph
 ```
 
+## 3D scenes, signed fields and sprite rigs
+
+These operations run in the CLI graph and the Node library. The geometry,
+lighting descriptors, signed-field renderer and sprite tools are also
+available as `KIT.procedural.sceneGraph`. The Node splat renderer and pass
+adapter are available as `ink.renderGraphScene(world, settings)` and
+`ink.graphRenderPass(frame, channel, settings)`. To use these two operations
+in a low-level `KIT.procedural.graph.create` graph, pass
+`{ operations: ink.graph3DOperations() }`. Graph projects supply them automatically.
+
+### Meshes and image-defined solids
+
+| Operation | Interfaces |
+| --- | --- |
+| `geo.mesh` | Normalize an indexed triangle mesh from `source`. Accepts Ink’s `pos` and `tri` buffers or `points` and triangular `faces`, with optional vertex colors, face materials, UVs and normals. |
+| `geo.box`, `geo.tube` | Build a native closed solid. Boxes use `center` and `half`. Tubes use XYZ `start` and `end` with `radius` and 3–32 `sides`. |
+| `geo.triangulate` | Triangulate planar `rings` at `options.z`. The first ring is the outline and subsequent rings are holes. |
+| `geo.transform`, `geo.merge` | Apply XYZ `position`, radians `rotation`, and scalar or XYZ `scale`, or combine an array of indexed meshes. Mirroring reverses winding. |
+| `geo.clip` | Crop a mesh with face materials to `dot(normal, point) <= offset` for each plane. Set `options.cap` to close a convex shell. UVs and normals remain available on the clipped triangles. |
+| `geo.extrudeImage` | Expand an XY raster mask along Z. Set `pixelSize`, `depth`, `center`, `channel`, `alphaThreshold` and optional `edgeColor`. Holes pass through the part. The main mesh retains per-cell colors on the caps. The `front` port is a UV-mapped front cap for `warp.surface`. |
+| `geo.sliceStack` | Build the exterior of a stack of aligned raster `slices` in list order. Set world `axis`, `spacing`, `center`, `pixelSize` and mask controls. Neighboring occupied cells share their boundary and omit their internal faces. |
+
+`pixelSize` can be a world step or an XY pair. Raster tops point toward
+local +Y, and later slices advance along the selected positive world axis.
+XY maps to world XY for a Z stack, to −ZY for an X stack, and to X−Z for a Y
+stack. The extrusion and slice operations return bounds and triangle counts
+as separate ports. Feed mesh results to other graph operators such as
+`meshPaths`, export them as JSON, or add them to a scene.
+
+### Signed fields and render passes
+
+| Operation | Interfaces |
+| --- | --- |
+| `sdf.shape` | Create a bounded negative-inside sphere, rounded `box`, `torus` or `capsule` with optional XYZ `center` and `rotation`. Torus and capsule axes point along Y before rotation. |
+| `sdf.bound`, `sdf.transform`, `sdf.combine` | Bound a scalar field, apply an affine transform with conservative distance scaling, or combine bounded fields by `union`, `intersection` or `subtract`. Subtraction removes later fields from the first. |
+| `sdf.mesh`, `sdf.slices` | Polygonize a zero surface with Ink’s native implicit mesher, or sample aligned slices at an optional `level`. Connect both the slices and the `layout` port to `geo.sliceStack` to preserve alignment. |
+| `sdf.render` | Raymarch the signed field directly from a camera. Set image dimensions, tint, `shades`, `steps`, `epsilon` and optional shadows. For a custom distance estimate, lower `stepScale` to advance more conservatively. The frame supplies coverage, depth, normals, XYZ positions and IDs. Shaped lights use their centers in this renderer. |
+| `scene.camera`, `scene.cameraTrack` | Resolve orbit and lens settings, or sample a native camera rig with its shots, rails, framing and transitions. Projection can be perspective or orthographic. |
+| `scene.light` | Author one directional `sun` and local `point`, `rectangle`, `disk` or `line` resources. The CPU scene renderer uses native shadow maps and shaped emitters. Points use compact omnidirectional emitters. |
+| `scene.object` | Wrap a mesh with object and material IDs, sampling `resolution`, distance-grid `cells`, optional thickness, color override and emission. |
+| `scene.world`, `scene.diorama` | Bake mesh objects into a native splat world, or load an authored diorama definition with graph parameters. Pass camera, lights, palette, look or a native textured surface batch through the world’s options. |
+| `scene.render` | Render a native world using optional camera and light overrides. Choose `options.width`, `height` and transparency. Captures a selected array of [art pass names](art-passes.md), including the `environment` shortcut. |
+| `scene.pass` | Extract one pass from either renderer. `value` is an RGBA preview. `data` preserves numeric channels. `valid` identifies available depth or position samples, and `report` contains ranges and available ID labels. |
+
+Graph exports require finite JSON numbers. The depth `data` port replaces
+empty pixels with `options.emptyDepth` (default `1e9`), and the `valid` port
+marks those pixels with zero. Use the renderer’s `frame.passes` in Node to
+read the original buffers. To request motion, use a prior
+`scene.render` with `captureMotion: true` in its options and connect its
+`motionReference` to the next render’s `options.motionFrom`.
+
+### 2D skeletal sprites
+
+Bind a `source` raster with `rig.bindSprite`. Bones use named `id`, optional
+`parent`, and absolute rest-space `pivot` and `tip` in top-down pixels.
+Use the built-in grid or supply a triangular mesh in the same pixel
+coordinates. Supply named `weights` per vertex or use nearest-segment
+weights with up to four influences. The bind is editable JSON.
+
+Use `rig.pose` to sample per-bone key arrays on the project clock. Each key
+has `time` and optional `angle` (radians, clockwise), `translate` (pixels),
+`scale`, and `ease`. Transforms inherit motion from parents.
+`rig.skinSprite` deforms the mesh and samples the original sprite through
+Ink’s inverse raster warp. It returns the posed image, UV field, deformed
+vertices and joint positions. Set the crop and filter in its options.
+The native warp resolves overlapping triangles in index order.
+
+The Relay Foundry example uses two kinds of mesh extraction in one lit
+scene, shows the direct signed-field render, exports render passes and
+animates an independently skinned sprite.
+
+```sh
+node examples/graph-3d-rig.cjs graph-3d-review
+ink-studio graph run graph-3d-review/relay-foundry.json --at 1.13 --out graph-3d-review/graph
+```
+
 ## Geometry and attributes
 
 `geometry.meshPaths(mesh, { sources, edgeCost, maxCost })` supports native and imported indexed meshes. It returns per-vertex distances and predecessors, plus `path(vertex)`, `curves(vertices)` and a sampled `distanceAt(point)` field. The cost function receives positions, vertex IDs, length and adjacent faces. Return infinity to block an edge.
