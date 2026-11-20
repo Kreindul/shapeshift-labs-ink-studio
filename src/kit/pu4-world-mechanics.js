@@ -67,7 +67,9 @@
     check([start,jointSpecs,forceSpecs].every(group=>record(group)&&Object.keys(group).length<=512&&Object.keys(group).every(id)),
       'Mechanics needs bounded body, joint and force tables');
     const richer=fabricFields.length>0||Object.values(start).some(item=>item?.collider!==undefined||item?.structure!==undefined);
-    const continuous=config.continuous??richer, advanced=richer||continuous, iterations=config.contactIterations??10;
+    const local=config.gravityField!==undefined;
+    check(!local||typeof config.gravityField==='string','Invalid mechanics gravity field');
+    const continuous=config.continuous??(richer||local), advanced=richer||continuous||local, iterations=config.contactIterations??10;
     check((config.continuous===undefined||typeof config.continuous==='boolean')&&Number.isSafeInteger(iterations)&&
       iterations>=1&&iterations<=32,'Invalid mechanical contact controls');
     const initialBodies={}, initials={}, inputs={}, outputs={}, claimed=new Map(), driveOrder=[], mountOrder=[];
@@ -108,6 +110,8 @@
       check(record(item)&&vector(item.position??zero)&&
         vector(item.velocity??zero)&&vector(item.angular??zero)&&Number.isFinite(item.mass??1)&&(item.mass??1)>0,
         'Invalid body ' + key);
+      check(item.gravityAlign===undefined||local&&Number.isFinite(item.gravityAlign)&&item.gravityAlign>=0&&item.gravityAlign<=1000,
+        'Invalid body gravity alignment '+key);
       let half=item.half;
       if(item.collider!==undefined){
         check(half===undefined&&item.surfaceState===undefined,'A shaped collider defines its own dimensions and surface');
@@ -191,7 +195,9 @@
         vector(spec.axis??up)&&V.len(spec.axis??up)>1e-8&&vector(spec.at??zero)&&
         Number.isFinite(spec.magnitude??1)&&(spec.magnitude??1)>=0&&
         Number.isFinite(spec.radius??.3)&&(spec.radius??.3)>0&&
-        (spec.kind!=='buoyancy'||typeof spec.field==='string')&&
+        (spec.kind!=='buoyancy'||typeof spec.field==='string'&&
+          (spec.displacement===undefined||Number.isFinite(spec.displacement)&&spec.displacement>0)&&
+          (spec.density===undefined||Number.isFinite(spec.density)&&spec.density>=0))&&
         (spec.kind!=='sail'||typeof spec.field==='string'&&spec.field.length>0),'Invalid force module '+key);
       inputs['force.'+key]={type:'number',default:spec.input??(spec.kind==='sail'?1:0)};
     }
@@ -200,6 +206,9 @@
       Number.isFinite(config.drag??.08)&&(config.drag??.08)>=0,'Invalid mechanical world');
     const sails = Object.values(forceSpecs).filter(spec => spec.kind==='sail');
     const windSampler = (query,spec) => query.sampler(spec.field,{type:'vec3',units:spec.units??'world/s'});
+    const gravity=config.gravity??[0,-9.81,0];
+    const gravityAt=(ctx,point)=>local?W.gravity.sample(ctx.query,config.gravityField,point,gravity):
+      {up,acceleration:gravity,buoyancy:1,angularVelocity:zero};
     function ground(context,point) {
       const sampled=config.terrain&&context.query.probe(config.terrain,point);
       return sampled?.status==='ok'&&Number.isFinite(sampled.value)?sampled.value:config.ground??0;
@@ -267,7 +276,8 @@
           requested=(clamp(s.value+raw*ctx.dt,min,max)-s.value)/ctx.dt;
           if(spec.gravityLoad&&requested){
             const axis=M.app(state.bodies[spec.parent]?.rotation??M.id(),V.norm(spec.axis??up));
-            gravity=Math.max(0,-Math.sign(requested)*V.dot(config.gravity??[0,-9.81,0],axis))*(liftMass[spec.child]??0);
+            const acceleration=gravityAt(ctx,state.bodies[spec.child]?.position??zero).acceleration;
+            gravity=Math.max(0,-Math.sign(requested)*V.dot(acceleration,axis))*(liftMass[spec.child]??0);
             demand[root]+=gravity;
             if(loading&&gravity)loading[root].push({joint:key,load:gravity,gravity:true,axis});
           }
@@ -413,7 +423,19 @@
           }
         }
       }
-      function wheelSupport(point,radius,root) {
+      function wheelSupport(point,radius,root,axis) {
+        if(local){
+          const from=V.mad(point,axis,.045), down=V.mul(axis,-1);
+          let best=null;
+          for(const body of Object.values(bodies)){
+            if(roots[body.id]===root)continue;
+            for(const hit of W.colliders.ray(body,from,down,radius+.125)){
+              if(V.dot(hit.normal,axis)>.4&&(!best||hit.distance-.045<best.gap))
+                best={gap:hit.distance-.045,at:hit.point,support:body};
+            }
+          }
+          return best;
+        }
         let y=ground(ctx,point), support=null;
         if(advanced){
           const [x,,z]=point, low=point[1]-radius-.09, high=point[1]+.04;
@@ -431,7 +453,7 @@
           }
         }
         const at=[point[0],y,point[2]];
-        return {y,at,support};
+        return {y,gap:point[1]-y,at,support};
       }
       for(const [key,spec] of Object.entries(forceSpecs)){
         const body=bodies[spec.body], root=roots[spec.body];
@@ -439,18 +461,28 @@
         if(!body||!dynamic&&!own(structures,spec.body))continue;
         const point=V.add(body.position,M.app(body.rotation,durability.bendPoint(body,spec.at??zero)));
         let wheel;
+        const frame=gravityAt(ctx,point);
         let direction=M.app(body.rotation,V.norm(spec.axis??up)), input=clamp(ctx.input['force.'+key],-1,1);
         if(spec.kind==='wheel'){
           const radius=spec.radius??.3;
-          wheel=wheelSupport(point,radius,root);
-          if(point[1]-wheel.y>radius+.08)continue;
-          direction=V.norm([direction[0],0,direction[2]],[1,0,0]);
+          wheel=wheelSupport(point,radius,root,frame.up);
+          if(!wheel||wheel.gap>radius+.08)continue;
+          direction=V.norm(W.gravity.tangent(direction,frame.up),local?V.perp(frame.up):[1,0,0]);
         }
+        let capacity=spec.magnitude??1;
         if(spec.kind==='buoyancy'){
           const read=ctx.query.probe(spec.field,point);
           if(read.status!=='ok')continue;
-          direction=up;
-          input=clamp((read.value.surface-point[1])/(spec.radius??.3),0,1);
+          direction=frame.up;
+          const value=read.value, depth=typeof value==='number'?value:value?.depthAtPoint??(value?.surface-point[1]);
+          if(!Number.isFinite(depth))continue;
+          input=clamp(depth/(spec.radius??.3),0,1);
+          if(spec.displacement!==undefined){
+            const density=spec.density??value?.density??1;
+            if(!Number.isFinite(density)||density<0)continue;
+            capacity=density*spec.displacement*Math.max(0,-V.dot(frame.acceleration,frame.up));
+          }
+          capacity*=frame.buoyancy;
         }
         if(spec.kind==='sail'){
           const wind=windSampler(ctx.query,spec)(...point);
@@ -460,13 +492,13 @@
           const speed=V.dot(direction,apparent);
           input=Math.max(0,input)*speed*Math.abs(speed);
         }
-        let magnitude=(spec.magnitude??1)*input;
+        let magnitude=capacity*input;
         if(spec.kind==='wheel'){
           const fit=wheel.support?bodyMaterial(ctx,wheel.support):groundMaterial(ctx,advanced?wheel.at:point);
           const coefficient=friction(bodyMaterial(ctx,body)?.friction,fit?.friction);
           if(coefficient!==undefined) {
             if(dynamic)(rolling??=new Set()).add(root);
-            const limit=coefficient*body.mass*Math.max(0,-(config.gravity??[0,-9.81,0])[1]);
+            const limit=coefficient*body.mass*Math.max(0,-V.dot(frame.acceleration,frame.up));
             magnitude=clamp(magnitude,-limit,limit);
           }
         }
@@ -475,22 +507,23 @@
         if(!dynamic)continue;
         force[root]=V.add(force[root]??zero,load);
         const moment=V.cross(V.sub(point,bodies[root].position),load);
-        torque[root]=V.add(torque[root]??zero,spec.kind==='wheel'?[0,moment[1],0]:moment);
+        torque[root]=V.add(torque[root]??zero,spec.kind==='wheel'?V.mul(frame.up,V.dot(moment,frame.up)):moment);
       }
       const drag=Math.exp(-(config.drag??.08)*ctx.dt), rootKeys=Object.keys(masses).sort();
       for(const key of rootKeys){
         const body=bodies[key];
         if(body.fixed)continue;
-        const mass=masses[key], a=V.mad(config.gravity??[0,-9.81,0],force[key]??zero,1/mass);
+        const mass=masses[key], applied=V.mul(force[key]??zero,1/mass);
         const inertia=mass*(body.half.reduce((sum,n)=>sum+n*n,0))*.3;
-        const velocity=V.mul(V.mad(body.velocity,a,ctx.dt),drag);
+        const velocity=V.mul(local?W.gravity.advance(gravityAt(ctx,body.position),body.velocity,ctx.dt,applied):
+          V.mad(body.velocity,V.mad(gravity,force[key]??zero,1/mass),ctx.dt),drag);
         const angular=V.mul(V.mad(body.angular,torque[key]??zero,ctx.dt/Math.max(inertia,.01)),drag);
         bodies[key]=advanced?{...body,velocity,angular}:
           {...body,velocity,angular,position:V.mad(body.position,velocity,ctx.dt),rotation:spin(body.rotation,angular,ctx.dt)};
       }
       let motion, swept;
       if(advanced){
-        const plane=!config.terrain?config.ground??0:undefined, sounded=new Set();
+        const plane=!local&&!config.terrain?config.ground??0:undefined, sounded=new Set();
         const onContact=state.beams?(a,b,normal,parts,impulse)=>{
           if(!own(structures,a)&&!own(structures,b))return;
           const left=W.colliders.geometry(bodies[a]).parts[parts[0]];
@@ -528,7 +561,14 @@
         else motion.move(ctx.dt);
         for(const key of rootKeys){
           const body=bodies[key];
-          if(!body.fixed)bodies[key]={...body,rotation:spin(body.rotation,body.angular,ctx.dt)};
+          if(body.fixed)continue;
+          let rotation=spin(body.rotation,body.angular,ctx.dt);
+          const align=start[body.origin]?.gravityAlign;
+          if(align){
+            const axis=gravityAt(ctx,body.position).up, localUp=M.app(rotation,up);
+            rotation=M.mul(W.gravity.turn(localUp,axis,-Math.expm1(-align*ctx.dt)),rotation);
+          }
+          bodies[key]={...body,rotation};
         }
       }
       placeMounted(bodies,joints,ctx.dt,state.bodies);
@@ -539,7 +579,7 @@
         if(velocity[axis]*amount<0) velocity[axis]*=collision;
         bodies[key]={...body,position,velocity};
       }
-      for(const key of rootKeys){
+      if(!local)for(const key of rootKeys){
         if(bodies[key].fixed)continue;
         let lift=0, contact, supportBody;
         for(const child of members.get(key)){
@@ -648,9 +688,10 @@
         const body=bodies[spec.body], old=state.bodies[spec.body];
         if(!body||!old)continue;
         const at=spec.at??zero, point=V.add(body.position,M.app(body.rotation,at));
-        const prev=V.add(old.position,M.app(old.rotation,at)), seat=wheelSupport(point,spec.radius??.3,roots[body.id]);
-        const traveled=Math.hypot(point[0]-prev[0],point[2]-prev[2]);
-        if(point[1]-seat.y<=(spec.radius??.3)+.09&&traveled>1e-5) {
+        const axis=gravityAt(ctx,point).up, prev=V.add(old.position,M.app(old.rotation,at));
+        const seat=wheelSupport(point,spec.radius??.3,roots[body.id],axis);
+        const traveled=V.len(W.gravity.tangent(V.sub(point,prev),axis));
+        if(seat&&seat.gap<=(spec.radius??.3)+.09&&traveled>1e-5) {
           const profile=seat.support?bodyMaterial(ctx,seat.support):groundMaterial(ctx,seat.at);
           const cue=profile?.sounds?.roll;
           contacts.push({entity:body.entity,point:seat.at,support:seat.support?.id??'ground',
@@ -824,7 +865,7 @@
       if(broad)broad.overlap([x-pad,low-pad,z-pad],[x+pad,high+pad,z+pad],row=>visit(row.value));
       else for(const body of Object.values(state.bodies))visit(body);
       const floor=ground(context,target.point);
-      if(floor>=low&&floor<=high){
+      if(!local&&floor>=low&&floor<=high){
         const surface=groundMaterial(context,[x,floor,z]);
         rows.push({y:floor,normal:up,id:'ground',material:surface?.id??'ground',
           ...(surface?.sounds?.step&&{cue:surface.sounds.step})});
@@ -849,11 +890,12 @@
       return count?{status:'ok',value,body:nearest}:Q.missing('no bodies','empty');
     }
     const structural=Object.keys(structures).length>0;
-    return {...((config.surface!==undefined||fabricFields.length||routeFields.length||structural)&&
-      {dependencies:{reads:[config.surface,...fabricFields,...routeFields].filter(Boolean),
+    return {...((config.surface!==undefined||fabricFields.length||routeFields.length||structural||local)&&
+      {dependencies:{reads:[config.surface,config.gravityField,...fabricFields,...routeFields].filter(Boolean),
         ...(structural&&{writes:['bodies','support','clearance']})}}),
-    ...((sails.length||config.surface!==undefined||fabricFields.length||routeFields.length) && {checkFields(query) {
+    ...((sails.length||config.surface!==undefined||fabricFields.length||routeFields.length||local) && {checkFields(query) {
       for (const sail of sails) windSampler(query,sail);
+      if(local)W.gravity.checkField(query,config.gravityField);
       W.materials.checkSurface(query,config.surface);
       const names=fabricFields.map(field=>{
         const descriptor=query.field(field);
@@ -968,7 +1010,19 @@
       clearance:{type:'number',units:'world',read:context=>obstruction(context,context.args.exclude)},
       support:{type:'records',units:'world',read:support}
     },
-    traces:{support:{run(context){
+    traces:{ray:{run({state,target,args}){
+      const {direction,distance:limit=100}=args;
+      check(target.point&&vector(direction)&&V.len(direction)>1e-8&&Number.isFinite(limit)&&limit>=0&&limit<=1e5,
+        'Mechanical ray needs a start, direction and bounded distance');
+      const axis=V.norm(direction);
+      let best=null;
+      for(const body of Object.values(state.bodies)){
+        if(body.id===args.exclude||body.entity===args.exclude)continue;
+        const hit=W.colliders.ray(body,target.point,axis,best?.distance??limit)[0];
+        if(hit&&(!best||hit.distance<best.distance))best=hit;
+      }
+      return best?Q.ok(best):Q.missing('no surface along ray','empty');
+    }},support:{run(context){
       const first=support(context);
       if(first.status!=='ok'||!first.value.length)return first;
       let body=first.value[0].id;

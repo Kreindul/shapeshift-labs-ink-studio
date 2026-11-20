@@ -1238,6 +1238,75 @@ ink-studio probe workshop.run.json --field power/energy
 ink-studio sim replay workshop.run.json
 ```
 
+## Local gravity and buoyancy frames
+
+A `gravity` system defines a spatial frame with unit `up`, an
+`acceleration` in `world/s^2`, a unitless `buoyancy` multiplier, and
+`angular-velocity` in `rad/s`. Probe `frame` for all four together.
+The system has a default `frame` and optional XYZ `regions`. The last
+matching region supplies the local frame.
+
+| Frame kind | Settings |
+| --- | --- |
+| `uniform` | Set a constant `acceleration`. Up defaults to the opposite direction, with world up as the zero-gravity fallback. |
+| `radial` | Set `center` and `strength`. Use constant gravity or `falloff: "inverse-square"` with a `referenceRadius`. Set `outward` for gravity pointing away from the center. |
+| `rotation` | Set `center`, rotation `axis`, and signed `omega` in radians per second. Apparent gravity points outward from the axis. Moving actors and bodies use the frame's Coriolis term when `coriolis` is enabled (the default). |
+
+Every frame accepts an explicit `up` and `buoyancy`. Bind
+`accelerationField`, `upField`, or `buoyancyField` to typed spatial
+fields to override values where those fields provide a reading. For
+example, a wind-tunnel scene can author a constant sideways gravity or
+a region with a reduced buoyancy multiplier.
+
+Set `gravityField` on `mechanics` to use a frame or an XYZ acceleration
+field. Rigid bodies use the same collider contacts with this mode and
+take their floors from scene colliders. Wheel supports are sampled
+along local down. Wheel traction and yaw use the local tangent plane.
+Set a free body's `gravityAlign` to a rate per second to turn its Y axis
+toward local up. Ordinary bodies can tumble. Powered slider weight
+also reads local acceleration.
+
+A buoyancy force accepts a numeric depth field in world units, positive
+below the surface, or a record with `depthAtPoint`. The old Y-up
+`surface` record is also supported. Force points along local up and
+scales with the frame's buoyancy multiplier. Set `displacement` and
+`density` to use displaced-fluid weight, or supply a fixed
+`magnitude`. The force reaches full displacement at the configured
+`radius` depth.
+
+The `characters` system wraps the same capsule controller. Configure
+`gravity`, `clearance`, optional `support` (a directional trace such
+as `rig/ray`), and optional `medium` (water depth or a medium record).
+Each entry in `characters` supplies a starting XYZ `position`,
+optional `forward`, and ordinary character `tuning`. Drive
+`move.<id>` using its X and Z components as right and backward in
+the transported frame. Set `worldMove` to use a world XYZ direction
+projected onto the tangent plane instead. Use `vertical.<id>`,
+`jump.<id>`, and `climb.<id>` for the remaining controls. Probe
+`actors` or render that field with `visual.fields.characters`.
+
+In JavaScript, pass `W.characters.fromQuery(query, bindings)` to
+`controller.step`, or supply a world adapter with `gravityAt(point)`,
+`clearance(point)`, and optional `supportAlong(origin, direction, distance)`
+and `mediumAt(point)`. Custom movement callbacks in this mode operate
+in the local tangent frame. The returned actor, contacts and motion
+segments use world coordinates. Create a follow camera with
+`W.cameras.follow({localUp:true})` to transport its orbit with the actor.
+
+The [pocket moon](../examples/world-pocket-moon.json) shows a surveyor
+and rover crossing the same sphere. The [rotating dock](../examples/world-rotating-dock.json)
+shows a hull floating against centrifugal gravity.
+
+```sh
+ink-studio sim run examples/world-pocket-moon.json --ticks 190 --record moon.run.json
+ink-studio probe moon.run.json --field crew/actors
+ink-studio probe moon.run.json --field moon/frame --entity surveyor
+ink-studio trace moon.run.json rig/ray --at 3,0,0 --args '{"direction":[-1,0,0],"distance":1}'
+ink-studio sim run examples/world-rotating-dock.json --ticks 150 --record dock.run.json
+ink-studio probe dock.run.json --field tank/depth --entity hull
+ink-studio sim replay moon.run.json
+```
+
 ## Extend the runtime in JavaScript
 
 ```js

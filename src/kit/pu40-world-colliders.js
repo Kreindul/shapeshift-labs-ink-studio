@@ -237,15 +237,18 @@
     if(length>eps)intersection(V.sub(from,b),dir,t=>axial+along*t>=length-eps);
     return best;
   }
-  function columns(body,x,z,low,high) {
-    const {parts}=geometry(body), origin=[x,high,z], span=high-low;
+  function ray(body,origin,axis,span) {
+    const {parts}=geometry(body);
     return parts.flatMap(part=>{
-      const hit=part.kind==='poly'?rayPoly(part,origin,down,span):rayCapsule(part,origin,down,span);
-      if(!hit?.normal||hit.normal[1]<=eps)return [];
-      const point=V.mad(origin,down,hit.t);
+      const hit=part.kind==='poly'?rayPoly(part,origin,axis,span):rayCapsule(part,origin,axis,span);
+      if(!hit?.normal||V.dot(hit.normal,axis)>=-eps)return [];
+      const point=V.mad(origin,axis,hit.t);
       if(parts.some(other=>other!==part&&partDistance(other,point,true)<-eps))return [];
-      return [{y:point[1],normal:hit.normal,id:body.id,material:body.material,part:part.part}];
-    }).sort((a,b)=>b.y-a.y||a.part-b.part);
+      return [{point,distance:hit.t,normal:hit.normal,id:body.id,material:body.material,part:part.part}];
+    }).sort((a,b)=>a.distance-b.distance||a.part-b.part);
+  }
+  function columns(body,x,z,low,high) {
+    return ray(body,[x,high,z],down,high-low).map(({point,distance,...hit})=>({y:point[1],...hit}));
   }
   function closestSegments(p,q,r,s) {
     const a=V.sub(q,p), b=V.sub(s,r), v=V.sub(p,r), aa=length2(a), bb=length2(b),
@@ -370,5 +373,5 @@
     const hit=rayCapsule({points:[a,b],radius},origin,down,origin[1]-low);
     return hit&&{point:V.mad(origin,down,hit.t),normal:hit.normal};
   }
-  W.colliders=Object.freeze({local,geometry,distance,columns,contact,sweep,capsuleColumn});
+  W.colliders=Object.freeze({local,geometry,distance,columns,ray,contact,sweep,capsuleColumn});
 })(KIT);

@@ -191,19 +191,27 @@
       hasSurface ||= Boolean(finish.surface);
       S.box(point,half,finish,{res:resolution*.72,tag:id,target:targetFor(id)});
     }
-    for (const field of fields.agents??[]) {
+    const agentFields=[fields.agents,fields.characters].filter(Boolean).flat();
+    for (const field of agentFields) {
       const reading=query.probe(field);
       if (reading.status!=='ok') continue;
       for (const [id,agent] of Object.entries(reading.value)) {
         if (!agent.position || agent.mode==='dormant') continue;
-        const r=agent.radius??.16, p=agent.position, face=agent.direction??[1,0,0];
+        const r=agent.radius??.16, axis=agent.up??[0,1,0], face=agent.direction??[1,0,0];
+        const p=agent.bodyCenter?V.mad(agent.position,axis,-agent.height*.5):agent.position;
         const binding=looks.forEntity(agent.entity??id);
         const body=looks.material({r:agent.look??[4,5,6,24],materialId:'agent'},binding);
         const head=looks.material({r:[19,20,23],materialId:'agent'},binding);
         hasSurface ||= Boolean(body.surface);
         const target=targetFor(agent.entity??id);
-        S.ball(V.add(p,[0,r*.7,0]),[r*1.27,r*.78,r*.76],body,{objectId:id,target,res:resolution*.64});
-        S.ball(V.mad(V.add(p,[0,r,0]),face,r),r*.48,head,{objectId:id,target,res:resolution*.64});
+        if(agent.bodyCenter){
+          const turn=W.gravity.basis(axis,face), ax=[0,1,2].map(i=>[turn[i],turn[i+3],turn[i+6]]);
+          S.ball(V.mad(p,axis,agent.height*.40),[r*.85,agent.height*.34,r*.76],body,{ax,objectId:id,target,res:resolution*.64});
+          S.ball(V.mad(V.mad(p,axis,agent.height-r*.56),face,r*.16),r*.66,head,{objectId:id,target,res:resolution*.64});
+        }else{
+          S.ball(V.add(p,[0,r*.7,0]),[r*1.27,r*.78,r*.76],body,{objectId:id,target,res:resolution*.64});
+          S.ball(V.mad(V.add(p,[0,r,0]),face,r),r*.48,head,{objectId:id,target,res:resolution*.64});
+        }
         const toes=looks.material({r:[19,20,21,22],materialId:'agent'},binding);
         for(const limb of agent.limbs??[]){
           const top=V.add(limb.point,[0,r*.42,0]);

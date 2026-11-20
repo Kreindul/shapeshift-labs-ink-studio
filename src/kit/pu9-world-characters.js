@@ -1,4 +1,4 @@
-/* Optional Y-up capsule controller over the shared terrain and medium queries. */
+/* Capsule controller over shared terrain, medium and gravity queries. */
 (function (K) {
   const W = K.world, V = K.V, P = K.procedural;
   const { clone, freeze } = P.data;
@@ -15,12 +15,39 @@
   const close = (a, b) => V.dist(a, b) <= 1e-5;
   const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 
-  function fromBiome(frame, { supportPadding = 0.24 } = {}) {
+  function fromBiome(frame, { supportPadding = 0.24, gravityAt } = {}) {
     if (typeof frame?.supports !== 'function' || typeof frame.distance !== 'function' ||
-        typeof frame.view?.mediumAt !== 'function' || !finite(supportPadding) || supportPadding < 0)
+        typeof frame.view?.mediumAt !== 'function' || !finite(supportPadding) || supportPadding < 0 ||
+        gravityAt!==undefined&&typeof gravityAt!=='function')
       throw new TypeError('Expected a prepared biome frame and nonnegative support padding');
     return Object.freeze({ supports: (x, z, low, high) => frame.supports(x, z, low, high),
-      clearance: point => frame.distance(...point), mediumAt: point => frame.view.mediumAt(...point), supportPadding });
+      clearance: point => frame.distance(...point), mediumAt: point => frame.view.mediumAt(...point),
+      ...(gravityAt&&{gravityAt}),supportPadding });
+  }
+  function fromQuery(query,{gravity,clearance,support,medium,supportPadding=0,exclude}={}){
+    if(typeof query?.probe!=='function'||typeof clearance!=='string'||typeof gravity!=='string'||
+        [support,medium].some(field=>field!==undefined&&typeof field!=='string')||
+        !finite(supportPadding)||supportPadding<0)throw new TypeError('A local character adapter needs gravity and clearance fields');
+    return Object.freeze({
+      gravityAt:point=>W.gravity.sample(query,gravity,point),
+      clearance(point){
+        const read=query.probe(clearance,point,{exclude});
+        return read.status==='ok'?read.value:Infinity;
+      },
+      ...(support&&{supportAlong(origin,axis,distance){
+        const hit=query.trace(support,origin,{direction:axis,distance,exclude});
+        return hit.status==='ok'?hit.value:null;
+      }}),
+      ...(medium&&{mediumAt(point){
+        const read=query.probe(medium,point);
+        if(read.status!=='ok')return air;
+        const value=read.value;
+        if(typeof value==='number')return value>0?{kind:'water'}:air;
+        const kind=value.kind??(point[1]<value.surface?'water':'air');
+        const flow=value.current??value.velocity;
+        return {...value,kind,...(flow&&{current:flow.length===2?[flow[0],0,flow[1]]:flow})};
+      }}),supportPadding
+    });
   }
   function steer(from, to, amount) {
     const delta = V.sub(to, from), length = V.len(delta);
@@ -54,7 +81,8 @@
 
     function state(actor = {}) {
       if (!xyz(actor.position) || actor.velocity !== undefined && !xyz(actor.velocity) || actor.forward !== undefined && !xyz(actor.forward) ||
-          actor.up !== undefined && !xyz(actor.up) || actor.mode !== undefined &&
+          actor.up !== undefined && !xyz(actor.up) || actor.gravityForward!==undefined&&!xyz(actor.gravityForward) ||
+          actor.mode !== undefined &&
           !standard.has(actor.mode) && !extensions.has(actor.mode) ||
           actor.jumpHeld !== undefined && typeof actor.jumpHeld !== 'boolean')
         throw new TypeError('A character needs a position, finite vectors and a known movement mode');
@@ -179,7 +207,7 @@
       return freeze({ ...clone(raw), move: [move[0] / length, 0, move[1] / length],
         vertical: clamp(vertical, -1, 1), jump, climb });
     }
-    function step(actor, raw, seconds, world) {
+    function stepUpright(actor, raw, seconds, world) {
       const ground = queries(world), input = control(raw ?? {});
       if (!finite(seconds) || seconds < 0 || Math.ceil(seconds / t.maxStep) > t.maxSteps)
         throw new RangeError('Character step duration exceeds its time budget');
@@ -226,7 +254,7 @@
           const swimming = mode === 'swim';
           if (swimming) {
             const desired = V.add(V.mul(input.move, t.swimSpeed), V.mul(sampled.current ?? zero, t.currentScale));
-            desired[1] += (input.jump ? 1 : input.vertical) * t.swimVerticalSpeed + t.buoyancy;
+            desired[1] += (input.jump ? 1 : input.vertical) * t.swimVerticalSpeed + t.buoyancy*(world.localBuoyancy??1);
             velocity = steer(velocity, desired, t.swimAcceleration * dt);
           } else {
             const speed = steer(horizontal(velocity), V.mul(input.move, t.walkSpeed),
@@ -247,7 +275,11 @@
             } else mode = 'air';
           }
           if (mode !== 'ground') {
-            if (!swimming) velocity[1] = Math.max(-t.terminalSpeed, velocity[1] - t.gravity * dt);
+            if (!swimming) {
+              if(world.localAcceleration)velocity=V.mad(velocity,world.localAcceleration,dt);
+              else velocity[1]-=t.gravity*dt;
+              velocity[1]=Math.max(-t.terminalSpeed,velocity[1]);
+            }
             const vertical = () => {
               const dy = velocity[1] * dt;
               const target = !swimming && dy <= 0 && seated(world, ground, current, p, 0.008, -dy + 0.008 + padding);
@@ -286,6 +318,68 @@
       return freeze({ actor: current, segments, events, support, blocked,
         medium: clone(medium(world, current.position)), eyes: clone(medium(world, supportHeight(current, t.eyes))) });
     }
+    function localWorld(world,origin,frame,heading,velocity){
+      const {M}=K, G=W.gravity, matrix=G.basis(frame.up,heading), inverse=M.tr(matrix);
+      const toVector=v=>M.app(inverse,v), fromVector=v=>M.app(matrix,v);
+      const toPoint=p=>toVector(V.sub(p,origin)), fromPoint=p=>V.add(origin,fromVector(p));
+      const adapter={
+        supports(x,z,low,high){
+          const start=fromPoint([x,high,z]), down=V.mul(frame.up,-1);
+          const hit=world.supportAlong?world.supportAlong(start,down,high-low):G.ray(world.clearance,start,down,high-low);
+          if(!hit)return [];
+          return [{y:toPoint(hit.point)[1],normal:toVector(hit.normal),id:hit.id??'surface',material:hit.material}];
+        },
+        clearance:p=>world.clearance(fromPoint(p)),
+        mediumAt(p){
+          const hit=medium(world,fromPoint(p));
+          return hit.current?{...hit,current:toVector(hit.current)}:hit;
+        },
+        supportPadding:world.supportPadding,
+        localAcceleration:toVector(G.inertial(frame,velocity)),localBuoyancy:frame.buoyancy
+      };
+      return {adapter,toVector,fromVector,fromPoint};
+    }
+    function step(actor,raw={},seconds,world){
+      if(typeof world?.gravityAt!=='function')return stepUpright(actor,raw,seconds,world);
+      if(typeof world.clearance!=='function'||world.supportAlong!==undefined&&typeof world.supportAlong!=='function')
+        throw new TypeError('Local gravity needs clearance and optional directional support');
+      const count=Math.ceil(seconds/t.maxStep);
+      if(!finite(seconds)||seconds<0||count>t.maxSteps)throw new RangeError('Character step duration exceeds its time budget');
+      raw??={};
+      if(raw.moveWorld!==undefined&&!xyz(raw.moveWorld))throw new TypeError('World movement needs a finite XYZ vector');
+      const G=W.gravity, {M}=K, dt=count?seconds/count:0;
+      let current=state(actor), support=null, blocked=false;
+      const segments=[],events=[];
+      for(let tick=0;tick<count;tick++){
+        const frame=G.normalize(world.gravityAt(current.position),[0,-t.gravity,0]);
+        const transport=G.turn(V.norm(current.up),frame.up);
+        const heading=V.norm(G.tangent(M.app(transport,current.gravityForward??current.forward),frame.up),V.perp(frame.up));
+        const velocity=current.mode==='ground'?M.app(transport,current.velocity):current.velocity;
+        const map=localWorld(world,current.position,frame,heading,velocity);
+        const {toVector,fromVector,fromPoint}=map;
+        const desired=raw.moveWorld===undefined?null:toVector(raw.moveWorld);
+        const input=desired?{...raw,move:[desired[0],desired[2]]}:raw;
+        const localVelocity=toVector(velocity);
+        if(current.mode==='ground')localVelocity[1]=0;
+        const upright={...current,position:zero,up:[0,1,0],velocity:localVelocity,forward:toVector(M.app(transport,current.forward))};
+        const result=stepUpright(upright,input,dt,map.adapter);
+        function fromActor(row){
+          const position=fromPoint(row.position), axis=G.normalize(world.gravityAt(position),[0,-t.gravity,0]).up;
+          const change=G.turn(frame.up,axis);
+          const speed=fromVector(row.velocity);
+          return {...row,position,up:axis,velocity:row.mode==='ground'?M.app(change,speed):speed,
+            forward:V.norm(G.tangent(M.app(change,fromVector(row.forward)),axis),V.perp(axis)),
+            gravityForward:M.app(change,heading)};
+        }
+        current=freeze(fromActor(result.actor));
+        support=result.support?{...result.support,foot:fromPoint(result.support.foot),normal:fromVector(result.support.normal)}:null;
+        blocked ||= result.blocked;
+        for(const row of result.segments)segments.push({previous:fromPoint(row.previous),actor:fromActor(row.actor)});
+        for(const row of result.events)events.push({...row,position:fromPoint(row.position)});
+      }
+      return freeze({actor:current,segments,events,support,blocked,medium:clone(medium(world,current.position)),
+        eyes:clone(medium(world,V.mad(current.position,current.up,height*t.eyes-half)))});
+    }
     async function cross(session, linkId, movement, { camera } = {}) {
       const link = session.linksFrom(session.current()?.id).find(row => row.id === linkId);
       if (!link?.sweep) return null;
@@ -299,10 +393,14 @@
       return Object.freeze({ status: 'blocked', actor, arrival: null });
     }
     return Object.freeze({ state, step, cross, fits(world, position) {
-      queries(world);
       if (!xyz(position)) throw new TypeError('A character capsule needs a finite center');
+      if(typeof world?.gravityAt==='function'){
+        const frame=W.gravity.normalize(world.gravityAt(position),[0,-t.gravity,0]);
+        return fits(localWorld(world,position,frame,[0,0,-1],zero).adapter,zero);
+      }
+      queries(world);
       return fits(world, position);
     }, tuning: t });
   }
-  W.characters = Object.freeze({ create, fromBiome });
+  W.characters = Object.freeze({ create, fromBiome, fromQuery });
 })(KIT);

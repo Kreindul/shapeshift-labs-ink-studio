@@ -59,9 +59,10 @@
     const visualLinks=world.visual?.fields?.routedLinks;
     const visualPipes=world.visual?.fields?.pipes;
     const visualPower=world.visual?.fields?.powerLines;
+    const visualCharacters=world.visual?.fields?.characters;
     const visualIce=world.visual?.fields?.ice;
     if (consumers.length || world.visual?.fields?.surface!==undefined || visualFabric!==undefined ||
-        visualLinks!==undefined || visualPipes!==undefined || visualPower!==undefined ||
+        visualLinks!==undefined || visualPipes!==undefined || visualPower!==undefined || visualCharacters!==undefined ||
         visualIce!==undefined || world.visual?.air!==undefined) {
       const query = Q.create({world},systems);
       for (const system of consumers) system.checkFields(query);
@@ -75,6 +76,8 @@
         typeof field==='string'&&query.field(field)?.role==='pipe-network-pipes'), 'Invalid visual pipe field');
       if(visualPower!==undefined)check((Array.isArray(visualPower)?visualPower:[visualPower]).every(field=>
         typeof field==='string'&&query.field(field)?.role==='power-lines'), 'Invalid visual power line field');
+      if(visualCharacters!==undefined)check((Array.isArray(visualCharacters)?visualCharacters:[visualCharacters]).every(field=>
+        typeof field==='string'&&query.field(field)?.role==='character-actors'), 'Invalid visual character field');
       if(visualIce!==undefined){
         const field=typeof visualIce==='string'&&query.field(visualIce);
         check(field?.type==='number'&&field.units==='world','Visual ice needs a numeric thickness field in world units');
