@@ -58,7 +58,9 @@
     const visualFabric=world.visual?.fields?.deformables;
     const visualLinks=world.visual?.fields?.routedLinks;
     const visualPipes=world.visual?.fields?.pipes;
-    if (consumers.length || world.visual?.fields?.surface!==undefined || visualFabric!==undefined || visualLinks!==undefined || visualPipes!==undefined) {
+    const visualIce=world.visual?.fields?.ice;
+    if (consumers.length || world.visual?.fields?.surface!==undefined || visualFabric!==undefined ||
+        visualLinks!==undefined || visualPipes!==undefined || visualIce!==undefined) {
       const query = Q.create({world},systems);
       for (const system of consumers) system.checkFields(query);
       W.materials.checkSurface(query,world.visual?.fields?.surface);
@@ -68,6 +70,10 @@
         typeof field==='string'&&query.field(field)?.role==='routed-links'), 'Invalid visual routed link field');
       if(visualPipes!==undefined)check((Array.isArray(visualPipes)?visualPipes:[visualPipes]).every(field=>
         typeof field==='string'&&query.field(field)?.role==='pipe-network-pipes'), 'Invalid visual pipe field');
+      if(visualIce!==undefined){
+        const field=typeof visualIce==='string'&&query.field(visualIce);
+        check(field?.type==='number'&&field.units==='world','Visual ice needs a numeric thickness field in world units');
+      }
     }
     const systemDependencies = Object.entries(systems).filter(([,system])=>system.dependencies !== undefined);
     let fieldQuery;

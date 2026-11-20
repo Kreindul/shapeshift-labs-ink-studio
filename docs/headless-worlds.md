@@ -1078,6 +1078,60 @@ ink-studio sim replay cellar.run.json
 ink-studio sim render cellar.run.json --colored --out cellar.png
 ```
 
+## Heat, moisture, and phase changes
+
+Set `thermal` on a `water` system to simulate temperature, liquid water,
+ice, and vapor on the same XZ cells. `initialTemperature` and
+`initialVapor` are bounds/value patches. An initial temperature below
+`freezingPoint` starts the cell's authored water as ice. Vapor and ice
+depths are water-equivalent. Ice stays in its cell and raises the floor
+seen by liquid flow. `bed` still exposes the editable ground. The
+`water` column exposes the floor above accumulated ice.
+
+Shallow-water face fluxes and pumps carry liquid enthalpy. Neighboring
+cells conduct heat and exchange vapor. Evaporation cools a wet cell.
+Condensation returns water and latent heat when the air holds more vapor
+than its temperature supports. The solver uses `latentFusion` to hold
+temperature at the freezing point until the phase change uses the
+available heat. `latentVaporization` sets the energy cost of drying.
+
+| Setting | Meaning |
+| --- | --- |
+| `ambientTemperature`, `ambientField` | Heat exchange with the air uses the `ambient` number input, initially `ambientTemperature`. A sampled numeric `degC` field can supply local air temperature. |
+| `heatCapacity`, `conductance`, `conductivity`, `waterHeatCapacity` | Ground heat capacity per area, heat exchange with air, heat exchange between neighbors, and water heat capacity per volume. |
+| `saturation`, `evaporation`, `condensation`, `vaporDiffusivity` | Saturated vapor inventory at the freezing point, drying and condensation rates, and the diffusivity of near-surface vapor. |
+| `materials` | Bounds and portable `material` asset IDs. A material's thermal capacity, ambient conductance, and drying rate override the corresponding defaults in its region. |
+| `sourceTemperature` | Temperature credited to rain and incoming water from transfer accounts. Outgoing water carries the donor's enthalpy. |
+
+The default heat constants are scaled for metres and joules. In scenes
+with other units or compressed time, set the coefficients together.
+Use `<water>/heat` with XZ `bounds` and signed `energy`
+to distribute heat over the selected cells. The phase model uses a
+shared cell temperature, a closed near-surface vapor inventory, and
+a saturation curve that scales with temperature.
+
+Set a gate's `iceClearance` to the ice thickness that jams it. Ice on
+either side reduces the opening, and a gate with both ice and silt
+clearance applies both restrictions per face. Hydraulic flow uses ice
+at the start of its step. `gates` exposes the commanded and effective
+opening, ice thickness, and jam state. History records `gate-frozen`
+and `gate-thawed`. Traversal sees the released water through the normal
+water query. Set `visual.fields.ice` to the thickness field for splats.
+
+Probe `temperature`, `ice`, `vapor`, `humidity`, `phase`, or
+`phase-state` at a point. The `heat` ledger accounts for energy added
+by the air, rain, transfers, and scheduled heat commands. The `mass`
+ledger still reports mobile liquid as `volume`, and adds `ice`,
+`vapor`, and `total` for the full water balance.
+
+```sh
+ink-studio sim run examples/world-thawing-ford.json --ticks 140 --record thawing-ford.run.json
+ink-studio probe examples/world-thawing-ford.json --ticks 35 --field river/gates --args '{"gate":"sluice"}'
+ink-studio probe thawing-ford.run.json --field river/heat
+ink-studio trace thawing-ford.run.json nav/route --at 1.7,0.66,-1.25 --args '{"to":[1.7,0.66,1.25],"radius":0.1,"maxWade":0.18,"maxSlope":10}'
+ink-studio sim replay thawing-ford.run.json
+```
+
 ## Extend the runtime in JavaScript
 
 ```js

@@ -46,7 +46,9 @@
     if(route)return {...info,points:route.points};
     let blocked=null;
     for(let i=0;i<=48;i++){
-      const p=V.lerp(start,end,i/48), solid=read(ctx,config.clearance,V.add(p,[0,radius,0]),{exclude});
+      const p=V.lerp(start,end,i/48);
+      p[1]=height(p[0],p[2]);
+      const solid=read(ctx,config.clearance,V.add(p,[0,radius,0]),{exclude});
       if(solid?.status==='ok'&&solid.value<radius){
         blocked={kind:'clearance',point:p,body:solid.body??null};
         break;

@@ -69,11 +69,12 @@
       });
       bed=changed;
     }
-    function step(duration,{rain,drain,friction=0.13,opening,transfers=[],transport}={}){
+    function step(duration,{rain,drain,friction=0.13,opening,transfers=[],transport,bedOffset}={}){
 
       if(!number(duration,0,120)||!number(friction,0,1e6)||
         (opening!==undefined&&typeof opening!=='function')||!Array.isArray(transfers)||transfers.length>4096||
         (transport!==undefined&&!['begin','face','advect','drain','pump','settle'].every(key=>typeof transport?.[key]==='function'))||
+        (bedOffset!==undefined&&(!Array.isArray(bedOffset)||bedOffset.length!==size||!bedOffset.every(v=>number(v,0,1e7))))||
         transfers.some(p=>!p||!integer(p.from,0,size-1)||!integer(p.to,0,size-1)||p.from===p.to||
           !open[p.from]||!open[p.to]||!number(p.rate,0,1e9))||
         [rain,drain].some(v=>v!==undefined&&typeof v!=='function'&&!number(v,0,1e4)))
@@ -81,11 +82,12 @@
       if(!duration)return snapshot();
       const depth=layer.depth.slice(),mx=layer.x.slice(),mz=layer.z.slice(),
         dh=new Float64Array(size),du=new Float64Array(size),dv=new Float64Array(size),heightmap=transport?bed.slice():bed;
+      const floor=i=>heightmap[i]+(bedOffset?.[i]??0);
       let elapsed=0,substeps=0,totalRain=0,totalDrain=0,totalMoved=0;
       function faceFlux(left,right,axis,fraction){
         if(!fraction||left<0&&right<0)return;
         const li=left<0?right:left,ri=right<0?left:right,
-          a=depth[li],b=depth[ri],az=heightmap[li],bz=heightmap[ri],
+          a=depth[li],b=depth[ri],az=floor(li),bz=floor(ri),
           surface=Math.max(az,bz),al=Math.max(0,a+az-surface),br=Math.max(0,b+bz-surface);
         if(a<=0&&b<=0)return;
         let ax=a>dry?mx[li]/a:0,ay=a>dry?mz[li]/a:0,bx=b>dry?mx[ri]/b:0,by=b>dry?mz[ri]/b:0;
@@ -114,8 +116,9 @@
       function interfaceFlux(left,right,axis){
         if(!opening||left<0||right<0){faceFlux(left,right,axis,1);return;}
         const [x,z]=center(left).map((v,i)=>(v+center(right)[i])*.5);
-        const a=heightmap[left], b=heightmap[right];
-        const fraction=opening(x,z,axis,left,right,{time:time+elapsed,bed:[a,b],level:[a+depth[left],b+depth[right]]});
+        const a=floor(left), b=floor(right);
+        const fraction=opening(x,z,axis,left,right,{time:time+elapsed,bed:[a,b],level:[a+depth[left],b+depth[right]],
+          ...(bedOffset&&{terrain:[heightmap[left],heightmap[right]]})});
         if(!number(fraction,0,1))throw new Error('Water face opening must be in [0, 1]');
         faceFlux(left,right,axis,fraction);
         if(fraction<1){
@@ -153,12 +156,13 @@
             u=(mx[i]+dt*du[i])*drag,v=(mz[i]+dt*dv[i])*drag;
           let inFlow=0,outFlow=0;
           if(rain||drain){
-            const p=center(i),state={depth:d,level:heightmap[i]+d,bed:heightmap[i]},
+            const p=center(i),state={depth:d,level:floor(i)+d,bed:floor(i)},
               r=typeof rain==='function'?rain(...p,t,state):rain??0,
               s=typeof drain==='function'?drain(...p,t,state):drain??0;
             if(!number(r,0,1e4)||!number(s,0,1e4))throw new Error('Water source and drainage rates must be finite');
             inFlow=r*dt;
             outFlow=Math.min(d+inFlow,s*dt);
+            if(inFlow)transport?.rain?.(i,inFlow);
             if(outFlow)transport?.drain(i,outFlow,d+inFlow);
           }
           const next=d+inFlow-outFlow,retain=next<=dry||d<=dry?0:Math.min(1,next/d),

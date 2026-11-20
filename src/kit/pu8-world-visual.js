@@ -300,6 +300,18 @@
       }
       B.describeSplats?.(first,B.count(),{material:'water',target:{medium:water,mediumKind:'water',surface:'water'}});
     }
+    if(fields.ice){
+      const first=B.count();
+      for(let z=min[2]+resolution/2;z<max[2];z+=resolution)for(let x=min[0]+resolution/2;x<max[0];x+=resolution){
+        const at=[x,0,z], ice=query.probe(fields.ice,at);
+        if(ice.status!=='ok'||ice.value<.008)continue;
+        const waterColumn=water&&query.probe(water,at).value;
+        const top=fields.bed?height(x,z)+ice.value:waterColumn?.bed??height(x,z)+ice.value;
+        const color=ice.value>.08?[167,219,232]:[112,174,193];
+        B.disc(x,top+.01,z,[0,1,0],resolution*.7,resolution*.18,color,2);
+      }
+      B.describeSplats?.(first,B.count(),{material:'ice',target:{surface:'ice'}});
+    }
     const surfaceEffects = (hasSurface || config.surfaceEffects || looks.look?.paletteConstraints || looks.look?.renderStages) &&
       { ...config.surfaceEffects, query };
     const baked=B.finish({lookSnapshot: { time: view.time ?? view.tick * view.world.dt, tick: view.tick, query }, cam:config.camera??{target:[mid[0],.05,mid[2]],dist:span*1.48,yaw:.62,pitch:.8},

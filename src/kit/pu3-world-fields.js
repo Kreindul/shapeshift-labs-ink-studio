@@ -168,7 +168,7 @@
     return {combinational:stateless,initial:() => initial,inputs,outputs,step,output:state =>
       Object.fromEntries(Object.keys(outputs).map(key => [key,state[key]]))};
   }
-  function water(config,{id:system} = {}) {
+  function water(config,{id:system,catalog} = {}) {
     const {width,height,cell=1,origin=[0,0]} = config;
     const [dx,dz] = Array.isArray(cell) ? cell : [cell,cell];
     check(Number.isSafeInteger(width) && Number.isSafeInteger(height) && width>0 && height>0 && width*height<=65536 &&
@@ -180,6 +180,7 @@
     };
     const point = i => [origin[0]+(i%width+.5)*dx,origin[1]+(Math.floor(i/width)+.5)*dz];
     const sedimentModel=config.sediment===undefined?null:W.sediment.create(config.sediment,{width,height,cellArea,point});
+    const thermalModel=config.thermal===undefined?null:W.thermalWater.create(config.thermal,{width,height,dx,dz,point,maxDepth,catalog});
     const bed = patchList(config.bed ?? [],2), seed = patchList(config.initial ?? [],2);
     check([config.base??0,config.rain??0,config.drain??0,config.friction??.13].every(Number.isFinite) &&
       [config.rain??0,config.drain??0,config.friction??.13].every(n=>n>=0) &&
@@ -187,7 +188,8 @@
     const gates=config.gates??{}, pumps=config.pumps??{}, sensors=config.sensors??{};
     check([gates,pumps,sensors].every(group => record(group) && Object.keys(group).length<=128 &&
       Object.keys(group).every(id)), 'Invalid water controls');
-    const inputs={}, outputs={volume:'number'}, byFace=new Map(), gateInit={}, pumpInit={}, siltFaces=new Map();
+    const inputs={}, outputs={volume:'number'}, byFace=new Map(), gateInit={}, pumpInit={}, trackedFaces=new Map();
+    if(thermalModel)inputs.ambient={type:'number',default:thermalModel.ambientTemperature};
     for (const [key,spec] of Object.entries(gates)) {
       check(record(spec) && [0,1,undefined].includes(spec.axis), 'Invalid gate axis');
       bounds(spec.bounds,2);
@@ -199,8 +201,11 @@
       if(spec.siltClearance!==undefined){
         check(sedimentModel&&Number.isFinite(spec.siltClearance)&&spec.siltClearance>0&&spec.siltClearance<=1e7,
           'Gate silt clearance needs live sediment and a positive height');
-        siltFaces.set(key,[]);
-        outputs['effective-opening.'+key]='number';
+      }
+      if(spec.iceClearance!==undefined)check(thermalModel&&Number.isFinite(spec.iceClearance)&&
+        spec.iceClearance>0&&spec.iceClearance<=maxDepth,'Ice clearance needs thermal water and a positive thickness');
+      if(spec.siltClearance!==undefined||spec.iceClearance!==undefined){
+        trackedFaces.set(key,[]);outputs['effective-opening.'+key]='number';
       }
     }
     for (const [key,spec] of Object.entries(pumps)) {
@@ -222,21 +227,31 @@
         (gates[key].axis===undefined||gates[key].axis===axis) && zone([x,z],gates[key].bounds)));
       return byFace.get(cache);
     }
-    if(siltFaces.size)for(let i=0;i<width*height;i++){
+    if(trackedFaces.size)for(let i=0;i<width*height;i++){
       for(const [axis,next,valid] of [[0,i+1,i%width<width-1],[1,i+width,i+width<width*height]]){
         if(!valid)continue;
         const other=point(next), [fx,fz]=point(i).map((n,k)=>(n+other[k])*.5);
-        for(const key of matchFaces(fx,fz,axis,i))siltFaces.get(key)?.push([i,next]);
+        for(const key of matchFaces(fx,fz,axis,i))trackedFaces.get(key)?.push([i,next]);
       }
     }
     const siltRise=(sediment,a,b,y,z)=>Math.max(0,y-sediment.datum[a],z-sediment.datum[b]);
-    const siltFactor=(rise,key)=>Math.max(0,1-rise/gates[key].siltClearance);
-    function gateMetrics({sediment,fluid,gate}){
-      return Object.fromEntries([...siltFaces].map(([key,faces])=>{
-        const rise=faces.reduce((max,[a,b])=>Math.max(max,siltRise(sediment,a,b,fluid.bed[a],fluid.bed[b])),0);
-        const factor=siltFactor(rise,key);
-        return [key,{command:gate[key],effective:gate[key]*factor,silt:rise,clearance:gates[key].siltClearance,clogged:factor===0,
-          faces:faces.length}];
+    const iceRise=(thermal,a,b)=>Math.max(thermal.ice[a],thermal.ice[b]);
+    const factor=(amount,clearance)=>clearance===undefined?1:Math.max(0,1-amount/clearance);
+    const siltKeys=[...trackedFaces.keys()].filter(key=>gates[key].siltClearance!==undefined);
+    const iceKeys=[...trackedFaces.keys()].filter(key=>gates[key].iceClearance!==undefined);
+    function gateMetrics({sediment,thermal,fluid,gate}){
+      return Object.fromEntries([...trackedFaces].map(([key,faces])=>{
+        const {siltClearance,iceClearance}=gates[key];
+        let silt=0,ice=0,opening=1;
+        for(const [a,b] of faces){
+          const rise=siltClearance===undefined?0:siltRise(sediment,a,b,fluid.bed[a],fluid.bed[b]);
+          const frozen=iceClearance===undefined?0:iceRise(thermal,a,b);
+          silt=Math.max(silt,rise);ice=Math.max(ice,frozen);
+          opening=Math.min(opening,factor(rise,siltClearance)*factor(frozen,iceClearance));
+        }
+        return [key,{command:gate[key],effective:gate[key]*opening,faces:faces.length,
+          ...(siltClearance!==undefined&&{silt,clearance:siltClearance,clogged:silt>=siltClearance}),
+          ...(iceClearance!==undefined&&{ice,iceClearance,jammed:ice>=iceClearance})}];
       }));
     }
     function makeSolver(withTerrain = false) {
@@ -256,7 +271,7 @@
     }
     function sample(state,x,z,i=index(x,z)) {
       if (i<0) return null;
-      const depth=state.fluid.depth[i], b=state.fluid.bed[i];
+      const depth=state.fluid.depth[i], b=state.fluid.bed[i]+(state.thermal?.ice[i]??0);
       const suspended=state.sediment?.suspended[i];
       return {bed:b,depth,surface:b+depth,velocity:depth>1e-6?
         [state.fluid.mx[i]/depth,state.fluid.mz[i]/depth]:[0,0],
@@ -300,6 +315,7 @@
           }
           const {sent,received} = state.exchange;
           return {...state,fluid:{...state.fluid,depth,mx,mz},
+            ...(thermalModel&&{thermal:thermalModel.exchange(state.thermal,state.fluid,cell,level-old)}),
             exchange:{sent:sent+Math.max(0,-amount),received:received+Math.max(0,amount)}};
         }};
     }
@@ -307,10 +323,13 @@
     function metric({state}) {
       const {depth,startVolume,added,drained,moved}=state.fluid;
       const volume=depth.reduce((a,b)=>a+b,0)*cellArea;
-      const error = volume-startVolume-added+drained;
-      const exchange = state.exchange;
-      return Q.ok({volume,initial:startVolume,added,drained,transferred:moved,
-        ...(exchange && {received:exchange.received,sent:exchange.sent}),
+      const {thermal,exchange}=state;
+      const ice=thermal?thermal.ice.reduce((a,b)=>a+b,0)*cellArea:0;
+      const vapor=thermal?thermal.vapor.reduce((a,b)=>a+b,0)*cellArea:0;
+      const initial=startVolume+(thermal?.initialVapor??0), total=volume+ice+vapor;
+      const error = total-initial-added+drained;
+      return Q.ok({volume,initial,added,drained,transferred:moved,
+        ...(thermal&&{ice,vapor,total}),...(exchange && {received:exchange.received,sent:exchange.sent}),
         error:exchange ? error-exchange.received+exchange.sent : error});
     }
     const terrainQuery=config.obstacle, surface=config.surface;
@@ -318,23 +337,40 @@
     check(surface===undefined || typeof surface==='string','Invalid water material surface field');
     const legacyErosion=surface!==undefined&&!sedimentModel;
     const dependencyBounds = {axes:'xz',min:origin,max:[origin[0]+width*dx,origin[1]+height*dz]};
+    const phaseFields=['temperature','ice','vapor','humidity','phase','phase-state','water','depth','flow','surface-height'];
     return {inputs,outputs,...(exchanging && {accounts}),
       dependencies:{reads:[{field:system+'/bed',bounds:dependencyBounds},
-        ...[terrainQuery,surface].filter(Boolean).map(field=>({field,bounds:dependencyBounds}))],writes:[system+'/bed']},
-      ...(surface!==undefined&&{checkFields:query=>W.materials.checkSurface(query,surface)}),
+        ...[terrainQuery,surface,thermalModel?.ambientField].filter(Boolean).map(field=>({field,bounds:dependencyBounds}))],
+        writes:[system+'/bed',...(thermalModel?phaseFields.map(key=>system+'/'+key):[])]},
+      ...((surface!==undefined||thermalModel)&&{checkFields(query){
+        W.materials.checkSurface(query,surface);thermalModel?.checkFields(query);
+      }}),
       initial() {
         const fluid=makeSolver(true).checkpoint();
-        return {fluid,gate:gateInit,pump:pumpInit,terrain:[],manual:{},...(legacyErosion&&{eroded:0}),
-          ...(sedimentModel&&{sediment:sedimentModel.boot(fluid.bed),silted:Object.fromEntries([...siltFaces.keys()].map(key=>[key,false]))}),
-          ...(exchanging&&{exchange:{sent:0,received:0}})};
+        const thermal=thermalModel?.boot(fluid);
+        const state={fluid,gate:gateInit,pump:pumpInit,terrain:[],manual:{},...(legacyErosion&&{eroded:0}),
+          ...(sedimentModel&&{sediment:sedimentModel.boot(fluid.bed),silted:Object.fromEntries(siltKeys.map(key=>[key,false]))}),
+          ...(thermal&&{thermal}),...(exchanging&&{exchange:{sent:0,received:0}})};
+        if(thermal){
+          const metrics=gateMetrics(state);
+          state.frozen=Object.fromEntries(iceKeys.map(key=>[key,metrics[key].jammed]));
+        }
+        return state;
       },
       validateState(state) {
         solver.restore(state.fluid);
         if (legacyErosion) check(Number.isFinite(state.eroded)&&state.eroded>=0,'Invalid eroded bed volume');
         if(sedimentModel){
           sedimentModel.validate(state.sediment,state.fluid.bed);
-          check(record(state.silted)&&Object.keys(state.silted).length===siltFaces.size&&
-            [...siltFaces.keys()].every(key=>typeof state.silted[key]==='boolean'),'Invalid saved gate silt state');
+          check(record(state.silted)&&Object.keys(state.silted).length===siltKeys.length&&
+            siltKeys.every(key=>typeof state.silted[key]==='boolean'),'Invalid saved gate silt state');
+        }
+        if(thermalModel){
+          thermalModel.validate(state.thermal);
+          check(record(state.frozen)&&Object.keys(state.frozen).length===iceKeys.length&&
+            iceKeys.every(key=>typeof state.frozen[key]==='boolean'),'Invalid saved gate ice state');
+          const {initial,added,received,error}=metric({state}).value;
+          check(Math.abs(error)<=1e-7*Math.max(1,initial+added+(received??0)),'Saved water phase balance is inconsistent');
         }
         if (exchanging) check(record(state.exchange) &&
           [state.exchange.sent,state.exchange.received].every(value=>Number.isFinite(value) && value>=0),
@@ -348,6 +384,8 @@
         if(type==='gate')check(own(gates,args.gate)&&Number.isFinite(args.opening)&&args.opening>=0&&args.opening<=1,'Invalid gate command');
         if(type==='pump')check(own(pumps,args.pump)&&Number.isFinite(args.rate)&&args.rate>=0&&args.rate<=1e9,'Invalid pump command');
         if(type==='release')check(own(inputs,args.port),'Unknown water control');
+        if(type==='heat')check(thermalModel&&bounds(args.bounds,2)&&Number.isFinite(args.energy)&&Math.abs(args.energy)<=1e15,
+          'Heat edit needs thermal water, XZ bounds and signed energy');
         if(type==='sediment-feed'){
           bounds(args.bounds,2);
           check(Number.isFinite(args.depth)&&args.depth>0&&args.depth<=1e7,'Sediment feed needs a positive solid-equivalent depth');
@@ -358,7 +396,7 @@
         depth:channel('number','world','depth'),
         'surface-height':channel('number','world','surface'),
         flow:channel('vec2','world/s','velocity'),
-        bed:channel('number','world','bed'),
+        bed:channel('number','world',(state,i)=>state.fluid.bed[i]),
         ...((legacyErosion||sedimentModel)&&{eroded:{type:'number',units:'world^3',read:({state})=>Q.ok(state.sediment?.totals.eroded??state.eroded)}}),
         ...(sedimentModel&&{
           sediment:{type:'record',units:'world^3',read:({state})=>Q.ok(sedimentModel.report(state.sediment,state.fluid.bed))},
@@ -367,7 +405,24 @@
           'bed-change':channel('number','world',(state,i)=>state.fluid.bed[i]-state.sediment.datum[i]),
           'erodible-depth':channel('number','world',(state,i)=>state.fluid.bed[i]-state.sediment.bedrock[i])
         }),
-        ...(siltFaces.size&&{gates:{type:'record',read:({state,args})=>{
+        ...(thermalModel&&{
+          temperature:channel('number','degC',(state,i)=>thermalModel.sample(state.thermal,state.fluid,i).temperature),
+          ice:channel('number','world',(state,i)=>state.thermal.ice[i]),
+          vapor:channel('number','world',(state,i)=>state.thermal.vapor[i]),
+          humidity:channel('number','1',(state,i)=>thermalModel.sample(state.thermal,state.fluid,i).humidity),
+          phase:spatial.define({type:'category',units:'1',categories:['dry','vapor','liquid','ice','mixed'],...domain},
+            ({state,point})=>{
+              const i=index(...point);
+              return state&&i>=0?Q.ok(thermalModel.sample(state.thermal,state.fluid,i).phase):Q.missing('outside thermal grid','outside');
+            }),
+          'phase-state':{type:'record',read({state,target}){
+            if(!target.point||!state)return Q.missing('state and point required');
+            const [x,,z]=target.point, i=index(x,z);
+            return i>=0?Q.ok(thermalModel.sample(state.thermal,state.fluid,i)):Q.missing('outside thermal grid','outside');
+          }},
+          heat:{type:'record',units:'J',read:({state})=>Q.ok(thermalModel.energyReport(state.thermal))}
+        }),
+        ...(trackedFaces.size&&{gates:{type:'record',read:({state,args})=>{
           const rows=gateMetrics(state);
           return args.gate===undefined?Q.ok(rows):own(rows,args.gate)?Q.ok(rows[args.gate]):Q.missing('Unknown silt-sensitive gate','missing');
         }}}),
@@ -423,6 +478,15 @@
           ctx.emit('sediment-fed',{bounds:area,cells:cells.length,volume:sediment.totals.fed-state.sediment.totals.fed});
           return {...state,sediment};
         }}),
+        ...(thermalModel&&{heat(state,{bounds:area,energy},ctx){
+          const cells=terrainCells(area);
+          if(cells.length&&energy!==0){
+            ctx.emit('heat-applied',{bounds:area,energy,cells:cells.length});
+            for(const field of ['temperature','humidity','phase-state'])
+              ctx.spatial?.write(field,{...area,axes:'xz'},'heat-applied');
+          }
+          return {...state,thermal:thermalModel.heat(state.thermal,cells,energy)};
+        }}),
         release(state,{port}) {
           const manual={...state.manual};
           delete manual[port];
@@ -443,11 +507,13 @@
         for (const key of Object.keys(gates)) gate[key]=clamp(state.manual['gate.'+key]??ctx.input['gate.'+key],0,1);
         for (const key of Object.keys(pumps)) pump[key]=clamp(state.manual['pump.'+key]??ctx.input['pump.'+key],0,1e9);
         const obstruction=new Map();
-        const opening=(x,z,axis,left,right,{bed,level:levels})=>{
+        const opening=(x,z,axis,left,right,{bed,terrain=bed,level:levels})=>{
           let value=1;
           for (const key of matchFaces(x,z,axis,left)){
-            const factor=siltFaces.has(key)?siltFactor(siltRise(sediment,left,right,bed[0],bed[1]),key):1;
-            value=Math.min(value,gate[key]*factor);
+            const {siltClearance,iceClearance}=gates[key];
+            const silt=siltClearance===undefined?1:factor(siltRise(sediment,left,right,terrain[0],terrain[1]),siltClearance);
+            const ice=iceClearance===undefined?1:factor(iceRise(state.thermal,left,right),iceClearance);
+            value=Math.min(value,gate[key]*silt*ice);
           }
           if (terrainQuery) {
             const key=left*2+axis;
@@ -470,10 +536,14 @@
           return material[i];
         }
         const drain=material?(x,z)=>Math.min(1e4,(config.drain??0)+(atCell(index(x,z))?.permeability??0)):config.drain;
-        const transport=sedimentModel?.coupling(sediment,material?atCell:null);
+        const solidTransport=sedimentModel?.coupling(sediment,material?atCell:null), heatTransport=thermalModel?.transport(state.thermal);
+        const transport=solidTransport&&heatTransport?{...heatTransport,...Object.fromEntries(
+          ['begin','face','advect','drain','pump','settle'].map(key=>[key,(...args)=>{
+            solidTransport[key](...args);heatTransport[key](...args);
+          }]))}:solidTransport??heatTransport;
         solver.step(ctx.dt,{rain:config.rain,drain,friction:config.friction,
           ...(Object.keys(gates).length||terrainQuery?{opening}:{}),
-          ...(transport&&{transport}),
+          ...(transport&&{transport}),...(heatTransport&&{bedOffset:state.thermal.ice}),
           transfers:Object.entries(pumps).map(([key,spec])=>({from:index(...spec.from),to:index(...spec.to),rate:pump[key]}))});
         const fluid=solver.checkpoint();
         let eroded=0, minX=width,minZ=height,maxX=-1,maxZ=-1;
@@ -493,15 +563,38 @@
         if (eroded>0) ctx.spatial?.write('bed',{axes:'xz',min:[origin[0]+minX*dx,origin[1]+minZ*dz],
           max:[origin[0]+(maxX+1)*dx,origin[1]+(maxZ+1)*dz]},'surface-erosion');
         const next={...state,gate,pump,fluid,terrain:[],...(legacyErosion&&{eroded:state.eroded+eroded})};
-        if(transport){
-          next.sediment=transport.checkpoint();
-          const dirty=transport.dirty();
+        if(solidTransport){
+          next.sediment=solidTransport.checkpoint();
+          const dirty=solidTransport.dirty();
           if(dirty)ctx.spatial?.write('bed',{axes:'xz',min:[origin[0]+dirty.minX*dx,origin[1]+dirty.minZ*dz],
             max:[origin[0]+(dirty.maxX+1)*dx,origin[1]+(dirty.maxZ+1)*dz]},'sediment-transport');
           next.silted={};
+        }
+        if(heatTransport){
+          next.thermal=thermalModel.phase(heatTransport.capture(),fluid,ctx);
+          next.frozen={};
+          let x0=width,x1=-1,z0=height,z1=-1;
+          for(let i=0;i<fluid.depth.length;i++){
+            if(next.thermal.ice[i]===state.thermal.ice[i]&&next.thermal.energy[i]===state.thermal.energy[i]&&
+              next.thermal.vapor[i]===state.thermal.vapor[i]&&fluid.depth[i]===state.fluid.depth[i]&&
+              fluid.mx[i]===state.fluid.mx[i]&&fluid.mz[i]===state.fluid.mz[i])continue;
+            const x=i%width,z=Math.floor(i/width);
+            x0=Math.min(x0,x);x1=Math.max(x1,x);z0=Math.min(z0,z);z1=Math.max(z1,z);
+          }
+          if(x1>=0)for(const field of phaseFields)ctx.spatial?.write(field,{
+            axes:'xz',min:[origin[0]+x0*dx,origin[1]+z0*dz],max:[origin[0]+(x1+1)*dx,origin[1]+(z1+1)*dz]
+          },'thermal-water-phase');
+        }
+        if(trackedFaces.size){
           for(const [key,result] of Object.entries(gateMetrics(next))){
-            next.silted[key]=result.clogged;
-            if(result.clogged!==state.silted[key])ctx.emit(result.clogged?'gate-silted':'gate-cleared',{gate:key,...result});
+            if(result.clogged!==undefined){
+              next.silted[key]=result.clogged;
+              if(result.clogged!==state.silted[key])ctx.emit(result.clogged?'gate-silted':'gate-cleared',{gate:key,...result});
+            }
+            if(result.jammed!==undefined){
+              next.frozen[key]=result.jammed;
+              if(result.jammed!==state.frozen[key])ctx.emit(result.jammed?'gate-frozen':'gate-thawed',{gate:key,...result});
+            }
           }
         }
         return next;
