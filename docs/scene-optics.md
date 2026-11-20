@@ -171,6 +171,15 @@ and rear silhouettes. Upload `frame.plane` to `u_inkSweep` and
 `frame.feather` to `u_inkSweepFeather` while the track plays. Zero disables
 the sweep. A negative feather holds the frame at black before the edge starts.
 
+Use `InkVeil.flow(keys, { period, delay, rise, wake, distortion })` for a
+cyclic reveal that follows action and closes behind it. Keys use `time`,
+`at`, and `extent`. The first time must be zero and later times must fall
+inside the period. The track holds black during its initial delay and then
+grows the moving area over `rise` seconds. The `wake` option gives the
+area a trailing edge in seconds, and `distortion` bends the contour in world
+units. Send `frame.warp` to `u_inkRevealWarp` alongside the cue uniforms.
+`track.coverage(seconds, point)` lets overlays share the scene's visibility.
+
 ## Pixel art on flat surfaces
 
 `SpriteSurface.make()` batches world-space rectangles into an RGBA atlas.

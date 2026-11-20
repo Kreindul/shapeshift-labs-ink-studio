@@ -77,6 +77,65 @@ const InkVeil = (() => {
     };
   }
 
+  // Carry a bounded reveal along a cyclic path, with older lobes falling away behind it.
+  function flow(keys, { period, delay = .2, rise = 1, wake = .42, distortion = .7 } = {}) {
+    const triple = value => value?.length === 3 && value.every(Number.isFinite);
+    if (!Array.isArray(keys) || keys.length < 2 || ![period, delay, rise, wake, distortion].every(Number.isFinite) ||
+        period <= 0 || delay < 0 || rise <= 0 || wake < 0 || distortion < 0 || keys[0].time !== 0 ||
+        keys.some(({ time, at, extent }, i) => !Number.isFinite(time) || time >= period ||
+          (i && time <= keys[i - 1].time) || !triple(at) || !triple(extent) || extent.some(v => v <= 0)))
+      throw new RangeError('Expected increasing flow keys within a positive period and positive XYZ extents');
+
+    const lags = wake ? [0, wake * .56, wake * 1.32] : [0];
+    const strengths = [1, .67, .39];
+    const frame = {
+      centers: new Float32Array(lags.length * 4), extents: new Float32Array(lags.length * 4),
+      warp: new Float32Array([distortion, 0]), settled: 0
+    };
+    const ease = value => {
+      const t = Math.max(0, Math.min(1, value));
+      return t * t * (3 - 2 * t);
+    };
+    const mix = (a, b, t) => a + (b - a) * t;
+    let lastTime;
+    function sample(seconds) {
+      if (seconds === lastTime) return frame;
+      lastTime = seconds;
+      frame.warp[1] = (seconds * 1.07) % (2 * Math.PI);
+      for (let i = 0; i < lags.length; i++) {
+        const age = Math.max(0, seconds - lags[i]), t = age % period, offset = i * 4;
+        const next = keys.findIndex(key => key.time > t);
+        const a = keys[next < 0 ? keys.length - 1 : next - 1], b = keys[next < 0 ? 0 : next];
+        const blend = ease((t - a.time) / ((next < 0 ? period : b.time) - a.time));
+        const strength = ease((seconds - lags[i] - delay) / rise);
+        for (let j = 0; j < 3; j++) {
+          frame.centers[offset + j] = mix(a.at[j], b.at[j], blend);
+          frame.extents[offset + j] = mix(a.extent[j], b.extent[j], blend);
+        }
+        frame.centers[offset + 3] = strengths[i] * strength;
+        frame.extents[offset + 3] = (.43 + .57 * strength) * (1 + i * .09);
+      }
+      return frame;
+    }
+    function coverage(seconds, [x, y, z]) {
+      sample(seconds);
+      const [amp, t] = frame.warp;
+      x += amp * Math.sin(z * .88 + y * .44 + t);
+      y += amp * Math.sin(z * .61 - x * .49 - t);
+      z += amp * Math.sin(x * .75 + y * .37 + t);
+      let shown = 0;
+      for (let i = 0; i < frame.centers.length; i += 4) {
+        const dx = (x - frame.centers[i]) / frame.extents[i];
+        const dy = (y - frame.centers[i + 1]) / frame.extents[i + 1];
+        const dz = (z - frame.centers[i + 2]) / frame.extents[i + 2];
+        const r = (dx * dx + dy * dy + dz * dz) / (frame.extents[i + 3] ** 2);
+        shown = Math.max(shown, frame.centers[i + 3] * (1 - ease((r - .47) / .53)));
+      }
+      return shown;
+    }
+    return { duration: Infinity, sample, coverage };
+  }
+
   const glsl = `
 uniform bool u_inkOn, u_inkWater;
 uniform vec4 u_inkPlane, u_inkBounds, u_inkPulse;
@@ -87,6 +146,7 @@ uniform sampler2D u_inkFootprint;
 uniform int u_inkRevealCount;
 uniform float u_inkRevealSettled;
 uniform vec4 u_inkRevealCenters[8], u_inkRevealExtents[8];
+uniform vec2 u_inkRevealWarp;
 uniform vec4 u_inkSweep;
 uniform float u_inkSweepFeather;
 
@@ -145,6 +205,12 @@ vec3 inkVeil(vec3 color, ivec2 pixel, vec2 resolution, float depth, mat3 view, v
   }
   if (u_inkRevealCount > 0) {
     float shown = u_inkRevealSettled;
+    if (u_inkRevealWarp.x > 0.0) {
+      float t = u_inkRevealWarp.y, amp = u_inkRevealWarp.x;
+      position.x += amp * sin(position.z * .88 + position.y * .44 + t);
+      position.y += amp * sin(position.z * .61 - position.x * .49 - t);
+      position.z += amp * sin(position.x * .75 + position.y * .37 + t);
+    }
     for (int i = 0; i < 8; i++) {
       if (i >= u_inkRevealCount) break;
       vec4 cue = u_inkRevealCenters[i], area = u_inkRevealExtents[i];
@@ -159,6 +225,6 @@ vec3 inkVeil(vec3 color, ivec2 pixel, vec2 resolution, float depth, mat3 view, v
 }
 `;
 
-  return Object.freeze({ rank, footprint, reveal, sweep, glsl });
+  return Object.freeze({ rank, footprint, reveal, sweep, flow, glsl });
 })();
 if (typeof module !== 'undefined') module.exports = InkVeil;

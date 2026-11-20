@@ -53,3 +53,23 @@ test('a continuous ink sweep holds black, advances forward and passes its destin
   assert.equal(track.sample(5.3).plane[3], 11);
   assert.throws(() => sweep({ from: [0,0,1], to: [0,0,1], end: 2 }), RangeError);
 });
+
+test('a travelling reveal carries a local wake and hides earlier subjects between visits', () => {
+  const { flow } = require('../src/ink-veil.js');
+  const nodes = [
+    { time: 0, at: [0, 0, 0], extent: [3, 3, 3] },
+    { time: 2, at: [12, 0, 0], extent: [3, 3, 3] },
+    { time: 4, at: [12, 8, 0], extent: [3, 3, 3] }
+  ];
+  const track = flow(nodes, { period: 6, delay: .2, rise: .4, wake: .55, distortion: 0 });
+  assert.equal(track.duration, Infinity);
+  assert.equal(track.coverage(0, nodes[0].at), 0);
+  assert.equal(track.coverage(2, nodes[1].at), 1);
+  assert.equal(track.coverage(2, nodes[0].at), 0);
+  assert.equal(track.coverage(4, nodes[1].at), 0);
+  assert.equal(track.coverage(4, nodes[2].at), 1);
+  assert.equal(track.coverage(6, nodes[0].at), 1);
+  assert.equal(track.sample(18).settled, 0);
+  assert(track.sample(2).centers[4] < track.sample(2).centers[0]);
+  assert.throws(() => flow(nodes, { period: 4 }), RangeError);
+});
