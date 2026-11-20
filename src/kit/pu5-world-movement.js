@@ -398,7 +398,7 @@
       return slot&&S.read(roster,slot);
     }
     function agentField(type,select,units){
-      return {type,selector:true,...(units&&{units}),read({state,args,target}){
+      return {type,selector:true,qualified:true,...(units&&{units}),read({state,args,target}){
         const roster=S.get(state), name=args.agent??target?.agent;
         const row=name!==undefined?S.select(roster,name):target?.entity&&byEntity(roster,target.entity);
         return row&&(args.generation===undefined||args.generation===row.generation)?
@@ -511,7 +511,7 @@
       position:agentField('vector',row=>row.position,'world'),
       velocity:agentField('vector',row=>row.velocity,'world/s'),
       task:agentField('categorical',row=>row.task),
-      components:{type:'record',read({state,args}){
+      components:{type:'record',qualified:true,read({state,args}){
         const roster=S.get(state), page=args.page;
         if(page!==undefined&&(!Number.isSafeInteger(page)||page<0||page>=roster.pages.length))
           return Q.missing('unknown component page','missing');

@@ -28,6 +28,7 @@ test('scheduled births, destinations, task changes and removal survive replay an
   assert.deepEqual(scout.position,[1.25,1,0]);
   assert.deepEqual(inspect(run,'scout','velocity').value,[1,0,0]);
   assert.deepEqual(run.query().target({entity:'rover'}).point,scout.position);
+  assert.deepEqual(run.query().probe('position',{entity:'rover'}).value,scout.position);
   assert.equal(run.query().probe('flock/task',{entity:'rover'}).value,'survey');
 
   const first=run.checkpoint();
