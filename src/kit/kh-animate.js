@@ -454,6 +454,10 @@
       if (solo && !l.solo) continue;
       const w = A.influence(l, time, dur) * A.driver(l.driver, before || pose);
       if (!w) continue;
+      if (l.mode === 'override') {
+        A.motionLayers.mix(pose, l, time, w, dur);
+        continue;
+      }
       let values = l.values;
       if (l.source) {
         const c = l.source,

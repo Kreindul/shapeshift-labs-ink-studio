@@ -14,21 +14,6 @@
     return M.cols(x, up, V.cross(x, up));
   }
 
-  function rotationDelta(from, to) {
-    const m = M.mul(from, M.tr(to));
-    const skew = [m[7] - m[5], m[2] - m[6], m[3] - m[1]];
-    const cos = clamp((m[0] + m[4] + m[8] - 1) / 2, -1, 1);
-    const angle = Math.acos(cos);
-    if (angle < 1e-7) return { axis: [1, 0, 0], angle: 0 };
-    if (cos > -0.9999) return { axis: V.norm(skew), angle };
-    const diagonal = [m[0], m[4], m[8]];
-    const i = diagonal.indexOf(Math.max(...diagonal)), axis = [0, 0, 0];
-    axis[i] = Math.sqrt((m[i * 3 + i] - cos) / (1 - cos));
-    for (let j = 0; j < 3; j++) if (j !== i)
-      axis[j] = (m[i * 3 + j] + m[j * 3 + i]) / (2 * (1 - cos) * axis[i]);
-    return { axis: V.norm(V.dot(axis, skew) < 0 ? V.mul(axis, -1) : axis), angle };
-  }
-
   function mount(spec = {}) {
     const { position = zero, rotation = zero } = spec;
     if (!xyz(position) || !xyz(rotation)) throw new TypeError('A prop mount needs XYZ position and Euler degrees');
@@ -202,7 +187,7 @@
             key.time + (key.settle ?? clamp((key.time - reachStart) * 0.5, 0.1, 0.28)));
           const reachMiss = key.reach ? solveReach(key, world.position, 1) : null;
           const offset = relative(socketFrame(key.socket), world);
-          const delta = rotationDelta(offset.rotation, key.mount.rotation);
+          const delta = M.axisAngle(M.mul(offset.rotation, M.tr(key.mount.rotation)));
           keys.push({ ...key, from: previous.socket, reachStart, settleEnd, offset, delta,
             anchor: world.position, reachDistance, reachMiss });
         }

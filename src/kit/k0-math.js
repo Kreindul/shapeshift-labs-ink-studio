@@ -58,6 +58,19 @@ const KIT = {};
       R[6] * v[0] + R[7] * v[1] + R[8] * v[2]
     ],
     tr: A => [A[0], A[3], A[6], A[1], A[4], A[7], A[2], A[5], A[8]],
+    axisAngle: m => {
+      const skew = [m[7] - m[5], m[2] - m[6], m[3] - m[1]];
+      const cos = Math.max(-1, Math.min(1, (m[0] + m[4] + m[8] - 1) / 2));
+      const angle = Math.acos(cos);
+      if (angle < 1e-7) return { axis: [1, 0, 0], angle: 0 };
+      if (cos > -0.9999) return { axis: V.norm(skew), angle };
+      const diagonal = [m[0], m[4], m[8]];
+      const i = diagonal.indexOf(Math.max(...diagonal)), axis = [0, 0, 0];
+      axis[i] = Math.sqrt((m[i * 3 + i] - cos) / (1 - cos));
+      for (let j = 0; j < 3; j++) if (j !== i)
+        axis[j] = (m[i * 3 + j] + m[j * 3 + i]) / (2 * (1 - cos) * axis[i]);
+      return { axis: V.norm(V.dot(axis, skew) < 0 ? V.mul(axis, -1) : axis), angle };
+    },
     // the least turn that carries direction u onto direction v
     aim: (u, v) => {
       const w = V.cross(u, v),

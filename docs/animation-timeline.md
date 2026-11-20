@@ -8,7 +8,7 @@ headless frame sampling.
 - **Block** samples held story poses and breakdowns. A plain clip holds the
   whole pose at its preceding keyed time.
 - **Spline** samples the native interpolation and any sequence trims,
-  timing curves, and placement.
+  timing curves, placement, and optional [Motion Layers](motion-layers.md).
 - **Polish** adds accepted Motion Review corrections, keyed Motion FX,
   and placed cloth takes. Contacts and prop switches run in every stage.
 
@@ -30,6 +30,7 @@ const timeline = K.anim.timeline.create({
   world,
   puppet,
   sequence,                             // or clip, or blocking
+  motionLayers,                         // timed override stack. Optional.
   contacts: contactSpec,                // sockets, contacts, and prop. Optional.
   fx: motionFx,                         // a stack allocated on the builder. Optional.
   cloth: [{ id: 'cape', panel: cape, take: savedBake, start: 2.2 }],

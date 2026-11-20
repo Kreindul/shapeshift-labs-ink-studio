@@ -372,6 +372,8 @@ Use the [headless animation timeline](docs/animation-timeline.md) to put these t
 
 Use [motion retargeting](docs/motion-retarget.md) to adapt a clip to another puppet's rest axes and proportions. Start with a biped, quadruped, avian, or serpentine profile, or define your own and bake editable Ink keys.
 
+Use [Motion Layers](docs/motion-layers.md) to play a base performance with ordered, part-masked override clips and animate their weights on the headless timeline.
+
 `K.character(B, spec, lane)` creates an input-driven character with movement, running, jumping, dashing, attacks, casting and crouching. Its specification supplies geometry and rig points; it is a toolkit for authoring a character, rather than a bundled cast of character assets. The API is documented at the top of [kk-character.js](src/kit/kk-character.js).
 
 ## Particles and interaction

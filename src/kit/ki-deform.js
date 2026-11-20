@@ -954,6 +954,17 @@
     return M.mul(M.rot([1, 0, 0], r[0] * k), M.mul(M.rot([0, 1, 0], r[1] * k), M.rot([0, 0, 1], r[2] * k)));
   };
   D.euler = eulerDeg;
+  D.angles = (matrix, near) => {
+    const degrees = 180 / Math.PI, y = Math.asin(K.clamp(matrix[2], -1, 1));
+    const normal = Math.abs(matrix[2]) < 1 - 1e-12;
+    const z = normal ? Math.atan2(-matrix[1], matrix[0]) : (near?.[2] ?? 0) / degrees;
+    const x = normal ? Math.atan2(-matrix[5], matrix[8]) : Math.atan2(matrix[7], matrix[4]) - Math.sign(y) * z;
+    const primary = [x * degrees, y * degrees, z * degrees];
+    if (!near) return primary;
+    const closest = a => a.map((angle, i) => near[i] + K.anim.shortAngle(near[i], angle));
+    const first = closest(primary), second = closest([primary[0] + 180, 180 - primary[1], primary[2] + 180]);
+    return V.dist(near, first) <= V.dist(near, second) ? first : second;
+  };
   const ID = [1, 0, 0, 0, 1, 0, 0, 0, 1];
   /* Inspect authored poses without changing the puppet's live pose, frame maps, or bone buffer. */
   D.inspectPoses = (puppet, read) => {

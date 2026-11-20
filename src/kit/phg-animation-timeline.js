@@ -4,13 +4,17 @@
   const stages = Object.freeze(['block', 'spline', 'polish']);
   const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
-  function create({ world, puppet, clip, blocking, sequence, contacts, fx, cloth = [], review, sprite = {} } = {}) {
+  function create({ world, puppet, clip, blocking, sequence, motionLayers, contacts, fx, cloth = [], review, sprite = {} } = {}) {
     const source = blocking?.clip ?? clip;
     const duration = sequence?.duration ?? source?.dur;
     if ([clip, blocking, sequence].filter(value => value !== undefined).length !== 1 ||
         typeof (sequence ?? source)?.sample !== 'function' || !Number.isFinite(duration) || duration <= 0 ||
         !world?.anim || puppet?.anim !== world.anim || typeof puppet.setPoseSampler !== 'function')
       throw new TypeError('Animation timeline needs a world, its puppet, and one native clip, blocking plan, or sequence');
+    if (motionLayers !== undefined && (motionLayers?.duration !== duration || typeof motionLayers.apply !== 'function' ||
+        typeof motionLayers.at !== 'function' || !Array.isArray(motionLayers.layers) ||
+        motionLayers.layers.some(layer => layer.parts?.some(part => !Object.hasOwn(puppet.parts, part)))))
+      throw new TypeError('Motion layers must use this shot duration and its puppet part names');
     const spriteSpec = {
       width: 96, height: 96, directions: 8, fps: sequence?.fps ?? source?.fps ?? 12,
       yaw: world.cam?.yaw, pivot: world.cam?.target, ...sprite
@@ -78,8 +82,10 @@
 
     const held = sequence ? null : blocking?.held ?? A.poseBlocking.heldClip(source);
     function basePose(time, stage) {
-      if (sequence) return sequence.sample(time, {}, { held: stage === 'block' });
-      return (stage === 'block' ? held : source).sample(time, {}, { sourceTime: true });
+      const block = stage === 'block';
+      const pose = sequence ? sequence.sample(time, {}, { held: block })
+        : (block ? held : source).sample(time, {}, { sourceTime: true });
+      return block || !motionLayers ? pose : motionLayers.apply(pose, time);
     }
     const contactPlans = new Map();
     const contactSpec = contacts === undefined ? null : structuredClone(contacts);
@@ -219,7 +225,8 @@
       actor.solve();
       const polish = stage === 'polish' && !before;
       const effects = fx?.apply(t, { before: !polish }) ?? null;
-      current = { time: t, stage, contacts, effects, cloth: drawCloth(t, polish) };
+      current = { time: t, stage, contacts, effects, cloth: drawCloth(t, polish),
+        ...(motionLayers && { motionLayers: motionLayers.at(t, { enabled: stage !== 'block' }) }) };
     });
     function sample(time = cursor.time, out, { stage = cursor.stage, before = false } = {}) {
       if (!inShot(time) || !stages.includes(stage)) throw new RangeError('Invalid timeline sample time or stage');
@@ -241,6 +248,7 @@
           poses: sequence?.markers?.slice() ?? blocking?.markers.slice() ?? [],
           clips: sequence?.steps.slice() ?? [],
           handoffs: sequence?.handoffs.slice() ?? [],
+          motionLayers: motionLayers?.layers.map((layer, order) => ({ ...layer, order })) ?? [],
           keys: sequence?.keys.slice() ?? (source?.tracks ?? []).flatMap(track =>
             (track.keys ?? []).map(key => ({ part: track.part, channel: track.ch, time: key.t ?? key.time }))).sort((a, b) => a.time - b.time),
           cues: sequence?.cues.slice() ?? source?.cues.slice() ?? [],

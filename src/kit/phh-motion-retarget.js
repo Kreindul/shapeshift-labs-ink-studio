@@ -133,19 +133,6 @@
     return a > 0 ? b / a : 1;
   }
 
-  function euler(matrix, near) {
-    const degrees = 180 / Math.PI, y = Math.asin(clamp(matrix[2], -1, 1));
-    const normal = Math.abs(matrix[2]) < 1 - 1e-12;
-    const z = normal ? Math.atan2(-matrix[1], matrix[0]) : (near?.[2] ?? 0) / degrees;
-    const x = normal ? Math.atan2(-matrix[5], matrix[8]) : Math.atan2(matrix[7], matrix[4]) - Math.sign(y) * z;
-    const primary = [x * degrees, y * degrees, z * degrees];
-    if (!near) return primary;
-    const closest = a => a.map((angle, i) => near[i] + A.shortAngle(near[i], angle));
-    const first = closest(primary);
-    const second = closest([primary[0] + 180, 180 - primary[1], primary[2] + 180]);
-    return V.dist(near, first) <= V.dist(near, second) ? first : second;
-  }
-
   function create({ clip, source, target, profile: definition = 'biped', travel = 'scaled' } = {}) {
     if (typeof definition === 'string' && !own(profiles, definition)) throw new TypeError('Unknown retarget profile: ' + definition);
     const profile = typeof definition === 'string' ? profiles[definition] : validateProfile(definition);
@@ -204,7 +191,7 @@
               (turn !== undefined && (!vector(turn, 9) || M.det(turn) <= 1e-8)))
             throw new TypeError('Invalid local rotation on ' + pair.source);
           const local = turn ? M.mul(M.polar(turn), rot ? D.euler(rot) : M.id()) : D.euler(rot);
-          out.rot = euler(M.mul(pair.transform, M.mul(local, pair.inverse)), near?.[pair.target]);
+          out.rot = D.angles(M.mul(pair.transform, M.mul(local, pair.inverse)), near?.[pair.target]);
         }
         if (scale !== undefined) {
           if (Number.isFinite(scale)) out.scale = scale;

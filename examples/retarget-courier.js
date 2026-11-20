@@ -1,5 +1,5 @@
 /* A walking courier and a differently proportioned guard using the same semantic profile. */
-function character(kit, guard) {
+function character(kit, guard, withLantern = false) {
   const { KIT: K, makeBuilder, makeSculpt } = kit;
   const id = guard ? 'retarget-guard' : 'retarget-courier';
   const palette = [0x121923, 0x392639, 0x783548, 0xb95359, 0xe9876b, 0x183641, 0x295b69, 0x398e90,
@@ -24,7 +24,7 @@ function character(kit, guard) {
     const dark = { r: guard ? [1, 2, 3] : [5, 6, 7] }, brass = { r: [9, 10, 11, 12] };
     const eye = { r: [10, 11, 12], em: true };
     const part = (role, pivot, parent) => {
-      const tag = names[role];
+      const tag = names[role] ?? role;
       parts[tag] = { ids: [], pivot, parent: parent && names[parent] };
       return {
         box: (center, size, mat = outer, rd = 0.05) => S.box(center, size, mat, { tag, rd, res: 0.055 }),
@@ -62,6 +62,14 @@ function character(kit, guard) {
       forearm.box([elbowX, (elbowY + wristY) / 2, 0], [0.112, (elbowY - wristY) / 2, 0.13], dark);
       forearm.ball([elbowX, wristY, 0], guard ? 0.13 : 0.107, brass);
       roles[side + 'Wrist'] = { part: names[side + 'Forearm'], point: [elbowX, wristY, 0], marker: true };
+      if (withLantern && side === 'right') {
+        const grip = [elbowX, wristY - 0.045, 0.09], [x, y, z] = grip;
+        const lantern = part('lantern', grip, 'rightForearm');
+        lantern.box(grip, [0.084, 0.034, 0.05], brass, 0.023);
+        lantern.box([x, y-0.14, z], [0.12, 0.035, 0.10], brass, 0.023);
+        lantern.box([x, y-0.24, z], [0.083, 0.085, 0.085], eye, 0.037);
+        lantern.box([x, y-0.34, z], [0.123, 0.034, 0.108], brass, 0.028);
+      }
     }
     S.bake();
     for (const [id, entry] of Object.entries(parts)) entry.ids = tags[id];
@@ -105,3 +113,4 @@ function character(kit, guard) {
 
 module.exports = kit => character(kit, false);
 module.exports.guard = kit => character(kit, true);
+module.exports.lantern = kit => character(kit, false, true);
