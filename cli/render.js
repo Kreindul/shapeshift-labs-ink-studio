@@ -558,8 +558,8 @@ function renderFrame(world, o, preparedPalettes) {
     world.atmosphereDepthBands,o.atmosphereDepthBands,world.pal);
   const bandVolumes = depthBands.length ? require('../index.js').load().KIT.atmosphere.depthBands.frame(depthBands,
     {origin:nominalEye,forward:[-V[2],-V[6],-V[10]]},{time:skyTime,seed:world.seed}) : [];
-  const volumes = SceneOptics.prepareVolumes([...atmosphereSources(world,o),...bandVolumes], world.pal, colorForVolume, weather?.fogGain);
-  if (emitted?.volumes.length) volumes.push(...SceneOptics.prepareVolumes(emitted.volumes, world.pal, colorForVolume));
+  const volumes = SceneOptics.prepareVolumes([...atmosphereSources(world,o),...bandVolumes], world.pal, colorForVolume, weather?.fogGain, skyTime);
+  if (emitted?.volumes.length) volumes.push(...SceneOptics.prepareVolumes(emitted.volumes, world.pal, colorForVolume, undefined, skyTime));
   const sourceWater = o.water !== false && world.water?.count && world.water.raySegments ? world.water : null;
   const water = sourceWater && (optics || paletteRules) ?
     sourceWater.mapColors((id, kind) => mediumLook(TargetSelectors.medium(id, kind))) : sourceWater;

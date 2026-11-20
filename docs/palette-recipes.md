@@ -98,6 +98,70 @@ ink-studio render examples/surface-palette-roles.js --w 354 --h 168 --px 1 --out
 [Palette remaps](pixel-look.md#palette-remaps) also accept a named
 destination swatch.
 
+## Animate a palette field or ramp
+
+Add `animation` to an existing field. Key times are in seconds and
+increase from zero. Each key overrides values from the base definition.
+Leave a value out of a key to use its authored base value at that key.
+
+```json
+{
+  "type": "spectrum",
+  "hue": [0, 1],
+  "saturation": 0.7,
+  "brightness": 0.9,
+  "steps": 16,
+  "animation": {
+    "interpolation": "linear",
+    "playback": "loop",
+    "keys": [
+      { "time": 0 },
+      { "time": 3, "hue": [1, 2] }
+    ]
+  }
+}
+```
+
+Use `smooth` (default), `linear`, or `step` interpolation and
+`clamp` (default), `loop`, or `pingpong` playback. A loop needs a
+closing key. Whole-turn differences in `hue` and `rotation` count as
+matching endpoints. Hue values can run in either direction by
+authoring the ends of the sweep in turns.
+
+Key the existing numeric appearance controls, palette swatches, or
+named colour stops that are present in the base field. Keep palette
+lists, ramp types, step counts, and projection geometry fixed across
+keys. Palette-only changes recolour the original indexed regions.
+Coverage error and boundary views measure the current palette.
+
+Use `protect: [2, "emission"]` to lock original entries by zero-based
+slot or their authored string reference, including material palette
+roles. A primary ramp can also protect its `shadow`, `accent`, or
+`highlight` stop by name. Protection holds the swatch colour while
+the keyed field controls can still move its boundaries.
+
+```js
+const sweep = KIT.palette.ramp(definition);
+const color = sweep.frame(1.25).sample(0.35);
+const texture = sweep.raster(192, 32, 1.25);
+```
+
+`ink-studio palette field spectrum.json --t 1.25 --out sweep.png`
+exports the same sample. Assign the definition to a projected palette
+effect or a surface colour ramp to sample the scene clock. For
+atmospheric bindings, use the same ramp definition or key an existing
+bands field by supplying a `palette` list in the order of its stops.
+
+The [chromatic observatory](../examples/animated-palette-fields.js) combines
+a sky transition, a spectrum sweep, and spell glass with a protected gold
+swatch. This export retains the sampled sky colours at one art pixel per
+output pixel.
+
+```sh
+ink-studio clip examples/animated-palette-fields.js --w 340 --h 178 --px 1 --raw --to 8 --fps 12 --out observatory.png
+ink-studio transition-review examples/animated-palette-fields.js --w 340 --h 178 --raw --out observatory-review.png
+```
+
 ## Independent channel curves
 
 ```js

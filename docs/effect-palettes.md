@@ -86,6 +86,10 @@ reflections use the same directional field by default. Set
 `reflections: false` inside the sky field to keep the base sky in the
 reflection. Surface finishes can also choose their own reflection source.
 
+[Animate the field's ramp or bands](palette-recipes.md#animate-a-palette-field-or-ramp)
+to change the pigment over time. Sky, fog and clouds use the environment
+clock. Local volume lights use the scene clock.
+
 The headless renderer supports all bindings. WebGL samples sky fields
 and supports fields on analytic fog volumes and its supported cloud
 representations. Its cloud cards sample the visible span's midpoint.

@@ -886,7 +886,7 @@ const SurfaceLook = (() => {
         }
         output[3] *= mix(1, clamp(result[4]), strength);
         output[4] = Math.max(output[4], clamp(result[5] * strength) * detailGain);
-        if (!unlit && amount >= 0.5) output[5] = layer.effect.palette;
+        if (!unlit && amount >= 0.5) output[5] = layer.effect.paletteAt?.(sample.time ?? 0) ?? layer.effect.palette;
         let clipped;
         for (let i = 0; i < 3; i++) {
           const next = layer.blend === 'add' ? output[i] + result[i] :
