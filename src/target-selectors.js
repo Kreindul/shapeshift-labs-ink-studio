@@ -36,14 +36,15 @@ const TargetSelectors = (() => {
     const { objectIds, materialIds, targetIds, objects, materials, targets } = world.renderMetadata ?? {};
     const cache = new Map();
     const stride = 8; // SurfaceLook.STRIDE
+    const dims = [objects?.length ?? 1, materials?.length ?? 1, (world.surfaces?.length ?? 0) + 1];
+    const packedKey = Number.isSafeInteger(dims.reduce((n, size) => n * size, 2 * (targets?.length ?? 1)));
     function row(i) {
       const objectId = objectIds?.[i] || 0, materialId = materialIds?.[i] || 0, targetId = targetIds?.[i] || 0;
       const glass = namedGlass(world, i);
       const surfaceSlot = world.surfaceData?.[i * stride] || 0;
       const surfaceName = world.surfaces?.[surfaceSlot - 1]?.settings?.id;
-      const key = ((targetId * (objects?.length ?? 1) + objectId) * (materials?.length ?? 1) + materialId) *
-        ((world.surfaces?.length ?? 0) + 1) + surfaceSlot;
-      const group = key * 2 + Number(glass);
+      const group = packedKey ? (((targetId * dims[0] + objectId) * dims[1] + materialId) * dims[2] + surfaceSlot) * 2 + Number(glass) :
+        [objectId, materialId, targetId, surfaceSlot, Number(glass)].join('/');
       if (!cache.has(group)) {
         const object = objects?.[objectId], material = materials?.[materialId], extra = targets?.[targetId];
         const surface = extra?.surface ?? surfaceName;

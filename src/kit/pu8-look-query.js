@@ -20,6 +20,16 @@
       const selector = spec === undefined ? undefined : TargetSelectors.prepare(spec);
       return K.procedural.data.freeze(groups(selector).map(({ target, count }) => ({ ...target, count })));
     }
+    function provenance(spec, { limit = 256 } = {}) {
+      check(Number.isSafeInteger(limit) && limit >= 1 && limit <= 4096, 'Expected a bounded provenance result limit');
+      const selector = spec === undefined ? undefined : TargetSelectors.prepare(spec);
+      setup();
+      const rows = index.groups(selector);
+      if (!rows.length) return W.query.missing('no splat provenance matches the selector', 'missing');
+      return W.query.ok({ matched: rows.length, targets: rows.slice(0, limit).map(({ target, count }) => ({
+        ...target, count, surfaceId: target.surface ?? null, materialId: target.material ?? null
+      })) });
+    }
     function output(spec, args = {}) {
       const selector = spec === undefined ? undefined : TargetSelectors.prepare(spec);
       const { rgb: input, at, rest, base, stage, pixel = [0, 0], limit = 256 } = args;
@@ -94,6 +104,6 @@
       });
       return W.query.ok({ matched: selected.length, targets: rows });
     }
-    return { select, output };
+    return { select, output, provenance };
   };
 })(KIT);

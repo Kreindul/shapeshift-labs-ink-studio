@@ -5,7 +5,8 @@
     EPS = 1e-10,
     integer = (n, a, b) => Number.isSafeInteger(n) && n >= a && n <= b,
     finite = (n, a, b) => Number.isFinite(n) && n >= a && n <= b,
-    name = s => typeof s === 'string' && s.length <= 240,
+    name = s => typeof s === 'string' && s.length <= 256,
+    label = s => name(s) || Number.isSafeInteger(s),
     vector = p => Array.isArray(p) && p.length === 3 && p.every(v => finite(v, -1e6, 1e6)),
     covar = (n, r) => {
       const f = r * r,
@@ -42,6 +43,8 @@
       2 * (x * y * (d * f - b * g) + x * z * (b * f - d * e) + y * z * (b * d - a * f));
     return Math.max(Math.sqrt(Math.max(0, projected)), Number.EPSILON * Math.max(a, e, g));
   };
+
+  const nativePartition = Symbol('native splat partition');
 
   function mergeSplats(
     input,
@@ -99,6 +102,8 @@
           owner = '',
           material = '',
           surface = '',
+          target,
+          [nativePartition]: partition,
           protect = false
         } = raw ?? {};
         if (
@@ -111,11 +116,12 @@
           !vector(color) ||
           !color.every(v => finite(v, 0, 1)) ||
           !finite(opacity, 1e-8, 1) ||
-          ![owner, material, surface].every(name) ||
+          ![owner, material].every(label) || !name(surface) ||
           typeof protect !== 'boolean' ||
           (raw?.covariance === undefined && !finite(radius, 1e-6, 1e5))
         )
           throw new Error('Splat LOD records need stable IDs, geometry and normalized color');
+        const binding = target === undefined ? undefined : P.data.freeze(K.authoring.data.clone(TargetSelectors.describe(target)));
         ids.add(id);
         const n = V.norm(normal),
           c = raw.covariance === undefined ? covar(n, radius) : covariance(raw.covariance),
@@ -130,9 +136,9 @@
           color: color.slice(),
           owner,
           material,
-          surface,
+          surface, binding,
           weight: projected * opacity,
-          group: JSON.stringify([owner, material, surface]),
+          group: JSON.stringify([owner, material, surface, binding && SplatProvenance.targetKey(binding), partition]),
           locked,
           alive: true,
           first: i
@@ -343,6 +349,7 @@
           owner: a.owner,
           material: a.material,
           surface: a.surface,
+          binding: a.binding,
           group: a.group,
           weight: hit.weight,
           locked: false,
@@ -360,7 +367,7 @@
       return selection
         .sort((a, b) => a.first - b.first)
         .map(n => {
-          const { id, position, normal, covariance, opacity, color, owner, material, surface, locked: protect } = n,
+          const { id, position, normal, covariance, opacity, color, owner, material, surface, binding, locked: protect } = n,
             members = [],
             pending = [n];
           while (pending.length) {
@@ -368,7 +375,7 @@
             if (node.parts) pending.push(node.parts[1], node.parts[0]);
             else members.push(node.id);
           }
-          return { id, position, normal, covariance, opacity, color, owner, material, surface, protect, members };
+          return { id, position, normal, covariance, opacity, color, owner, material, surface, ...(binding && { target: binding }), protect, members };
         });
     }
     const splats = records(nodes.filter(n => n.alive));
@@ -385,23 +392,62 @@
     return P.data.freeze({ status: active <= goal ? 'ok' : capped ? 'budget' : 'constrained', splats, work });
   }
 
+  function writeRow(data, i, p, alpha) {
+    const [r, g, b] = p.color.map(v => Math.round(v * 255)), [x, y, z] = p.position;
+    const [xx, xy, xz, yy, yz, zz] = p.covariance;
+    data.set([x, y, z, alpha, xx, xy, xz, r + 256 * g + 65536 * b, yy, yz, zz, 0, 0, 0, 0, 0], i * 16);
+  }
+
   function packSplats(input, { alphaScale = 3 } = {}) {
     const splats = Array.isArray(input) ? input : input?.splats;
     if (!Array.isArray(splats) || splats.length > 250000 || !finite(alphaScale, 1e-6, 10))
       throw new Error('Native splat packing needs a bounded static splat list');
     const data = new Float32Array(splats.length * 16);
     for (const [i, p] of splats.entries()) {
-      if (!vector(p?.position) || !vector(p?.color) || !p.color.every(v => finite(v, 0, 1)) || !finite(p.opacity, 0, 1))
+      if (!vector(p?.position) || !vector(p?.color) || !p.color.every(v => finite(v, 0, 1)) || !finite(p.opacity, 0, 1) ||
+          (p.normal !== undefined && (!vector(p.normal) || V.len(p.normal) < EPS)) ||
+          (p.owner !== undefined && !label(p.owner)) || (p.material !== undefined && !label(p.material)) ||
+          (p.surface !== undefined && !name(p.surface)))
         throw new Error('Invalid native splat');
-      const [r, g, b] = p.color.map(v => Math.round(v * 255)),
-        [xx, xy, xz, yy, yz, zz] = covariance(p.covariance),
-        [x, y, z] = p.position;
-      data.set(
-        [x, y, z, p.opacity * alphaScale, xx, xy, xz, r + 256 * g + 65536 * b, yy, yz, zz, 0, 0, 0, 0, 0],
-        i * 16
-      );
+      covariance(p.covariance);
+      if (p.target !== undefined) TargetSelectors.describe(p.target);
+      writeRow(data, i, p, p.opacity * alphaScale);
     }
-    return { count: splats.length, data };
+    return { count: splats.length, data, renderMetadata: SplatProvenance.fromRecords(splats),
+      ...(splats.some(row => row.id !== undefined) && { splatIds: Object.freeze(splats.map(row => row.id ?? null)) }) };
+  }
+
+  function reduceWorld(world, options) {
+    if (!world || !integer(world.count, 0, 250000) || !(world.data instanceof Float32Array) || world.data.length < world.count * 16 ||
+        world.anim || world.rest || world.pixAnchors || world.effectParticles?.length || world.sortRanges?.length)
+      throw new TypeError('Native LOD needs a baked world without external per-splat animation or draw ranges');
+    const { data, count, renderMetadata: meta, materialAlbedo, surfaceData, pix, fine, attr } = world;
+    const index = TargetSelectors.index(world);
+    const samples = Array.from({ length: count }, (_, i) => {
+      const q = i * 16, color = Math.round(data[q + 7]), metadata = index.row(i);
+      const normal = Array.from(meta?.normals?.subarray(i * 3, i * 3 + 3) ?? []);
+      const validNormal = normal.length === 3 && V.len(normal) > EPS;
+      return { id: String(i), position: Array.from(data.subarray(q, q + 3)), normal: validNormal ? normal : [0, 1, 0],
+        covariance: [4, 5, 6, 8, 9, 10].map(k => data[q + k]),
+        opacity: Math.max(1e-8, Math.min(1, data[q + 3])),
+        color: [color & 255, color >> 8 & 255, color >> 16].map(value => value / 255),
+        owner: metadata.object ?? '', material: metadata.material ?? '', surface: metadata.surface ?? '',
+        [nativePartition]: [meta?.objectIds?.[i] || 0, meta?.materialIds?.[i] || 0, meta?.targetIds?.[i] || 0,
+          materialAlbedo?.[i] || 0].join('/'),
+        protect: !validNormal || data[q + 3] < 1 || Boolean(data[q + 11] || surfaceData?.[i * 8] ||
+          pix?.[i * 8] || fine?.[i * 12 + 11] || attr?.subarray(i * 4, i * 4 + 4).some(Boolean)) };
+    });
+    const reduced = mergeSplats(samples, options);
+    const result = SplatProvenance.subset(world, reduced.splats.map(row => Number(row.id)));
+    for (let i = 0; i < reduced.splats.length; i++) {
+      const row = reduced.splats[i];
+      if (row.members.length < 2) continue;
+      // Merged dabs still cover the solid footprint of their original samples.
+      writeRow(result.data, i, row, Math.max(data[Number(row.id) * 16 + 3], row.opacity * 3));
+      result.renderMetadata.normals.set(row.normal, i * 3);
+    }
+    result.lod = P.data.freeze({ status: reduced.status, sourceCount: count, ...reduced.work });
+    return result;
   }
 
   // Compare coverage arrays captured with the same camera and render settings.
@@ -440,5 +486,6 @@
     };
   }
 
-  P.lod = { mergeSplats, packSplats, compareCoverage };
+  P.splatProvenance = SplatProvenance;
+  P.lod = { mergeSplats, packSplats, reduceWorld, compareCoverage };
 })(KIT);

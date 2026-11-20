@@ -29,6 +29,10 @@ test('chunks build deterministic splats, placements and sampled solids against t
   const forwardWorld = compiler.makeWorld(frame, ordered), reverseWorld = compiler.makeWorld(frame, reversed);
   assert.deepEqual(forwardWorld.data, reverseWorld.data);
   assert.deepEqual(forwardWorld.splatIds, reverseWorld.splatIds);
+  assert.deepEqual(forwardWorld.renderMetadata, reverseWorld.renderMetadata);
+  const labels = KIT.world.query.fromScene(forwardWorld).probe('look/provenance', { surface: 'terrain' });
+  assert.equal(labels.status, 'ok');
+  assert(labels.value.targets.every(row => row.surfaceId === 'terrain' && typeof row.materialId === 'string'));
   assert.equal(new Set(forwardWorld.splatIds).size, forwardWorld.count);
   for (const { splats } of ordered) assert.equal(splats.data.buffer.byteLength, splats.count * 16 * 4);
   const cpu = core.render(forwardWorld, { w: 72, h: 48, px: 1, raw: true });

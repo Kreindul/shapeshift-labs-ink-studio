@@ -4,12 +4,14 @@
   const indexBits = 25, indexLimit = 2 ** indexBits, scaleUnits = 16, maxCode = 31;
 
   function compile(world, cell, { preserveOwners = [] } = {}) {
-    const { count, data, owners, materialIds, surfaceNormals, fine } = world;
+    const { count, data, renderMetadata: meta, fine, surfaceData, materialAlbedo } = world;
+    const owners = world.owners ?? meta?.objectIds, materials = world.materialIds ?? meta?.materialIds;
+    const surfaceNormals = world.surfaceNormals ?? meta?.normals;
     if (!(cell > 0) || !Number.isFinite(cell)) throw new Error('Invalid splat interaction cell');
     if (!Number.isSafeInteger(count) || count < 0 || !data || data.length < count * 16)
       throw new Error('Invalid splat interaction world');
     if (count >= indexLimit) return null;
-    const protectedOwners = new Set(preserveOwners), protectedSlots = (world.ownerIds || []).map(id => protectedOwners.has(id));
+    const protectedOwners = new Set(preserveOwners), protectedSlots = (world.ownerIds ?? meta?.objects ?? []).map(id => protectedOwners.has(id));
     const representative = new Int32Array(count), next = new Int32Array(count).fill(-1),
       scale = new Uint8Array(count), groups = new Map(), back = new Set(world.back || []);
     const unit = 1 / cell, ordered = new Uint8Array(count);
@@ -25,7 +27,8 @@
       const nx = Math.round((surfaceNormals?.[normal] || 0) * 2),
         ny = Math.round((surfaceNormals?.[normal + 1] || 0) * 2),
         nz = Math.round((surfaceNormals?.[normal + 2] || 0) * 2);
-      const key = [owner, materialIds?.[i] || 0, flags,
+      const key = [owner, materials?.[i] || 0, meta?.targetIds?.[i] || 0,
+        surfaceData?.[i * 8] || 0, materialAlbedo?.[i] || 0, flags,
         Math.floor(x * unit), Math.floor(y * unit), Math.floor(z * unit), nx, ny, nz].join('/');
       const group = groups.get(key);
       if (group) {

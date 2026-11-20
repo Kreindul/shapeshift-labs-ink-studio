@@ -406,7 +406,9 @@
       if (m === undefined) return;
       const role = typeof m === 'string' ? m : m && m.role;
       if (m && typeof m === 'object') {
-        keys(m, path, { role: 1, ramp: 1, noise: 1, scale: 1, glow: 1, over: 1, surface: 1, model: 1, lookAsset: 1, albedo: 1 });
+        keys(m, path, { role: 1, ramp: 1, noise: 1, scale: 1, glow: 1, over: 1, surface: 1, model: 1, lookAsset: 1, albedo: 1, materialId: 1, surfaceId: 1 });
+        for (const key of ['materialId', 'surfaceId'])
+          if (m[key] !== undefined && !TargetSelectors.name(m[key])) bad(path + '.' + key, key + ' must be a name');
         if (m.albedo !== undefined) {
           try { RenderStages.albedo(m.albedo, pal); }
           catch (error) { bad(path + '.albedo', error.message); }
@@ -775,13 +777,14 @@
       matOf = m => {
         if (m === undefined) m = 'stone';
         const r = ramp(m),
-          out = { r, materialId: typeof m === 'string' ? m : m.role };
+          out = { r, materialId: typeof m === 'string' ? m : m.materialId ?? m.role };
         if (typeof m === 'object') {
           const sc = m.scale || 0.7;
           if (m.noise) out.mod = (x, y, z) => m.noise * (B.n3(x * sc, y * sc, z * sc) - 0.5);
           if (m.glow) out.em = true;
           if (m.model) out.model = m.model;
           if (m.albedo !== undefined) out.albedo = m.albedo;
+          if (m.surfaceId !== undefined) out.surfaceId = m.surfaceId;
           if (m.over) {
             const r2 = ramp(m.over.role),
               above = m.over.above === undefined ? 0.55 : m.over.above,

@@ -114,7 +114,7 @@
     return Object.freeze({change,spatial});
   }
 
-  const lookField = {name:'look/output',type:'record',selector:true};
+  const lookFields = ['output', 'provenance'].map(key => ({name:'look/'+key,type:'record',selector:true}));
   function create(view, systems = {}, projected, visual) {
     const {world, states = {}, signals = {}, tick = 0, history = [], dropped = 0} = view;
     const fields = new Map(), traces = new Map();
@@ -188,7 +188,10 @@
         return own(signals,port)?ok(signals[port]):missing('unknown signal port');
       }}
     },'read');
-    add(fields,'look',{output:{type:'record',selector:true,read:({target:site,args})=> look().output(site,args)}},'read');
+    add(fields,'look',Object.fromEntries(lookFields.map(({name,type,selector}) => {
+      const key = name.slice(5);
+      return [key,{type,selector,read:({target:site,args}) => look()[key](site,args)}];
+    })),'read');
     add(traces,'world',{
       signal:{run:({args}) => {
         let port = args.port;
@@ -314,9 +317,10 @@
       return Object.freeze({...wrapped, select:appearance.select,
         inspect(options){
           const result=wrapped.inspect(options);
-          return {...result,fields:[...(result.fields??[]).filter(row=>row.name!==lookField.name),lookField]};
+          return {...result,fields:[...(result.fields??[]).filter(row=>!lookFields.some(field=>field.name===row.name)),...lookFields]};
         },
-        probe(name,site,args) {return name===lookField.name ? freeze(appearance.output(site,args)) : wrapped.probe(name,site,args);}});
+        probe(name,site,args) {return lookFields.some(field=>field.name===name) ?
+          freeze(appearance[name.slice(5)](site,args)) : wrapped.probe(name,site,args);}});
     }
     const descriptors={}, configs={};
     if(w.water?.mediumAt){

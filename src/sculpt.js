@@ -81,7 +81,7 @@ function makeSculpt(B, rest) {
     p.bump = o.bump || null;
     p.tag = o.tag || null;
     p.renderOwner = o.objectId ?? p.tag;
-    p.renderTarget = o.target;
+    p.renderTarget = o.surfaceId !== undefined ? { surface: o.surfaceId, ...o.target } : o.target;
     p.model = o.model;
     if (p.bump) p.br += p.bump[0];
     p.reach = o.reach || 0;
@@ -745,7 +745,7 @@ function makeSculpt(B, rest) {
     return RR;
   }
   const RR = [null, 0];
-  function light(m, res, x, y, z, nx, ny, nz, full) {
+  function light(m, res, x, y, z, nx, ny, nz, full, selected) {
     if (S.clip && !S.clip(x, y, z)) return;
     /* born: when this dab appears (growth you can watch). A material's or a solid's o.born: seconds, or (x, y, z, along) -> seconds */
     const bn = m.born !== undefined ? m.born : curP && curP.born !== undefined ? curP.born : null;
@@ -967,6 +967,7 @@ function makeSculpt(B, rest) {
     /* a wet or polished thing has a small hard highlight where it mirrors the sun to the eye. The eye is taken to be at S.view (set it to the
        way the camera looks from); gloss: { c (palette index), at (how small: 0.95), c2 and at2 (a dimmer ring round it) } */
     const surface = m.surface === undefined ? m0.surface : m.surface;
+    selected?.(m);
     let glint = false;
     if (m.gloss && !surface && !m.em && !flat) {
       const g = m.gloss,
@@ -1560,18 +1561,33 @@ function makeSculpt(B, rest) {
     }
     return open / dirs.length;
   };
+  const stagedAlbedo = surface => surface?.renderStages?.some(rule => rule.stage === 'material');
+  const unnamedTarget = {}, surfaceTargets = new WeakMap();
+  function renderTarget(owner, surfaceId) {
+    const target = owner?.renderTarget;
+    if (!surfaceId || target?.surface !== undefined) return target;
+    const source = target ?? unnamedTarget;
+    if (!surfaceTargets.has(source)) surfaceTargets.set(source, new Map());
+    const entries = surfaceTargets.get(source);
+    if (!entries.has(surfaceId)) entries.set(surfaceId, { ...target, surface: surfaceId });
+    return entries.get(surfaceId);
+  }
+
   function shadeOwned(owner, material, ...sample) {
-    const capture = B.describeAlbedo && (S.captureAlbedo || material.surface?.renderStages?.some(rule => rule.stage === 'material'));
+    const capture = B.describeAlbedo && (S.captureAlbedo || stagedAlbedo(material.surface) || stagedAlbedo(material.top?.surface));
     if (!capture && !B.describeSplats) return light(material, ...sample);
     const first = B.count();
-    light(material, ...sample);
+    let effective = material;
+    if (material.top) light(material, ...sample, used => { effective = used; });
+    else light(material, ...sample);
     const end = B.count();
+    const surfaceId = effective.surfaceId ?? (effective === material ? undefined : effective.surface?.id) ?? material.surfaceId;
     B.describeSplats?.(first, end, {
       object: owner?.renderOwner ?? owner,
-      material: material.materialId ?? material,
-      target: owner?.renderTarget
+      material: effective.materialId ?? material.materialId ?? material,
+      target: renderTarget(owner, surfaceId)
     });
-    const albedo = material.albedo ?? material.r?.at(-1);
+    const albedo = effective.albedo ?? effective.r?.at(-1) ?? material.albedo ?? material.r?.at(-1);
     if (capture && albedo !== undefined) B.describeAlbedo(first, end, albedo);
   }
   S.bake = () => {

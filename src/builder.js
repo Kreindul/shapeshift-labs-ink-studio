@@ -180,10 +180,11 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     if (target) {
       let id = targetValues.get(target);
       if (id === undefined) {
-        const key = JSON.stringify(TargetSelectors.describe(target));
+        const labels = TargetSelectors.describe(target);
+        const key = SplatProvenance.targetKey(labels);
         if (!targetKeys.has(key)) {
           targetKeys.set(key, targetNames.length);
-          targetNames.push(JSON.parse(key));
+          targetNames.push(JSON.parse(JSON.stringify(labels)));
         }
         id = targetKeys.get(key);
         targetValues.set(target, id);

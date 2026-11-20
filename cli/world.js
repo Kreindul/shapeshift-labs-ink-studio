@@ -297,7 +297,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
       case 'probe': {
         ensure(typeof opt.field==='string'||opt.select!==undefined,'Use --field to select a query');
         const field=opt.field??'look/output';
-        const site=field==='look/output'&&opt.select===undefined&&opt.at===undefined&&opt.entity===undefined?undefined:target(opt);
+        const site=['look/output','look/provenance'].includes(field)&&opt.select===undefined&&opt.at===undefined&&opt.entity===undefined?undefined:target(opt);
         respond(view(file).probe(field,site,args()));
         break;
       }

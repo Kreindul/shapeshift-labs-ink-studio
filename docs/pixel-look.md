@@ -766,3 +766,50 @@ node cli/ink-studio.js sim render hot.json --w 1800 --h 1240 --out forge-hot.png
 node cli/ink-studio.js probe hot.json --select '{"surface":"heated-workpiece"}' \
   --args '{"stage":"lit","rgb":[0.6,0.6,0.6]}'
 ```
+
+## Material and surface provenance
+
+Use stable names in a selector across bakes. A JSON diorama solid can
+supply `surfaceId` and `mat.materialId`, including on a material
+defined with an inline ramp. A simulation entity uses
+`visual.surfaceId` and `visual.materialId` or `visual.material`.
+When stamping a prefab, an instance keeps its own entity ID and the
+local surface and material names. Appearance overrides can change
+the finish independently.
+
+JavaScript sculptors can set `surfaceId` on a solid or its material
+and `materialId` on the material. The solid's surface name takes
+precedence. If a top material supplies its own material ID, the baked
+samples on that material carry it. For direct splats, use
+`B.describeSplats(first, end, { object, material, target: { surface } })`.
+
+The native buffer stores integer slots locally. Their meanings come
+from dictionaries that carry the authored names. Use
+`KIT.procedural.splatProvenance.join(chunks, sceneSettings)` to assemble
+static native splat chunks with one palette. It remaps those local slots,
+including bound surface settings and pixel patterns. Joining chunks
+also retains normals, albedo references, and sample IDs when present.
+The biome compiler uses the same assembly path and publishes each
+terrain stratum's material on the `terrain` surface. Set
+`renderMetadata: false` when requesting geometry without provenance.
+
+`KIT.procedural.lod.packSplats` preserves the names in reduced records.
+Use `lod.reduceWorld(world, options)` for static native bakes. Different
+owners, materials, surfaces, and authored target scopes stay in their
+own groups. Samples with individual surface shaders, per-pixel
+patterns, or animation flags keep their exact rows. Interactive
+representatives likewise keep their original indices and respect
+provenance boundaries. Native previews may change the sample count
+and surface detail.
+
+Use `query.probe('look/provenance', selector)` or the CLI equivalent to
+read stable IDs and splat counts. The same selector can also diagnose
+a look with `look/output`.
+
+```sh
+node cli/ink-studio.js probe examples/provenance-relays.js \
+  --params '{"variant":"lod"}' --field look/provenance \
+  --select '{"prefab":"east","surface":"housing","material":"enamel"}'
+node cli/ink-studio.js render examples/provenance-relays.js --ortho \
+  --params '{"variant":"lod"}' --out reduced.png
+```

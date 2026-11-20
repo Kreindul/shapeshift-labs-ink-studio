@@ -74,7 +74,7 @@
   function create({
     height, caves = [], cell = 0.25, chunkCells = 16, verticalCells = [-24, 24], terrainSlope = 1,
     layers = [], project, emit, palette = [0x13232b, 0x435a58, 0x78927a, 0xbdba92, 0xede0b9], materialRamps = {},
-    dependencyHalo = 0, maxSplats = 50000, surfaceScatter = 0, shadeSurface
+    dependencyHalo = 0, maxSplats = 50000, surfaceScatter = 0, shadeSurface, renderMetadata = true
   } = {}) {
     if (typeof height !== 'function' || !positive(cell) || cell < 1e-6 || !integer(chunkCells) || chunkCells < 1 ||
         !coordinates(verticalCells, 2, integer) || verticalCells[0] >= verticalCells[1] ||
@@ -82,7 +82,7 @@
         chunkCells ** 2 * (verticalCells[1] - verticalCells[0]) > 250000 || !finite(terrainSlope) || terrainSlope < 0 ||
         !Array.isArray(caves) || !Array.isArray(layers) || layers.length > 64 ||
         (emit !== undefined && typeof emit !== 'function') || (project !== undefined && typeof project !== 'function') ||
-        (shadeSurface !== undefined && typeof shadeSurface !== 'function') ||
+        (shadeSurface !== undefined && typeof shadeSurface !== 'function') || typeof renderMetadata !== 'boolean' ||
         !Array.isArray(palette) || !palette.length || palette.length > 64 ||
         !Array.from(palette).every(v => integer(v) && v >= 0 && v <= 0xffffff) ||
         !finite(dependencyHalo) || dependencyHalo < 0 || !integer(maxSplats) || maxSplats < 1 ||
@@ -284,20 +284,24 @@
         return { id, point, normal, surfaceY: heightAt(point[0], point[2]) };
       }
       const builder = makeBuilder(hash(key, view.seed), pal, {
-        renderMetadata: false, initialCapacity: Math.max(1, sampled.vertices.length)
+        renderMetadata, initialCapacity: Math.max(1, sampled.vertices.length)
       }), ids = [];
       const owned = p => P.spatial.contains(bounds, p) && p[0] < bounds.max[0] && p[2] < bounds.max[2];
+      const terrainTarget = { surface: 'terrain' };
       for (const { id, point, normal, surfaceY } of sampled.vertices) {
         const shade = Math.max(0, V.dot(normal, sun));
-        const painted = bricks && ramps.size ? ramps.get(bricks.attributes(...V.mad(point, normal, -cell * 0.22)).material) : null;
-        const color = painted ? painted[Math.round(shade * (painted.length - 1))] : (() => {
-          const { ramp } = view.materialAt(...point, { surfaceY, time, probe: V.mad(point, normal, cell * 0.22) });
-          return ramp[Math.round(shade * (ramp.length - 1))].map(v => Math.round(v * 255));
-        })();
+        const paint = bricks && ramps.size ? bricks.attributes(...V.mad(point, normal, -cell * 0.22)).material : null;
+        const painted = ramps.get(paint);
+        const material = painted ? null : view.materialAt(...point, { surfaceY, time, probe: V.mad(point, normal, cell * 0.22) });
+        const ramp = painted ?? material.ramp;
+        const swatch = ramp[Math.round(shade * (ramp.length - 1))];
+        const color = painted ? swatch : swatch.map(v => Math.round(v * 255));
         const shaded = shadeSurface?.(color.slice(), { point: point.slice(), normal: normal.slice(), frame }) ?? color;
         if (shadeSurface && !coordinates(shaded, 3, v => finite(v) && v >= 0 && v <= 255))
           throw new RangeError('Surface shading needs an RGB color in [0, 255]');
+        const first = builder.count();
         builder.disc(...point, normal, cell * (0.52 + surfaceScatter * 0.24), cell * 0.11, shaded, 1);
+        builder.describeSplats?.(first, builder.count(), { material: painted ? paint : material.stratum.material, target: terrainTarget });
         ids.push(id);
       }
       const placements = [];
@@ -332,16 +336,21 @@
       for (const item of scenePlacements) {
         const first = builder.count();
         if (emit) emit(builder, item, frame);
-        else builder.iso(...item.point, cell * 0.22, builder.P.at(-1), 1);
+        else {
+          builder.iso(...item.point, cell * 0.22, builder.P.at(-1), 1);
+          builder.describeSplats?.(first, builder.count(), { object: item.id });
+        }
         for (let i = first; i < builder.count(); i++) ids.push(item.id + '/' + (i - first));
         if (builder.count() > maxSplats) throw new RangeError('Biome chunk exceeds its splat budget');
       }
       if (builder.count() > maxSplats) throw new RangeError('Biome chunk exceeds its splat budget');
-      const { data, count, moving, back } = builder.finish();
+      const { data, count, moving, back, renderMetadata: metadata, surfaceData, surfaces, materialAlbedo,
+        pix, fine, attr, ramps: pixelRamps, rampOff, pats } = builder.finish();
       const packed = data.byteLength === data.buffer.byteLength ? data : data.slice();
       const chunk = Object.freeze({ key, index: freeze(index.slice()), bounds, placements: scenePlacements, routes: freeze(routes),
         field: sampled.field, work: freeze({ ...sampled.work, heightColumns: columns.size, reusedSurface: Boolean(retained) }),
-        splats: Object.freeze({ data: packed, count, moving, back, ids: freeze(ids) }) });
+        splats: Object.freeze({ data: packed, count, moving, back, ids: freeze(ids), renderMetadata: metadata,
+          surfaceData, surfaces, materialAlbedo, pix, fine, attr, ramps: pixelRamps, rampOff, pats }) });
       geometry.set(chunk, sampled);
       return chunk;
     }
@@ -351,19 +360,10 @@
       const sorted = chunks.slice().sort((a, b) => order(a.key, b.key));
       if (sorted.some((chunk, i) => i > 0 && chunk.key === sorted[i - 1].key))
         throw new Error('World chunks need distinct keys');
-      const count = sorted.reduce((sum, chunk) => sum + chunk.splats.count, 0);
-      const data = new Float32Array(count * 16), moving = [], back = [], splatIds = [];
-      let first = 0;
-      for (const { splats } of sorted) {
-        data.set(splats.data, first * 16);
-        for (const id of splats.ids) splatIds.push(id);
-        for (const row of splats.moving) moving.push(first + row);
-        for (const row of splats.back) back.push(first + row);
-        first += splats.count;
-      }
-      return { radius: 14, detail: 1 / cell, dither: 1, fog: { c: 0, start: 1, max: 0 },
-        ...meta, cam: { target: [0, 0, 0], dist: 12, yaw: 0, pitch: 0, ...meta.cam }, water: frame.water, pal,
-        count, data, splatIds: freeze(splatIds), moving: Int32Array.from(moving), back: Int32Array.from(back) };
+      return SplatProvenance.join(sorted.map(chunk => chunk.splats), {
+        radius: 14, detail: 1 / cell, dither: 1, fog: { c: 0, start: 1, max: 0 },
+        ...meta, cam: { target: [0, 0, 0], dist: 12, yaw: 0, pitch: 0, ...meta.cam }, water: frame.water, pal
+      });
     }
 
     let published, queue = Promise.resolve();

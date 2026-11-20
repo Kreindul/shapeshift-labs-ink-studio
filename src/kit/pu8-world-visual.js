@@ -118,7 +118,8 @@
       const ramp=entry.look??[1,2,3,4,5,6];
       const rotation=entry.rotation??M.id();
       const axis=[0,1,2].map(i=>[rotation[i],rotation[i+3],rotation[i+6]]);
-      const finish=looks.material({r:ramp,materialId:entry.material??'body'},looks.forEntity(entry.entity??entry.id));
+      const entityId=entry.entity??entry.id, visual=entities[entityId]?.visual;
+      const finish=looks.material({r:ramp,materialId:visual?.materialId??visual?.material??entry.material??'body'},looks.forEntity(entityId));
       hasSurface ||= Boolean(finish.surface);
       S.box(entry.position,entry.half,finish,{ax:axis,res:resolution*.72,
         rd:Math.min(.055,...entry.half)*.4,tag:entry.id,target:targetFor(entry.entity??entry.id)});
@@ -128,7 +129,7 @@
       const pose=query.target({entity:id}), point=pose?.point;
       if (!point) continue;
       const {half,ramp,surface}=entity.visual;
-      const finish=looks.material({r:ramp??[19,20,21,22,23],surface,albedo:entity.visual.albedo,materialId:entity.visual.material??'entity'},looks.forEntity(id));
+      const finish=looks.material({r:ramp??[19,20,21,22,23],surface,albedo:entity.visual.albedo,materialId:entity.visual.materialId??entity.visual.material??'entity'},looks.forEntity(id));
       hasSurface ||= Boolean(finish.surface);
       S.box(point,half,finish,{res:resolution*.72,tag:id,target:targetFor(id)});
     }
