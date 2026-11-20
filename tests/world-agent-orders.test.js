@@ -188,6 +188,23 @@ test('a cancellation clears a shared crossing before stopping and restores the l
   assert.equal(actor(run).task,'patrol');
 });
 
+test('interrupting a move supersedes its pending route before the planner spends a slot',()=>{
+  const scene=ground(), {config}=scene.systems.crew;
+  delete config.bounds;
+  scene.systems.nav={kind:'navigation',config:{bounds,cell:.22,tiles:{}}};
+  config.navigation='nav';
+  config.routeQueue={maxRequestsPerTick:1};
+  const run=W.runtime.create(scene);
+  run.schedule([issue(1,move('old',at(9))),issue(2,move('new',at(3)),'interrupt')]);
+  run.advance(2);
+  const routing=run.query().probe('crew/route-queue').value;
+  assert.deepEqual(routing.served,[]);
+  assert.deepEqual(routing.pending.map(row=>row.to),[at(3)]);
+  assert.equal(orders(run).paused[0].id,'old');
+  run.advance(65);
+  assert.deepEqual(orders(run).outcomes.map(row=>row.id),['new','old']);
+});
+
 test('invalid tasks, overfilled queues and stale owner generations do not mutate the roster',()=>{
   const scene=ground();
   scene.systems.crew.config.orders.maxQueued=1;

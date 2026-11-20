@@ -495,6 +495,11 @@
       draft.update(slot,row,update(row));
       return packed(draft.finish(),state.contacts,decisions,state.routeWork,state.crowd);
     }
+    function changeOrders(row,orders){
+      const switched=orders.active!==(row.orders?.active??null);
+      return {...row,orders,...(switched&&{route:emptyList,cursor:0,retry:0,
+        ...(row.routing&&{routing:RQ.idle})})};
+    }
     function pendingTransfers(roster,limit){
       const pending=new Map();
       for(const slot of S.order(roster)){
@@ -580,12 +585,12 @@
       ...(orders&&{
         'issue-order'(state,args,ctx){
           const decisions=policy?.managed(args.agent)?{...state.decisions,[args.agent]:policy.initial[args.agent]}:state.decisions;
-          return replace(state,args,row=>({...row,orders:orders.issue(row,args,ctx)}),decisions);
+          return replace(state,args,row=>changeOrders(row,orders.issue(row,args,ctx)),decisions);
         },
         'cancel-order'(state,args,ctx){
           return replace(state,args,row=>{
             const book=row.orders??O.blank, next=orders.cancel(book,args.order,row,ctx);
-            return next===book?row:{...row,orders:next};
+            return next===book?row:changeOrders(row,next);
           });
         }
       }),
