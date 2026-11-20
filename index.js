@@ -107,6 +107,7 @@ module.exports = {
     return module.exports.load().KIT.procedural.contributions.create(world, options);
   },
   createSimulationWorkers: require('./src/simulation-worker-pool.js'),
+  openCheckpointStore: require('./src/simulation-checkpoint-store.js').openCheckpointStore,
   load() {
     const out = path.join(__dirname, 'dist', 'standalone.js'),
       srcs = files().concat(demoFiles()),
