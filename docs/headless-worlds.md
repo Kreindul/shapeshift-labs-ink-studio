@@ -42,6 +42,9 @@ single-use work across agent rosters.
 [Physical work and production](physical-work.md) connect located stocks,
 staffed recipes, and construction, repair, or recruitment effects.
 
+[Groups and formations](group-formations.md) give agents shared
+destinations, per-member slots, and rally points beyond narrow passages.
+
 [First-divergence debugging](first-divergence.md) compares timelines
 tick by tick and reports actual inputs and changed state paths.
 
