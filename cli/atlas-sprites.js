@@ -13,7 +13,7 @@ function heading(v) {
 
 function rasterize(placements, settings) {
   if (!placements.length) return [];
-  const {eye,V,W,H,focal,ortho,near,rayAt,time,override,sun,visibility,clip}=settings;
+  const {eye,V,W,H,focal,ortho,near,rayAt,time,override,sun,visibility,clip,objectDither}=settings;
   if (override!==undefined&&!['card','impostor'].includes(override))
     throw new RangeError('Sprite atlas mode must be card or impostor');
   const results=[];
@@ -51,8 +51,9 @@ function rasterize(placements, settings) {
       const ray=rayAt(x+.5,y+.5), facing=-dot(ray.direction,axes.normal);
       if (facing<=1e-7) continue;
       const origin=ray.origin.map((n,i)=>n-at[i]), plane=dot(origin,axes.normal)/facing;
-      const u=Math.floor(px+(dot(origin,axes.right)+plane*dot(ray.direction,axes.right))/units);
-      const v=Math.floor(py-(dot(origin,axes.up)+plane*dot(ray.direction,axes.up))/units);
+      const uAt=px+(dot(origin,axes.right)+plane*dot(ray.direction,axes.right))/units;
+      const vAt=py-(dot(origin,axes.up)+plane*dot(ray.direction,axes.up))/units;
+      const u=Math.floor(uAt), v=Math.floor(vAt);
       if (u<0||u>=width||v<0||v>=height||!atlas.sample(tile,u,v,placement,sample)) continue;
       const hit=plane+placement.scale*sample.depth/facing, z=hit*ray.axial;
       if (z<near) continue;
@@ -74,7 +75,8 @@ function rasterize(placements, settings) {
         return gain===1 ? value : clamp(Math.max(0,value-glow)*gain+glow,0,1);
       });
       results.push({p:y*W+x,z,alpha:sample.alpha*opacity,color,normal,position,emission,
-        objectPosition:local(rotation,position.map((n,i)=>(n-at[i])/placement.scale))});
+        objectPosition:local(rotation,position.map((n,i)=>(n-at[i])/placement.scale)),
+        ...(objectDither && mode==='card' && { patternPosition:[(uAt-px)*tile.unitsPerPixel,(py-vAt)*tile.unitsPerPixel,0] })});
     }
   }
   return results.sort((a,b)=>b.z-a.z);

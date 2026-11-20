@@ -30,7 +30,7 @@ function target(opt) {
   return {};
 }
 
-module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,atmosphereEmittersOption,effectPalettesOption}) {
+module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,atmosphereEmittersOption,effectPalettesOption,stabilityOption}) {
   const W = kit.KIT.world, R = W.runtime;
   const args = () => opt.args ? parse(opt.args) : {};
   function sampleArgs() {
@@ -327,7 +327,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
           colorCurves:opt['color-curves']==='off'?false:undefined,
           colorLut:require('./lut.js').override(opt.lut),
           paletteConstraints:require('./palette-constraints.js').override(opt['palette-constraints']),
-          water:opt.water==='off'?false:undefined, effectPalettes:effectPalettesOption?.(),
+          water:opt.water==='off'?false:undefined, effectPalettes:effectPalettesOption?.(), stable:stabilityOption?.(),
           atmosphere:opt.atmosphere==='off'?false:undefined, atmosphereEmitters:atmosphereEmittersOption?.(),
           coverageAware:opt['coverage-aware']===undefined?undefined:opt['coverage-aware']!=='off',
           lookMasks:opt['look-masks']==='off'?false:undefined,

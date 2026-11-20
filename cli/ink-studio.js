@@ -226,7 +226,7 @@ function pose(w, t) {
 const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
 if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
   die('--px needs a positive integer');
-let lutOverride, stackOverride, effectPalettesOverride, constraintsOverride, skyOverride, skyProfiles, celestialOverride, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, splatFieldsOverride, atmosphereEmittersOverride, inputSpriteAtlas;
+let stableOverride, lutOverride, stackOverride, effectPalettesOverride, constraintsOverride, skyOverride, skyProfiles, celestialOverride, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, splatFieldsOverride, atmosphereEmittersOverride, inputSpriteAtlas;
 function skyProfileOverrides(value) {
   if (typeof value !== 'string') die('--sky-profile expects track=profile pairs');
   const pairs = value.split(',').map(entry => entry.split('=').map(part => part.trim()));
@@ -413,6 +413,39 @@ function onOffOption(flag) {
   die('--' + flag + ' expects on or off');
 }
 
+function stabilityOption() {
+  const value = opt.stable;
+  if (value === 'off') return false;
+  const snap = onOffOption('snap');
+  if (value === undefined && snap === undefined && opt['dither-space'] === undefined &&
+      opt['dither-spacing'] === undefined && opt['dither-origin'] === undefined && opt.resolve === undefined) return;
+  const fromFile = value !== undefined && value !== true && value !== 'on';
+  const base = fromFile ? (stableOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'))) :
+    value === 'on' || value === true ? {snap:true} : {};
+  if (!base || typeof base !== 'object' || Array.isArray(base)) throw new TypeError('Stable settings file needs an object');
+  return {
+    ...base,
+    ...(snap !== undefined && {snap}),
+    ...(opt['dither-space'] !== undefined && {dither:opt['dither-space']}),
+    ...(opt['dither-spacing'] !== undefined && {spacing:num('dither-spacing')}),
+    ...(opt['dither-origin'] !== undefined && {origin:list('dither-origin')}),
+    ...(opt.resolve !== undefined && {resolve:opt.resolve})
+  };
+}
+
+function clipCamera(world) {
+  if (opt['camera-pan'] === undefined && opt['camera-orbit'] === undefined) return null;
+  const shift = list('camera-pan',[0,0,0]), start = list('target',world.cam.target);
+  const yaw = num('yaw',world.cam.yaw), degrees = num('camera-orbit',0);
+  if (opt['camera-orbit'] === true || ![shift,start].every(v=>v.length===3 && v.every(Number.isFinite)) ||
+      !Number.isFinite(yaw) || !Number.isFinite(degrees))
+    throw new TypeError('Use --camera-pan x,y,z and --camera-orbit degrees');
+  return phase => ({
+    target: start.map((n,i)=>n+shift[i]*phase),
+    yaw: yaw+phase*degrees*Math.PI/180
+  });
+}
+
 const view = extra =>
   Object.assign(
     {
@@ -423,11 +456,7 @@ const view = extra =>
       w: num('w', 900),
       h: num('h', 620),
       px: artPixelSize,
-      stable: opt.stable === 'off' ? false : opt.snap || opt['dither-space'] || opt.resolve || opt.stable ? {
-        snap: opt.snap === 'on' || opt.snap === true || (opt.snap !== 'off' && !!opt.stable),
-        ...(opt['dither-space'] && { dither: opt['dither-space'] }),
-        ...(opt.resolve && { resolve: opt.resolve })
-      } : undefined,
+      stable: stabilityOption(),
       effectPalettes: effectPalettesOption(),
       artEffects: opt.effects === 'off' ? false : opt.effects,
       ink: opt.ink === 'off' ? false : opt.ink,
@@ -523,7 +552,7 @@ function die(m) {
   console.error(m);
   process.exit(1);
 }
-const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,atmosphereEmittersOption,effectPalettesOption});
+const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,atmosphereEmittersOption,effectPalettesOption,stabilityOption});
 const worldCommands = new Set(['inspect','probe','trace','field','scene','sim']);
 const CMD = {
   help() {
@@ -570,6 +599,7 @@ const CMD = {
         '  sheet <id> [--from 0 --to 6 --n 12 | --t 0,1,2]   the same view at several moments, on one sheet',
         '  turn <id> [--n 8] [--t 0]   the diorama from all round, on one sheet',
         '  clip <id> [--from 0 --to 6 --fps 12]   an animated PNG of it moving (also supports --text)',
+        '    --camera-pan x,y,z --camera-orbit degrees --px 1   review slow camera motion at native art resolution',
         '  ghost <id> [--t 2 --spacing 0.12 --n 2 | --ghosts 1.6,1.8]   one moment with those either side laid faintly over it',
         '  acts                        the ready clips, reactions, easings and cues, by name',
         '  motion <id> [--from 0 --to 12]   numbers about how it moves: speed, jumps, what goes underground',
@@ -630,7 +660,7 @@ const CMD = {
         'shaped fog options: --shaped-atmosphere on|off|file.json --volume-cutouts on|off|file.json',
         'fog lighting options: --volume-local-lights on|off --volume-local-shadows on|off',
         'effect palette options: --effect-palettes on|off|file.json',
-        'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable off --snap --dither-space screen|world|object --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
+        'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable on|off|file.json --snap on|off --dither-space screen|world|object --dither-spacing n --dither-origin x,y,z --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
       ].join('\n')
     );
   },
@@ -1391,11 +1421,12 @@ const CMD = {
       from = num('from', 0),
       to = num('to', 6),
       n = Math.max(2, Math.round((to - from) * fps)),
-      frames = [], ts = [];
+      frames = [], ts = [], camera = clipCamera(w);
     for (let k = 0; k < n; k++) {
       const t = from + k / fps;
       pose(w, t);
-      const im = R.render(w, view({ t, artHistory, volumeHistory, w: num('w', 600), h: num('h', 420), ...diagnostics?.settings }));
+      const im = R.render(w, view({ t, artHistory, volumeHistory, w: num('w', 600), h: num('h', 420),
+        ...camera?.(k/(n-1)), ...diagnostics?.settings }));
       diagnostics?.capture(im, opt.px1 ? 1 : im.px);
       ts.push(t);
       frames.push(displayFrame(im, w));

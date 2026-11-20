@@ -139,9 +139,9 @@ function render(world, o, preparedPalettes) {
   ) : !o.raw && !o.captureCoverage ? o.effectPaletteCapture : null;
   const ink = styled ? ArtInk.prepare(o.ink ?? look.ink, world.pal) : null;
   const effects = styled ? ArtEffects.prepare(o.artEffects ?? look.effects, world.pal) : null;
-  const stable = ArtStability.prepare(o.stable ?? look.stable);
+  const stable = ArtStability.prepare(look.stable, o.stable);
   const specializedResolve = legacyLook && stable && stable.resolve !== 'native';
-  const anchoring = legacyLook && stable && stable.dither !== 'screen';
+  const anchoring = !o.raw && !o.captureCoverage && !!stable?.anchorSpaces.size;
   const requestedPasses = ArtPasses.select(o.passes);
   const passSelection = new Set(requestedPasses);
   let lookPass;
@@ -159,8 +159,11 @@ function render(world, o, preparedPalettes) {
     if (effectPaletteSettings.materials.size) passSelection.add('materialId');
   }
   if (anchoring) {
-    passSelection.add('splatId');
-    passSelection.add(stable.dither === 'world' ? 'position' : 'objectPosition');
+    passSelection.add('depth');
+    if (stable.anchorSpaces.has('world')) passSelection.add('position');
+    if (stable.anchorSpaces.has('object')) passSelection.add('objectPosition');
+    if (stable.rules.some(rule => rule.object !== undefined)) passSelection.add('objectId');
+    if (stable.rules.some(rule => rule.material !== undefined)) passSelection.add('materialId');
   }
   if (specializedResolve || (legacyLook && stable?.protect.size)) {
     for (const channel of ['objectId', 'materialId', 'emission', 'protected']) passSelection.add(channel);
@@ -170,9 +173,10 @@ function render(world, o, preparedPalettes) {
     if (effects) frame = ArtEffects.apply(frame, passes, effects, t, {
       history: o.artHistory, world, palette: world.pal, motionReference: frame.motionReference
     });
-    if (styled && stages?.post) RenderStages.finish(frame, stages, passes, t, lookPass?.post, audit);
+    const ditherAt = anchoring ? (x,y) => ArtStability.ditherCoordinates(stable, passes, y*frame.w+x, x, y) : undefined;
+    if (styled && stages?.post) RenderStages.finish(frame, stages, passes, t, lookPass?.post, audit, ditherAt);
     if (effectSignals) {
-      frame = EffectPalettes.apply(frame, passes, effectSignals, source, world.pal, o.captureEffectPalettes);
+      frame = EffectPalettes.apply(frame, passes, effectSignals, source, world.pal, o.captureEffectPalettes, ditherAt);
       if (audit) for (const ramp of effectSignals.rules.ramps.values()) audit.addPalette(ramp.packed);
     }
     if (audit) {
@@ -376,6 +380,7 @@ function render(world, o, preparedPalettes) {
   const spriteAtlases=AtlasSprites.placements(world.spriteAtlases,o.spriteAtlases);
   const sprites=AtlasRaster.rasterize(spriteAtlases,{
     eye,V,W,H,focal,ortho,near,rayAt,time:t,override:o.spriteAtlasMode,sun,
+    objectDither: anchoring && stable.anchorSpaces.has('object'),
     visibility:(position)=>(cloudShadow?.(...position)??1)*(exposure?.light?.(...position)??1),
     clip:reflectionPlane && (position=>SceneOptics.planeDistance(reflectionPlane,...position)>reflectionPlane.bias)
   });
@@ -689,7 +694,7 @@ function render(world, o, preparedPalettes) {
   const patternFlashes = flash && PIX ? new Map() : null;
   let contributions = retainLayers && PIX ? contributionLayers(col, captured, W, H, true, bend) : null;
   const stageMasks = stages?.surfaceMask || contribution && localConstraints?.some(policy => policy?.mask);
-  const stagedFrames = stageMasks ? sampleFrames(world, t) : null;
+  const stagedFrames = stageMasks || anchoring && contribution ? sampleFrames(world, t) : null;
   const maskFrames = stagedFrames && new Map();
   function stageFrame(i) {
     if (i >= baseCount) return { normal: null };
@@ -701,6 +706,13 @@ function render(world, o, preparedPalettes) {
     const { rest, normal, localOffset } = stageFrame(i);
     const offset = localOffset(point[0] - X[i], point[1] - Y[i], point[2] - Z[i]);
     return { position: Array.from(rest, (n, k) => n + offset[k]), worldPosition: point, normal, time: t };
+  }
+  const renderMeta = world.renderMetadata;
+  function fragmentRule(i) {
+    if (!anchoring || !contribution) return null;
+    const rule = stable.rules.length ? ArtStability.matching(stable, renderMeta?.objects?.[renderMeta.objectIds?.[i]],
+      renderMeta?.materials?.[renderMeta.materialIds?.[i]]) : stable;
+    return rule.dither === 'screen' ? null : rule;
   }
   function stagedMaterial(i, rules, rgb, sample) {
     const reference = world.materialAlbedo?.[i];
@@ -912,6 +924,7 @@ function render(world, o, preparedPalettes) {
     const projected = surface?.projected(i);
     const reflectedSky = !skyOverlay && surface?.environment(i);
     const fragmentSurface = !pixelSurface && (planar || projected || reflectedSky || liveNormal && hasSurface);
+    const ditherRule = fragmentRule(i);
     const detailParticle = fieldParticle || world.effectParticles?.some(({ first, count }) => i >= first && i < first + count);
     if (hasSurface && !pixelSurface && !fragmentSurface) {
       [r, g, b, coverage, glint, centerPalette] = surface.shade(i, x, y, z, x, y, z, r, g, b, undefined, undefined, lookPass?.surface);
@@ -1041,14 +1054,18 @@ function render(world, o, preparedPalettes) {
         const scoped = contribution?.applies(i, paletteId);
         if (staged?.lit || scoped || glassLook) {
           let sample;
-          if (litMask || (scoped && contribution.masked(i, paletteId))) {
+          if (litMask || (scoped && (ditherRule || contribution.masked(i, paletteId)))) {
             const sampleNormal = litNormal ?? stageFrame(i).normal;
             const point = hit ?? (sampleNormal ?
               surfacePoint(rayAt(ix + .5, iy + .5), sampleNormal, x, y, z, -cz, R) : [x, y, z]);
             sample = stageSample(i, point);
           }
           let rgb = [pr, pg, pb];
-          if (scoped) rgb = contribution.shade(i, paletteId, rgb, ix, H - 1 - iy, sample, highlight <= .22, lookPass?.palette);
+          if (scoped) {
+            const [dx,dy] = ditherRule ? ArtStability.coordinates(ditherRule,
+              ditherRule.dither === 'object' ? sample.position : sample.worldPosition, ix, H-1-iy) : [ix,H-1-iy];
+            rgb = contribution.shade(i, paletteId, rgb, dx, dy, sample, highlight <= .22, lookPass?.palette);
+          }
           if (staged?.lit) rgb = RenderStages.apply(staged.lit, rgb, sample, lookPass?.stage);
           [pr, pg, pb] = glassLook ? glassLook(rgb, lookPass?.optics) : rgb;
         }
@@ -1357,8 +1374,11 @@ function render(world, o, preparedPalettes) {
         const c = surface?.has(i) ? surface.shade(i, HX[p], HY[p], HZ[p], X[i], Y[i], Z[i], ...base, x + 0.5, y + 0.5, lookPass?.surface) : base;
         let rgb = c;
         if (contribution?.applies(i, c[5])) {
-          const site = sample ?? (contribution.masked(i, c[5]) ? stageSample(i, [HX[p], HY[p], HZ[p]]) : undefined);
-          rgb = contribution.shade(i, c[5], c, x, H - 1 - y, site, !(c[4] > .22), lookPass?.palette);
+          const rule = fragmentRule(i);
+          const site = sample ?? (rule || contribution.masked(i, c[5]) ? stageSample(i, [HX[p], HY[p], HZ[p]]) : undefined);
+          const [dx,dy] = rule ? ArtStability.coordinates(rule, rule.dither === 'object' ? site.position : site.worldPosition, x, H-1-y) :
+            [x,H-1-y];
+          rgb = contribution.shade(i, c[5], c, dx, dy, site, !(c[4] > .22), lookPass?.palette);
         }
         let lit = staged?.lit ? RenderStages.apply(staged.lit, rgb, sample, lookPass?.stage) : rgb;
         if (cloudShadow && !live?.normal(i) && !(Math.round(d[i * 16 + 11]) & (32 | 64))) {
@@ -1623,7 +1643,7 @@ function render(world, o, preparedPalettes) {
       if (!masks) continue;
       if (!overlay.slots[p]) continue;
       const q = p * 3, x = p % W, y = H - 1 - Math.floor(p / W);
-      const [dx, dy] = passes?.splatId && stable ? ArtStability.ditherCoordinates(stable, passes, y * W + x, x, y) : [x, y];
+      const [dx, dy] = anchoring ? ArtStability.ditherCoordinates(stable, passes, y * W + x, x, y) : [x, y];
       masks.record(p, c2[q], c2[q + 1], c2[q + 2], dx, dy);
     }
     if (audit) for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
@@ -1747,16 +1767,17 @@ function render(world, o, preparedPalettes) {
         continue;
       }
       const localId = outlined ? 0 : localAt?.[p];
-      let ditherX = x, ditherY = y;
-      if (anchoring) [ditherX, ditherY] = ArtStability.ditherCoordinates(stable, passes, yo * W + x, x, y);
-      const localY = anchoring && passes.splatId[yo * W + x] ? ditherY : yo;
+      const localCoordinates = tone || localId || masks;
+      const screenY = localCoordinates ? yo : y;
+      const [ditherX, ditherY] = anchoring ?
+        ArtStability.ditherCoordinates(stable, passes, yo*W+x, x, screenY) : [x,screenY];
       if (lookPass && globalPaletteMark && (!localId || localConstraints?.[localId - 1]?.source === 'graded'))
         lookPass.local(p, globalPaletteMark);
       if (lookPass && localId && localConstraints?.[localId - 1]) lookPass.local(p, localConstraints[localId - 1]);
-      if (masks && !outlined) masks.record(p, r, g, b, ditherX, localY);
+      if (masks && !outlined) masks.record(p, r, g, b, ditherX, ditherY);
       if (tone || localId) {
-        const index = localId ? PixelLook.localIndex(local, localId, [r, g, b], ditherX, localY, !surfaceGlint?.[p]) :
-          PixelLook.toneIndex(tone, r, g, b, ditherX, anchoring && passes.splatId[yo * W + x] ? ditherY : yo);
+        const index = localId ? PixelLook.localIndex(local, localId, [r, g, b], ditherX, ditherY, !surfaceGlint?.[p]) :
+          PixelLook.toneIndex(tone, r, g, b, ditherX, ditherY);
         const color = (localOutput?.packed || tone.palette)[index];
         use[index]++;
         out[q] = color >> 16;
@@ -1765,7 +1786,9 @@ function render(world, o, preparedPalettes) {
         continue;
       }
       if (!outlined && !surfaceGlint?.[p]) {
-        const th = PixelLook.bayerRank(ditherX, ditherY) - 0.5;
+        const [dx,dy] = masks && screenY !== y ? (anchoring ?
+          ArtStability.ditherCoordinates(stable, passes, yo*W+x, x, y) : [x,y]) : [ditherX,ditherY];
+        const th = PixelLook.bayerRank(dx, dy) - 0.5;
         r = clamp(r + th * dith, 0, 1);
         g = clamp(g + th * dith, 0, 1);
         b = clamp(b + th * dith, 0, 1);

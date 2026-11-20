@@ -1,17 +1,45 @@
 /* Optional camera and sampling controls in native art pixels. */
 const ArtStability = (() => {
-  function prepare(definition) {
-    if (!definition) return null;
-    const settings = definition === true ? { snap: true } : definition;
-    if (typeof settings !== 'object' || Array.isArray(settings)) throw new TypeError('Expected pixel stability settings');
-    const { snap = false, anchor = [0, 0, 0], dither = 'screen', spacing = .08,
-      resolve = 'native', threshold = .4, protect = [] } = settings;
-    if (typeof snap !== 'boolean' || !Array.isArray(anchor) || anchor.length !== 3 || !anchor.every(Number.isFinite) ||
-        !['screen', 'world', 'object'].includes(dither) || !Number.isFinite(spacing) || spacing <= 0 ||
+  const spaces = ['screen', 'world', 'object'];
+  const origin = [0, 0, 0];
+  const vector = value => Array.isArray(value) && value.length === 3 && Array.from(value).every(Number.isFinite);
+
+  function pattern({ dither = 'screen', spacing = .08, origin: point = origin }) {
+    if (!spaces.includes(dither) || !Number.isFinite(spacing) || spacing <= 0 || !vector(point))
+      throw new RangeError('Invalid dither space, spacing or origin');
+    return { dither, spacing, origin: point.slice() };
+  }
+
+  function prepare(definition, override) {
+    if (override === false || (override === undefined && !definition)) return null;
+    function read(value) {
+      if (value === true) return { snap: true };
+      if (value === undefined || value === false || value === null) return {};
+      if (typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Expected pixel stability settings');
+      return value;
+    }
+    const settings = { ...read(definition), ...read(override) };
+    const { snap = false, anchor = origin, resolve = 'native', threshold = .4, protect = [], targets = [] } = settings;
+    if (typeof snap !== 'boolean' || !vector(anchor) ||
         !['native', 'coverage', 'clusters'].includes(resolve) || !Number.isFinite(threshold) || threshold <= 0 || threshold > 1 ||
-        !Array.isArray(protect) || !protect.every(value => typeof value === 'string' || Number.isSafeInteger(value)))
+        !Array.isArray(protect) || !Array.from(protect).every(value => typeof value === 'string' || Number.isSafeInteger(value)) ||
+        !Array.isArray(targets) || targets.length > 64)
       throw new RangeError('Invalid pixel stability settings');
-    return { snap, anchor, dither, spacing, resolve, threshold, protect: new Set(protect.map(String)) };
+    const main = pattern(settings);
+    const named = value => typeof value === 'string' && value.trim() || Number.isSafeInteger(value);
+    const rules = Array.from(targets, row => {
+      if (!row || Object.getPrototypeOf(row) !== Object.prototype ||
+          Object.keys(row).some(key => !['object', 'material', 'dither', 'spacing', 'origin'].includes(key)))
+        throw new TypeError('Invalid dither target');
+      const { object, material } = row;
+      if (object === undefined && material === undefined ||
+          object !== undefined && !named(object) || material !== undefined && !named(material))
+        throw new TypeError('A dither target needs an object or material name');
+      return { ...pattern({ ...main, ...row }), object, material };
+    });
+    const anchorSpaces = new Set([main.dither, ...rules.map(rule => rule.dither)]);
+    anchorSpaces.delete('screen');
+    return { ...main, snap, anchor: anchor.slice(), resolve, threshold, protect: new Set(protect.map(String)), rules, anchorSpaces };
   }
 
   function snapView(view, pixelsPerUnit, anchor) {
@@ -25,15 +53,33 @@ const ArtStability = (() => {
   }
 
   const modulo = (n, size) => ((n % size) + size) % size;
-  function ditherCoordinates(settings, passes, p, x, y) {
-    if (!settings || settings.dither === 'screen' || !passes?.splatId[p]) return [x, y];
-    const coordinates = settings.dither === 'object' ? passes.objectPosition : passes.position;
-    const q = p * 3;
-    const ix = Math.floor(coordinates[q] / settings.spacing);
-    const iy = Math.floor(coordinates[q + 1] / settings.spacing);
-    const iz = Math.floor(coordinates[q + 2] / settings.spacing);
+  function matching(settings, object, material) {
+    for (let i = settings.rules.length - 1; i >= 0; i--) {
+      const rule = settings.rules[i];
+      if ((rule.object === undefined || rule.object === object) &&
+          (rule.material === undefined || rule.material === material)) return rule;
+    }
+    return settings;
+  }
+
+  function coordinates(rule, point, x, y) {
+    if (!point || rule.dither === 'screen') return [x, y];
+    const cell = i => Math.floor((point[i] - rule.origin[i]) / rule.spacing + 1e-5);
+    const ix = cell(0), iy = cell(1), iz = cell(2);
+    if (![ix, iy, iz].every(Number.isFinite)) return [x, y];
     // Mixing the three integer axes lets any axis-aligned surface use both pattern dimensions.
     return [ix + 3 * iy + 2 * iz, 2 * ix + iy + 3 * iz];
+  }
+
+  function ditherCoordinates(settings, passes, p, x, y) {
+    if (!settings?.anchorSpaces.size || !passes || !(passes.depth ? Number.isFinite(passes.depth[p]) : passes.splatId?.[p]))
+      return [x, y];
+    const object = passes.objects?.[passes.objectId?.[p]], material = passes.materials?.[passes.materialId?.[p]];
+    const rule = matching(settings, object, material);
+    if (rule.dither === 'screen') return [x, y];
+    const buffer = rule.dither === 'object' ? passes.objectPosition : passes.position;
+    const point = (rule.dither === 'object' && passes.ditherRest?.get(p)) || buffer?.subarray(p * 3, p * 3 + 3);
+    return coordinates(rule, point, x, y);
   }
 
   function protectedPixel(settings, passes, p) {
@@ -107,6 +153,6 @@ const ArtStability = (() => {
     return { w, h, rgb, use, detail, ...((local || tone) && { palette: local?.output.packed || tone.palette }) };
   }
 
-  return Object.freeze({ prepare, snapView, modulo, ditherCoordinates, protectedPixel, resolve });
+  return Object.freeze({ prepare, snapView, modulo, ditherCoordinates, coordinates, matching, protectedPixel, resolve });
 })();
 if (typeof module !== 'undefined') module.exports = ArtStability;

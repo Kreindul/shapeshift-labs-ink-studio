@@ -136,6 +136,7 @@ function createArtPasses(request, w, h) {
           if (normalOut && atlas.normal) normalOut.set(atlas.normal,p*3);
           positionOut?.set(atlas.position,p*3);
           objectOut?.set(atlas.objectPosition,p*3);
+          if (atlas.patternPosition) (result.ditherRest ??= new Map()).set((h-1-Math.floor(p/w))*w+p%w,atlas.patternPosition);
           continue;
         }
         const i = owner[p];

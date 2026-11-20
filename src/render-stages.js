@@ -213,7 +213,7 @@ const RenderStages = (() => {
     return evaluate(rules, rgb, sample, x, y);
   }
 
-  function finish(frame, plan, passes, time, visitPixel, audit) {
+  function finish(frame, plan, passes, time, visitPixel, audit, ditherAt) {
     const { w, h, rgb } = frame;
     const swatches = new Map(plan.palettes.map((color, i) => [color, i]));
     const use = new Uint32Array(swatches.size);
@@ -234,7 +234,9 @@ const RenderStages = (() => {
       const original = [rgb[offset] / 255, rgb[offset + 1] / 255, rgb[offset + 2] / 255];
       const visit = visitPixel && visitPixel(p);
       const graded = apply(rules.frame, original, sample, visit);
-      const color = evaluate(rules.palette, graded, sample, p % w, Math.floor(p / w), undefined, visit);
+      const x = p % w, y = Math.floor(p / w);
+      const [dx,dy] = rules.palette && ditherAt ? ditherAt(x,y) : [x,y];
+      const color = evaluate(rules.palette, graded, sample, dx, dy, undefined, visit);
       if (audit) audit.pixel('frame', p, color[0], color[1], color[2]);
       const index = swatches.get(pack(color));
       if (index !== undefined) use[index]++;

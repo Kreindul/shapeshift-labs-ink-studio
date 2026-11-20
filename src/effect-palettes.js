@@ -73,7 +73,7 @@ const EffectPalettes = (() => {
     return ramps.size ? { ...settings, ramps } : null;
   }
 
-  function apply(frame, passes, signals, source, palette, capture) {
+  function apply(frame, passes, signals, source, palette, capture, ditherAt) {
     const { rules, media, backdropCloud, sky, haze } = signals;
     const { w, h, rgb } = frame, { ramps, objects, materials } = rules;
     const mask = capture ? new Uint8Array(w*h) : null;
@@ -107,7 +107,8 @@ const EffectPalettes = (() => {
           const luma = sample[0]*.30 + sample[1]*.55 + sample[2]*.15;
           const [lo,hi] = ramp.range, span = ramp.packed.length-1;
           const step = Math.min(1, Math.max(0,(luma-lo)/(hi-lo)))*span;
-          index = Math.min(span, Math.max(0,Math.round(step + (pixel.bayerRank(x,y)-.5)*ramp.amount)));
+          const [dx,dy] = ramp.amount && ditherAt ? ditherAt(x,y) : [x,y];
+          index = Math.min(span, Math.max(0,Math.round(step + (pixel.bayerRank(dx,dy)-.5)*ramp.amount)));
         }
         const color = ramp.packed[index];
         rgb[q] = color>>16;
