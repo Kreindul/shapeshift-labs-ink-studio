@@ -280,7 +280,7 @@
     return {world,plan,weather};
   }
   const validate=(source,options)=>prepare(source,options).world;
-  function create(source, {checkpoint,implementations,profile = false,validated = false,workerPool} = {}, token) {
+  function create(source, {checkpoint,implementations,profile = false,validated = false,workerPool,regionRevisions} = {}, token) {
     check(workerPool===undefined||typeof workerPool?.solve==='function','Invalid simulation worker pool');
     const modules=workerPool?.implementations;
     const installed=modules?{...modules,...implementations}:implementations;
@@ -293,6 +293,7 @@
     }
     const {plan, weather = weatherProgram(world)}=result;
     const {systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,aggregates,causePolicy} = plan;
+    const regions=regionRevisions===undefined?null:W.regionRevisions.capture(world,regionRevisions,systems);
     const partitioned=workerPool&&new Set(names.filter(name=>{
       const {kind}=world.systems[name];
       return systems[name].partitionStep===true&&(own(installed,kind)?
@@ -500,6 +501,7 @@
       enqueue([...world.commands,...(world.scenario?.commands ?? [])],false);
     }
     const origin = save();
+    regions?.publish(view());
     function query() {
       return currentQuery ?? (currentQuery = Q.create(view(),systems,projection));
     }
@@ -785,7 +787,9 @@
         peakWorkers=Math.max(peakWorkers,workersThisTick);
         for(const [name,count] of offloaded)jobsBySystem.set(name,(jobsBySystem.get(name)??0)+count);
       }
-      return view();
+      const committedView=view();
+      regions?.publish(committedView,commands);
+      return committedView;
     }
     function advance(to, {onTick,stopOnOutcome = false} = {}) {
       check(tickOK(to) && to >= tick, 'Target tick precedes current state or exceeds the run budget');
@@ -798,7 +802,7 @@
     function recording() {
       return freeze({format:runFormat,version:1,origin,commands:added.slice(),end:save()});
     }
-    return Object.freeze({view,query,step,advance,
+    return Object.freeze({view,query,step,advance,...(regions&&{regions:regions.api}),
       get scenario(){return scenario;}, get history(){return history;}, get events(){return lastEvents;},
       schedule:commands => enqueue(commands,true),checkpoint:save,recording,
       commandCounts:() => {

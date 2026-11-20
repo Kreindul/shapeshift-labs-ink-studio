@@ -455,10 +455,10 @@
     }
     return create({world:W.manifest({id:W.data.id(w.id)?w.id:'world',systems:configs}),tick:Math.round(time*60),time},descriptors,undefined,()=>w);
   }
-  function keyedChanges(a,b) {
+  function keyedChanges(a,b,{limit=Infinity}={}) {
     const operations = [];
     function compare(before,after,path) {
-      if (before===after) return;
+      if (before===after||operations.length>limit) return;
       if(Array.isArray(before)&&Array.isArray(after)&&before.length===after.length){
         const budget=Math.max(1,Math.floor(after.length/4)), changed=[];
         for(let i=0;i<after.length&&changed.length<=budget;i++)
@@ -470,6 +470,7 @@
       }
       if (record(before) && record(after)) {
         for (const key of [...new Set([...Object.keys(before),...Object.keys(after)])].sort()) {
+          if(operations.length>limit)break;
           if (!own(after,key)) operations.push({op:'remove',path:[...path,key]});
           else if (!own(before,key)) operations.push({op:'set',path:[...path,key],value:copy(after[key])});
           else compare(before[key],after[key],[...path,key]);

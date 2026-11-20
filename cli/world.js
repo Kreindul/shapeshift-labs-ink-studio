@@ -77,13 +77,13 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
     }
     return {legacy:file};
   }
-  function runtime(input, profile = false) {
+  function runtime(input, profile = false, regionRevisions) {
     ensure(input.world,'The scene must expose an Ink Studio world manifest');
     const source = !input.checkpoint && (opt.seed !== undefined || opt.dt !== undefined)
       ? {...input.world,...(opt.seed===undefined?{}:{seed:Number(opt.seed)}),...(opt.dt===undefined?{}:{dt:Number(opt.dt)})}
       : input.world;
     if (input.checkpoint) ensure(opt.seed===undefined && opt.dt===undefined,'A resumed run uses its checkpoint seed and timestep');
-    return R.create(source,{checkpoint:input.checkpoint,profile,workerPool});
+    return R.create(source,{checkpoint:input.checkpoint,profile,workerPool,regionRevisions});
   }
   function to(run) {
     const {tick,world} = run.view(), modes = [opt.ticks,opt.steps,opt.t].filter(v => v !== undefined);
@@ -292,6 +292,35 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
       workerPool=undefined;
     }
   }
+  function regionUpdate(file){
+    const input=load(file);
+    ensure(typeof opt.stream==='string','Region revisions need --stream ID');
+    ensure(opt.global===undefined||opt.global===true,'Use --global without a value');
+    ensure(opt.regions===undefined||typeof opt.regions==='string','Use --regions ID,ID for an explicit selection');
+    ensure(opt.near===undefined||typeof opt.near==='string','Use --near X,Y,Z for a nearby selection');
+    ensure(opt.since===undefined||typeof opt.since==='string','Use --since FILE for an applied cursor');
+    const origin=input.log?.origin;
+    const run=runtime(origin?{world:origin.world,checkpoint:origin}:input,false,
+      {stream:opt.stream,...(opt.retain!==undefined&&{retain:opt.retain===true?NaN:Number(opt.retain)})});
+    if(input.log)run.schedule(input.log.commands);
+    schedule(run);
+    const tick=input.log&&opt.ticks===undefined&&opt.steps===undefined&&opt.t===undefined?input.log.end.tick:to(run);
+    run.advance(tick);
+    const selected={
+      ...(opt.regions!==undefined&&{regions:opt.regions===''?[]:opt.regions.split(',')}),
+      ...(opt.near!==undefined&&{at:numbers(opt.near)}),...(opt.place!==undefined&&{place:opt.place}),
+      ...(opt.radius!==undefined&&{radius:opt.radius===true?NaN:Number(opt.radius)}),...(opt.global&&{includeGlobal:true})
+    };
+    const last=opt.since&&read(opt.since);
+    return respond(run.regions.pull(selected,{since:last?.cursor??last??undefined}));
+  }
+  function applyRegionUpdate(file,other){
+    const mirror=W.regionRevisions.receiver();
+    ensure(mirror.apply(read(file)).status==='applied','Expected a region snapshot as the baseline');
+    const applied=mirror.apply(read(other));
+    ensure(['applied','duplicate'].includes(applied.status),'Region update '+applied.status);
+    return respond(mirror.snapshot());
+  }
   function runSimulation([mode,file,other]) {
     switch (mode) {
       case 'run':
@@ -306,6 +335,8 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         break;
       }
       case 'dependencies': return dependencyReport(file);
+      case 'regions': return regionUpdate(file);
+      case 'regions-apply': return applyRegionUpdate(file,other);
       case 'reset': {
         const input=load(file);
         finish(input.log?R.create(input.log.origin.world,{checkpoint:input.log.origin,workerPool}):runtime(input),input.store);
@@ -395,7 +426,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         shot?.finish(output,{suffixes});
         break;
       }
-      default: throw Error('Use sim run|resume|fork|reset|replay|diff|sweep|render|dependencies');
+      default: throw Error('Use sim run|resume|fork|reset|replay|diff|sweep|render|dependencies|regions|regions-apply');
     }
   }
   function applyEdits(input, edits, { dryRun = false } = {}) {

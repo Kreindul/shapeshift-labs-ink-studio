@@ -656,6 +656,8 @@ const CMD = {
         '  sim run|resume|fork|reset|replay|diff|sweep|render ...  run or compare fixed-tick simulations',
         '    sim run <world> --workers N [--profile]   advance eligible systems in deterministic Node worker partitions',
         '    sim run <world> --checkpoint file.json --checkpoint-store DIR   reuse snapshot blocks across checkpoints and runs',
+        '    sim regions <world|run> --stream ID [--regions IDs | --near X,Y,Z --radius N] [--since snapshot.json]',
+        '    sim regions-apply <snapshot.json> <update.json>   reconstruct a scoped snapshot',
         '    sim dependencies <scene|run|driver.js> [--ticks N] [--actions file] [--out report.json]   report spatial rebuilds',
         '    sim sweep <world|run> <cases.json>   use look cases to compare one fixed simulation snapshot',
         '  compare <scene|run> --looks cases.json [--out sheet.png]   compare look variants on the same view',
