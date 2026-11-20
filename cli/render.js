@@ -140,6 +140,10 @@ function cameraCapture(options, receive) {
 }
 
 function render(world, o, preparedPalettes) {
+  if (o?.timeDomains || world.timeDomains) {
+    const times = require('../index.js').load().KIT.timeDomains.frame(world, { ...o, time: o?.t });
+    o = { ...times, t: times.time };
+  }
   if (o?.cameraGuides && !o.samples && !o.captureCoverage) {
     const staging = o.cameraStaging ?? world.look?.cameraStaging;
     return CameraStaging.overlay(render(world, { ...o, cameraGuides: false, cameraStaging: staging || true }, preparedPalettes));
@@ -167,7 +171,7 @@ function render(world, o, preparedPalettes) {
   }
   if (!o?.[sampledPresentation] && world.timeline && !o?.samples && !o?.captureCoverage) {
     const time = o?.t ?? world.lookSnapshot?.time ?? 0;
-    const presentation = require('../index.js').load().KIT.presentationTimeline.sample(world, time, o);
+    const presentation = require('../index.js').load().KIT.presentationTimeline.sample(world, o?.interfaceTime ?? time, o);
     o = { ...o, ...presentation, [sampledPresentation]: true };
   }
   const inspection = o?.inspection ?? world.look?.inspection;
@@ -177,7 +181,8 @@ function render(world, o, preparedPalettes) {
     const requested = ArtPasses.select(o?.passes); let camera;
     const base = render(world, { ...o, inspection: false, passes: [...new Set([...requested, 'depth'])],
       ...cameraCapture(o, view => { camera = view; }) }, preparedPalettes);
-    const plan = api.plan(settings, { world, time: o?.t ?? world.lookSnapshot?.time ?? 0,
+    const plan = api.plan(settings, { world, time: o?.interfaceTime ?? o?.t ?? world.lookSnapshot?.time ?? 0,
+      sceneTime: o?.t ?? world.lookSnapshot?.time ?? 0,
       width: base.w, height: base.h, camera, focus: o?.inspectionFocus });
     const passes = base.passes, range = camera.depthRange;
     const depthAt = (u,v) => {
@@ -200,9 +205,9 @@ function render(world, o, preparedPalettes) {
     let camera;
     const base = render(world, { ...o, renderGraph: false, renderHistory: undefined, passes,
       ...(graph.needsCamera && cameraCapture(o, view => { camera ??= view; })) }, preparedPalettes);
-    const time = o?.t ?? world.lookSnapshot?.time ?? 0;
+    const time = o?.interfaceTime ?? o?.t ?? world.lookSnapshot?.time ?? 0;
     const kit = require('../index.js').load().KIT;
-    const frame = { ...base, ...runGraph(graph, base, world, time, kit.poly2.text, camera, kit.annotations.anchor, { ...o, renderHistoryKey: o?.renderHistoryKey ?? o?.[reconstructionSource] }) };
+    const frame = { ...base, ...runGraph(graph, base, world, time, kit.poly2.text, camera, (spec,ctx) => kit.annotations.anchor(spec,{ ...ctx,sceneTime:o?.t }), { ...o, renderHistoryKey: o?.renderHistoryKey ?? o?.[reconstructionSource] }) };
     if (base.passes && diagnostic) {
       if (requested.length) frame.passes = ArtPasses.subset(base.passes, requested);
       else delete frame.passes;
@@ -217,11 +222,11 @@ function render(world, o, preparedPalettes) {
     const plan = FrameComposite.prepare(definition, o?.w || 900, o?.h || 620, o?.px ?? world.look?.pixelSize ?? 1);
     let camera;
     const api = require('../index.js').load().KIT.frameComposite;
-    const time = o?.t ?? world.lookSnapshot?.time ?? 0;
-    let layers = !plan.needsCamera && api.layers(plan, world, time);
+    const time = o?.interfaceTime ?? o?.t ?? world.lookSnapshot?.time ?? 0;
+    let layers = !plan.needsCamera && api.layers(plan, world, time, undefined, undefined, o?.t);
     const base = render(world, { ...o, composite: false, w: plan.world.w, h: plan.world.h, px: 1,
       ...(plan.needsCamera && cameraCapture(o, view => { camera ??= view; })) }, preparedPalettes);
-    layers ||= api.layers(plan, world, time, camera);
+    layers ||= api.layers(plan, world, time, camera, undefined, o?.t);
     const frame = { ...base, ...FrameComposite.compose(base, layers, plan.w, plan.h, plan.world.filter),
       px: 1, worldSize: [base.w, base.h] };
     if (frame.renderStats) frame.renderStats.frameMs = performance.now() - start;
@@ -252,7 +257,7 @@ function renderFrame(world, o, preparedPalettes) {
   const protection = SilhouetteProtection.prepare(look.silhouetteProtection,o.silhouetteProtection);
   const subject = protection?.bind(world);
   const sceneTime = o.t ?? world.lookSnapshot?.time ?? 0;
-  const authored = world.cameraRig?.sample(sceneTime, { shot: o.cameraShot }).camera;
+  const authored = world.cameraRig?.sample(o?.cameraTime ?? world.timeDomains?.read('camera').sampleTime ?? sceneTime, { shot: o.cameraShot }).camera;
   const c = authored ?? world.cam;
   const viewStaging = o[probeCamera] ? null : CameraStaging.prepare(o.cameraStaging ?? look.cameraStaging);
   const framing = o.samples || o.captureCoverage || o.reflectionPlane ? null : viewStaging;
