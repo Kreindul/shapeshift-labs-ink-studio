@@ -956,6 +956,12 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     stick(x, y, z, [1, 0, 0], s2, s2 * 0.12 + 0.012, P[c], 3, an);
     stick(x, y, z, UP, s2, s2 * 0.12 + 0.012, P[c], 3, an);
   }
+  const precipitationRanges = [];
+  function describePrecipitation(first, end, profile = false) {
+    if (![first, end].every(Number.isSafeInteger) || first < 0 || end < first || end > n || typeof profile !== 'boolean')
+      throw new RangeError('Expected a valid precipitation row range');
+    if (end > first) precipitationRanges.push({ first, end, profile });
+  }
   function finish(meta) {
     /* paint-over decals (ink-studio paint): pixels painted over a view of the diorama, each pinned where it fell on the surface, as a
        flat dab one pixel across of that palette colour just in front of it. Whatever builds the diorama puts its decals in
@@ -973,6 +979,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
         data: data.subarray(0, n * 16),
         count: n,
         renderMetadata: renderRows(),
+        ...(precipitationRanges.length && { precipitationRanges: precipitationRanges.slice() }),
         ...(materialAlbedo && { materialAlbedo: materialAlbedo.slice(0, n) }),
         attr: attr ? Float32Array.from({ length: n * 4 }, (_, i) => attr[i] || 0) : undefined,
         pix: pix ? Float32Array.from({ length: n * 8 }, (_, i) => pix[i] || 0) : undefined,
@@ -1031,6 +1038,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     targetNames.length = 1;
     targetValues = new WeakMap();
     ownerNames.length = materialNames.length = 1;
+    precipitationRanges.length = 0;
     moving.length = 0;
     back.length = 0;
     return out;
@@ -1057,6 +1065,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     count: () => n,
     describeSplats: renderMetadata ? describeSplats : undefined,
     describeAlbedo,
+    describePrecipitation,
     born: v => (bornV = v === undefined || v === null || !isFinite(v) ? null : v),
     wet: v => (wetV = v === undefined || v === null || !isFinite(v) ? null : v),
     fineTile,

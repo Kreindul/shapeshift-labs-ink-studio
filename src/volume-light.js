@@ -100,21 +100,27 @@ const VolumeLight = (() => {
     }
     if (!weight) return;
     if (shadow && light.castsShadow !== false && shadow(x, y, z, toLight, range)) return;
-    const amount = light.intensity * weight * (1 - range / light.radius) ** 2 * phase(anisotropy, dot(direction, toLight));
+    const scatter = anisotropy ? phase(anisotropy, dot(direction, toLight)) : 1;
+    const amount = light.intensity * weight * (1 - range / light.radius) ** 2 * scatter;
     for (let i = 0; i < 3; i++) output[i] += light.rgb[i] * amount;
   }
 
+  function addLocal(media, x, y, z, output, direction, anisotropy = 0) {
+    const { point, locals, localShadows, shadow } = media;
+    const localShadow = localShadows === false ? null : shadow;
+    if (point) illuminateLocal(point, output, x, y, z, direction, anisotropy, localShadow);
+    if (locals) for (const light of locals)
+      illuminateLocal(light, output, x, y, z, direction, anisotropy, localShadow);
+  }
+
   function illuminate(volume, output, x, y, z, direction, media, visibility) {
-    const { ambient, sun, point, locals, shadow, localShadows } = media;
+    const { ambient, sun, shadow } = media;
     output.fill(ambient);
     if (sun && sun.intensity && visibility && (!shadow || !shadow(x, y, z, sun.direction, sun.distance))) {
       const amount = sun.intensity * visibility * phase(volume.anisotropy, dot(direction, sun.direction));
       for (let i = 0; i < 3; i++) output[i] += sun.rgb[i] * amount;
     }
-    const localShadow = localShadows === false ? null : shadow;
-    if (point) illuminateLocal(point, output, x, y, z, direction, volume.anisotropy, localShadow);
-    if (locals) for (const light of locals)
-      illuminateLocal(light, output, x, y, z, direction, volume.anisotropy, localShadow);
+    addLocal(media, x, y, z, output, direction, volume.anisotropy);
   }
 
   function integrate(segments, origin, direction, stop, result, options = {}) {
@@ -226,6 +232,6 @@ const VolumeLight = (() => {
     };
   }
 
-  return Object.freeze({ lighting, occluder, integrate, history });
+  return Object.freeze({ lighting, addLocal, occluder, integrate, history });
 })();
 if (typeof module !== 'undefined') module.exports = VolumeLight;

@@ -26,10 +26,10 @@ const WeatherBinding = (() => {
     let surface = edits.surface === undefined ? base.surface : edits.surface;
     if (base.surface && edits.surface && typeof base.surface === 'object' && typeof edits.surface === 'object')
       surface = { ...record(base.surface, 'Weather surface'), ...record(edits.surface, 'Weather surface') };
-    const { rainFull = 1, windDryingSpeed = 5, fogVolumes } = { ...base, ...edits };
+    const { rainFull = 1, snowFull = 1, windDryingSpeed = 5, fogVolumes } = { ...base, ...edits };
     const channels = { ...base.channels, ...edits.channels };
     for (const raw of [base, edits]) {
-      if (Object.keys(raw).some(key => !['channels', 'rainFull', 'windDryingSpeed', 'fogVolumes', 'surface'].includes(key)))
+      if (Object.keys(raw).some(key => !['channels', 'rainFull', 'snowFull', 'windDryingSpeed', 'fogVolumes', 'surface'].includes(key)))
         throw new RangeError('Unknown weather binding setting');
       if (raw.channels !== undefined) record(raw.channels, 'Weather channels');
     }
@@ -38,6 +38,7 @@ const WeatherBinding = (() => {
         throw new TypeError('Invalid weather channel binding for ' + key);
     }
     number(rainFull, 1e-6, 1000, 'Full visual rain rate');
+    number(snowFull, 1e-6, 1000, 'Full visual snow rate');
     number(windDryingSpeed, 1e-6, 1000, 'Wind drying speed');
     if (fogVolumes !== undefined && (!Array.isArray(fogVolumes) ||
         !Array.from(fogVolumes).every(id => typeof id === 'string' && id.trim())))
@@ -50,14 +51,14 @@ const WeatherBinding = (() => {
         throw new TypeError('Weather surface forcing must be a function');
       retained = { step, forcing, options };
     }
-    return { channels, rainFull, windDryingSpeed, fogVolumes: fogVolumes && new Set(fogVolumes), surface: retained };
+    return { channels, rainFull, snowFull, windDryingSpeed, fogVolumes: fogVolumes && new Set(fogVolumes), surface: retained };
   }
 
   function bind(environment, config, { profiles, createSurface } = {}) {
     if (!config) return null;
     if (!environment?.sample) throw new TypeError('Weather binding needs a sky environment');
     const pins = profiles === undefined ? undefined : Object.freeze({ ...profiles });
-    const { channels, rainFull, windDryingSpeed, fogVolumes, surface } = config;
+    const { channels, rainFull, snowFull, windDryingSpeed, fogVolumes, surface } = config;
     const keys = Object.keys(defaults);
     function read(parameters) {
       const signal = {};
@@ -112,6 +113,8 @@ const WeatherBinding = (() => {
       const state = surfaceAt(time);
       const wetness = signal.wetness;
       return { ...signal, rainGain: Math.min(1, (signal.rain ?? 0) / rainFull),
+        snowGain: Math.min(1, (signal.snowfall ?? 0) / snowFull),
+        windAt: signal.wind && (at => sample(at).wind),
         fogGain: volume => !fogVolumes || fogVolumes.has(volume.id) ? signal.fogDensity ?? 1 : 1,
         surface: state || wetness !== undefined ? (x, z) => {
           const point = state?.sample(x, z);
