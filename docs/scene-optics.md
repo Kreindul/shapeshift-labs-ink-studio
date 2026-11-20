@@ -111,3 +111,40 @@ a feathered shoreline, and projected caustics drive coverage on the plane.
 The view depth occludes the plane behind foreground geometry. Each of the up to
 eight light sources supplies world X and Z, radius and signed intensity. Use the
 internal art-pixel coordinates so the pattern stays sharp at integer scales.
+
+For an optional scene reveal, attach a track to `world.inkVeil.reveal`.
+The track works with or without a receiving surface. Each cue opens an
+ellipsoid centered at `at` with positive XYZ radii in `extent`. Its opening
+starts and ends at the supplied times in seconds. The settle interval ramps
+the whole scene to full coverage.
+
+```js
+world.inkVeil = {
+  reveal: InkVeil.reveal([
+    { at: [0, 1, 4], extent: [4, 3, 5], start: 0.25, end: 2 },
+    { at: [1, 7, 0], extent: [6, 5, 5], start: 1.5, end: 3.5 }
+  ], [3.5, 4.5])
+};
+```
+
+Sample the track once per frame with seconds since playback started and
+upload the returned `centers`, `extents`, and `settled` before compositing.
+Use the surface depth and camera to evaluate coverage in world space.
+
+## Pixel art on flat surfaces
+
+`SpriteSurface.make()` batches world-space rectangles into an RGBA atlas.
+Each rectangle specifies its bottom-left corner and two span vectors in world
+units. The paint callback receives integer column and row coordinates from
+the upper-left texel and returns a packed RGB value or `null` for a cutout.
+
+```js
+const signs = SpriteSurface.make();
+signs.face([-1, 1, 2], [2, 0, 0], [0, 1, 0], 48, 24, (x, y) =>
+  x < 2 || x >= 46 || y < 2 || y >= 22 ? 0x36e4ff : 0x131a2c);
+world.spriteSurfaces = signs.finish();
+```
+
+The batch contains the atlas bitmap and interleaved XYZ and UV-in-texels
+vertices. Inkwell Rebirth draws those triangles once into the scene color and
+depth before drawing the splats. Use nearest filtering to keep the art sharp.

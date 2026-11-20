@@ -21,13 +21,50 @@ const InkVeil = (() => {
     return { bounds: bounds.slice(), size, data };
   }
 
+  // A one-shot track accumulates soft world-space regions, then settles
+  // to the fully visible scene. The caller owns the playback clock.
+  function reveal(cues, settle) {
+    if (cues.length < 1 || cues.length > 8 || settle.length !== 2 ||
+        !settle.every(Number.isFinite) || settle[0] < 0 || settle[1] <= settle[0])
+      throw new RangeError('Expected 1–8 reveal cues and an increasing settle interval');
+    const centers = new Float32Array(cues.length * 4), extents = new Float32Array(cues.length * 4);
+    for (const [i, cue] of cues.entries()) {
+      if (cue.at.length !== 3 || cue.extent.length !== 3 || !cue.at.every(Number.isFinite) ||
+          !cue.extent.every(v => Number.isFinite(v) && v > 0) ||
+          ![cue.start, cue.end].every(Number.isFinite) || cue.start < 0 || cue.end <= cue.start)
+        throw new RangeError('Expected a finite reveal center, positive extents and an increasing cue interval');
+      centers.set(cue.at, i * 4);
+      extents.set(cue.extent, i * 4);
+    }
+    const ease = n => {
+      const t = Math.max(0, Math.min(1, n));
+      return t * t * (3 - 2 * t);
+    };
+    const frame = { centers, extents, settled: 0 };
+    return {
+      duration: settle[1],
+      sample(seconds) {
+        for (const [i, cue] of cues.entries()) {
+          const age = (seconds - cue.start) / (cue.end - cue.start), t = ease(age);
+          centers[i * 4 + 3] = ease(age * 4);
+          extents[i * 4 + 3] = .18 + .82 * t;
+        }
+        frame.settled = ease((seconds - settle[0]) / (settle[1] - settle[0]));
+        return frame;
+      }
+    };
+  }
+
   const glsl = `
-uniform bool u_inkOn;
+uniform bool u_inkOn, u_inkWater;
 uniform vec4 u_inkPlane, u_inkBounds, u_inkPulse;
 uniform vec3 u_inkCyan, u_inkWarm;
 uniform int u_inkCount;
 uniform vec4 u_inkSources[8]; // world xz, falloff radius, signed intensity
 uniform sampler2D u_inkFootprint;
+uniform int u_inkRevealCount;
+uniform float u_inkRevealSettled;
+uniform vec4 u_inkRevealCenters[8], u_inkRevealExtents[8];
 
 float inkRank(ivec2 pixel) {
   const float ranks[16] = float[16](${bayer.map(i => i.toFixed(1)).join(',')});
@@ -45,15 +82,17 @@ vec3 inkVeil(vec3 color, ivec2 pixel, vec2 resolution, float depth, mat3 view, v
   vec3 origin = eye + (ortho ? inverseView * vec3(screen, 0.0) : vec3(0.0));
   vec3 ray = inverseView * vec3(ortho ? vec2(0.0) : screen, -1.0);
   float surfaceDepth = mix(camera.z, camera.w, depth);
+  vec3 position = origin + ray * surfaceDepth;
   // The ray has unit forward speed in camera coordinates, so the plane
   // intersection is directly comparable to the composited scene depth.
-  if (ray.y < -0.015 && origin.y > u_inkPlane.x) {
+  if (u_inkWater && ray.y < -0.015 && origin.y > u_inkPlane.x) {
     float at = (u_inkPlane.x - origin.y) / ray.y;
     vec2 q = origin.xz + ray.xz * at;
     vec2 uv = (q - u_inkBounds.xy) / (u_inkBounds.zw - u_inkBounds.xy);
     if (at < surfaceDepth + 0.17 && all(greaterThan(uv, vec2(0.0))) && all(lessThan(uv, vec2(1.0)))) {
       float shore = texture(u_inkFootprint, uv).r;
       if (shore > 0.0) {
+        position = vec3(q.x, u_inkPlane.x, q.y);
         float cold = 0.0, warm = 0.0;
         for (int i = 0; i < 8; i++) {
           if (i >= u_inkCount) break;
@@ -79,10 +118,20 @@ vec3 inkVeil(vec3 color, ivec2 pixel, vec2 resolution, float depth, mat3 view, v
       }
     }
   }
+  if (u_inkRevealCount > 0) {
+    float shown = u_inkRevealSettled;
+    for (int i = 0; i < 8; i++) {
+      if (i >= u_inkRevealCount) break;
+      vec4 cue = u_inkRevealCenters[i], area = u_inkRevealExtents[i];
+      vec3 offset = (position - cue.xyz) / (area.xyz * area.w);
+      shown = max(shown, cue.w * (1.0 - smoothstep(0.47, 1.00, dot(offset,offset))));
+    }
+    coverage *= shown;
+  }
   return coverage >= rank ? color : vec3(0.0);
 }
 `;
 
-  return Object.freeze({ rank, footprint, glsl });
+  return Object.freeze({ rank, footprint, reveal, glsl });
 })();
 if (typeof module !== 'undefined') module.exports = InkVeil;

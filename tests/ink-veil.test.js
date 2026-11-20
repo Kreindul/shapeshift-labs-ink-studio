@@ -23,3 +23,21 @@ test('the projected footprint samples texel centers and feathers into black', ()
   assert.equal(projected.bounds[1], -1);
   assert.throws(() => footprint([1,1,0,0], 32, () => 1), RangeError);
 });
+
+test('world-space reveal cues stay selectable, overlap, then settle to full coverage', () => {
+  const { reveal } = require('../src/ink-veil.js');
+  const track = reveal([
+    { at:[-6,1,0], extent:[3,4,5], start:.5, end:1.5 },
+    { at:[6,1,0], extent:[3,4,5], start:1.2, end:2.5 }
+  ], [2.2,3.15]);
+  assert.equal(track.duration, 3.15);
+  assert.equal(track.sample(0).centers[3], 0);
+  assert.equal(track.sample(0).settled, 0);
+  assert.equal(track.sample(1.4).centers[3], 1);
+  const next = track.sample(1.5);
+  assert(next.centers[7] > 0 && next.centers[7] < 1);
+  assert.deepEqual(Array.from(next.extents.slice(0,3)), [3,4,5]);
+  assert.equal(track.sample(3.15).settled, 1);
+  assert.equal(track.sample(0).settled, 0);
+  assert.throws(() => reveal([], [0,1]), RangeError);
+});
