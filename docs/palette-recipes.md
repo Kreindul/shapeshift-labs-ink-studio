@@ -179,3 +179,22 @@ ink-studio render examples/hue-brightness.js --w 232 --h 132 --px 1 --out prism-
 ```
 
 The [Prism Workshop](../examples/hue-brightness.js) projects three variants of one palette onto its windows. See [hue–brightness material projection](projected-effects.md#huebrightness-fields) for the layer definition.
+
+
+## Polar colour fields
+
+`KIT.palette.polar({ palette, radial, range, rotation, saturation, brightness })` makes a circular field from the same nearest-swatch match as the [rectangular hue–brightness field](#huebrightness-fields). Hue increases counterclockwise from the right edge. `rotation` adds to that edge's hue in turns. Coordinates for `index(u, v)` and `sample(u, v)` run across the unit square around the disk, with `[0.5, 0.5]` at its centre and Y rising. The exact centre uses the starting hue.
+
+- With `radial: 'brightness'`, the default, set a fixed `saturation`.
+- With `radial: 'saturation'`, set a fixed `brightness` (HSV value).
+- The fixed control defaults to 1. `range` gives the radial values at centre and rim and defaults to `[0, 1]`. Use `[1, 0]` to reverse the gradient.
+- Outside the circle, `index` returns `-1` and `sample` returns `null`. `raster(w, h)` fits a circle to the shorter side, with RGB, alpha, and swatch indices. Transparent pixels have index `-1`.
+
+For the CLI, set `"type": "polar"` in the field JSON. The default chart size is 128 × 128. Its PNG has a transparent background for reuse as a texture.
+
+```sh
+ink-studio palette field examples/polar-colour-field.json --w 192 --h 192 --out polar-colour.png
+ink-studio render examples/polar-colour.js --w 248 --h 146 --px 1 --out observatory.png
+```
+
+The [chromatic observatory](../examples/polar-colour.js) uses both radial modes as [projected material fields](projected-effects.md#polar-colour-fields).

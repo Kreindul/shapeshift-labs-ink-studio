@@ -365,22 +365,27 @@ const SplatEffects = (() => {
     return rgbEffect(plan.sample, outputPalette, resolveColor);
   }
 
-  function hueBrightnessLayer(value, resolveColor) {
+  function paletteFieldLayer(value, resolveColor, polar) {
+    const label = polar ? 'polar' : 'hueBrightness';
     if (!value || Object.getPrototypeOf(value) !== Object.prototype)
-      throw new TypeError('Projected hue–brightness needs a hueBrightness definition');
+      throw new TypeError('Projected palette field needs a ' + label + ' definition');
     const { size = [1, 1], wrap = false, ...definition } = value;
     if (!vector(size, 2) || size.some(n => n <= 0) || typeof wrap !== 'boolean')
-      throw new RangeError('Projected hue–brightness needs a positive size and optional wrap');
-    const field = paletteFields.hueBrightness(definition, resolveColor);
+      throw new RangeError('Projected palette fields need a positive size and optional wrap');
+    const field = paletteFields[label](definition, resolveColor);
     const [spanU, spanV] = size;
+    const diameter = Math.min(spanU, spanV);
+    const fitU = spanU / diameter, fitV = spanV / diameter;
+    if (polar && (!Number.isFinite(fitU) || !Number.isFinite(fitV)))
+      throw new RangeError('Projected polar field aspect ratio must be finite');
     return {
       palette: field.palette,
       sample(u, v, _time, out) {
         u /= spanU;
         v /= spanV;
         if (!Number.isFinite(u) || !Number.isFinite(v) || (!wrap && (u < 0 || v < 0 || u > 1 || v > 1))) return 0;
-        field.sample(wrap ? fract(u) : u, wrap ? fract(v) : v, out);
-        return 1;
+        const x = wrap ? fract(u) : u, y = wrap ? fract(v) : v;
+        return Number(Boolean(polar ? field.sample(.5 + (x - .5) * fitU, .5 + (y - .5) * fitV, out) : field.sample(x, y, out)));
       }
     };
   }
@@ -401,7 +406,8 @@ const SplatEffects = (() => {
     const lookup = coordinates({ projection, space, field }, channels, context);
     if (pattern === 'contour' && !contourChannel) throw new TypeError('Contours need a contourChannel');
     const indexed = pattern === 'indexed' ? indexedRaster(definition.raster, definition.cycles, resolveColor, roles) : null;
-    const paletteField = pattern === 'hue-brightness' ? hueBrightnessLayer(definition.hueBrightness, resolveColor) : null;
+    const paletteField = pattern === 'hue-brightness' ? paletteFieldLayer(definition.hueBrightness, resolveColor, false) :
+      pattern === 'polar-colour' ? paletteFieldLayer(definition.polar, resolveColor, true) : null;
     const pixels = indexed?.sample ?? paletteField?.sample ?? (pattern === 'raster' ? raster(definition.raster) : null);
     const custom = typeof pattern === 'function' ? pattern :
       Object.hasOwn(context?.shaders || {}, pattern) ? context.shaders[pattern] : null;
