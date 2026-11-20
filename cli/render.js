@@ -311,7 +311,6 @@ function render(world, o, preparedPalettes) {
   const sky = environment?.sky;
   const aerial = o.atmosphere !== false && !o.captureCoverage ?
     SkyEnvironment.aerial(world.aerialPerspective, o.aerialPerspective, environment?.parameters) : null;
-  const axialDepth = volumes.length || water || aerial ? new Float32Array(W * H).fill(Infinity) : null;
   const sun = LiveSun.prepare(world.liveSun, o.liveSun, t);
   const cloudSource = o.cloudField ?? world.cloudField;
   const cloudSettings = cloudSource === false ? null :
@@ -319,27 +318,31 @@ function render(world, o, preparedPalettes) {
   if (cloudSettings && !cloudSource) throw new TypeError('Cloud shadows need a cloud field');
   const cloudDisplacement = cloudSource && windConfig && windConfig.clouds !== false
     ? flow.cloudTravel(0,skyTime).map(n => n*windConfig.clouds) : undefined;
-  const clouds = cloudSource ? CloudField.compile(cloudSource).frame(skyTime, cloudSettings,
-    sun?.direction ?? sky?.sun ?? (o.volumeLighting ?? world.volumeLighting)?.sun?.direction, cloudDisplacement) : null;
-  const cloudShadow = clouds?.shadow;
   const flash = Lightning.settings(world.lightning, o.lightning)?.frame(t);
-  const skyBase = clouds?.visible && !sky ? hex(0) : bg;
-  const skyOverlay = flash && !sky && !clouds?.visible;
-  const skySample = (sky || clouds?.visible || flash) && ((direction, out, origin) => {
+  const clouds = cloudSource ? CloudField.compile(cloudSource).frame(skyTime, cloudSettings,
+    sun?.direction ?? sky?.sun ?? (o.volumeLighting ?? world.volumeLighting)?.sun?.direction,
+    cloudDisplacement, o.cloudRepresentation ?? world.cloudRepresentation, flash?.light) : null;
+  const cloudShadow = clouds?.shadow;
+  const cloudEye = ortho ? eye.map((value, i) => value - (eyeD - dist) * V[2 + i * 4]) : eye;
+  const cloudView = clouds?.view?.(cloudEye, ortho ? [V[2],V[6],V[10]] : null);
+  const axialDepth = volumes.length || water || aerial || cloudView ? new Float32Array(W * H).fill(Infinity) : null;
+  const backdropClouds = clouds?.visible && !cloudView;
+  const skyBase = backdropClouds && !sky ? hex(0) : bg;
+  const skyOverlay = (flash || cloudView) && !sky && !backdropClouds;
+  const skySample = (sky || clouds?.visible || flash) && ((direction, out, origin, reflection) => {
     if (sky) SkyEnvironment.shade(sky, direction, out);
     else for (let c = 0; c < 3; c++) out[c] = skyBase[c];
     if (origin) {
       flash?.sky(origin, direction, out);
-      clouds?.paint(origin, direction, out, flash?.light);
+      if (!cloudView || reflection) clouds?.paint(origin, direction, out, flash?.light);
     }
     return out;
   });
-  const showSky = skySample && !transparent && !o.captureCoverage;
+  const showSky = (sky || backdropClouds || flash) && !transparent && !o.captureCoverage;
   const skyRay = showSky || aerial && ortho && sky ?
     cameraRays(V, eye, W, H, ortho ? H * .5 / Math.tan((sky?.orthoFov ?? Math.PI / 3) * .5) : focal, false) : null;
   const skyRayAt = pixel => skyRay(pixel % W + .5, Math.floor(pixel / W) + .5);
   const skyDirection = pixel => skyRayAt(pixel).direction;
-  const cloudEye = ortho ? eye.map((value, i) => value - (eyeD - dist) * V[2 + i * 4]) : eye;
   const skyColor = showSky && [0, 0, 0];
   // Orthographic geometry uses an artificial camera setback. Measure aerial distance from the nominal eye.
   const air = aerial && { ...aerial, start: aerial.start + eyeD - dist,
@@ -347,7 +350,7 @@ function render(world, o, preparedPalettes) {
   const skyReflectionSource = o.skyReflections ?? world.skyReflections;
   if (skyReflectionSource !== undefined && !['scene', 'material'].includes(skyReflectionSource))
     throw new RangeError('Sky reflections source must be scene or material');
-  const horizon = eyeD + 2 * R;
+  const horizon = Math.max(eyeD + 2 * R, cloudView?.horizon(eye) ?? 0);
   const volumeLighting = o.volumeLighting ?? world.volumeLighting;
   let localLighting;
   const prepareVolumeLight = () => volumeLighting ? (localLighting ??= SceneOptics.lighting(volumeLighting, world.pal,
@@ -376,9 +379,10 @@ function render(world, o, preparedPalettes) {
     quality.wind = volumeWind ?? wind.velocity;
     if (volumeFlow) quality.windOffset = volumeFlow.windOffset;
     const media = volumes.some(volume => volume.type === 'field') ? prepareVolumeLight() : undefined;
-    return { ...quality, time: t, cloudShadow, flash, media, exposure };
+    return { ...quality, time: t, cloudShadow, flash, media, exposure, cloud:cloudView,
+      cloudStart:cloudView && eyeD-dist };
   };
-  const geometrySample = probe || sortedSurfaces || aerial || cloudShadow || flash ? sampleFrames(world, t) : null;
+  const geometrySample = probe || sortedSurfaces || aerial || cloudShadow || flash || cloudView ? sampleFrames(world, t) : null;
   const captured = o.captureCoverage || transparent ? new Float32Array(W * H) : null;
   // The reflected pass uses the same projection and reads only the plane's front side.
   const reflectionTint = effects?.reflection || o.reflectionTint;
@@ -417,7 +421,12 @@ function render(world, o, preparedPalettes) {
     eye,
     forward: [V[2], V[6], V[10]],
     reflection,
-    sky: skyOverlay ? (direction, out, origin) => flash.sky(origin, direction, out) : skySample,
+    sky: skySample && ((direction, out, origin) => {
+      if (!skyOverlay) return skySample(direction,out,origin,true);
+      flash?.sky(origin,direction,out);
+      cloudView && clouds.paint(origin,direction,out,flash?.light);
+      return out;
+    }),
     skyOverlay: Boolean(skyOverlay),
     skyReflectionSource,
     parallel: ortho ? [V[2], V[6], V[10]] : null,
@@ -591,7 +600,7 @@ function render(world, o, preparedPalettes) {
   const order = new Uint32Array(N);
   for (let i = 0; i < N; i++) order[i] = i;
   order.sort((a, b) => depth[a] - depth[b]);
-  const mediaOptions = (water || aerial) && atmosphereOptions();
+  const mediaOptions = (water || aerial || cloudView) && atmosphereOptions();
   const rayMedia = mediaOptions && mediaSampler(volumes, water, rayAt, W, mediumHorizon, mediaOptions, air);
   const retainLayers = retainContributions || Boolean(rayMedia);
   const col = new Float32Array(W * H * 3),
@@ -878,7 +887,7 @@ function render(world, o, preparedPalettes) {
       }
     }
     const bakedCloud = cloudShadow && !liveNormal && !(flags & 6);
-    const wantsDepth = probe || deferred || aerial;
+    const wantsDepth = probe || deferred || aerial || cloudView;
     const probeNormal = wantsDepth || bakedCloud ? geometrySample(i).normal : null, probeCenter = wantsDepth && [x, y, z];
     const probeReach = wantsDepth ? 3 * Math.sqrt(c00 + c11 + c22) : 0;
     const centerMark = lookPass && { ...lookPass.mark };
@@ -988,12 +997,12 @@ function render(world, o, preparedPalettes) {
           const entry = { sort: flags & 4 ? Infinity : surfaceZ, index: n, center: -cz,
             sample: [i, surfaceZ, clamp((surfaceZ - (eyeD - R)) / (2 * R), 0, 1), a, pr, pg, pb,
               wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, lookPass && { ...lookPass.mark },
-              aerial ? surfaceZ : undefined] };
+              aerial || cloudView ? surfaceZ : undefined] };
           if (!deferred.has(p)) deferred.set(p, []);
           deferred.get(p).push(entry);
           deferredCount++;
         } else composite(p, i, -cz, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass,
-          lookPass?.mark, aerial ? surfaceZ : undefined);
+          lookPass?.mark, aerial || cloudView ? surfaceZ : undefined);
       }
     }
   }

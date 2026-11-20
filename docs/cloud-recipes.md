@@ -41,3 +41,5 @@ ink-studio render examples/cloud-recipe-coast.js --cloud-field cirrus --raw --ou
 ink-studio render examples/cloud-recipe-coast.js --cloud-field storm-front --raw --out storm.png
 ink-studio render examples/cloud-recipe-coast.js --cloud-field my-clouds.json --raw --out custom.png
 ```
+
+Use [cloud assets and distance transitions](cloud-representations.md) when a bounded recipe needs a distant card, a directional impostor, and an enterable volume.

@@ -377,6 +377,7 @@ const view = extra =>
         (skyOverride ??= require('../src/sky-environment.js').compile(
           JSON.parse(fs.readFileSync(path.resolve(opt['sky-environment']), 'utf8')))),
       cloudField: cloudFieldOption(),
+      cloudRepresentation: opt['cloud-representation'],
       cloudShadows: cloudShadowOption(),
       weatherBinding: weatherOption(),
       retainedWeather: onOffOption('retained-weather'),
@@ -528,7 +529,7 @@ const CMD = {
         'any command that plays a diorama takes --poke 2:x,y,z (tap it at 2 seconds, toward that point; several with ;)',
         'sun options: --live-sun on|off --sun-direction x,y,z --sun-ambient n --sun-intensity n --shadow-map-size n --shadow-bias n --sun-shadows off',
         'bounce options: --sky-bounce color|preset|off --ground-bounce color|preset|off --sky-bounce-intensity n --ground-bounce-intensity n',
-        'cloud options: --cloud-field cirrus|coastal-stratus|cumulus|storm-front|file.json|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',
+        'cloud options: --cloud-field cirrus|coastal-stratus|cumulus|storm-front|file.json|off --cloud-representation auto|card|impostor|volume|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',
         'sky options: --sky-environment file.json|off --sky-time seconds --sky-profile track=profile --sky-reflections scene|material',
         'weather options: --weather-binding on|off|file.json --retained-weather on|off --weather-fronts on|off --world-precipitation on|off|file.json --rain-impacts on|off|file.json',
         'wind options: --wind-field on|off|file.json',

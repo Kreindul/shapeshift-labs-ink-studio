@@ -109,14 +109,21 @@ function traceMedia(volumes, segments, origin, direction, stop, result, sample, 
   result.fill(0, 0, 3);
   result.fill(1, 3, 6);
   let cursor = 0, dryDistance = 0, aerialThrough = 1;
+  function composite() {
+    for (let channel = 0; channel < 3; channel++) {
+      result[channel] += result[channel + 3] * sample[channel];
+      result[channel + 3] *= sample[3];
+    }
+  }
   function air(end) {
     if (end <= cursor) return;
     if (volumes.length) {
       SceneOptics.trace(volumes, origin, direction, end, sample, { ...options, start: cursor });
-      for (let channel = 0; channel < 3; channel++) {
-        result[channel] += result[channel + 3] * sample[channel];
-        result[channel + 3] *= sample[3];
-      }
+      composite();
+    }
+    if (options?.cloud) {
+      options.cloud.trace(origin,direction,Math.max(cursor,options.cloudStart ?? 0),end,sample);
+      composite();
     }
     if (!aerial || end <= aerial.start || aerialThrough === 0) return;
     const from = Math.max(cursor, aerial.start);
@@ -172,14 +179,14 @@ function mediaSampler(volumes, water, rayAt, width, horizon, options, aerial) {
     }
     const stop = Math.min(horizon, depth) / ray.axial;
     const useAerial = geometry && aerial && Number.isFinite(depth) && stop > aerial.start;
-    if (!useAerial && !ray.segments.length && !volumes.length) {
+    if (!useAerial && !ray.segments.length && !volumes.length && !options.cloud) {
       opacity = 0;
       return rgb;
     }
     if (useAerial && !ray.aerial) {
       ray.aerial = { ...aerial, color: aerial.color(pixel, ray.direction) };
     }
-    if (useAerial && !ray.segments.length && !volumes.length) {
+    if (useAerial && !ray.segments.length && !volumes.length && !options.cloud) {
       const remaining = airTransmission(aerial, stop - aerial.start);
       opacity = 1 - remaining;
       return [0, 1, 2].map(i => remaining * rgb[i] + opacity * ray.aerial.color[i]);

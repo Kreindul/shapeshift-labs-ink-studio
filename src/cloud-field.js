@@ -3,6 +3,7 @@ const CloudField = (() => {
   const brand = Symbol.for('ink-studio.cloud-field');
   const namedFields = new Map();
   const recipes = typeof CloudRecipes === 'undefined' ? require('./cloud-recipes.js') : CloudRecipes;
+  const detail = typeof CloudDetail === 'undefined' ? require('./cloud-detail.js') : CloudDetail;
   const clamp = n => Math.max(0,Math.min(1,n));
   const smooth = (lo,hi,n) => {
     const u = clamp((n-lo)/(hi-lo));
@@ -15,6 +16,7 @@ const CloudField = (() => {
     const u=(n-lo)/(hi-lo);
     return (hi-lo)*u*u*u*(1-u*.5);
   };
+  const topOf = coverage => .25+.75*coverage*(1.28-.28*coverage);
   const wrap = (value, size) => ((value % size) + size) % size;
   const mix = (a, b, t) => a + (b - a) * t;
   const record = (value, name) => {
@@ -78,7 +80,7 @@ const CloudField = (() => {
       return namedFields.get(value);
     }
     const source = record(value,'Cloud field');
-    const isRecipe = source.recipe !== undefined;
+    const isRecipe = source.recipe !== undefined, lod=source.lod;
     const { bounds, resolution = [48,48], coverage, velocity = [0,0], height = 8,
       color = '#d9e0ed', opacity = .85, repeat = false, visible = true, thickness=0,
       steps=12, lighting } = isRecipe ? recipes.resolve(source) : source;
@@ -112,6 +114,25 @@ const CloudField = (() => {
       if (repeat) return data[wrap(z, rows)*width+wrap(x,width)];
       return x >= 0 && x < width && z >= 0 && z < rows ? data[z*width+x] : 0;
     }
+    function sampleAt(data,x,z) {
+      if (!Number.isFinite(x) || !Number.isFinite(z)) return 0;
+      const u=(x-minX)/sx-.5, v=(z-minZ)/sz-.5;
+      if (!Number.isFinite(u) || !Number.isFinite(v)) return 0;
+      const i=Math.floor(u), j=Math.floor(v);
+      return mix(mix(cell(data,i,j),cell(data,i+1,j),u-i),
+        mix(cell(data,i,j+1),cell(data,i+1,j+1),u-i),v-j);
+    }
+    function createDetail() {
+      if (!thickness || repeat) throw new RangeError('Cloud representations need a bounded, nonrepeating field with positive thickness');
+      return detail.compile({
+        min:[minX,low,minZ], max:[maxX,high,maxZ], steps:Math.max(24,steps),
+        density(x,y,z) {
+          const cover=sampleAt(cells,x,z), top=topOf(cover), h=(y-low)/thickness;
+          return cover*4.8/thickness*(smooth(0,.12,h)-smooth(top-.12,top,h));
+        }
+      },lod&&lod!==true ? lod : {});
+    }
+    let asset = lod ? createDetail() : null;
     function pass(data, sigma, across) {
       if (sigma < .2) return data;
       const dimension = across ? width : rows;
@@ -136,19 +157,16 @@ const CloudField = (() => {
       }
       return cache.get(softness);
     }
-    function frame(time, shadows, light = [-.52, .64, .57], displacement) {
+    function frame(time, shadows, light = [-.52, .64, .57], displacement, representation, flashAt) {
+      const mode=representation ?? (lod ? 'auto' : 'off');
+      if (!detail.modes.includes(mode)) throw new RangeError('Unknown cloud representation: ' + mode);
+      const useDetail=mode!=='off';
+      if (useDetail && !asset) asset=createDetail();
       if (!Number.isFinite(time)) throw new RangeError('Cloud time is out of range');
       const offset = vector(displacement ?? [0,0],2,'Cloud displacement');
       const drift = !displacement || isRecipe;
       const [dx,dz] = vector([offset[0]+(drift?vx*time:0),offset[1]+(drift?vz*time:0)],2,'Cloud displacement');
-      function sample(data, x, z) {
-        if (!Number.isFinite(x) || !Number.isFinite(z)) return 0;
-        const u=(x-minX-dx)/sx-.5, v=(z-minZ-dz)/sz-.5;
-        if (!Number.isFinite(u) || !Number.isFinite(v)) return 0;
-        const i=Math.floor(u), j=Math.floor(v);
-        return mix(mix(cell(data,i,j),cell(data,i+1,j),u-i),
-          mix(cell(data,i,j+1),cell(data,i+1,j+1),u-i),v-j);
-      }
+      const sample = (data,x,z) => sampleAt(data,x-dx,z-dz);
       let shadow = null;
       if (shadows) {
         const [lx,ly,lz] = shadows.direction ?? light;
@@ -169,6 +187,18 @@ const CloudField = (() => {
         const relief = clamp(.52 + 1.45*(density-upstream));
         return clamp(style.ambient + daylight*(style.strength*(.24+.76*relief)*(.48+.52*y) + style.rim*rim));
       };
+      const rendered=visible && opacity>0;
+      const shift=[dx,0,dz];
+      const shade=(origin,ray,depth,optical,out) => {
+        const x=origin[0]+ray[0]*depth, y=origin[1]+ray[1]*depth, z=origin[2]+ray[2]*depth;
+        const rim=style ? Math.max(0,lx*ray[0]+ly*ray[1]+lz*ray[2])**12 : 0;
+        const brightness=style ? lit(x,z,clamp((y-low)/thickness),sample(cells,x,z),rim)*(.49+.51*Math.exp(-optical*.58)) : 0;
+        const flash=flashAt?.(x,y,z);
+        for (let c=0;c<3;c++) out[c]=Math.min(1,(style?mix(rgb[c],style.rgb[c],brightness):rgb[c])+(flash?.[c]??0));
+      };
+      const view=useDetail && rendered ? (eye,parallel) => asset.view(eye,parallel,mode,shift,shade,opacity) : null;
+      const reflections=useDetail && rendered ? asset.view([0,0,0],null,'volume',shift,shade,opacity) : null;
+      const reflectionSample=[0,0,0,1];
       function paintVolume(origin, ray, out, flashAt) {
         const range = [0,horizon];
         if (!clip(range,origin[1],ray[1],low,high) || (!repeat &&
@@ -184,7 +214,7 @@ const CloudField = (() => {
           const x=origin[0]+t*ray[0], y=origin[1]+t*ray[1], z=origin[2]+t*ray[2];
           const density=sample(cells,x,z);
           if (density<=0) continue;
-          const h=(y-low)/thickness, top=.25+.75*density*(1.28-.28*density), cap=top-.12;
+          const h=(y-low)/thickness, top=topOf(density), cap=top-.12;
           const body = half>1e-6
             ? (integral(0,.12,h+half)-integral(0,.12,h-half)
               -integral(cap,top,h+half)+integral(cap,top,h-half))/(2*half)
@@ -201,7 +231,12 @@ const CloudField = (() => {
         return out;
       }
       function paint(origin, direction, out, light) {
-        if (!visible || !opacity) return out;
+        if (!rendered) return out;
+        if (reflections) {
+          reflections.trace(origin,direction,0,Infinity,reflectionSample);
+          for (let c=0;c<3;c++) out[c]=reflectionSample[c]+out[c]*reflectionSample[3];
+          return out;
+        }
         if (thickness>0) return paintVolume(origin,direction,out,light);
         if (Math.abs(direction[1]) < 1e-8) return out;
         const distance=(height-origin[1])/direction[1];
@@ -216,13 +251,15 @@ const CloudField = (() => {
           out[i]=mix(out[i],Math.min(1,(style?mix(rgb[i],style.rgb[i],brightness):rgb[i])+(flash?.[i]??0)),amount);
         return out;
       }
-      return { visible: visible && opacity > 0, coverage:(x,z)=>sample(cells,x,z), paint, shadow };
+      return { visible: rendered, coverage:(x,z)=>sample(cells,x,z), paint, shadow, view };
     }
     return Object.freeze({ [brand]:true, frame });
   }
 
   return Object.freeze({ compile, shadowSettings, recipes:recipes.names,
     recipe:(name, options={}) => compile({ ...options, recipe:name }),
+    asset:(source, lod={}) => compile({ ...(typeof source==='string' ? { recipe:source } : record(source,'Cloud asset')), lod }),
+    representations:detail.modes,
     dim: visibility => .35 + .65 * visibility });
 })();
 if (typeof module !== 'undefined') module.exports = CloudField;
