@@ -25,6 +25,8 @@ Rain aligns its streaks with the current wind. Rain and flakes integrate recent 
 
 Particles pick up color from the scene’s point lamps and its [volume point lights and spotlights](fog-lighting.md). The geometry query also shadows ordinary lamps. Volume lights use their own shadow setting.
 
+Use [rain impacts and runoff](rain-impacts.md) to bind the flight contacts to water, paving, and roof drains.
+
 ## Compare and configure
 
 ```sh

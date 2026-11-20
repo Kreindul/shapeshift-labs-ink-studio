@@ -1,6 +1,7 @@
 const Airflow = require('../src/airflow.js');
 const LightSchedule = require('../src/light-schedule.js');
 const SceneOptics = require('../src/scene-optics.js');
+const { inside } = require('./rain-impacts.js');
 
 function settings(authored, override) {
   if (override === false || (authored === false && override === undefined)) return null;
@@ -44,7 +45,7 @@ function blocks(occluder, from, to, time) {
   return distance > 1e-6 && occluder(...from, delta.map(n => n / distance), distance, time);
 }
 
-function frame(world, override, { time, wind, windAt, weather, lamps, localLighting }) {
+function frame(world, override, { time, wind, windAt, weather, lamps, localLighting, impacts }) {
   if (!world.precipitationRanges?.length) return null;
   const config = settings(world.precipitation, override);
   // Tag the authored rows even in the disabled view so they disappear together.
@@ -59,7 +60,62 @@ function frame(world, override, { time, wind, windAt, weather, lamps, localLight
   }
   if (!config) return { rows };
   const { occlusion, occluder, flightSegments, lightStrength } = config;
-  const drift = windPath(time, duration, wind, duration > 0 ? windAt : undefined);
+  const drift = windPath(time, duration + (impacts?.lookback ?? 0), wind, duration > 0 ? windAt : undefined);
+  const receivers = (impacts?.receivers ?? []).filter(receiver => occlusion || receiver.kind !== 'roof');
+  function hit(x, y, z, speed, height, birthAge, flown) {
+    const total = drift(birthAge);
+    for (const receiver of receivers) {
+      const age = (y - receiver.y) / speed;
+      if (age <= 0 || age > flown || y - receiver.y > height) continue;
+      const tail = drift(birthAge - age);
+      const px = x + total[0] - tail[0], pz = z + total[1] - tail[1];
+      if (inside(receiver, px, pz)) return { receiver, at:[px,receiver.y,pz], age };
+    }
+  }
+  function blocked(point, origin, age, born, count) {
+    if (!occlusion || !occluder) return false;
+    let from = origin;
+    for (let i = 1; i <= count; i++) {
+      const to = point(i / count);
+      if (blocks(occluder, from, to, born + age * (i - .5) / count)) return true;
+      from = to;
+    }
+    return false;
+  }
+  function recentContacts() {
+    const events = [];
+    if (!receivers.length || !config.rain) return events;
+    for (const { first, end, profile } of world.precipitationRanges) {
+      if (profile && !weather) continue;
+      for (let row = first; row < end; row++) {
+        const q = row * 16, data = world.data;
+        if (Math.round(data[q + 11]) % 16 !== 2 || !data[q + 3]) continue;
+        const x = data[q], y = data[q + 1], z = data[q + 2];
+        const phase = data[q + 12], speed = data[q + 13], height = data[q + 14], period = height / speed;
+        if (!(period > 0 && Number.isFinite(period))) continue;
+        const cycle = time / period + phase;
+        if (impacts.lookback / period > 4096) throw new RangeError('Rain impact history exceeds the emitter budget');
+        const youngest = (cycle - Math.floor(cycle)) * period;
+        for (let born = youngest; born <= impacts.lookback + period; born += period) {
+          const contact = hit(x, y, z, speed, height, born, Math.min(born, period));
+          if (!contact || born - contact.age > impacts.lookback) continue;
+          const eventTime = time - born + contact.age;
+          const strength = config.rain * (profile ? weather.rainAt?.(eventTime) ?? weather.rainGain : 1);
+          if (!(strength > 0)) continue;
+          const total = drift(born);
+          // Stop just above the authored receiving plane so the receiver itself is not treated as upstream cover.
+          const travel = Math.max(0, contact.age - .025 / speed);
+          const point = u => {
+            const age = travel * u, tail = drift(born - age);
+            return [x + total[0] - tail[0], y - speed * age, z + total[1] - tail[1]];
+          };
+          if (!blocked(point, [x,y,z], travel, time - born, windAt ? flightSegments : 1))
+            events.push({ ...contact, time:eventTime, strength });
+        }
+      }
+    }
+    return events;
+  }
   const fade = (a, b, value) => {
     const u = Math.max(0, Math.min(1, (value - a) / (b - a)));
     return u * u * (3 - 2 * u);
@@ -72,6 +128,7 @@ function frame(world, override, { time, wind, windAt, weather, lamps, localLight
     if (!rate || !alpha) return null;
     const cycle = time * speed / height + phase, fraction = cycle - Math.floor(cycle);
     const age = fraction * height / speed;
+    if (!snow && y - speed * age <= receivers[0]?.y && hit(x, y, z, speed, height, age, age)) return null;
     const total = drift(age);
     function point(progress) {
       const flown = progress * fraction;
@@ -81,15 +138,7 @@ function frame(world, override, { time, wind, windAt, weather, lamps, localLight
       return [x + total[0] - remaining[0] + wx, y - flown * height, z + total[1] - remaining[1] + wz];
     }
     const position = point(1);
-    if (occlusion && occluder) {
-      const count = snow || windAt ? flightSegments : 1;
-      let from = [x,y,z];
-      for (let i = 1; i <= count; i++) {
-        const to = i === count ? position : point(i / count);
-        if (blocks(occluder, from, to, time - age * (1 - (i - .5) / count))) return null;
-        from = to;
-      }
-    }
+    if (blocked(point, [x,y,z], age, time - age, snow || windAt ? flightSegments : 1)) return null;
     const coverage = snow ? fade(0,.05,fraction) * (1 - fade(.92,1,fraction)) : 1 - fraction * fraction;
     return [...position, Math.min(.99, alpha * rate * coverage)];
   }
@@ -106,7 +155,7 @@ function frame(world, override, { time, wind, windAt, weather, lamps, localLight
     }
     return out.map(value => value * lightStrength);
   } : null;
-  return { rows, pose, lighting };
+  return { rows, pose, lighting, contacts: receivers.length ? recentContacts() : undefined };
 }
 
 module.exports = { frame, settings };

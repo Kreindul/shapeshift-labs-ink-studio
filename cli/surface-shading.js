@@ -62,6 +62,7 @@ function surfaceShading(world, options, camera) {
     footprint,
     time,
     weather: camera.weather,
+    rain: camera.rain,
     visibility: 1,
     skyView: [0, 0, 0], skyReflectionSource
   };
@@ -117,6 +118,11 @@ function surfaceShading(world, options, camera) {
     sample.worldPosition[0] = x;
     sample.worldPosition[1] = y;
     sample.worldPosition[2] = z;
+    if (prepared.settings.rainRipple) {
+      const slope = camera.rain?.normal(prepared.settings.rainRipple, sample.worldPosition, footprint);
+      const local = slope && [c * slope[0] - s * slope[2], slope[1], s * slope[0] + c * slope[2]];
+      sample.rainSlope = local && frame ? frame.apply(frame.inverse, local) : local;
+    } else sample.rainSlope = undefined;
     if (prepared.depth) sample.depth = (eye[0] - x) * forward[0] + (eye[1] - y) * forward[1] + (eye[2] - z) * forward[2];
     normal[0] = surfaceData[offset + 1];
     normal[1] = surfaceData[offset + 2];

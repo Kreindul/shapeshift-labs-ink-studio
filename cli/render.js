@@ -37,6 +37,7 @@ const SkyEnvironment = require('../src/sky-environment.js');
 const CloudField = require('../src/cloud-field.js');
 const weatherFrame = require('./weather.js');
 const Precipitation = require('./precipitation.js');
+const RainImpacts = require('./rain-impacts.js');
 const { cameraRays, surfacePoint, reflectionSampler, atmosphereQuality, mediaSampler, applyAtmosphere } = require('./scene-optics.js');
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x),
   sstep = (a, b, x) => {
@@ -325,6 +326,22 @@ function render(world, o, preparedPalettes) {
   let localLighting;
   const prepareVolumeLight = () => volumeLighting ? (localLighting ??= SceneOptics.lighting(volumeLighting, world.pal,
     { time: t, localLights: o.volumeLocalLights, localShadows: o.volumeLocalShadows })) : undefined;
+  const wind = Airflow.frame(o.wind ?? weather?.wind ?? an.wind);
+  const daylight = o.lightDaylight ?? o.environment?.daylight ?? an.daylight ?? 1;
+  const dusk = LightSchedule.gain(daylight);
+  const lampEye = [
+    T[0]+eyeD*Math.cos(pitch)*Math.sin(yaw),
+    T[1]+eyeD*Math.sin(pitch),
+    T[2]+eyeD*Math.cos(pitch)*Math.cos(yaw)
+  ];
+  const lamps = LightSchedule.select(world.lights || [], lampEye, { daylight, duskOnly: true });
+  const rainConfig = RainImpacts.settings(world.rainImpacts, o.rainImpacts);
+  const precipitation = Precipitation.frame(world, o.precipitation, {
+    time: skyTime, wind: wind.velocity, windAt: o.wind == null ? weather?.windAt : undefined, weather, impacts: rainConfig,
+    lamps: world.precipitationRanges?.length ? LightSchedule.select(world.lights || [], lampEye, { daylight }) : [],
+    localLighting: prepareVolumeLight
+  });
+  const rain = RainImpacts.frame(rainConfig, precipitation?.contacts, skyTime);
   const atmosphereOptions = () => {
     const quality = atmosphereQuality({ ...world.volumeQuality, ...o.volumeQuality });
     quality.wind = world.volumeWind && !o.wind && !weather?.wind && !an.wind ? Airflow.frame(world.volumeWind).velocity : wind.velocity;
@@ -378,6 +395,7 @@ function render(world, o, preparedPalettes) {
     sun: sun?.direction,
     cloudShadow,
     weather: weather?.surface,
+    rain,
     sunVisibility: sun && ((i, x, y, z) => live?.visibility(i, x, y, z)),
     blueNoise: settings => blueNoise(world, settings), onPaletteClip,
     onSurfaceClip: audit && ((r, g, b) => audit.sample('surface', r, g, b))
@@ -420,20 +438,6 @@ function render(world, o, preparedPalettes) {
     depth = new Float32Array(N),
     add = new Float32Array(N),
     wet = new Float32Array(N);
-  const wind = Airflow.frame(o.wind ?? weather?.wind ?? an.wind);
-  const daylight = o.lightDaylight ?? o.environment?.daylight ?? an.daylight ?? 1;
-  const dusk = LightSchedule.gain(daylight);
-  const lampEye = [
-    T[0]+eyeD*Math.cos(pitch)*Math.sin(yaw),
-    T[1]+eyeD*Math.sin(pitch),
-    T[2]+eyeD*Math.cos(pitch)*Math.cos(yaw)
-  ];
-  const lamps = LightSchedule.select(world.lights || [], lampEye, { daylight, duskOnly: true });
-  const precipitation = Precipitation.frame(world, o.precipitation, {
-    time: skyTime, wind: wind.velocity, windAt: o.wind === undefined ? weather?.windAt : undefined, weather,
-    lamps: world.precipitationRanges?.length ? LightSchedule.select(world.lights || [], lampEye, { daylight }) : [],
-    localLighting: prepareVolumeLight
-  });
   const sampleWithdrawal = SampleCoverage.amount(o.sampleWithdrawal ?? world.sampleWithdrawal ?? 0);
   for (let i = 0, q = 0; i < N; i++, q += 16) {
     let x = d[q],

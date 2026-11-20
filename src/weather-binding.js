@@ -114,6 +114,7 @@ const WeatherBinding = (() => {
       const wetness = signal.wetness;
       return { ...signal, rainGain: Math.min(1, (signal.rain ?? 0) / rainFull),
         snowGain: Math.min(1, (signal.snowfall ?? 0) / snowFull),
+        rainAt: at => Math.min(1, (sample(at).rain ?? 0) / rainFull),
         windAt: signal.wind && (at => sample(at).wind),
         fogGain: volume => !fogVolumes || fogVolumes.has(volume.id) ? signal.fogDensity ?? 1 : 1,
         surface: state || wetness !== undefined ? (x, z) => {

@@ -155,6 +155,13 @@ const SurfaceLook = (() => {
     };
   }
 
+  function rainMask(mask) {
+    const { receiver, channel = 'splash' } = mask;
+    if (typeof receiver !== 'string' || !receiver.trim() || !['splash','runoff'].includes(channel))
+      throw new RangeError('Rain impact masks need a receiver ID and splash or runoff channel');
+    return sample => sample.rain?.mask(receiver, channel, sample.worldPosition ?? sample.position) ?? 0;
+  }
+
   function directionAt(direction, p, normal) {
     if (typeof direction === 'function') return vector(direction(p, normal));
     if (direction?.type === 'circular') {
@@ -325,6 +332,8 @@ const SurfaceLook = (() => {
       stages.prepare(settings.renderStages, { palette, roles: paletteRoles, blueNoise, context, validateOnly });
     }
     numeric(settings, ['scale', 'seed', 'steps'], 'surface');
+    if (settings.rainRipple !== undefined && (typeof settings.rainRipple !== 'string' || !settings.rainRipple.trim()))
+      throw new TypeError('Surface rainRipple must be a water receiver ID');
     if (settings.layers !== undefined && !isRecord(settings.layers))
       throw new TypeError('Surface layers must be named in an object');
     if (
@@ -419,6 +428,7 @@ const SurfaceLook = (() => {
         }
         const fieldMask = layer.mask?.type === 'field' ? effects.fieldMask(layer.mask, context) : null;
         const spatialMask = layer.mask?.type === 'weather' ? weatherMask(layer.mask) :
+          layer.mask?.type === 'rainImpact' ? rainMask(layer.mask) :
           ['axis', 'texture', 'query'].includes(layer.mask?.type)
           ? effects.prepareMask(layer.mask, context, { validateOnly }) : fieldMask;
         if (layer.mask && typeof layer.mask !== 'function' && !spatialMask) {
@@ -470,7 +480,7 @@ const SurfaceLook = (() => {
       paletteConstraint: paletteConstraints && settings.paletteConstraint !== undefined
         ? pixelLook.prepareLookPolicy(settings.paletteConstraint, { palette, roles: paletteRoles, blueNoise, context, validateOnly, onPaletteClip,
           skipMaskedStacks: !colorStack }) : null,
-      projected: layers.some(layer => layer.effect || layer.spatialMask),
+      projected: Boolean(settings.rainRipple) || layers.some(layer => layer.effect || layer.spatialMask),
       depth: layers.some(layer => layer.effect?.depth),
       reveals: layers.some(layer => layer.effect?.reveals)
     };
@@ -492,6 +502,7 @@ const SurfaceLook = (() => {
       t = tangent(sample.tangent ?? directionAt(settings.direction, p, n), n);
     const geometricNormal = n, geometricTangent = t;
     n = bump(prepared.normal, n, t, cross(n, t), p, sample.time || 0, footprint, seed);
+    if (settings.rainRipple && sample.rainSlope) n = unit(n.map((value, i) => value + sample.rainSlope[i]), n);
     t = tangent(t, n);
     const b = cross(n, t),
       v = unit(view, n),
