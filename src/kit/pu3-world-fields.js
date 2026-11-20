@@ -354,7 +354,7 @@
         }
       },
       fields:{
-        water:{type:'record',units:'world',read:column},
+        water:{type:'record',units:'world',columnGrid:{bounds:domain.bounds,resolution:[width,height]},read:column},
         depth:channel('number','world','depth'),
         'surface-height':channel('number','world','surface'),
         flow:channel('vec2','world/s','velocity'),

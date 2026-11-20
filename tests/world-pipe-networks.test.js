@@ -1,6 +1,6 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {KIT:{world:W}}=require('..').load();
+const kit=require('..').load(), {KIT:{world:W}}=kit;
 const yard=require('../examples/world-hydraulic-yard.json');
 const commands=require('../examples/world-hydraulic-yard.commands.json');
 
@@ -111,6 +111,28 @@ test('pond, network, lift and irrigation exchange actual volume and replay exact
   resumed.advance(110);
   run.advance(110);
   assert.deepEqual(clone(resumed.checkpoint()),clone(run.checkpoint()));
+});
+
+test('yard water renders from the solver cells and stays inside the banks',()=>{
+  const run=W.runtime.create(yard);
+  const column=(x,z)=>run.query().probe('river/water',[x,0,z]);
+  const rays=(frame,x,z)=>frame.water.raySegments([x,2,z],[0,-1,0],4);
+  const build=()=>W.visual(kit,run.view(),run.query());
+  const before=build();
+  assert.equal(column(-2.38,.2).status,'dry');
+  assert.deepEqual(rays(before,-2.38,.2),[]);
+  const inside=column(-2.42,.2).value;
+  const [[enter,leave]]=rays(before,-2.42,.2);
+  near(2-enter,inside.surface,1e-6);
+  near(2-leave,inside.bed,1e-6);
+  assert.deepEqual(rays(before,-4.12,.2),[]);
+  assert.deepEqual(rays(before,2.61,.2),[]);
+  run.advance(70);
+  const running=build(), outlet=pipe(run,'irrigation').points.at(-1);
+  assert.equal(column(outlet[0],outlet[2]).status,'ok');
+  assert.ok(outlet[1]<column(outlet[0],outlet[2]).value.surface);
+  assert.ok(rays(running,3.9,.2).length);
+  assert.deepEqual(rays(running,4.05,.2),[]);
 });
 
 test('boundary receipts show partial, blocked and closed transfers on a slower schedule',()=>{

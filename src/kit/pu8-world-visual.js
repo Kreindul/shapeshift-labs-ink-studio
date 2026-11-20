@@ -270,9 +270,14 @@
     const waterTarget = TargetSelectors.medium(water, 'water');
     const nativeWater = water && (config.waterOptics || looks.look?.optics?.some(rule => TargetSelectors.matches(rule.select, waterTarget)));
     const waterBodies = K.procedural.waterBodies;
+    const waterBounds={min:[min[0],min[2]],max:[max[0],max[2]]};
+    const grid=nativeWater&&!volume?.water&&query.field(water)?.columnGrid;
+    // Preserve solver shores when the viewport covers its full, GPU-sized grid.
+    const aligned=grid&&grid.resolution.every(n=>n<=64)&&['min','max'].every(side=>
+      grid.bounds[side].every((n,i)=>Math.abs(n-waterBounds[side][i])<1e-7));
     const surfaceWater = volume?.water ?? (nativeWater ? waterBodies.scene([waterBodies.create({
-      id: water, bounds: { min: [min[0], min[2]], max: [max[0], max[2]] }, optics: config.waterOptics,
-      resolution: [0, 2].map(axis => Math.min(64, Math.ceil((max[axis] - min[axis]) / resolution))),
+      id:water, bounds:aligned?grid.bounds:waterBounds, optics:config.waterOptics,
+      resolution:aligned?grid.resolution:[0,2].map(axis=>Math.min(64,Math.ceil((max[axis]-min[axis])/resolution))),
       sample(x, z) {
         const read = query.probe(water, [x, 0, z]);
         if (read.status !== 'ok' || !(read.value?.depth > 0)) return null;
