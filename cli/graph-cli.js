@@ -4,6 +4,7 @@ const { once } = require('node:events');
 const { createInterface } = require('node:readline');
 const files = require('./asset-files.js');
 const { readGraphProject } = require('./graph-project.js');
+const host = require('./graph-host-command.js');
 
 const flags = {
   validate:['inputs','json'], plan:['inputs','json'],
@@ -80,11 +81,14 @@ async function session(project, directory, inputs) {
 
 module.exports = async function graphCommand(pos,opt,settings) {
   const [mode,file,caseFile]=pos;
+  if (Object.hasOwn(host.commands,mode)) return send(await host.execute(pos,opt,settings),opt.json);
   if (!Object.hasOwn(flags,mode) || pos.length!==(mode==='batch'?3:2) ||
-      Object.entries(opt).some(([key,value])=>!flags[mode].includes(key) || (key==='json' ? value!==true : typeof value!=='string' || !value.trim())) ||
+      Object.entries(opt).some(([key,value])=>key!=='adapters' && !flags[mode].includes(key) || (key==='json' ? value!==true : typeof value!=='string' || !value.trim())) ||
       opt.port!==undefined && opt.node===undefined || opt.protocol!==undefined && opt.protocol!=='ndjson')
     throw new TypeError('Use graph validate|plan|inspect|run|batch|session <project.json> [cases-or-sweep.json]. See ink-studio help');
+  settings=await host.adapters(opt.adapters,settings);
   const project=readGraphProject(file,settings), sources=project.sourceFiles();
+  if (settings.adapterFile) sources.push(settings.adapterFile);
   let inputs, result;
   if (opt.inputs!==undefined) {
     const file=path.resolve(opt.inputs);

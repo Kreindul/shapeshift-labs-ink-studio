@@ -1031,6 +1031,9 @@ const CMD = {
         '  graph inspect <project.json> [--output NAME | --node PATH --port NAME] [--out directory]',
         '  graph run <project.json> [--inputs values.json --at seconds --seed N --out directory]',
         '  graph batch <project.json> <cases-or-sweep.json> [--out directory]   run named cases or a Cartesian sweep',
+        '  graph capture <request.json> [--adapters host.cjs --out file]   capture or send via a registered host adapter',
+        '  graph inspect-pxc <project.pxc> [--out info.json]   inspect a Pixel Composer container',
+        '  graph import-pxc <project.pxc> --out graph.json [--adapters host.cjs --using ID]   import saved art or use a translator',
         '  graph session <project.json> [--protocol ndjson --out directory]   serve requests using a warm graph',
         '  material-controls <material.json> [--palette colors.json --out report.json]  inspect shared material controls',
         '  light-emitters <lights.json> [--at seconds --out report.json]  inspect shaped lights and cookies',
@@ -2086,7 +2089,7 @@ const CMD = {
     return require('./render-graph-plan.js')(pos,opt,lib());
   },
   graph() {
-    return require('./graph-cli.js')(pos,opt,{kit:lib(),operations:cfg.graphOperations});
+    return require('./graph-cli.js')(pos,opt,{kit:lib(),operations:cfg.graphOperations,adapters:cfg.graphAdapters});
   },
   'material-controls'() {
     return require('./material-controls.js')(pos,opt,lib());

@@ -173,6 +173,7 @@
     ...P.sceneGraph.operations,
     ...P.animationGraph.operations,
     ...P.rasterSimulation.operations,
+    ...P.mediaGraph.operations,
     meshPaths: {
       inputs: { mesh: 'geometry', sources: 'points', targets: { type: 'points', default: [] }, options: { type: 'any', default: {} } },
       outputs: { value: 'any', curves: 'points', distance: 'field' },

@@ -66,7 +66,7 @@
   function audio(value) {
     const {sampleRate,channels,samples} = value ?? {};
     return Number.isSafeInteger(sampleRate) && sampleRate > 0 && Number.isSafeInteger(channels) && channels > 0 &&
-      list(samples) && samples.length % channels === 0 && all(samples, n => Number.isFinite(n) && n>=-1 && n<=1);
+      list(samples) && samples.length <= 32000000 && samples.length % channels === 0 && all(samples, n => Number.isFinite(n) && n>=-1 && n<=1);
   }
 
   const checks = {

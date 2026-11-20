@@ -3,6 +3,8 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { isDeepStrictEqual } = require('node:util');
 const PNG = require('./png.js');
+const WAV = require('./wav.js');
+const { createGraphHost } = require('./graph-host.js');
 
 const format = 'ink-studio/graph-project';
 const reportFormat = 'ink-studio/graph-report';
@@ -69,6 +71,11 @@ function describe(value, depth = 0) {
   if (!value || typeof value !== 'object') return value;
   if (Number.isSafeInteger(value.width) && Number.isSafeInteger(value.height) && value.data)
     return {kind:'image',width:value.width,height:value.height,samples:value.data.length};
+  if (Number.isSafeInteger(value.sampleRate) && value.sampleRate > 0 && Number.isSafeInteger(value.channels) &&
+      value.channels > 0 && (Array.isArray(value.samples) || ArrayBuffer.isView(value.samples))) {
+    const frames=value.samples.length / value.channels;
+    return {kind:'audio',sampleRate:value.sampleRate,channels:value.channels,frames,duration:frames/value.sampleRate};
+  }
   if (ArrayBuffer.isView(value)) return {kind:'buffer',type:value.constructor.name,length:value.length};
   if (Array.isArray(value)) return depth<3 && value.length<=32 ? value.map(item => describe(item,depth+1)) :
     {kind:'array',length:value.length};
@@ -150,10 +157,10 @@ function prepareAssertions(rows, plan) {
 
 function nativeOperations(kit, assets) {
   const binary = (fn, type='number') => ({inputs:{a:'number',b:'number'},outputs:{value:type},run(args){return {value:fn(args)};}});
-  function asset(type) {
-    return {inputs:{name:'string'},outputs:{value:type==='png' ? 'image' : 'any'},run({name}){
+  function asset(type, accepts) {
+    return {inputs:{name:'string'},outputs:{value:type},run({name}){
       const entry=assets.get(name);
-      if (entry?.format!==type) throw new RangeError('Unknown '+type+' graph asset '+name);
+      if (!entry || !accepts(entry)) throw new RangeError('Unknown '+type+' graph asset '+name);
       return {value:entry.value};
     }};
   }
@@ -164,8 +171,11 @@ function nativeOperations(kit, assets) {
     time:{time:true,outputs:{value:'number'},run(_,ctx){return {value:ctx.time};}},
     random:{outputs:{value:'number'},run(_,ctx){return {value:kit.KIT.grow.dice(ctx.seed)()};}},
     ...require('./graph-render.js').graph3DOperations(kit),
-    pngAsset:asset('png'),
-    jsonAsset:asset('json')
+    pngAsset:asset('image', entry => entry.format==='png'),
+    jsonAsset:asset('any', entry => entry.format==='json'),
+    audioAsset:asset('audio', entry => entry.type==='audio'),
+    rasterAsset:asset('raster', entry => entry.type==='raster'),
+    inputAsset:asset('record', entry => entry.format==='inputs')
   };
 }
 
@@ -221,8 +231,9 @@ function cacheReport(frame) {
   return {hits,misses:Object.keys(nodes).length-hits,nodes};
 }
 
-function createGraphProject(source, { kit=require('../index.js').load(), baseDir=process.cwd(), operations={}, sourceFile }={}) {
-  const {graph,data}=kit.KIT.procedural;
+function createGraphProject(source, { kit=require('../index.js').load(), baseDir=process.cwd(), operations={}, adapters={}, sourceFile }={}) {
+  const {graph,data,mediaGraph}=kit.KIT.procedural;
+  const host=createGraphHost(adapters,{kit});
   const {broadcast}=graph.arrays;
   const groupOperators=[...graph.arrays.groupOperators,...kit.KIT.procedural.animationGraph.groupOperators];
   const project=data.freeze(data.clone(source));
@@ -244,18 +255,31 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     return [name,graphSpec(value,'group '+name,groupOperators)];
   }));
   const assets=new Map(named(assetDefinitions,'assets').map(([name,definition])=>{
-    const {format,file}=fields(definition,['format','file'],'graph asset '+name);
-    if (!['png','json'].includes(format) || typeof file!=='string' || !file)
-      throw new TypeError('Graph assets need a PNG or JSON file');
+    const {format,file,type,codec,options}=fields(definition,
+      definition?.format==='codec' ? ['format','file','type','codec','options'] : ['format','file'],'graph asset '+name);
+    if (!['png','json','wav','inputs','codec'].includes(format) || typeof file!=='string' || !file)
+      throw new TypeError('Graph assets need a PNG, JSON, WAV, input recording or hosted codec file');
     const full=path.resolve(baseDir,file);
     paths.add(full);
+    if ((format==='wav' || format==='codec') && fs.statSync(full).size>WAV.maxBytes)
+      throw new RangeError('Graph media asset exceeds its byte budget');
     const bytes=fs.readFileSync(full);
-    let value;
+    let value, kind;
     if (format==='png') {
       const {w,h,data,max}=PNG.raster(bytes);
       value={width:w,height:h,data:max===255 ? data : Uint8Array.from(data,n=>Math.round(n*255/max))};
-    } else value=data.freeze(data.clone(JSON.parse(bytes.toString('utf8'))));
-    return [name,{format,file,sha256:sha256(bytes),value}];
+      kind='raster';
+    } else if (format==='wav') {
+      value=WAV.decode(bytes);
+      kind='audio';
+    } else if (format==='codec') {
+      value=host.decode(codec,bytes,{type,file:full,options});
+      kind=type;
+    } else {
+      const parsed=JSON.parse(bytes.toString('utf8'));
+      value=format==='inputs' ? mediaGraph.recording(parsed) : data.freeze(data.clone(parsed));
+    }
+    return [name,{format,file,sha256:sha256(bytes),value,...(kind && {type:kind}),...(codec && {codec})}];
   }));
   const stock=nativeOperations(kit,assets);
   const ops={...stock,...Object.fromEntries(named(operations,'host operations'))};
@@ -270,10 +294,12 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     if (expandedNodes>maxNodes) throw new RangeError('Expanded graph exceeds its '+maxNodes+' node budget');
     const compiled=graph.create(spec,{operations:ops,groups,planOnly:true}), plan=compiled.plan();
     for (const {id,op,inputs} of plan.nodes) {
-      if (ops[op]!==stock[op] || !['pngAsset','jsonAsset'].includes(op) || inputs.name.source.kind!=='value') continue;
+      if (ops[op]!==stock[op] || !['pngAsset','jsonAsset','audioAsset','rasterAsset','inputAsset'].includes(op) ||
+          inputs.name.source.kind!=='value') continue;
       const node=spec.nodes[id], definition=node.inputs?.name ?? node.params?.name;
       const name=record(definition) ? definition.value : definition;
-      if (assets.get(name)?.format!==op.slice(0,-5)) throw new RangeError('Unknown graph asset '+name+' at '+id);
+      try { stock[op].run({name}); }
+      catch (error) { throw new RangeError('Unknown graph asset '+name+' at '+id,{cause:error}); }
     }
     return {compiled,plan:{...plan,expandedNodes}};
   }
@@ -295,19 +321,27 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
   for (const name of groupSpecs.keys()) compileGroup(name);
   const {compiled,plan:rootPlan}=compile(spec);
   const exports=named(exportsSpec,'exports').map(([name,definition])=>{
-    const {output,format}=fields(definition,['output','format'],'graph export '+name);
-    if (!id(output) || !Object.hasOwn(rootPlan.outputs,output) || !['png','json','atlas'].includes(format))
-      throw new TypeError('Graph export '+name+' needs a known output and png, json or atlas format');
-    if (format==='png' && !['image','raster','any'].includes(rootPlan.outputs[output].type))
-      throw new TypeError('Graph PNG export '+name+' needs an image output');
-    if (format==='atlas' && !['atlas','any'].includes(rootPlan.outputs[output].type))
-      throw new TypeError('Graph atlas export '+name+' needs an atlas output');
-    return {name,output,format};
+    const {output,format,encoding,type,codec,options}=fields(definition,definition?.format==='wav' ?
+      ['output','format','encoding'] : definition?.format==='codec' ? ['output','format','type','codec','options'] :
+      ['output','format'],'graph export '+name);
+    if (!id(output) || !Object.hasOwn(rootPlan.outputs,output) || !['png','json','atlas','wav','codec'].includes(format))
+      throw new TypeError('Graph export '+name+' needs a known output and png, json, atlas, wav or codec format');
+    const port=rootPlan.outputs[output].type, compatible=kit.KIT.procedural.graphTypes.compatible;
+    if (format==='png' && !compatible(port,'raster')) throw new TypeError('Graph PNG export '+name+' needs an image output');
+    if (format==='atlas' && !compatible(port,'atlas')) throw new TypeError('Graph atlas export '+name+' needs an atlas output');
+    if (format==='wav' && (!compatible(port,'audio') || encoding!==undefined && !WAV.encodings.includes(encoding)))
+      throw new TypeError('Graph WAV export '+name+' needs audio and a supported PCM encoding');
+    if (format==='codec' && (!['audio','raster'].includes(type) || !compatible(port,type) || !id(codec) ||
+        options!==undefined && !record(options))) throw new TypeError('Graph codec export '+name+' needs typed media and a named codec');
+    if (format==='codec') host.requireCodec(codec,'encode');
+    return {name,output,format,...(encoding && {encoding}),...(codec && {type,codec,...(options && {options})})};
   });
   separateNames(exports.map(entry=>entry.name),'Graph exports');
   const assertions=prepareAssertions(assertionSpecs,rootPlan);
-  const assetInfo=Object.fromEntries([...assets].map(([name,{value,...entry}])=>[name,{...entry,...(entry.format==='png' &&
-    {width:value.width,height:value.height})}]));
+  const assetInfo=Object.fromEntries([...assets].map(([name,{value,...entry}])=>[name,{...entry,...(entry.type==='raster' &&
+    {width:value.width,height:value.height}),...(entry.type==='audio' && {
+      sampleRate:value.sampleRate,channels:value.channels,frames:value.samples.length/value.channels
+    })}]));
   const projectHash=sha256(jsonBytes({project,groups:Object.fromEntries(groupSpecs),assets:assetInfo}));
   const header={format:reportFormat,version,projectHash};
 
@@ -353,9 +387,11 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     }
   }
 
-  function encode(name,value,format) {
-    const bytes=format==='png' ? imageBytes(value) : jsonBytes(value);
-    return {file:'artifacts/'+name+'.'+format,format,sha256:sha256(bytes),bytes};
+  function encode(name,value,format,settings={}) {
+    const result=format==='codec' ? host.encode(settings.codec,value,settings) : undefined;
+    const bytes=result?.bytes ?? (format==='png' ? imageBytes(value) :
+      format==='wav' ? WAV.encode(value,settings) : jsonBytes(value));
+    return {file:'artifacts/'+name+'.'+(result?.extension ?? format),format,sha256:sha256(bytes),bytes};
   }
 
   function encodeAtlas(name,value) {
@@ -372,8 +408,8 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
   function run(prepared) {
     const {frame,report}=evaluate(prepared);
     const checks=assertions.map(check=>check(frame)), passed=checks.every(check=>check.passed);
-    const artifacts=exports.flatMap(({name,output,format})=>{
-      const value=frame.outputs[output], encoded=format==='atlas' ? encodeAtlas(name,value) : [encode(name,value,format)];
+    const artifacts=exports.flatMap(({name,output,format,...settings})=>{
+      const value=frame.outputs[output], encoded=format==='atlas' ? encodeAtlas(name,value) : [encode(name,value,format,settings)];
       return encoded.map(artifact=>({name,output,...artifact}));
     });
     return {outputs:frame.outputs,artifacts,report:{...report,kind:'run',passed,assertions:checks,
@@ -395,6 +431,10 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
   }
 
   function preview(value) {
+    if (Number.isSafeInteger(value?.sampleRate) && value.samples) {
+      try { return encode('preview',value,'wav'); }
+      catch { /* Fall through to the generic data preview. */ }
+    }
     if (Number.isSafeInteger(value?.width) && value.data) {
       try { return encode('preview',value,'png'); }
       catch { /* Numeric raster channels can be inspected as JSON. */ }

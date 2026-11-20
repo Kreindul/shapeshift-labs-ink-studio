@@ -711,6 +711,12 @@ node examples/procedural-generation.cjs procedural-review
 ink-studio graph run procedural-review/storm-relay.json --at 1.22 --out procedural-review/graph
 ```
 
+## Audio and automation
+
+See [Audio, recorded inputs and host adapters](graph-media.md) for native
+WAV assets, frame-aligned analysis, FFT channels, input recordings,
+capture, codecs and the Pixel Composer preview bridge.
+
 ## Animation and raster simulation
 
 `KIT.procedural.animationGraph` provides the same time mapping as the
