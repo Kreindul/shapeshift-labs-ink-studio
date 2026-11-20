@@ -121,6 +121,9 @@ entrance closed, reload, and reopen the workshop from a different position.
 
 ## Use the travel lifecycle
 
+Pass a [carry registry](carry.md#cross-a-portal-with-the-attached-group) to
+`portals.create` to check and transfer the traveler's held objects as a group.
+
 Call `session.prepare(linkId)` to preload the destination, or let
 `session.approach(position, { actor })` preload a nearby doorway. Preparation
 resolves to the payload, rejects on load failure, and resolves to null if

@@ -373,16 +373,24 @@
     return best;
   }
   function sweepYaw(a,b,delta,turn) {
+    return sweepTurn(a,b,delta,[0,1,0],turn,true);
+  }
+  function sweepRotation(a,b,delta,rotation) {
+    const {axis,angle}=M.axisAngle(M.mul(rotation,M.tr(a.rotation)));
+    if(!angle)return sweep(a,b,delta,{allowSurfaceSlide:true});
+    return sweepTurn(a,b,delta,axis,angle,Math.hypot(axis[0],axis[2])<1e-8);
+  }
+  function sweepTurn(a,b,delta,axis,turn,upright) {
     const start=geometry(a), other=geometry(b), end=V.add(a.position,delta);
-    const pairs=[];
+    const pairs=[], axes=upright?[0,2]:[0,1,2];
     let reach=0;
     for(const left of start.parts){
-      const radius=left.radius+Math.max(...left.points.map(point=>
-        Math.hypot(point[0]-a.position[0],point[2]-a.position[2])));
+      const radius=left.radius+Math.max(...left.points.map(point=>upright?
+        Math.hypot(point[0]-a.position[0],point[2]-a.position[2]):V.dist(point,a.position)));
       for(const right of other.parts){
-        if(separatedHeight(left,right,delta[1])||
-          [0,2].some(axis=>Math.min(a.position[axis],end[axis])-radius>right.max[axis]||
-            Math.max(a.position[axis],end[axis])+radius<right.min[axis]))continue;
+        if(upright&&separatedHeight(left,right,delta[1])||
+          axes.some(i=>Math.min(a.position[i],end[i])-radius>right.max[i]||
+            Math.max(a.position[i],end[i])+radius<right.min[i]))continue;
         pairs.push([left.part,right]);
         reach=Math.max(reach,radius);
       }
@@ -394,7 +402,7 @@
     let time=0;
     for(let i=0;i<64;i++){
       const posed=time===0?start:geometry({...a,position:V.mad(a.position,delta,time),
-        rotation:M.mul(M.rot([0,1,0],turn*time),a.rotation)});
+        rotation:M.mul(M.rot(axis,turn*time),a.rotation)});
       let best;
       for(const [index,right] of pairs){
         const hit=separation(posed.parts[index],right);
@@ -409,5 +417,5 @@
     const hit=rayCapsule({points:[a,b],radius},origin,down,origin[1]-low);
     return hit&&{point:V.mad(origin,down,hit.t),normal:hit.normal};
   }
-  W.colliders=Object.freeze({local,geometry,distance,columns,ray,contact,sweep,sweepYaw,capsuleColumn});
+  W.colliders=Object.freeze({local,geometry,distance,columns,ray,contact,sweep,sweepYaw,sweepRotation,capsuleColumn});
 })(KIT);
