@@ -22,7 +22,9 @@
     const output=read(ctx,config.support,[x,(low+high)*.5,z],{low,high});
     if(output?.status==='ok'&&Array.isArray(output.value))return output.value;
     const y=heightAt(ctx,config,x,z);
-    return y>=low&&y<=high?[{y,normal:up,id:'ground',material:'ground'}]:[];
+    if(y<low||y>high)return [];
+    const surface=W.materials.probe(ctx.query,config.surface,[x,y,z]);
+    return [{y,normal:up,id:'ground',material:surface?.id??'ground'}];
   }
   function groundPlan(ctx,config,from,to,{radius=.13,maxWade=.16,maxSlope=.9,exclude}={}) {
     const region=config.bounds;
@@ -102,7 +104,7 @@
   function routeDependencies(config) {
     const {min,max} = config.bounds;
     const area = {axes:'xz',min:[min[0],min[2]],max:[max[0],max[2]]};
-    return {reads:['bed','support','clearance','water','wear'].flatMap(key=>
+    return {reads:['bed','support','clearance','water','wear','surface'].flatMap(key=>
       typeof config[key] === 'string' ? [{field:config[key],bounds:area}] : [])};
   }
   function navigation(config) {
@@ -117,7 +119,8 @@
       return Q.ok(mode==='walk'?groundPlan({query},config,target.point,args.to,args):
         spatialPlan({query},config,target.point,args.to,{mode,radius,entity:args.exclude}));
     }
-    return {initial:()=>null,dependencies:routeDependencies(config),fields:{
+    return {initial:()=>null,dependencies:routeDependencies(config),
+      ...(config.surface!==undefined&&{checkFields:query=>W.materials.checkSurface(query,config.surface)}),fields:{
       height:{type:'number',units:'world',read:({query,target})=>target.point?
         Q.ok(heightAt({query},config,target.point[0],target.point[2])):Q.missing('point required')}
     },traces:{route:{run:route}}};
@@ -170,7 +173,7 @@
     }
     return {initial:()=>null,fields:{suitability:{type:'record',read:suitability}}};
   }
-  function agents(config) {
+  function agents(config,{catalog}) {
     bounds(config.bounds);
     const initial={}, profiles=config.species??{}, source=config.agents??{}, poseCache=new WeakMap();
     check(record(profiles)&&record(source)&&Object.keys(source).length<=512,'Invalid creature catalog');
@@ -292,7 +295,9 @@
             const accumulated=travel+stepDistance,count=Math.floor(accumulated/stride);
             for(let n=0;n<count;n++){
               const at=V.lerp(foot,sample.foot,W.fields.clamp((stride-travel+n*stride)/stepDistance,0,1));
-              contacts.push({entity:agent.entity,point:at,support:sample.support,material:sample.material??null,weight:profile.weight??1});
+              const cue=catalog?.getMaterial(sample.material)?.material.sounds?.step;
+              contacts.push({entity:agent.entity,point:at,support:sample.support,material:sample.material??null,weight:profile.weight??1,
+                ...(cue&&{cue})});
               footprints++;
             }
             travel=accumulated-count*stride;
@@ -310,7 +315,8 @@
       });
       return {...previous,position:moved,direction,route,cursor,retry,mode:profile.mode,travel,footprints,limbs};
     }
-    return {initial:()=>({agents:initial,contacts:[]}),dependencies:routeDependencies(config),validateState(state){
+    return {initial:()=>({agents:initial,contacts:[]}),dependencies:routeDependencies(config),
+    ...(config.surface!==undefined&&{checkFields:query=>W.materials.checkSurface(query,config.surface)}),validateState(state){
       check(record(state?.agents)&&Array.isArray(state.contacts)&&Object.keys(state.agents).length===Object.keys(initial).length&&
         Object.entries(state.agents).every(([key,agent])=>own(initial,key)&&own(profiles,agent.species)&&vector(agent.position)&&
           vector(agent.goal)&&vector(agent.direction)&&Array.isArray(agent.route)&&agent.route.every(p=>vector(p))),

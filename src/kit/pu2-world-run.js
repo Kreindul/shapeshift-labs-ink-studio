@@ -27,12 +27,13 @@
   }
   function compile(world, implementations = {}) {
     const systems = {};
+    const catalog = W.materials.catalog(world);
     const ports = {inputs:{},outputs:{}};
     for (const name of ordered(world.systems)) {
       const spec = world.systems[name], factory = own(implementations,spec.kind) ? implementations[spec.kind] : factories.get(spec.kind);
       check(name !== 'world' && id(spec.kind) && typeof factory === 'function', 'Unknown or reserved system ' + name + ' (' + spec.kind + ')');
       check(record(spec.config??{}),'Invalid config for '+name);
-      const system = factory(spec.config ?? {},{world,id:name});
+      const system = factory(spec.config ?? {},{world,id:name,catalog});
       check(record(system) && typeof system.initial === 'function', 'System needs an initial state: ' + name);
       for (const direction of ['inputs','outputs']) {
         for (const [key,raw] of Object.entries(system[direction] ?? {})) {
@@ -48,9 +49,10 @@
       systems[name] = system;
     }
     const consumers = Object.values(systems).filter(system => system.checkFields);
-    if (consumers.length) {
+    if (consumers.length || world.visual?.fields?.surface!==undefined) {
       const query = Q.create({world},systems);
       for (const system of consumers) system.checkFields(query);
+      W.materials.checkSurface(query,world.visual?.fields?.surface);
     }
     const systemDependencies = Object.entries(systems).filter(([,system])=>system.dependencies !== undefined);
     let fieldQuery;
@@ -154,7 +156,7 @@
     const world = W.manifest(source), plan = compile(world,implementations);
     for (const command of world.commands) actionCheck(command,plan);
     scenarioCheck(world.scenario,plan);
-    const catalog = world.assetPacks.length ? K.authoring.assetPacks.create({packs:world.assetPacks}) : undefined;
+    const catalog = W.materials.catalog(world);
     W.validateLooks(world, catalog);
     check(world.history === undefined || record(world.history), 'Invalid history policy');
     if (world.history?.where !== undefined) Q.condition(world.history.where,{});

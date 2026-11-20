@@ -65,6 +65,11 @@ These are stylized reflectance models. The CLI resolves them into the scene pale
 
 ## JSON and host rendering
 
+Headless worlds can bind a [physical material asset](./headless-worlds.md#physical-material-assets)
+to a surface or body. Its authored dry and wet color ramps follow the
+same material state used by the simulation. Surface finishes can still
+add reflectance, masks, and other lighting effects.
+
 In JSON, `mat.surface` accepts a preset ID or a settings object. Add a `preset` field to the object to override that recipe.
 
 ```json

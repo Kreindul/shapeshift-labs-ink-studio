@@ -1574,6 +1574,7 @@ function makeSculpt(B, rest) {
   }
 
   function shadeOwned(owner, material, ...sample) {
+    if (material.materialAt) material = material.materialAt(sample[1], sample[2], sample[3]) ?? material;
     const preview = typeof globalThis !== 'undefined' && globalThis.INK_LOOK_ALBEDO;
     const capture = B.describeAlbedo && (preview || S.captureAlbedo || stagedAlbedo(material.surface) || stagedAlbedo(material.top?.surface));
     if (!capture && !B.describeSplats) return light(material, ...sample);

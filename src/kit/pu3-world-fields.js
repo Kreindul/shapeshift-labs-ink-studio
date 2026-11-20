@@ -287,16 +287,20 @@
         ...(exchange && {received:exchange.received,sent:exchange.sent}),
         error:exchange ? error-exchange.received+exchange.sent : error});
     }
-    const terrainQuery=config.obstacle;
+    const terrainQuery=config.obstacle, surface=config.surface;
     check(terrainQuery===undefined || typeof terrainQuery==='string','Invalid obstacle field');
+    check(surface===undefined || typeof surface==='string','Invalid water material surface field');
     const dependencyBounds = {axes:'xz',min:origin,max:[origin[0]+width*dx,origin[1]+height*dz]};
     return {inputs,outputs,...(exchanging && {accounts}),
       dependencies:{reads:[{field:system+'/bed',bounds:dependencyBounds},
-        ...(terrainQuery ? [{field:terrainQuery,bounds:dependencyBounds}] : [])],writes:[system+'/bed']},
+        ...[terrainQuery,surface].filter(Boolean).map(field=>({field,bounds:dependencyBounds}))],writes:[system+'/bed']},
+      ...(surface!==undefined&&{checkFields:query=>W.materials.checkSurface(query,surface)}),
       initial:() => ({fluid:makeSolver(true).checkpoint(),gate:gateInit,pump:pumpInit,terrain:[],manual:{},
+        ...(surface!==undefined&&{eroded:0}),
         ...(exchanging && {exchange:{sent:0,received:0}})}),
       validateState(state) {
         solver.restore(state.fluid);
+        if (surface!==undefined) check(Number.isFinite(state.eroded)&&state.eroded>=0,'Invalid eroded bed volume');
         if (exchanging) check(record(state.exchange) &&
           [state.exchange.sent,state.exchange.received].every(value=>Number.isFinite(value) && value>=0),
         'Invalid water transfer balance');
@@ -315,6 +319,7 @@
         depth:channel('number','world','depth'),
         flow:channel('vec2','world/s','velocity'),
         bed:channel('number','world','bed'),
+        ...(surface!==undefined&&{eroded:{type:'number',units:'world^3',read:({state})=>Q.ok(state.eroded)}}),
         mass:{type:'record',units:'world^3',read:metric}
       },
       traces:{flow:{run:({state,target,args})=>{
@@ -390,10 +395,36 @@
           }
           return value;
         };
-        solver.step(ctx.dt,{rain:config.rain,drain:config.drain,friction:config.friction,
+        const material=surface!==undefined?new Array(width*height):null;
+        function atCell(i) {
+          if (material[i]===undefined) {
+            const [x,z]=point(i);
+            material[i]=W.materials.probe(ctx.query,surface,[x,state.fluid.bed[i],z]);
+          }
+          return material[i];
+        }
+        const drain=material?(x,z)=>Math.min(1e4,(config.drain??0)+(atCell(index(x,z))?.permeability??0)):config.drain;
+        solver.step(ctx.dt,{rain:config.rain,drain,friction:config.friction,
           ...(Object.keys(gates).length||terrainQuery?{opening}:{}),
           transfers:Object.entries(pumps).map(([key,spec])=>({from:index(...spec.from),to:index(...spec.to),rate:pump[key]}))});
-        return {...state,gate,pump,fluid:solver.checkpoint(),terrain:[]};
+        const fluid=solver.checkpoint();
+        let eroded=0, minX=width,minZ=height,maxX=-1,maxZ=-1;
+        if (material) for (let i=0;i<material.length;i++) {
+          if (fluid.depth[i]<=1e-6) continue;
+          const erosion=atCell(i)?.erosion;
+          if (!erosion || erosion.rate===0) continue;
+          const velocity=Math.hypot(fluid.mx[i],fluid.mz[i])/fluid.depth[i];
+          const next=Math.max(-1e7,fluid.bed[i]-Math.max(0,velocity-erosion.threshold)*erosion.rate*ctx.dt);
+          const removed=fluid.bed[i]-next;
+          if (removed<=0) continue;
+          fluid.bed[i]=next;
+          eroded+=removed*cellArea;
+          const x=i%width,z=Math.floor(i/width);
+          minX=Math.min(minX,x);maxX=Math.max(maxX,x);minZ=Math.min(minZ,z);maxZ=Math.max(maxZ,z);
+        }
+        if (eroded>0) ctx.spatial?.write('bed',{axes:'xz',min:[origin[0]+minX*dx,origin[1]+minZ*dz],
+          max:[origin[0]+(maxX+1)*dx,origin[1]+(maxZ+1)*dz]},'surface-erosion');
+        return {...state,gate,pump,fluid,terrain:[],...(material&&{eroded:state.eroded+eroded})};
       },
       output(state) {
         const out={volume:metric({state}).value.volume};

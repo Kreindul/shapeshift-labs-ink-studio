@@ -49,7 +49,7 @@
     return shape.bounds={min,max,bounded};
   }
   function extents(body) { return geometry(body).extent; }
-  function mechanics(config) {
+  function mechanics(config,{catalog}) {
     check(config.contactEvents===undefined || typeof config.contactEvents==='boolean','contactEvents must be boolean');
     const start=config.bodies??{}, jointSpecs=config.joints??{}, forceSpecs=config.forces??{};
     check([start,jointSpecs,forceSpecs].every(group=>record(group)&&Object.keys(group).length<=512&&Object.keys(group).every(id)),
@@ -89,11 +89,14 @@
         vector(item.velocity??zero)&&vector(item.angular??zero)&&Number.isFinite(item.mass??1)&&(item.mass??1)>0,
         'Invalid body ' + key);
       check(item.entity===undefined||id(item.entity),'Invalid body entity reference');
+      W.materials.validateEntity(catalog,item);
       const rotation=item.turn===undefined?M.id():M.rot(up,item.turn);
       check(rotation.every(Number.isFinite),'Invalid body rotation');
       initialBodies[key]={id:key,entity:item.entity??key,half:item.half,position:item.position??zero,
         velocity:item.velocity??zero,angular:item.angular??zero,rotation,mass:item.mass??1,fixed:!!item.fixed,
-        material:item.material??'stone',look:item.look??[1,2,3,4,5,6],origin:key};
+        material:item.material??'stone',look:item.look??[1,2,3,4,5,6],origin:key,
+        ...(item.materialAsset!==undefined&&{materialAsset:item.materialAsset}),
+        ...(item.materialWetness!==undefined&&{materialWetness:item.materialWetness})};
     }
     for (const [key,spec] of Object.entries(jointSpecs)) {
       check(record(spec)&&['fixed','hinge','slider','shaft'].includes(spec.kind)&&own(start,spec.child)&&
@@ -137,13 +140,18 @@
       inputs['force.'+key]={type:'number',default:spec.input??(spec.kind==='sail'?1:0)};
     }
     check(vector(config.gravity??[0,-9.81,0])&&Number.isFinite(config.ground??0)&&
-      (config.terrain===undefined||typeof config.terrain==='string')&&
+      [config.terrain,config.surface].every(field=>field===undefined||typeof field==='string')&&
       Number.isFinite(config.drag??.08)&&(config.drag??.08)>=0,'Invalid mechanical world');
     const sails = Object.values(forceSpecs).filter(spec => spec.kind==='sail');
     const windSampler = (query,spec) => query.sampler(spec.field,{type:'vec3',units:spec.units??'world/s'});
     function ground(context,point) {
       const sampled=config.terrain&&context.query.probe(config.terrain,point);
       return sampled?.status==='ok'&&Number.isFinite(sampled.value)?sampled.value:config.ground??0;
+    }
+    const groundMaterial=(ctx,point)=>W.materials.probe(ctx.query,config.surface,point);
+    const bodyMaterial=(ctx,body)=>W.materials.forBody(catalog,ctx.world,body);
+    function friction(a,b) {
+      return a!==undefined&&b!==undefined?Math.sqrt(a*b):a??b;
     }
     function placeMounted(bodies,joints,dt,previous=bodies,order=mountOrder) {
       for (const key of order) {
@@ -251,6 +259,7 @@
         }
       }
       const roots=rootsOf(bodies,joints), masses={}, force={}, torque={}, members=new Map(), mounts=new Map();
+      let rolling;
       placeMounted(bodies,joints,ctx.dt,state.bodies);
       for(const [key,body] of Object.entries(bodies)){
         const root=roots[key];
@@ -289,7 +298,16 @@
           const speed=V.dot(direction,apparent);
           input=Math.max(0,input)*speed*Math.abs(speed);
         }
-        const load=V.mul(direction,(spec.magnitude??1)*input);
+        let magnitude=(spec.magnitude??1)*input;
+        if(spec.kind==='wheel'){
+          const coefficient=friction(bodyMaterial(ctx,body)?.friction,groundMaterial(ctx,point)?.friction);
+          if(coefficient!==undefined) {
+            (rolling??=new Set()).add(root);
+            const limit=coefficient*body.mass*Math.max(0,-(config.gravity??[0,-9.81,0])[1]);
+            magnitude=clamp(magnitude,-limit,limit);
+          }
+        }
+        const load=V.mul(direction,magnitude);
         force[root]=V.add(force[root]??zero,load);
         const moment=V.cross(V.sub(point,bodies[root].position),load);
         torque[root]=V.add(torque[root]??zero,spec.kind==='wheel'?[0,moment[1],0]:moment);
@@ -314,20 +332,36 @@
       }
       for(const key of rootKeys){
         if(bodies[key].fixed)continue;
-        let lift=0;
+        let lift=0, contact, supportBody;
         for(const child of members.get(key)){
           const body=bodies[child];
           const half=extents(body);
           const bottom=body.position[1]-half[1];
           for(const x of [-1,0,1])for(const z of [-1,0,1]){
             const point=[body.position[0]+x*half[0],bottom,body.position[2]+z*half[2]];
-            lift=Math.max(lift,ground(ctx,point)-bottom);
+            const floor=ground(ctx,point), overlap=floor-bottom;
+            if(overlap<=lift)continue;
+            lift=overlap;
+            contact=[point[0],floor,point[2]];
+            supportBody=body;
           }
         }
         if(lift>0){
+          const floor=groundMaterial(ctx,contact), surface=bodyMaterial(ctx,supportBody);
+          const coefficient=friction(surface?.friction,floor?.friction);
+          const approach=Math.max(0,-bodies[key].velocity[1]);
           translateRoot(key,1,lift,-.12);
           const body=bodies[key];
-          bodies[key]={...body,angular:V.mul(body.angular,.86)};
+          let velocity=body.velocity;
+          if(coefficient!==undefined&&!rolling?.has(key)){
+            const speed=Math.hypot(velocity[0],velocity[2]);
+            const keep=speed>0?Math.max(0,1-coefficient*1.12*approach/speed):0;
+            velocity=[velocity[0]*keep,velocity[1],velocity[2]*keep];
+          }
+          const cue=floor?.sounds?.impact??surface?.sounds?.impact;
+          if(cue&&approach>=.5)ctx.emit('material-sound',{cue,interaction:'impact',entity:body.entity,
+            material:floor?.sounds?.impact?floor.id:surface.id,at:contact,speed:approach});
+          bodies[key]={...body,velocity,angular:V.mul(body.angular,.86)};
         }
       }
       placeMounted(bodies,joints,ctx.dt,state.bodies);
@@ -400,9 +434,11 @@
         const at=spec.at??zero, point=V.add(body.position,M.app(body.rotation,at));
         const prev=V.add(old.position,M.app(old.rotation,at)), floor=ground(ctx,point);
         const traveled=Math.hypot(point[0]-prev[0],point[2]-prev[2]);
-        if(point[1]-floor<=(spec.radius??.3)+.09&&traveled>1e-5)
-          contacts.push({entity:body.entity,point:[point[0],floor,point[2]],support:'ground',material:'ground',weight:traveled,
-            wheel:key});
+        if(point[1]-floor<=(spec.radius??.3)+.09&&traveled>1e-5) {
+          const at=[point[0],floor,point[2]], surface=groundMaterial(ctx,at), cue=surface?.sounds?.roll;
+          contacts.push({entity:body.entity,point:at,support:'ground',material:surface?.id??'ground',weight:traveled,
+            wheel:key,...(cue&&{cue})});
+        }
       }
       return {bodies,joints,contacts};
     }
@@ -411,9 +447,16 @@
       ctx.emit('detached',{joint:key,body:jointSpecs[key].child});
       return {...state,joints:{...state.joints,[key]:{...state.joints[key],active:false,speed:0}}};
     }
-    function fracture(state,{body:key,axis=0,parts=3,omit=[],impulse=zero},ctx) {
+    function fracture(state,{body:key,axis=0,parts:requested,omit=[],impulse=zero,energy},ctx) {
       const body=state.bodies[key];
-      check(own(state.bodies,key)&&[0,1,2].includes(axis)&&Number.isSafeInteger(parts)&&parts>=2&&parts<=32&&
+      check(own(state.bodies,key),'Unknown body '+key);
+      const profile=bodyMaterial(ctx,body), response=profile?.fracture, parts=requested??response?.parts??3;
+      const cue=profile?.sounds?.fracture, material=profile?.id??body.material;
+      if(energy!==undefined&&response&&energy<response.energy) {
+        ctx.emit('fracture-resisted',{body:key,material,energy,threshold:response.energy});
+        return state;
+      }
+      check([0,1,2].includes(axis)&&Number.isSafeInteger(parts)&&parts>=2&&parts<=32&&
         body.half[axis]/parts>=.005&&Array.isArray(omit)&&omit.every(i=>Number.isSafeInteger(i)&&i>=0&&i<parts)&&
         vector(impulse)&&Object.keys(state.bodies).length+parts<=1024,'Invalid fracture command');
       const bodies={...state.bodies}, joints={...state.joints}, fragments=[];
@@ -429,10 +472,12 @@
         local[axis]=(2*i+1-parts)*half[axis];
         const offset=M.app(body.rotation,local);
         bodies[name]={...body,id:name,entity:name,fixed:false,half,position:V.add(body.position,offset),
+          ...(profile&&{materialAsset:profile.id,materialWetness:profile.wetness}),
           velocity:V.add(V.add(body.velocity,V.cross(body.angular,offset)),impulse),mass:body.mass/parts};
         fragments.push(name);
       }
-      ctx.emit('fracture',{body:key,at:body.position,material:body.material,fragments});
+      ctx.emit('fracture',{body:key,at:body.position,material,fragments,...(cue&&{cue}),
+        ...(energy!==undefined&&{energy,...(response&&{threshold:response.energy})})});
       return {...state,bodies,joints};
     }
     function support(context) {
@@ -443,7 +488,10 @@
       const rows=[];
       const visit=body=>{
         const row=column(body,x,z,low,high);
-        if(row&&row.normal[1]>.25)rows.push(row);
+        if(row&&row.normal[1]>.25){
+          const profile=bodyMaterial(context,body);
+          rows.push(profile?{...row,material:profile.id,...(profile.sounds?.step&&{cue:profile.sounds.step})}:row);
+        }
       };
       const broad=colliderIndex(state.bodies);
       // The column test treats near-parallel local axes as parallel.
@@ -451,7 +499,11 @@
       if(broad)broad.overlap([x-pad,low-pad,z-pad],[x+pad,high+pad,z+pad],row=>visit(row.value));
       else for(const body of Object.values(state.bodies))visit(body);
       const floor=ground(context,target.point);
-      if(floor>=low&&floor<=high)rows.push({y:floor,normal:up,id:'ground',material:'ground'});
+      if(floor>=low&&floor<=high){
+        const surface=groundMaterial(context,[x,floor,z]);
+        rows.push({y:floor,normal:up,id:'ground',material:surface?.id??'ground',
+          ...(surface?.sounds?.step&&{cue:surface.sounds.step})});
+      }
       return Q.ok(rows.sort((a,b)=>b.y-a.y||a.id.localeCompare(b.id)));
     }
     function obstruction({state,target},excluded) {
@@ -471,8 +523,10 @@
       }
       return count?{status:'ok',value,body:nearest}:Q.missing('no bodies','empty');
     }
-    return {...(sails.length && {checkFields(query) {
+    return {...(config.surface!==undefined&&{dependencies:{reads:[config.surface]}}),
+    ...((sails.length||config.surface!==undefined) && {checkFields(query) {
       for (const sail of sails) windSampler(query,sail);
+      W.materials.checkSurface(query,config.surface);
     }}),inputs,outputs,initial(ctx) {
       const bodies={...initialBodies}, joints={...initials};
       follow(bodies,ctx.world);
@@ -485,13 +539,15 @@
           vector(body.position)&&vector(body.velocity)&&vector(body.angular)&&vector(body.rotation,9)&&
           Number.isFinite(body.mass)&&body.mass>0)&&Object.values(state.joints).every(joint=>typeof joint.active==='boolean'&&
           Number.isFinite(joint.value)&&Number.isFinite(joint.speed)),'Invalid mechanical checkpoint');
+      for(const body of Object.values(state.bodies))W.materials.validateEntity(catalog,body);
     },checkAction(type,args){
       if(type==='detach')check(own(jointSpecs,args.joint),'Unknown joint '+args.joint);
       if(type==='impulse')check(id(args.body)&&vector(args.linear??zero)&&vector(args.angular??zero),'Invalid body impulse');
       if(type==='fracture'){
-        const parts=args.parts??3, omit=args.omit??[];
+        const parts=args.parts??(catalog?.materials.length?32:3), omit=args.omit??[];
         check(id(args.body)&&[0,1,2].includes(args.axis??0)&&Number.isSafeInteger(parts)&&parts>=2&&parts<=32&&
-          Array.isArray(omit)&&omit.every(i=>Number.isSafeInteger(i)&&i>=0&&i<parts)&&vector(args.impulse??zero),
+          Array.isArray(omit)&&omit.every(i=>Number.isSafeInteger(i)&&i>=0&&i<parts)&&vector(args.impulse??zero)&&
+          (args.energy===undefined||Number.isFinite(args.energy)&&args.energy>=0),
           'Invalid fracture command');
       }
     },*poseEntities(state) {

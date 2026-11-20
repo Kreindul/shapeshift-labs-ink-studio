@@ -18,10 +18,11 @@
         !Number.isSafeInteger(value.revision) || value.revision < 1 ||
         typeof value.title !== 'string' || !value.title.trim() || value.title.length > 100)
       throw Error('Invalid versioned asset pack');
-    const { families: sourceFamilies = [], looks: sourceLooks = [] } = value;
+    const { families: sourceFamilies = [], looks: sourceLooks = [], materials: sourceMaterials = [] } = value;
     if (!Array.isArray(sourceFamilies) || !Array.isArray(sourceLooks) || sourceLooks.length > 128 ||
-        (!sourceFamilies.length && !sourceLooks.length))
-      throw Error('An asset pack needs families or named looks');
+        !Array.isArray(sourceMaterials) || sourceMaterials.length > 256 ||
+        (!sourceFamilies.length && !sourceLooks.length && !sourceMaterials.length))
+      throw Error('An asset pack needs families, named looks or physical materials');
     const registry = A.assets();
     registry.load({ format: 'ink-studio/asset-families', version: 1, families: sourceFamilies });
     const families = registry.list();
@@ -36,8 +37,11 @@
     }
     const looks = sourceLooks.map(look => A.looks.definition(look, value.id));
     if (new Set(looks.map(look => look.id)).size !== looks.length) throw Error('Duplicate look asset in ' + value.id);
+    const materials = sourceMaterials.map(material => A.physicalMaterials.definition(material, value.id));
+    if (new Set(materials.map(material => material.id)).size !== materials.length)
+      throw Error('Duplicate physical material in ' + value.id);
     const result = freeze({ format, version: 1, id: value.id, revision: value.revision, title: value.title.trim(),
-      families, replacements, ...(looks.length && { looks }) });
+      families, replacements, ...(looks.length && { looks }), ...(materials.length && { materials }) });
     manifests.add(result);
     return result;
   }
@@ -131,9 +135,10 @@
     if (!Array.isArray(families)) throw Error('Asset catalog needs a family array');
     const registry = A.assets();
     registry.load({ format: 'ink-studio/asset-families', version: 1, families });
-    const extensions = packMap(packs), owners = new Map(), looks = new Map();
+    const extensions = packMap(packs), owners = new Map(), looks = new Map(), materials = new Map();
     for (const pack of extensions.values()) {
       for (const look of pack.looks ?? []) looks.set(look.id, freeze({ look, pack: pack.id, revision: pack.revision }));
+      for (const material of pack.materials ?? []) materials.set(material.id,freeze({material,pack:pack.id,revision:pack.revision}));
       for (const family of pack.families) {
         if (registry.get(family.id)) throw Error('Duplicate asset family: ' + family.id);
         registry.register(family);
@@ -176,6 +181,8 @@
       packs: Object.freeze([...extensions.values()]),
       families: listed,
       looks: Object.freeze([...looks.values()]),
+      materials: Object.freeze([...materials.values()]),
+      getMaterial: id => materials.get(id) ?? null,
       getLook: id => looks.get(id) ?? null,
       get: id => byId.get(id) ?? null,
       owner: id => owners.get(id) ?? null,

@@ -73,7 +73,7 @@
     const {min,max}=region, span=Math.max(max[0]-min[0],max[2]-min[2],1), resolution=config.resolution??Math.max(.08,span/100);
     W.data.check(Number.isFinite(resolution)&&resolution>=.02&&resolution<=10&&span/resolution<=256,'Render grid exceeds its sample budget');
     const B=makeBuilder(view.world.seed,config.palette??palette), S=K.sculpt(makeSculpt(B));
-    const catalog = view.world.assetPacks?.length ? K.authoring.assetPacks.create({ packs: view.world.assetPacks }) : undefined;
+    const catalog = W.materials.catalog(view.world);
     const looks = visualLooks(view.world, catalog);
     const entities = view.world.entities, targets = new Map();
     function targetFor(id) {
@@ -94,11 +94,41 @@
       looks.look.renderStages.some(rule => rule.stage === 'material');
     const mid=min.map((n,i)=>(n+max[i])/2);
     const fields=config.fields??{}, terrain=fields.bed, water=fields.water, wear=fields.wear;
+    const ramps=new Map();
+    function finishFor(base,profile) {
+      if (!profile) return base;
+      const {id,appearance}=profile;
+      if (!appearance) return {...base,materialId:id};
+      const dry=appearance.dry, wet=appearance.wet??dry, weight=wet===dry?0:Math.round(profile.wetness*32);
+      const key=id+'/'+weight;
+      if (!ramps.has(key)) {
+        const rgb=swatch=>{
+          const packed=parseInt(swatch.slice(1),16);
+          return [(packed>>16)&255,(packed>>8)&255,packed&255];
+        };
+        ramps.set(key,dry.map((color,i)=>PixelLook.nearest(V.lerp(rgb(color),rgb(wet[i]),weight/32),B.P,true)));
+      }
+      return {...base,materialId:id,r:ramps.get(key)};
+    }
     const earth=looks.material({r:[7,8,9,10,11],materialId:'terrain',surface:config.terrainSurface,rf(x,y,z,ny) {
       if (ny<.4) return [19,20,21,22];
       const result=wear&&query.probe(wear,[x,y,z]);
       return result?.status==='ok'&&result.value>.18?[19,20,21,22,23]:null;
     }}, config.terrainLookAsset);
+    if (fields.surface!==undefined) {
+      const materialViews=new Map();
+      earth.materialAt=(x,y,z)=>{
+        const profile=W.materials.probe(query,fields.surface,[x,y,z]);
+        if (!profile) return null;
+        const key=profile.id+'/'+Math.round(profile.wetness*32);
+        if (!materialViews.has(key)) {
+          const sampled=finishFor(earth,profile);
+          if (profile.appearance) sampled.rf=undefined;
+          materialViews.set(key,sampled);
+        }
+        return materialViews.get(key);
+      };
+    }
     let hasSurface=Boolean(earth.surface);
     const height=(x,z)=>{
       const result=terrain&&query.probe(terrain,[x,0,z]);
@@ -119,7 +149,9 @@
       const rotation=entry.rotation??M.id();
       const axis=[0,1,2].map(i=>[rotation[i],rotation[i+3],rotation[i+6]]);
       const entityId=entry.entity??entry.id, visual=entities[entityId]?.visual;
-      const finish=looks.material({r:ramp,materialId:visual?.materialId??visual?.material??entry.material??'body'},looks.forEntity(entityId));
+      const physical=W.materials.forBody(catalog,view.world,entry);
+      const finish=looks.material(finishFor({r:ramp,materialId:visual?.materialId??visual?.material??entry.material??'body'},physical),
+        looks.forEntity(entityId));
       hasSurface ||= Boolean(finish.surface);
       S.box(entry.position,entry.half,finish,{ax:axis,res:resolution*.72,
         rd:Math.min(.055,...entry.half)*.4,tag:entry.id,target:targetFor(entry.entity??entry.id)});
@@ -129,7 +161,9 @@
       const pose=query.target({entity:id}), point=pose?.point;
       if (!point) continue;
       const {half,ramp,surface}=entity.visual;
-      const finish=looks.material({r:ramp??[19,20,21,22,23],surface,albedo:entity.visual.albedo,materialId:entity.visual.materialId??entity.visual.material??'entity'},looks.forEntity(id));
+      const physical=W.materials.forBody(catalog,view.world,{entity:id});
+      const finish=looks.material(finishFor({r:ramp??[19,20,21,22,23],surface,albedo:entity.visual.albedo,
+        materialId:entity.visual.materialId??entity.visual.material??'entity'},physical),looks.forEntity(id));
       hasSurface ||= Boolean(finish.surface);
       S.box(point,half,finish,{res:resolution*.72,tag:id,target:targetFor(id)});
     }

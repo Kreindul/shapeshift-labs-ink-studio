@@ -1,0 +1,63 @@
+/* Portable material properties shared by solvers and the renderer. */
+(function (K) {
+  const A=K.authoring, {clone,freeze}=A.data;
+  const name='[a-z][a-z0-9-]{0,47}', assetId=new RegExp('^'+name+'/'+name+'$');
+  const number=(value,min,max)=>Number.isFinite(value)&&value>=min&&value<=max;
+  const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
+  const hasKeys=(value,keys)=>object(value)&&Object.keys(value).every(key=>keys.includes(key));
+  const check=(condition,message)=>{if(!condition)throw Error(message);};
+  const coefficient=(value,min,max)=>number(value,min,max)||hasKeys(value,['dry','wet'])&&
+    number(value.dry,min,max)&&number(value.wet,min,max);
+  const rules={
+    friction:[0,4],permeability:[0,100],dryingRate:[0,100],
+    thermal:{heatCapacity:[1e-6,1e12],conductance:[0,1e12]},
+    fracture:{energy:[0,1e12],parts:[2,32]},
+    erosion:{threshold:[0,1e4],rate:[0,100]}
+  };
+  const cue=value=>typeof value==='string'&&/^[a-z][a-z0-9._/-]{0,127}$/.test(value);
+  const ramp=value=>Array.isArray(value)&&value.length>=1&&value.length<=16&&
+    value.every(color=>typeof color==='string'&&/^#[0-9a-f]{6}$/i.test(color));
+
+  function definition(input,pack) {
+    check(hasKeys(input,['id','label',...Object.keys(rules),'sounds','appearance'])&&
+      typeof input.id==='string'&&assetId.test(input.id)&&input.id.startsWith(pack+'/')&&
+      typeof input.label==='string'&&input.label.trim().length>0&&input.label.length<=100,
+    'A physical material needs a name within its asset pack and a label');
+    for(const [key,range] of Object.entries(rules)) {
+      if(!Object.hasOwn(input,key))continue;
+      const value=input[key], fail='Invalid physical material '+input.id+' '+key;
+      if(Array.isArray(range))check(coefficient(value,...range),fail);
+      else {
+        check(hasKeys(value,Object.keys(range))&&Object.keys(value).length===Object.keys(range).length,fail);
+        for(const [property,[min,max]] of Object.entries(range)) {
+          const valid=property==='parts'?Number.isSafeInteger(value[property])&&number(value[property],min,max):
+            coefficient(value[property],min,max);
+          check(valid,fail+'.'+property);
+        }
+      }
+    }
+    if(Object.hasOwn(input,'sounds'))check(hasKeys(input.sounds,['step','roll','impact','fracture'])&&
+      Object.values(input.sounds).every(cue),'Invalid physical material sound cue on '+input.id);
+    if(Object.hasOwn(input,'appearance')) {
+      const value=input.appearance;
+      check(hasKeys(value,['dry','wet'])&&ramp(value.dry)&&
+        (!Object.hasOwn(value,'wet')||ramp(value.wet)&&value.wet.length===value.dry.length),
+      'Physical material appearance needs equal-length hex color ramps on '+input.id);
+    }
+    return freeze({...clone(input),label:input.label.trim()});
+  }
+  function profile(entry,wetness=0) {
+    check(number(wetness,0,1),'Material wetness must be between 0 and 1');
+    const {material,pack,revision}=entry, {id,label,sounds,appearance}=material;
+    const blend=value=>typeof value==='number'?value:value.dry+(value.wet-value.dry)*wetness;
+    const result={id,label,pack,revision,wetness,...(sounds&&{sounds}),...(appearance&&{appearance})};
+    for(const [key,range] of Object.entries(rules)) {
+      if(!Object.hasOwn(material,key))continue;
+      const value=material[key];
+      result[key]=Array.isArray(range)?blend(value):
+        Object.fromEntries(Object.entries(value).map(([name,coefficient])=>[name,blend(coefficient)]));
+    }
+    return result;
+  }
+  A.physicalMaterials=Object.freeze({definition,profile});
+})(KIT);

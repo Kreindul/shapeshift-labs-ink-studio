@@ -33,11 +33,15 @@
       for (const [key, item] of Object.entries(result[section]))
         check(id(key) && record(item), 'Invalid record ' + section + '/' + key);
     }
+    check(record(result.metadata) && Array.isArray(result.assetPacks) && result.assetPacks.length <= 128,
+      'Invalid metadata or asset packs');
     for (const [key, item] of Object.entries(result.entities)) {
       if (item.position !== undefined) check(vector(item.position), 'Invalid position for ' + key);
       if (item.tags !== undefined) check(Array.isArray(item.tags) && item.tags.every(TargetSelectors.name), 'Invalid tags for ' + key);
       for (const label of ['surfaceId','material','materialId']) if (item.visual?.[label] !== undefined)
         check(TargetSelectors.name(item.visual[label]), 'Invalid visual ' + label + ' for ' + key);
+      if (item.materialAsset!==undefined||item.materialWetness!==undefined)
+        K.world.materials.validateEntity(K.world.materials.catalog(result),item);
       if (item.parent !== undefined && item.parent !== null) check(own(result.entities, item.parent), 'Missing parent for ' + key);
       if (item.anchor !== undefined) check(record(item.anchor) && own(result.entities, item.anchor.entity) &&
         (item.anchor.socket === undefined || own(result.entities[item.anchor.entity].sockets, item.anchor.socket)),
@@ -57,8 +61,6 @@
       }
       for (const visited of seen) checked.add(visited);
     }
-    check(record(result.metadata) && Array.isArray(result.assetPacks) && result.assetPacks.length <= 128,
-      'Invalid metadata or asset packs');
     check(Array.isArray(result.connections) && result.connections.length <= 50000 && Array.isArray(result.commands),
       'World connections and commands must be arrays');
     for (const [key, prefab] of Object.entries(result.prefabs)) {

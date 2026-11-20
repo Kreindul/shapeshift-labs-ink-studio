@@ -431,6 +431,55 @@ record a decision with its selected input keys, evidence IDs, and output
 keys. Pass the returned decision ID in `ctx.emit(kind, detail, [id])`
 to explain a specific event.
 
+## Physical material assets
+
+A versioned asset pack can carry a `materials` list alongside families
+and looks. Give each material an ID such as `earthworks/clay`. Use
+`world/material` to resolve its pack revision and effective properties
+for a specified wetness. Most numeric properties accept a constant or
+`{"dry": 0.82, "wet": 0.10}` to interpolate over the moisture range.
+
+| Property | What uses it |
+| --- | --- |
+| `friction` | Mechanics uses the coefficient to reduce sliding and cap driven wheel traction. If both contacting materials supply a coefficient, their geometric mean is used. |
+| `permeability` | Potential water loss through the bed in world units per second. Surface water caps the loss by available water and reports it in its drainage ledger. |
+| `thermal.heatCapacity`, `thermal.conductance`, `dryingRate` | Lumped heat capacity in J/K and conductance in W/K use the same reference area. Each cell approaches its ambient temperature at their ratio. The drying rate is in inverse seconds at 20 °C. Dry cells lose moisture faster as their temperature rises. |
+| `erosion.threshold`, `erosion.rate` | For cells covered by water, the bed lowers at `rate × (flow speed − threshold)` above the threshold in world units per second. Each water system exposes the removed bed volume in its `eroded` field. |
+| `fracture.energy`, `fracture.parts` | The mechanics fracture action checks supplied impact energy against the threshold. Fragments inherit the material. `parts` is the default number of pieces and can be overridden by the action. |
+| `sounds` | Names the `step`, `roll`, `impact` and `fracture` cues. Foot and wheel contacts carry cue IDs. Impacts and fractures expose their cues in the event record for a host to play. |
+| `appearance.dry`, `appearance.wet` | Equal-length hex color ramps mapped to the scene palette. The ground renderer interpolates them from the same moisture field. |
+
+Bind `materialAsset` and optional `materialWetness` to an entity or
+mechanics body. A body binding takes precedence over its entity binding.
+A `fracture` command without energy directly edits the body.
+
+For terrain, declare a `materials` system with an XZ `grid` containing
+`width`, `height`, optional `cell` and optional `origin`. Set the default
+`material`, initial `wetness` and `temperature`, and optional bounded
+`regions`. A region covers cells whose centers lie inside its bounds.
+Use `airTemperature` or a numeric `ambientField` in `degC`. Point
+`water` at a water-column field to wet submerged soil. The wetness
+field measures surface condition on a scale from zero to one.
+
+Use the same `soil/surface` field as `surface` in water and mechanics
+config, and as `visual.fields.surface` for rendering. The system also
+exposes `soil/material`, `soil/wetness`, and `soil/temperature` as typed
+spatial fields. Water publishes erosion through its existing bed field
+and spatial dependency reports. Checkpoints save soil conditions and
+the original asset packs for replay.
+
+In the [clay yard](../examples/world-physical-materials.json), both
+lanes use the same [physical material pack](../examples/physical-materials.pack.json).
+Their moisture changes grip and color. An impact energy of 5 breaks
+the dry clay and leaves the wet clay intact.
+
+```sh
+ink-studio sim run examples/world-physical-materials.json --asset-pack examples/physical-materials.pack.json --ticks 22 --record yard.run.json
+ink-studio probe yard.run.json --field soil/surface --at -1.15,0,-2 --explain
+ink-studio probe yard.run.json --field world/material --args '{"id":"earthworks/clay","wetness":0.5}'
+ink-studio sim render yard.run.json --colored --out clay-yard.png
+```
+
 ## Author a world
 
 A manifest has `format: "ink-studio/world"`, `version: 1`, a stable `id`,
@@ -482,6 +531,7 @@ reaches the feeder.
 | Kind | State, queries and actions |
 | --- | --- |
 | `fields` | Typed spatial fields with defaults, grids, regions and a `set` action. |
+| `materials` | Grid of versioned surface materials with local moisture, temperature, coefficients, and appearance. |
 | `control` | Typed arithmetic, thresholds, selection, binary logic, pulses, latches, timers and hysteresis. |
 | `store` | Bounded numeric, integer, or vector accounts with named resources and units. |
 | `exchange` | Enabled links that request a fixed amount per tick or a rate per second. |

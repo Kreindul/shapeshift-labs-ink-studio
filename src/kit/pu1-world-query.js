@@ -123,15 +123,21 @@
     let spatialIndex, aliases, appearance;
     const transfers = () => W.transfers.bind(systems);
     const look = () => appearance ??= W.lookQuery(visual ?? (() => W.visual({makeBuilder,makeSculpt},view,api)),base.time);
+    const physical = () => W.materials.catalog(world);
 
     function location(id) {
       if (locations.has(id)) return locations.get(id);
       const entity = own(world.entities,id) && world.entities[id];
-      let point = null, socketTurn = null;
+      let point = null, socketTurn = null, material;
       for (const system of Object.keys(systems)) {
         const pose = systems[system].pose?.(states[system],id);
         if (pose === false) { locations.set(id,null); return null; }
-        if (pose) { point = pose.position ?? pose; socketTurn = pose.rotation ?? null; break; }
+        if (pose) {
+          point = pose.position ?? pose;
+          socketTurn = pose.rotation ?? null;
+          if (pose.materialAsset!==undefined) material={materialAsset:pose.materialAsset,materialWetness:pose.materialWetness};
+          break;
+        }
       }
       if (!point && entity) {
         point = entity.position ?? [0,0,0];
@@ -144,7 +150,7 @@
           socketTurn = host.rotation;
         }
       }
-      const pose = point ? {point,rotation:socketTurn,entity} : null;
+      const pose = point ? {point,rotation:socketTurn,entity,material} : null;
       locations.set(id,pose);
       return pose;
     }
@@ -207,6 +213,21 @@
       const key = name.slice(5);
       return [key,{type,selector,read:({target:site,args}) => look()[key](site,args)}];
     })),'read');
+    if (world.assetPacks?.some(pack=>pack?.materials?.length)) add(fields,'world',{
+      material:{type:'record',selector:true,read:({target,args})=>{
+        if (args.id!==undefined) {
+          const entry=physical()?.getMaterial(args.id);
+          return entry?ok(W.materials.profile(entry,args.wetness??0)):missing('unknown physical material','missing');
+        }
+        if (typeof target.entity!=='string') return missing('material asset ID or entity required');
+        const pose=location(target.entity);
+        if (!pose) return missing('unknown material entity','missing');
+        const binding=pose.material;
+        const profile=W.materials.forBody(physical(),world,{entity:target.entity,...binding,
+          materialWetness:args.wetness??binding?.materialWetness});
+        return profile?ok(profile):missing('entity has no physical material','missing');
+      }}
+    },'read');
     add(traces,'world',{
       cause:{selector:true,run:({target,args}) => view.causality ?
         W.causality.trace(view.causality,world,tick,args,target?.entity??args.entity) :
@@ -288,7 +309,9 @@
         return condition(where,row) ? [row] : [];
       });
       const accounts = transfers().describe();
+      const materials = physical()?.materials;
       return {tick,time:base.time,entities,fields:describe(fields),traces:describe(traces),
+        ...(materials?.length && {physicalMaterials:materials.map(({material,pack,revision})=>({id:material.id,label:material.label,pack,revision}))}),
         ...(accounts.length && {accounts}),systems:sorted(systems).map(id => ({
         id,...world.systems[id],inputs:systems[id].inputs ?? {},outputs:systems[id].outputs ?? {},
         actions:sorted(systems[id].actions ?? {})
