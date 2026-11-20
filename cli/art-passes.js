@@ -2,6 +2,7 @@ const ArtPasses = require('../src/art-passes.js');
 const EmissiveFinishes = require('../src/emissive-finishes.js');
 const { ditherFootprint } = require('./dither-footprint.js');
 const { surfacePoint } = require('./scene-optics.js');
+const TargetSelectors = require('../src/target-selectors.js');
 
 const SplatFrames = require('../src/splat-frames.js');
 let matrices;
@@ -179,4 +180,15 @@ function createArtPasses(request, w, h, emissiveSlots) {
   return { fragment, sprite, finalize };
 }
 
-module.exports = { createArtPasses, sampleFrames };
+function selectVisibleSubjects(world, owners, selectors) {
+  const index = TargetSelectors.index(world), seen = new Map();
+  return Uint8Array.from(owners, id=>{
+    if (!id || id>world.count) return 0;
+    const target = index.row(id-1);
+    if (!seen.has(target)) seen.set(target,selectors.reduce((bits,select,i)=>
+      TargetSelectors.matches(select,target) ? bits | 1<<i : bits,0));
+    return seen.get(target);
+  });
+}
+
+module.exports = { createArtPasses, sampleFrames, selectVisibleSubjects };

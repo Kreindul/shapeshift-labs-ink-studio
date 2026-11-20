@@ -782,6 +782,50 @@ library, call `K.palette.reviewDither(definition, context)`. Use the
 zero-based pair index with `result.preview(index)` for the comparison
 or `result.indexed(index)` for the pattern by itself.
 
+## Review subject readability
+
+```sh
+ink-studio palette readability examples/silhouette-protection.js \
+  --plan examples/readability-courier.json --w 264 --h 150 --px 1 --out readability
+
+ink-studio palette readability examples/silhouette-protection.js \
+  --select '{"surface":"courier-face"}' --directions 4 --times 0,1 \
+  --w 264 --h 150 --px 1 --out face-readability
+```
+
+Select a face, a prop, or a whole silhouette using Ink's existing
+object, material, surface, entity, or tag selectors. The review
+measures the final native scene colours before screen overlays. Every
+sample pairs a visible subject pixel with an immediate horizontal
+or vertical neighbour outside that subject. A neighbour can be
+another surface on the same object, such as the hat next to a face.
+Crop edges and foreground occluders are counted separately. With a
+transparent export, add a hex `matte` to the plan to measure against
+the intended background. Without a matte the review skips pixel pairs
+with partial or missing alpha.
+
+The report includes Euclidean OKLab colour distance, absolute OKLab
+lightness difference, minimum, tenth percentile, and mean separation.
+It gives the worst pair for each metric with the two swatches and
+top-left art pixel coordinates. Green outlines mark measured edges
+above both thresholds. Blue marks low colour separation, amber marks
+low lightness separation, and red marks edges low on both. A plan can
+override `thresholds.color` (default 0.09), `thresholds.lightness`
+(0.055), `thresholds.weakShare` (0.25 of sampled edge pairs to flag
+the view), and `thresholds.depthBias` (0.05 scene units).
+
+Use plan `subjects` with `{ id, select }`, named `views` with camera
+settings such as `yaw` and `pitch` in radians, and named `states` with
+`time` in seconds. Each state may override `lighting` using
+`skyTime`, `skyProfiles`, `skyEnvironment`, `liveSun`, or `areaLights`.
+The review checks every view under every state and identifies each
+subject's weakest cases. Export `comparison.png` and `review.json`
+together to keep the edge evidence and measurements aligned.
+
+In Node, call `ink.reviewSubjectReadability(world, { plan, width, height,
+view, pose })` for the image and report. Use `view.px` just as in a
+normal render. A stateful world needs a `pose(world, time)` callback.
+
 ## Suggest editable lighting ramps
 
 Use `K.palette.lightingRamps.suggest({ palette, roles, materials })` to choose lighting swatches from an existing palette. `roles` can carry the scene's current named roles. Each material needs a `base` palette index or a hex/RGB target. An index pins the exact swatch. A target uses the nearest allowed swatch as the base.

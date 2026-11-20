@@ -8,7 +8,7 @@ const PixelLook = require('../src/pixel-look.js');
 const RenderStages = require('../src/render-stages.js');
 const LookInputs = require('../src/look-inputs.js');
 const TargetSelectors = require('../src/target-selectors.js');
-const { createArtPasses, sampleFrames } = require('./art-passes.js');
+const { createArtPasses, sampleFrames, selectVisibleSubjects } = require('./art-passes.js');
 const ArtPasses = require('../src/art-passes.js');
 const { createEnvironmentPasses } = require('./environment-passes.js');
 const ArtInk = require('../src/art-ink.js');
@@ -293,6 +293,8 @@ function renderFrame(world, o, preparedPalettes) {
   }) : preparedPalettes;
   const requestedPasses = ArtPasses.select(o.passes);
   const passSelection = new Set(requestedPasses);
+  const readabilitySelectors = !o.samples && !o.captureCoverage && o.readabilitySelectors;
+  if (readabilitySelectors) passSelection.add('splatId');
   const paletteDiagnostic = passSelection.has('paletteOwner');
   if (paletteDiagnostic && !o.raw) passSelection.add('materialId');
   let lookPass;
@@ -386,6 +388,7 @@ function renderFrame(world, o, preparedPalettes) {
     }
     if (captureQuantization && !legacyLook) capture(graded ?? frame.rgb.slice(), 'frame');
     if (paletteTrace) frame.palettePixel = paletteTrace.finish(frame,passes);
+    if (readabilitySelectors) frame.readabilityMask = selectVisibleSubjects(world,passes.splatId,readabilitySelectors);
     ownership?.finish();
     if (paletteDiagnostic && !passes?.paletteOwner)
       passes = { ...passes,w:frame.w,h:frame.h,paletteOwner:new Uint32Array(frame.w*frame.h),paletteOwners:[null] };
