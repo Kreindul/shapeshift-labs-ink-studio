@@ -126,16 +126,19 @@
     orderedJoints(driveOrder,spec=>spec.drive);
     orderedJoints(mountOrder,spec=>claimed.get(spec.parent));
     for (const [key,spec] of Object.entries(forceSpecs)) {
-      check(record(spec)&&['thrust','buoyancy','wheel'].includes(spec.kind)&&own(start,spec.body)&&
+      check(record(spec)&&['thrust','buoyancy','wheel','sail'].includes(spec.kind)&&own(start,spec.body)&&
         vector(spec.axis??up)&&V.len(spec.axis??up)>1e-8&&vector(spec.at??zero)&&
         Number.isFinite(spec.magnitude??1)&&(spec.magnitude??1)>=0&&
         Number.isFinite(spec.radius??.3)&&(spec.radius??.3)>0&&
-        (spec.kind!=='buoyancy'||typeof spec.field==='string'),'Invalid force module '+key);
-      inputs['force.'+key]={type:'number',default:spec.input??0};
+        (spec.kind!=='buoyancy'||typeof spec.field==='string')&&
+        (spec.kind!=='sail'||typeof spec.field==='string'&&spec.field.length>0),'Invalid force module '+key);
+      inputs['force.'+key]={type:'number',default:spec.input??(spec.kind==='sail'?1:0)};
     }
     check(vector(config.gravity??[0,-9.81,0])&&Number.isFinite(config.ground??0)&&
       (config.terrain===undefined||typeof config.terrain==='string')&&
       Number.isFinite(config.drag??.08)&&(config.drag??.08)>=0,'Invalid mechanical world');
+    const sails = Object.values(forceSpecs).filter(spec => spec.kind==='sail');
+    const windSampler = (query,spec) => query.sampler(spec.field,{type:'vec3',units:spec.units??'world/s'});
     function ground(context,point) {
       const sampled=config.terrain&&context.query.probe(config.terrain,point);
       return sampled?.status==='ok'&&Number.isFinite(sampled.value)?sampled.value:config.ground??0;
@@ -246,6 +249,14 @@
           if(read.status!=='ok')continue;
           direction=up;
           input=clamp((read.value.surface-point[1])/(spec.radius??.3),0,1);
+        }
+        if(spec.kind==='sail'){
+          const wind=windSampler(ctx.query,spec)(...point);
+          if(!wind)continue;
+          const arm=V.sub(point,body.position);
+          const apparent=V.sub(wind,V.add(body.velocity,V.cross(body.angular,arm)));
+          const speed=V.dot(direction,apparent);
+          input=Math.max(0,input)*speed*Math.abs(speed);
         }
         const load=V.mul(direction,(spec.magnitude??1)*input);
         force[root]=V.add(force[root]??zero,load);
@@ -429,7 +440,9 @@
       }
       return count?{status:'ok',value,body:nearest}:Q.missing('no bodies','empty');
     }
-    return {inputs,outputs,initial(ctx) {
+    return {...(sails.length && {checkFields(query) {
+      for (const sail of sails) windSampler(query,sail);
+    }}),inputs,outputs,initial(ctx) {
       const bodies={...initialBodies}, joints={...initials};
       follow(bodies,ctx.world);
       placeMounted(bodies,joints,0);

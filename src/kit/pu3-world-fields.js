@@ -2,6 +2,7 @@
 (function (K) {
   const W = K.world, P = K.procedural, Q = W.query;
   const {check,record,id,vector,own} = W.data;
+  const spatial = W.spatialFields;
   const clamp = (value,min,max) => Math.min(max,Math.max(min,value));
   const zone = (point,bounds) => !bounds || point.every((value,i) => value >= bounds.min[i] && value <= bounds.max[i]);
   function bounds(value, dimensions = 3) {
@@ -22,26 +23,65 @@
     for (const entry of source) if (zone(point,entry.bounds)) value = entry.value;
     return value;
   }
-  function scalarFields(config) {
-    const entries = Object.entries(config.fields ?? {});
-    check(entries.length <= 256 && entries.every(([name,spec]) => id(name) && record(spec) && Number.isFinite(spec.default ?? 0)),
-      'Invalid scalar field definitions');
-    const descriptors = {}, initial = {};
-    for (const [name,spec] of entries) {
-      initial[name] = patchList(spec.regions ?? []);
-      descriptors[name] = {type:'number',units:spec.units ?? null,read:({state,target}) => {
-        const point = target.point;
-        return point ? Q.ok(regions(state[name],point,spec.default ?? 0)) : Q.missing('point required');
-      }};
+  function typedFields(config) {
+    const definitions = config.fields ?? {};
+    check(record(definitions),'Invalid spatial field definitions');
+    const entries = Object.entries(definitions), descriptors = {}, initial = {};
+    check(entries.length <= 256,'Too many spatial field definitions');
+
+    function checkRegion(descriptor, region) {
+      check(record(region) && (region.id === undefined || id(region.id)) && spatial.matches(descriptor,region.value),
+        'Invalid spatial field region value or ID');
+      spatial.checkBounds(region.bounds,descriptor.spatial.axes.length);
     }
-    return {initial:() => initial,fields:descriptors,actions:{
-      set(state,{field,region},ctx) {
-        check(own(state,field),'Unknown scalar field ' + field);
-        const values = patchList([...state[field],region]);
-        ctx.emit('field-edit',{field,bounds:region.bounds});
-        return {...state,[field]:values};
-      }
-    }};
+    function checkRegions(descriptor, values) {
+      check(Array.isArray(values) && values.length <= 4096,'Expected a bounded list of field regions');
+      for (const row of values) checkRegion(descriptor,row);
+    }
+    for (const [name,spec] of entries) {
+      check(id(name) && record(spec),'Invalid spatial field definition '+name);
+      const type = spec.type ?? 'number', hasGrid = own(spec,'grid');
+      const sampling = spec.sampling ?? (hasGrid ? type==='category' ? 'nearest' : 'linear' : 'regions');
+      check(hasGrid ? ['linear','nearest'].includes(sampling) && spec.bounds && !own(spec,'default') : sampling==='regions',
+        'A grid needs bounds and nearest or linear sampling; use default with regions');
+      const value = own(spec,'default') && !(spec.type === undefined && spec.default === null) ? spec.default :
+        {number:0,vec2:[0,0],vec3:[0,0,0],category:spec.categories?.[0]}[type];
+      let grid;
+      const descriptor = spatial.define({...spec,type,sampling},({state,point,explain}) => {
+        const rows = state?.[name];
+        if (!rows) return Q.missing('field state is unavailable');
+        for (let i = rows.length-1; i >= 0; i--) {
+          const row = rows[i];
+          if (spatial.inside(point,row.bounds))
+            return {status:'ok',value:row.value,...(explain && {source:{kind:'region',index:i,id:row.id??null,bounds:row.bounds}})};
+        }
+        if (grid) return grid(point,explain);
+        return {status:'ok',value,...(explain && {source:{kind:'default'}})};
+      });
+      if (hasGrid) grid = spatial.grid(descriptor,spec.grid);
+      else check(spatial.matches(descriptor,value),'Invalid default for spatial field '+name);
+      initial[name] = spec.regions ?? [];
+      checkRegions(descriptor,initial[name]);
+      descriptors[name] = descriptor;
+    }
+    function setCommand({field,region}) {
+      check(own(descriptors,field),'Unknown spatial field '+field);
+      checkRegion(descriptors[field],region);
+    }
+    return {initial:() => initial,fields:descriptors,
+      validateState(state) {
+        check(record(state) && Object.keys(state).length === entries.length &&
+          entries.every(([name]) => own(state,name)), 'Invalid saved spatial fields');
+        for (const [name] of entries) checkRegions(descriptors[name],state[name]);
+      },
+      checkAction(type,args) {if (type==='set') setCommand(args);},
+      actions:{
+        set(state,{field,region},ctx) {
+          check(state[field].length < 4096,'Spatial field region budget exceeded');
+          ctx.emit('field-edit',{field,bounds:region.bounds});
+          return {...state,[field]:[...state[field],region]};
+        }
+      }};
   }
   function control(config) {
     const kind = config.op ?? 'pass';
@@ -140,8 +180,7 @@
         ...(withTerrain?{terrain:(x,z)=>regions(bed,[x,z],config.base??0),initial:(x,z)=>regions(seed,[x,z])}:{})});
     }
     const solver = makeSolver();
-    function sample(state,x,z) {
-      const i=index(x,z);
+    function sample(state,x,z,i=index(x,z)) {
       if (i<0) return null;
       const depth=state.fluid.depth[i], b=state.fluid.bed[i];
       return {bed:b,depth,surface:b+depth,velocity:depth>1e-6?
@@ -152,6 +191,17 @@
       const [x,,z]=target.point, hit=sample(state,x,z);
       if (!hit) return Q.missing('outside water grid','outside');
       return hit.depth>1e-6 ? Q.ok({id:system,...hit}) : {status:'dry',value:{id:system,...hit}};
+    }
+    const domain = {axes:'xz',sampling:'cell',boundary:'half-open',
+      bounds:{min:origin,max:[origin[0]+width*dx,origin[1]+height*dz]}};
+    function channel(type, units, key) {
+      return spatial.define({type,units,...domain},({state,point,explain})=>{
+        if (!state) return Q.missing('water state is unavailable');
+        const cell = index(...point);
+        if (cell < 0) return Q.missing('outside water grid','outside');
+        const hit = sample(state,point[0],point[1],cell);
+        return {status:'ok',value:hit[key],...(explain && {source:{kind:'cell',cell:[cell%width,Math.floor(cell/width)]}})};
+      });
     }
     function metric({state}) {
       const {depth,startVolume,added,drained,moved}=state.fluid;
@@ -170,18 +220,9 @@
       },
       fields:{
         water:{type:'record',units:'world',read:column},
-        depth:{type:'number',units:'world',read:context=>{
-          const entry=column(context);
-          return entry.value?Q.ok(entry.value.depth):entry;
-        }},
-        flow:{type:'vec2',units:'world/s',read:context=>{
-          const entry=column(context);
-          return entry.value?Q.ok(entry.value.velocity):entry;
-        }},
-        bed:{type:'number',units:'world',read:context=>{
-          const entry=column(context);
-          return entry.value?Q.ok(entry.value.bed):entry;
-        }},
+        depth:channel('number','world','depth'),
+        flow:channel('vec2','world/s','velocity'),
+        bed:channel('number','world','bed'),
         mass:{type:'record',units:'world^3',read:metric}
       },
       traces:{flow:{run:({state,target,args})=>{
@@ -264,7 +305,7 @@
     };
   }
   W.runtime.register('control',control);
-  W.runtime.register('fields',scalarFields);
+  W.runtime.register('fields',typedFields);
   W.runtime.register('water',water);
   W.fields = Object.freeze({zone,bounds,regions,patchList,clamp});
 })(KIT);

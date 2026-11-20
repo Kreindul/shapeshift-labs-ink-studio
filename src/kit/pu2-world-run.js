@@ -46,6 +46,11 @@
         check(id(key) && typeof handler === 'function', 'Invalid action ' + name + '/' + key);
       systems[name] = system;
     }
+    const consumers = Object.values(systems).filter(system => system.checkFields);
+    if (consumers.length) {
+      const query = Q.create({world},systems);
+      for (const system of consumers) system.checkFields(query);
+    }
     const incoming = new Map(), edges = new Map(), indegree = new Map();
     for (const name of ordered(systems)) {
       edges.set(name,[]);

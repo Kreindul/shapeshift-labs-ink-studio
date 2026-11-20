@@ -33,6 +33,15 @@ function target(opt) {
 module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions}) {
   const W = kit.KIT.world, R = W.runtime;
   const args = () => opt.args ? parse(opt.args) : {};
+  function sampleArgs() {
+    if (opt.explain === undefined) return args();
+    ensure(opt.explain === true,'Use --explain without a value');
+    return {...args(),explain:true};
+  }
+  function fieldMetadata(query,name) {
+    const descriptor = query.field?.(name);
+    return descriptor?.spatial ? {type:descriptor.type,units:descriptor.units,spatial:descriptor.spatial} : {};
+  }
   const respond = value => {
     if (opt.out) write(opt.out,value);
     else process.stdout.write(JSON.stringify(value,null,opt.json?0:2)+'\n');
@@ -357,7 +366,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions}
           break;
         }
         const site=['look/output','look/provenance'].includes(field)&&opt.select===undefined&&opt.at===undefined&&opt.entity===undefined?undefined:target(opt);
-        respond(view(file).probe(field,site,args()));
+        respond(view(file).probe(field,site,sampleArgs()));
         break;
       }
       case 'trace':
@@ -366,28 +375,28 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions}
         break;
       case 'field': {
         ensure(typeof name==='string'&&typeof opt.spec==='string','Provide a field and --spec file.json');
-        const spec=read(opt.spec);
+        const spec=read(opt.spec), sample=sampleArgs();
         if (spec.ticks) {
           const run=runtime(load(file));
           schedule(run);
           ensure(Array.isArray(spec.ticks)&&spec.ticks.length<=10000,'Invalid sample ticks');
-          const ticks=spec.ticks.slice().sort((a,b)=>a-b);
+          const ticks=spec.ticks.slice().sort((a,b)=>a-b), metadata=fieldMetadata(run.query(),name);
           if (spec.spatial) {
             const samples=[], limit=100000;
             let count=0;
             for(const tick of ticks){
               run.advance(tick);
-              const frame=run.query().export(name,spec.spatial,args());
+              const frame=run.query().export(name,spec.spatial,sample);
               count+=frame.samples.length;
               ensure(count<=limit,'Time-series spatial sample budget exceeded');
               samples.push(frame);
             }
-            respond({field:name,series:samples});
-          } else respond({field:name,series:ticks.map(tick=>{
+            respond({field:name,...metadata,series:samples});
+          } else respond({field:name,...metadata,series:ticks.map(tick=>{
             run.advance(tick);
-            return {tick,time:run.view().time,...run.query().probe(name,spec.at??target(opt),args())};
+            return {tick,time:run.view().time,...run.query().probe(name,spec.at??target(opt),sample)};
           })});
-        } else respond(view(file).export(name,spec,args()));
+        } else respond(view(file).export(name,spec,sample));
         break;
       }
       case 'scene': scene(pos); break;

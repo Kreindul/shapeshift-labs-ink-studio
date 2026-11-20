@@ -116,6 +116,75 @@ path array or JSON pointer, `op` as one of `eq`, `ne`, `exists`, `lt`,
 `lte`, `gt`, `gte`, or `in`, and `value` where needed. Combine conditions
 with `all`, `any`, or `not`.
 
+## Typed spatial fields
+
+The `fields` system publishes numeric scalars (`number`), vectors
+(`vec2` and `vec3`), and named categories (`category`). Each field
+can declare `units`, a coordinate `space`, domain `axes`, and `bounds`.
+Existing scalar definitions with `default` and `regions` still work.
+
+- Probe points and field export positions are XYZ in world space. Use
+  `axes` to select the coordinates the field uses, such as `xz` for a
+  ground map or `y` for a height profile. Domain and region bounds use
+  those axes in order.
+- The default coordinate space is `"world"`. Use
+  `{"entity":"station","socket":"vane"}` to sample relative to the live
+  pose of an entity or socket. `vec3` values authored in that frame are
+  rotated into world space on read. `vec2` values use world space, with
+  `components` identifying their axes (`xz` by default).
+- A field can read its default value, winning region, or an authored grid.
+  Grid values are a flat array ordered by the first axis fastest.
+  Grid nodes span the declared bounds, and an axis with one node is
+  constant along that axis. Numeric grids default to linear interpolation.
+  Set `"sampling":"nearest"` for nearest-node reads. Categories declare
+  their allowed strings and use nearest-node or region sampling.
+- Regions override the underlying default or grid, with the last match
+  winning. Use `system/set` with `{field, region}` to append a region at a
+  scheduled tick. State and checkpoints carry those edits.
+- Bounds include both ends by default. A field can declare
+  `"boundary":"half-open"` to exclude the upper end. An out-of-domain
+  probe returns `outside`. The built-in water depth, bed, and XZ flow
+  use the same contract with half-open cell bounds.
+
+`inspect` exposes the type, units, and spatial contract. Add `--explain`
+to `probe` or `field` to get the source of each sample, including its
+grid nodes and weights, the winning region, or the solver cell. The
+report includes the revision tick and the position in both coordinate
+spaces. JavaScript callers pass `{explain:true}` as the probe's third
+argument.
+
+The [harbor station world](../examples/world-spatial-fields.json) uses
+one wind field for a raft's sail, a flag, and smoke. It also defines a
+temperature gradient and a shelter field attached to a socket.
+
+```sh
+ink-studio probe examples/world-spatial-fields.json --field weather/wind --entity brazier --explain
+ink-studio probe examples/world-spatial-fields.json --field weather/cover --entity station --socket vane --explain
+ink-studio probe examples/world-spatial-fields.json --field weather/temperature --at 0,2,0
+ink-studio field examples/world-spatial-fields.json weather/wind --spec examples/spatial-wind-transect.json --explain
+ink-studio probe examples/world-spatial-fields.json --field weather/wind --entity brazier --ticks 60 --explain
+ink-studio render examples/spatial-field-wind.js --params '{"tick":120}' --t 1.55 --out harbor.png
+```
+
+A query can bind a reusable XYZ sampler to its snapshot. Supply the
+consumer's expected type and units to validate the binding. An optional
+typed fallback is returned when a sample is unavailable.
+
+```js
+const wind = run.query().sampler('weather/wind', {
+  type: 'vec3', units: 'world/s', fallback: [0, 0, 0]
+});
+const velocity = wind(0.4, 0.55, 0.35);
+```
+
+Pass the same callable directly as an XPBD wind function, adapt it to
+the particle flow callback, or use its velocity to step a seed
+trajectory. Bind from the current query when a simulation advances.
+In a mechanics system, a force of kind `sail` samples a vector wind
+field, takes the apparent wind along the sail's local `axis`, and
+applies a two-sided pressure force. Set `field` to the field name and
+`units` to the expected velocity unit (default `world/s`).
+
 ## Author a world
 
 A manifest has `format: "ink-studio/world"`, `version: 1`, a stable `id`,
@@ -165,10 +234,10 @@ reaches the feeder.
 
 | Kind | State, queries and actions |
 | --- | --- |
-| `fields` | Named scalar fields with units, rectangular regions and a `set` action. |
+| `fields` | Typed spatial fields with defaults, grids, regions and a `set` action. |
 | `control` | Typed arithmetic, thresholds, selection, binary logic, pulses, latches, timers and hysteresis. |
 | `water` | Bounded XZ shallow water with live bed edits, fractional face openings, conservative pump transfer, sensors and probes for the bed, depth, current and volume. An `obstacle` field may supply signed solid clearance. |
-| `mechanics` | Oriented box bodies and shared clearance or support queries, fixed and powered mounts, transmission ratios and stall reports, physical separation, configurable fracture, wheel traction, buoyancy and thrust. |
+| `mechanics` | Oriented box bodies and shared clearance or support queries, fixed and powered mounts, transmission ratios and stall reports, physical separation, configurable fracture, wheel traction, buoyancy, thrust and sail forces. |
 | `navigation` | Bounded walking, swimming or flying route traces. Ground search can take depth, clearance and wear into account. Hosts can also expose the volumetric traversal graph. |
 | `habitat` | Authored species rules evaluate world fields and nearby or reachable resources. Probes return a score, suitability and the reasons behind the decision. |
 | `agents` | Ground, swim and flight movement with replanning, scene-aware destinations and optional limb contacts. Agents publish their real movement contacts for other systems. |
@@ -211,7 +280,14 @@ A system factory compiles its definition once per runtime instance.
 state in those values so fork and replay can recreate it. Optional hooks
 include `checkAction(type,args)`, `validateState(state)`, `pose(state,id)`,
 `fields`, `traces`, typed `inputs` and `outputs`, and
-`output(state,context)`. A tick context exposes the world, peer state, shared
+`output(state,context)`. A consumer can implement `checkFields(query)`
+to bind and check its field references when the runtime compiles.
+Use `W.spatialFields.define(spec, read)` to publish a custom scalar,
+vector, or categorical field. The callback receives the projected
+`point`, the regular query context, and an `explain` flag. Return a
+regular query result with an optional `source` record for provenance.
+
+A tick context exposes the world, peer state, shared
 queries, input values, `emit(kind, detail)`, and a seeded `random(key)`.
 Pose providers can also implement `poseEntities(state)` to enumerate all entity
 IDs whose pose they can override or suppress in that state. The hook must return

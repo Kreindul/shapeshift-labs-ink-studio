@@ -153,6 +153,11 @@
       const offset = pose.entity.sockets[name];
       return K.V.add(pose.point,pose.rotation ? K.M.app(pose.rotation,offset) : offset);
     }
+    function fieldFrame({entity,socket:name}) {
+      const pose = location(entity);
+      const point = pose && socket(pose,name);
+      return point && {point,rotation:pose.rotation};
+    }
     function target(spec = {}) {
       if (vector(spec)) return {point:spec.slice()};
       check(record(spec), 'Expected a point or an entity selector');
@@ -168,7 +173,11 @@
     function add(descriptors, system, collection, handler) {
       for (const [key,item] of Object.entries(collection ?? {})) {
         check(W.data.id(key) && record(item) && typeof item[handler] === 'function', 'Invalid query descriptor ' + key);
-        const { [handler]: execute, ...description } = item;
+        const { [handler]: read, ...description } = item;
+        const execute = handler === 'read' && description.spatial ? context => {
+          context.field = key;
+          return read(context,fieldFrame);
+        } : read;
         descriptors.set(system + '/' + key,{system,key,execute,description});
       }
     }
@@ -242,6 +251,25 @@
         active.delete(guard);
       }
     }
+    function field(name) {
+      const descriptor = resolve(fields,name);
+      if (descriptor) return {name:descriptor.system+'/'+descriptor.key,...descriptor.description};
+    }
+    function sampler(name,{type,units,fallback,args} = {}) {
+      const descriptor = resolve(fields,name);
+      const description = descriptor?.description;
+      check(description?.spatial,'Unknown or non-spatial field '+name);
+      check(type === undefined || description.type === type,'Unexpected spatial field type for '+name);
+      check(units === undefined || description.units === units,'Unexpected spatial field units for '+name);
+      if (fallback !== undefined) {
+        check(W.spatialFields.matches(description,fallback),'Invalid spatial field fallback for '+name);
+        fallback = freeze(copy(fallback));
+      }
+      return (x,y,z) => {
+        const sample = execute(fields,name,[x,y,z],args);
+        return sample.status === 'ok' ? sample.value : fallback;
+      };
+    }
     function describe(map) {
       return [...map].map(([name,item]) => ({name,...item.description}));
     }
@@ -303,10 +331,12 @@
           points.push([x,y,z].map((index,axis) => min[axis]+(max[axis]-min[axis])*(counts[axis]===1 ? 0 : index/(counts[axis]-1))));
       }
       check(points.length <= 100000 && points.every(p => vector(p)), 'Expected a bounded list of XYZ positions');
-      return {tick,time:base.time,field,units:resolve(fields,field)?.description.units ?? null,
+      const description = resolve(fields,field)?.description;
+      return {tick,time:base.time,field,units:description?.units ?? null,
+        ...(description?.spatial && {type:description.type,spatial:description.spatial}),
         ...(grid ? {grid} : {}),samples:points.map(point => ({point,...api.probe(field,point,args)}))};
     }
-    const api = Object.freeze({inspect,spatial,target,select:selector=>look().select(selector),
+    const api = Object.freeze({inspect,spatial,target,field,sampler,select:selector=>look().select(selector),
       inspectLook:options=>look().inspect(options,api),
       probe:(name,at,args) => execute(fields,name,at,args),
       trace:(name,at,args) => execute(traces,name,at,args),export:exportField});
