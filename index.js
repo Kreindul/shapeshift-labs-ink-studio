@@ -92,6 +92,7 @@ module.exports = {
   },
   exportGlb: require('./cli/export-glb.js'),
   render: require('./cli/render.js').render,
+  inspectEnvironment: require('./cli/environment-inspector.js').inspectEnvironment,
   silhouetteReview: require('./cli/silhouette-review.js').silhouetteReview,
   transitionReview: require('./cli/transition-review.js').transitionReview,
   spriteAtlas: require('./cli/sprite-atlas.js').spriteAtlas,

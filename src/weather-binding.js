@@ -88,7 +88,7 @@ const WeatherBinding = (() => {
         throw new RangeError('Missing weather channel ' + channel);
     const active = frontsEnabled ? authored : [];
     function spatial(time, signal = uniform(time)) {
-      const layers = active.map(front => ({ weight:front.frame(time), target:front.target }));
+      const layers = active.map(front => ({ front, weight:front.frame(time), target:front.target }));
       function value(key, x, z, fallback = signal[key]) {
         for (const { weight, target } of layers) {
           if (target[key] === undefined) continue;
@@ -100,15 +100,17 @@ const WeatherBinding = (() => {
         }
         return fallback;
       }
-      function at(x,z) {
+      function at(x,z, trace) {
         const local = { ...signal };
-        for (const { weight, target } of layers) {
+        for (const { front, weight, target } of layers) {
           const amount = weight(x,z);
-          if (!amount) continue;
-          for (const key of keys) if (target[key] !== undefined) {
+          const changes = trace && Object.create(null);
+          if (amount) for (const key of keys) if (target[key] !== undefined) {
             const base = local[key] ?? outside[key];
             local[key] = base + (target[key] - base)*amount;
+            if (changes) changes[key] = {from:base,to:target[key],value:local[key]};
           }
+          if (trace) trace.push({id:front.id,profile:front.profile,weight:amount,...front.inspect(time),channels:changes});
         }
         local.wind = velocity(local);
         return local;
@@ -205,7 +207,14 @@ const WeatherBinding = (() => {
           return { ...point, wetness: Math.max(local, point?.wetness ?? 0) };
         } : undefined };
     }
-    return Object.freeze({ sample, forcing, frame, surfaceAt });
+    function inspect(time,x,z,parameters) {
+      if (!Number.isFinite(x) || !Number.isFinite(z)) throw new TypeError('Weather position must be a finite XZ pair');
+      const global = parameters ? read(parameters) : uniform(time), fronts = [];
+      const local = spatial(time,global).at(x,z,fronts);
+      return { channels:{...defaults,...channels}, global, local, frontsEnabled,
+        fronts, rainGain:Math.min(1,(local.rain ?? 0)/rainFull), snowGain:Math.min(1,(local.snowfall ?? 0)/snowFull) };
+    }
+    return Object.freeze({ sample, forcing, frame, surfaceAt, inspect });
   }
 
   return Object.freeze({ settings, bind });

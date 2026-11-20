@@ -120,6 +120,10 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
     return { ...world, ...(atmospherePose && {atmospherePose}), id: view.world.id, assetPacks: view.world.assetPacks,
       ...(!input.checkpoint && { lookPreviewPacks: view.world.assetPacks }) };
   }
+  function environmentSnapshot(file) {
+    const input=load(file);
+    return input.world ? visualSnapshot(input) : null;
+  }
   function lookSnapshot(file) {
     const input = load(file, { lookPreview: true });
     return input.world ? visualSnapshot(input) : null;
@@ -498,5 +502,5 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
     respond({valid:true,format:raw.format});
     return true;
   }
-  return {execute,validate,inspectLook,lookSnapshot};
+  return {execute,validate,inspectLook,lookSnapshot,environmentSnapshot};
 };

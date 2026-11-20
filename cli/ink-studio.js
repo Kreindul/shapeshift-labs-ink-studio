@@ -572,9 +572,9 @@ const asciiFrame = (image, world) => lib().KIT.ascii.draw(image, {
   pal: image.palette || world.pal
 });
 const displayFrame = (image, world) => opt.text ? asciiFrame(image, world) : R.upscale(image, opt.px1 ? 1 : image.px);
-function buildPreview() {
+function buildPreview(id = pos[0]) {
   const Preview = require('./look-preview.js');
-  const world = opt.look !== undefined && opt.look !== 'off' ? Preview.withAlbedo(() => build(pos[0])) : build(pos[0]);
+  const world = opt.look !== undefined && opt.look !== 'off' ? Preview.withAlbedo(() => build(id)) : build(id);
   return Preview.override(world, opt, lib());
 }
 const previewPasses = () => require('./look-preview.js').preview(opt);
@@ -601,6 +601,7 @@ const CMD = {
         'ink-studio <command> <diorama id | lab/file.js> [options]',
         '',
         '  inspect <scene|run>         discover fields, actions, ports and entities',
+        '  environment inspect <scene|run> --at x,y,z [--t seconds] [--out report.json]   explain sky and local weather',
         '  probe <scene|run> --field name [--at x,y,z | --entity id] [--explain]  sample world state',
         '  inspect|validate|probe <scene|run> --select JSON   inspect, check, or sample a look target',
         '  probe <scene|run> --field look/sample [--select JSON | --entity ID] [--at x,y,z]   explain a baked splat',
@@ -722,6 +723,29 @@ const CMD = {
         return PNG.encode(image.w, image.h, image.rgb);
       }
     });
+  },
+  environment() {
+    if (pos[0] !== 'inspect' || pos.length !== 2)
+      die('Usage: ink-studio environment inspect <scene|run> --at x,y,z [--t seconds]');
+    if (typeof opt.at !== 'string' || opt.at.split(',').length !== 3 || opt.at.split(',').some(value=>!value.trim()) ||
+        !list('at').every(Number.isFinite)) die('--at needs three finite comma-separated coordinates');
+    const requested = num('t',0);
+    if (opt.t === true || !Number.isFinite(requested) || requested < 0) die('--t needs nonnegative scene seconds');
+    const snapshot = worldCLI().environmentSnapshot(pos[1]);
+    const world = snapshot ?? buildPreview(pos[1]);
+    const t = snapshot?.lookSnapshot?.time ?? requested;
+    if (!snapshot) pose(world,t);
+    const { inspectEnvironment } = require('./environment-inspector.js');
+    const report = inspectEnvironment(world,view({t,at:list('at')}));
+    if (snapshot && opt.t !== undefined) report.time.requested = requested;
+    const json = JSON.stringify(report,null,opt.json ? 0 : 2)+'\n';
+    if (opt.out === undefined) process.stdout.write(json);
+    else {
+      if (typeof opt.out !== 'string') die('--out needs a report filename');
+      const file = path.resolve(opt.out);
+      fs.mkdirSync(path.dirname(file),{recursive:true});
+      fs.writeFileSync(file,json);
+    }
   },
   look() {
     const io = require('./look.js');

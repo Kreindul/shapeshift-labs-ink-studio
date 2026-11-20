@@ -39,12 +39,9 @@ const surfaceShading = require('./surface-shading.js');
 const SceneOptics = require('../src/scene-optics.js');
 const SkyEnvironment = require('../src/sky-environment.js');
 const HorizonBands = require('../src/horizon-bands.js');
-const CelestialTracks = require('../src/celestial-tracks.js');
 const CloudField = require('../src/cloud-field.js');
 const Lightning = require('../src/lightning.js');
-const SceneExposure = require('../src/scene-exposure.js');
-const VolumeCutouts = require('../src/volume-cutouts.js');
-const weatherFrame = require('./weather.js');
+const { resolveEnvironment, resolveWind, resolveLighting, atmosphereSources } = require('./environment.js');
 const WindField = require('../src/wind-field.js');
 const Precipitation = require('./precipitation.js');
 const RainImpacts = require('./rain-impacts.js');
@@ -310,38 +307,11 @@ function render(world, o, preparedPalettes) {
     -(V[4] * V[12] + V[5] * V[13] + V[6] * V[14]),
     -(V[8] * V[12] + V[9] * V[13] + V[10] * V[14])
   ];
-  const skySource = o.skyEnvironment ?? world.skyEnvironment;
-  const skyTime = ArtDirection.time(direction,o.skyTime ?? sceneTime,'environment');
-  let clock = skySource ? SkyEnvironment.compile(skySource) : null;
-  if (clock && o.skyTransitions !== undefined) clock = clock.withTransitions(o.skyTransitions);
-  if (!clock && o.skyTransitions !== undefined && o.skyTransitions !== false && skySource !== false)
-    throw new TypeError('Sky transitions need a sky environment');
-  if (skySource !== false && o.weatherTracks !== false && world.weatherTracks !== undefined && world.weatherTracks !== false) {
-    const { KIT } = require('../index.js').load();
-    const track = KIT.weather.tracks.compile(clock,world.weatherTracks);
-    const cues = world.weatherTrackState ? track.transitions(world.weatherTrackState)
-      : track.sceneTransitions(world.animationTimeline?.cues?.());
-    if (cues.length) clock = clock.withTransitions([...clock.transitions,...cues]);
-  }
-  const environment = clock?.frame(skyTime, o.skyProfiles);
+  const climate = resolveEnvironment(world,o,sceneTime,direction);
+  const { skyTime,environment,weather,exposure,cutouts } = climate;
   const effectRules = EffectPalettes.activate(effectPaletteSettings, environment?.parameters);
-  const weather = weatherFrame(world, o, skySource, clock, environment?.parameters, skyTime);
-  const exposure = SceneExposure.settings(world.sceneExposure, o.sceneExposure);
-  const cutouts = VolumeCutouts.settings(world.volumeCutouts,o.volumeCutouts)?.frame(t);
-  const windConfig = WindField.settings(world.windField, o.windField);
-  const fallbackWind = o.wind ?? weather?.wind ?? windConfig?.fallback ?? an.wind ?? (windConfig && world.volumeWind) ?? undefined;
-  const weatherWindAt = o.wind == null ? weather?.windAt : undefined;
-  const weatherWindHere = o.wind == null ? weather?.windHere : undefined;
-  const flow = (windConfig || exposure?.wind) && WindField.create(windConfig ?? WindField.settings(true),{
-    ambient: time => weatherWindAt?.(time) ?? fallbackWind,
-    local:weatherWindHere,
-    gust:windConfig ? weather?.gustAt : undefined, localGust:windConfig ? weather?.gustHere : undefined, exposure
-  });
-  const wind = Airflow.frame(flow ? flow.open(skyTime) : fallbackWind);
-  const localWind = flow && (windConfig?.cover || weatherWindHere || (windConfig && weather?.gustHere) || exposure?.wind)
-    ? (time,x,z,_fallback,y=0) => flow.sample(x,y,z,time) : weatherWindHere;
-  const airAt = (x,y,z) => localWind ? Airflow.frame(localWind(skyTime,x,z,wind.velocity,y)) : wind;
-  const windAt = flow ? flow.open : weatherWindAt;
+  const windState = resolveWind(world,o,climate);
+  const { windConfig,flow,wind,localWind,airAt,windAt } = windState;
   const travel = (at, birth, time) => {
     const age = time - birth;
     return flow ? flow.travel(...at, skyTime - age, skyTime) : airAt(...at).velocity.map(v => v * age);
@@ -369,10 +339,7 @@ function render(world, o, preparedPalettes) {
   }
   const mediumLook = medium => optics?.transform(medium) ?? PixelLook.mediumTransform(paletteRules, medium);
   const colorForVolume = volume => mediumLook(TargetSelectors.medium(volume.id, volume.mediumKind ?? volume.type, volume.tags));
-  const atmosphereSources = o.atmosphere === false ? [] : [
-    ...(world.atmosphere||[]), ...SceneOptics.shapedVolumes(world.shapedAtmosphere,o.shapedAtmosphere)
-  ];
-  const volumes = SceneOptics.prepareVolumes(atmosphereSources, world.pal, colorForVolume, weather?.fogGain);
+  const volumes = SceneOptics.prepareVolumes(atmosphereSources(world,o), world.pal, colorForVolume, weather?.fogGain);
   if (emitted?.volumes.length) volumes.push(...SceneOptics.prepareVolumes(emitted.volumes, world.pal, colorForVolume));
   const sourceWater = o.water !== false && world.water?.count && world.water.raySegments ? world.water : null;
   const water = sourceWater && (optics || paletteRules) ?
@@ -383,22 +350,11 @@ function render(world, o, preparedPalettes) {
   const motionReference = centers && { w: W, h: H, centers, ...(birthIds && { birthIds, baseCount, splatSource, emitterSource }) };
   const art = createArtPasses([...passSelection].filter(name => name !== 'target' && name !== 'mask'), W, H);
   const rayAt = cameraRays(V, eye, W, H, focal, ortho);
-  const celestial = CelestialTracks.settings(world.celestialTracks, o.celestialTracks)?.frame(skyTime);
+  const { celestial,sun,flash,clouds } = resolveLighting(world,o,climate,windState,direction);
   const baseSky = SkyEnvironment.withCelestials(environment?.sky, celestial, celestial && hex(0));
   const sky = baseSky && direction?.bands ? { ...baseSky, bands:direction.bands } : baseSky;
   const aerial = o.atmosphere !== false && !o.captureCoverage ?
     SkyEnvironment.aerial(world.aerialPerspective, o.aerialPerspective, environment?.parameters) : null;
-  const sun = LiveSun.prepare(world.liveSun, o.liveSun, t, celestial?.sun);
-  const cloudSource = o.cloudField ?? world.cloudField;
-  const cloudSettings = cloudSource === false ? null :
-    CloudField.shadowSettings(world.cloudShadows, o.cloudShadows, environment?.parameters);
-  if (cloudSettings && !cloudSource) throw new TypeError('Cloud shadows need a cloud field');
-  const cloudDisplacement = cloudSource && windConfig && windConfig.clouds !== false
-    ? flow.cloudTravel(0,skyTime).map(n => n*windConfig.clouds) : undefined;
-  const flash = Lightning.settings(world.lightning, o.lightning)?.frame(t);
-  const clouds = cloudSource ? CloudField.compile(cloudSource).frame(skyTime, cloudSettings,
-    sun?.direction ?? celestial?.sun?.direction ?? environment?.sky?.sun ?? (o.volumeLighting ?? world.volumeLighting)?.sun?.direction,
-    cloudDisplacement, o.cloudRepresentation ?? world.cloudRepresentation, flash?.light, cutouts?.cloud, direction?.cloudEdge) : null;
   const cloudShadow = clouds?.shadow;
   const spriteAtlases=AtlasSprites.placements(world.spriteAtlases,o.spriteAtlases);
   const sprites=AtlasRaster.rasterize(spriteAtlases,{

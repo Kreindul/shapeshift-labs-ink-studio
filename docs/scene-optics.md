@@ -35,6 +35,8 @@ Use [Interruptible transitions](interruptible-sky.md) to carry the current sky a
 
 Use [Conditional weather tracks](conditional-weather.md) to drive sky transitions from cues and simulation state.
 
+Use the [environment inspector](environment-inspector.md) to report which keys, profiles, and regional overrides contribute at a world position.
+
 ## Planar reflections
 
 ```js

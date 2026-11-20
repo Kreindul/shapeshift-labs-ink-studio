@@ -1,7 +1,7 @@
 const WeatherBinding = require('../src/weather-binding.js');
 
 const sessions = new WeakMap();
-function weatherFrame(world, options, source, environment, parameters, time) {
+function weatherBinding(world, options, source, environment) {
   const authored = world.weatherBinding, override = options.weatherBinding;
   if (override === false || source === false || (override === undefined && (authored === undefined || authored === false))) return null;
   const pins = JSON.stringify(Object.entries(options.skyProfiles ?? {}).sort(([a], [b]) => a.localeCompare(b)));
@@ -20,6 +20,6 @@ function weatherFrame(world, options, source, environment, parameters, time) {
     cached = { authored, override, track, transitions, pins, retained, frontsEnabled, binding };
     sessions.set(world, cached);
   }
-  return cached.binding?.frame(time, parameters);
+  return cached.binding;
 }
-module.exports = weatherFrame;
+module.exports = weatherBinding;
