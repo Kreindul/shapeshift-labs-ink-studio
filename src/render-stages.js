@@ -240,7 +240,7 @@ const RenderStages = (() => {
     return evaluate(rules, rgb, sample, x, y);
   }
 
-  function finish(frame, plan, passes, time, visitPixel, audit, ditherAt, stable, beforePalette, inspect) {
+  function finish(frame, plan, passes, time, visitPixel, audit, ditherAt, stable, beforePalette, inspect, frameGrade) {
     const { w, h, rgb } = frame;
     const swatches = new Map(plan.outputPalettes.map((color, i) => [color, i]));
     const use = new Uint32Array(swatches.size);
@@ -250,6 +250,7 @@ const RenderStages = (() => {
       const offset = p * 3;
       if (!rules.frame && !rules.palette) {
         if (beforePalette) beforePalette.set(rgb.subarray(offset, offset + 3), offset);
+        if (frameGrade) frameGrade.set(rgb.subarray(offset,offset+3),offset);
         const index = swatches.get(rgb[offset] * 65536 + rgb[offset + 1] * 256 + rgb[offset + 2]);
         if (index !== undefined) use[index]++;
         continue;
@@ -268,6 +269,7 @@ const RenderStages = (() => {
       const placement = () => stability.placement(stable, passes, p, x, y, time);
       const record = inspect?.pixel === p ? inspect.stage : undefined;
       const graded = evaluate(rules.frame, original, sample, dx, dy, undefined, visit, anchorAt, placement, false, record);
+      if (frameGrade) for (let k=0;k<3;k++) frameGrade[offset+k]=byte(graded[k]);
       if (beforePalette) {
         const reference = rules.frame?.some(rule => rule.palette) ?
           evaluate(rules.frame, original, sample, dx, dy, undefined, undefined, undefined, undefined, true) : graded;

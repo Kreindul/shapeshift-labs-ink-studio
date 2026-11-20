@@ -755,7 +755,7 @@ const SurfaceLook = (() => {
   /* Inputs are RGB in 0..1 and a world-space sample. Output packs RGB, the opacity
      multiplier, a glint mask and, for projected paint, an optional local palette.
      Supply a normal Array when you want to retain the palette reference. */
-  function shade(prepared, sample, base, output = [0, 0, 0, 1, 0], trace, visit, onClip, reflected) {
+  function shade(prepared, sample, base, output = [0, 0, 0, 1, 0], trace, visit, onClip, reflected, paint) {
     const { settings, layers } = prepared;
     const sun = sample.lightDirection ?? prepared.sun;
     const { position, normal, view } = sample;
@@ -817,6 +817,7 @@ const SurfaceLook = (() => {
     const albedo = unlit && (sample.albedo ?? shaded);
     for (let i = 0; i < 3; i++) output[i] = unlit ? albedo[i] : shaded[i];
     const reapplyLight = unlit && (() => {
+      if (paint) for (let i=0;i<3;i++) paint[i]=output[i];
       const lit = stages.repaint(shaded,albedo,output);
       for (let i=0;i<3;i++) output[i] = lit[i];
       unlit = false;

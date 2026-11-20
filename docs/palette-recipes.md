@@ -871,6 +871,44 @@ Use `ink.reviewPaletteWeather(world, { plan, width, height, view, pose })`
 in Node. The CLI writes `comparison.png` and `review.json` with the
 resolved artwork, edge evidence and per-view findings.
 
+## Review the palette at each render stage
+
+```sh
+ink-studio palette stages examples/render-stages.js --params '{"stage":"review"}' \
+  --w 296 --h 158 --px 1 --out stage-review
+```
+
+The review captures four aligned views from the same native render.
+Base paint shows the visible surface's retained albedo after material
+rules and projected paint. The lit composite includes lighting, surface
+finishes, atmosphere, and compositing as they enter the frame grade.
+Graded output includes the actual frame-stage rules. Final swatches show
+the resolved scene before screen overlays.
+
+The report counts distinct swatches, hue families and tonal bands at
+each stage. Between stages it compares the same pixels and lists
+output swatches that combine multiple source swatches, colours newly
+present in the paired sample, and large hue shifts with example art
+pixel coordinates. Set `--hue-threshold` in degrees (default 22) and
+`--min-chroma` in OKLab (default 0.025). Colours below the chroma floor
+have no reported hue. Use `--select '{"material":"steel"}'` or another
+named selector to review one ramp or surface.
+
+Pass `--allowed '["#131d33","#253551"]'` to check the final output against
+an explicit palette. The report identifies the first captured stage at
+which those outside colours appeared and persisted on their pixels.
+The clipping audit covers the whole shot.
+
+Legacy looks grade indexed swatches during resolution. Their report
+compares the lit input and final output directly. Paint data is
+shown where the bake retained it. JavaScript sculpt scenes can capture
+this data with `S.captureAlbedo = true` before baking, and custom
+splats can supply it through `B.describeAlbedo`.
+
+Use `ink.reviewPaletteStages(world, options)` in Node for the
+report, native stage rasters, and comparison image. The CLI writes those
+rasters, `comparison.png`, and `stages.json`.
+
 ## Suggest editable lighting ramps
 
 Use `K.palette.lightingRamps.suggest({ palette, roles, materials })` to choose lighting swatches from an existing palette. `roles` can carry the scene's current named roles. Each material needs a `base` palette index or a hex/RGB target. An index pins the exact swatch. A target uses the nearest allowed swatch as the base.

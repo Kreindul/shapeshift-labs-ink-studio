@@ -896,6 +896,7 @@ const CMD = {
         '  palette shimmer <scene> [--from 0 --to 3 --fps 12] [--camera-pan x,y,z --camera-orbit degrees] [--animate] [--out directory]',
         '  palette readability <scene> [--select JSON | --plan file.json] [--directions N --times t1,t2] [--out directory]',
         '  palette weather <scene> [--plan file.json | --select JSON --times t1,t2] [--out directory]',
+        '  palette stages <scene> [--select JSON] [--allowed JSON] [--out directory]   review paint, lighting, grade and resolve',
         '  palette chart <chart.json> [--type chart] [--format png|data]   export an indexed swatch, bar or pair chart',
         '  palette lighting <source-or-draft.json> [--approve] [--out file.json]   suggest or save named lighting ramps',
         '  palette field <field.json> [--t seconds] [--w width --h height] [--format png|data]   render a palette field or report grayscale bands',
@@ -1084,6 +1085,35 @@ const CMD = {
     if (pos[0] === 'plot') return require('./palette-plot.js')(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'fit') return require('./palette-fit.js').fit(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'dither-review') return require('./palette-fit.js').review(pos.slice(1),opt,lib(),outputFile);
+    if (pos[0] === 'stages') {
+      if (pos.length!==2 || ['select','allowed','hue-threshold','min-chroma','limit','t','out'].some(key=>opt[key]===true))
+        die('Use palette stages <scene> [--select JSON] [--allowed JSON] [--out directory]');
+      const t=num('t',0);
+      if (!Number.isFinite(t)) die('Palette stage time must be finite');
+      const world=buildPreview(pos[1]);
+      pose(world,t);
+      const {rasters,report,image}=require('./palette-stages.js').reviewPaletteStages(world,view({
+        w:num('w',240),h:num('h',150),t,transparent:onOffOption('transparent'),
+        select:opt.select===undefined ? undefined : JSON.parse(opt.select),
+        allowed:opt.allowed===undefined ? undefined : JSON.parse(opt.allowed),
+        hueThreshold:num('hue-threshold',22),minChroma:num('min-chroma',.025),limit:num('limit',12)
+      }));
+      const directory=outputFile('palette-stages'), files={comparison:'comparison.png',report:'stages.json'};
+      for (const [name,frame] of Object.entries(rasters)) if (frame) files[name]=name+'.png';
+      const input=fs.statSync(path.resolve(pos[1]),{throwIfNoEntry:false});
+      for (const name of Object.values(files)) {
+        const existing=fs.statSync(path.join(directory,name),{throwIfNoEntry:false});
+        if (existing && input && existing.dev===input.dev && existing.ino===input.ino)
+          die('Choose stage output files separate from the scene');
+      }
+      fs.mkdirSync(directory,{recursive:true});
+      for (const [key,frame] of Object.entries({...rasters,comparison:image})) {
+        if (frame) PNG.write(path.join(directory,files[key]),frame.w,frame.h,frame.rgb,frame.alpha);
+      }
+      fs.writeFileSync(path.join(directory,files.report),JSON.stringify({...report,files},null,2)+'\n');
+      console.log('wrote render-stage palette review to',directory);
+      return;
+    }
     if (pos[0] === 'readability' || pos[0] === 'weather') {
       const weather=pos[0]==='weather';
       if (pos.length!==2 || ['plan','select','directions','pitches','t','times','w','h','cols','out']
