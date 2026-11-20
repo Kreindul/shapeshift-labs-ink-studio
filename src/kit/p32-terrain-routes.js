@@ -222,4 +222,6 @@
   }
 
   P.routes.terrain = terrain;
+  P.routes.terrainSampler = options=>evaluator({slopeCost:0,maxDeviation:Infinity,maxSamples:Infinity,...options},
+    options.sampleStep,{samples:0});
 })(KIT);

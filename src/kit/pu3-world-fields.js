@@ -69,6 +69,11 @@
       checkRegion(descriptors[field],region);
     }
     return {initial:() => initial,fields:descriptors,dependencies:{writes:entries.map(([name])=>name)},
+      navigationSource(field,state){
+        const spatial=descriptors[field]?.spatial, key=state?.[field];
+        if(spatial?.space!=='world'||!key)return;
+        return {key,changes:old=>W.navigationTiles.appended(old,key,row=>({...row.bounds,axes:spatial.axes}))};
+      },
 
       validateState(state) {
         check(record(state) && Object.keys(state).length === entries.length &&
@@ -287,6 +292,35 @@
     }
     const domain = {axes:'xz',sampling:'cell',boundary:'half-open',
       bounds:{min:origin,max:[origin[0]+width*dx,origin[1]+height*dz]}};
+    function changedCells(changed){
+      const regions=[];
+      for(let z=0;z<height;z++){
+        let start=-1;
+        for(let x=0;x<=width;x++){
+          if(x<width&&changed(z*width+x)){
+            if(start<0)start=x;
+          }else if(start>=0){
+            regions.push({axes:'xz',min:[origin[0]+start*dx,origin[1]+z*dz],
+              max:[origin[0]+x*dx,origin[1]+(z+1)*dz]});
+            start=-1;
+          }
+        }
+      }
+      return regions;
+    }
+    function navigationSource(field,state){
+      if(!state)return;
+      const {fluid}=state;
+      if(field==='bed')return {key:fluid.bed,changes:old=>changedCells(i=>old[i]!==fluid.bed[i])};
+      if(field==='water'){
+        const key={depth:fluid.depth,bed:fluid.bed,ice:state.thermal?.ice};
+        const surface=(frame,i)=>(frame.bed[i]+(frame.ice?.[i]??0))+frame.depth[i];
+        return {key,changes:old=>changedCells(i=>{
+          const wet=key.depth[i]>1e-6, wasWet=old.depth[i]>1e-6;
+          return wet!==wasWet||wet&&surface(key,i)!==surface(old,i);
+        })};
+      }
+    }
     function channel(type, units, key) {
       return spatial.define({type,units,...domain},({state,point,explain})=>{
         if (!state) return Q.missing('water state is unavailable');
@@ -340,7 +374,7 @@
     const legacyErosion=surface!==undefined&&!sedimentModel;
     const dependencyBounds = {axes:'xz',min:origin,max:[origin[0]+width*dx,origin[1]+height*dz]};
     const phaseFields=['temperature','ice','vapor','humidity','phase','phase-state','water','depth','flow','surface-height'];
-    return {inputs,outputs,...(exchanging && {accounts}),shareCheckpoint:true,
+    return {inputs,outputs,navigationSource,...(exchanging && {accounts}),shareCheckpoint:true,
       partitionStep:terrainQuery===undefined&&surface===undefined&&thermalModel?.ambientField===undefined,
       simulationAggregate(settings){
         check(!sedimentModel&&!thermalModel&&!legacyErosion&&!exchanging&&!terrainQuery&&

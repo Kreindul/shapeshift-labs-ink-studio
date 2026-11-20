@@ -30,6 +30,9 @@ local snapshots and bounded changes against an applied cursor.
 [Batch spatial queries](batch-spatial-queries.md) find nearby agents,
 test free space, and discover usable sockets on the same snapshot.
 
+[Incremental navigation tiles](navigation-tiles.md) share walking
+routes and recompute crossings affected by local changes.
+
 [First-divergence debugging](first-divergence.md) compares timelines
 tick by tick and reports actual inputs and changed state paths.
 

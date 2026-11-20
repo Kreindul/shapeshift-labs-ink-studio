@@ -55,6 +55,19 @@
     return shape.bounds={min,max,bounded};
   }
   function extents(body) { return geometry(body).extent; }
+  function changedBounds(before,after) {
+    const areas=[], geometry=['id','entity','position','rotation','half','bend','collider'];
+    for(const key of new Set([...Object.keys(before),...Object.keys(after)])){
+      const a=own(before,key)?before[key]:null, b=own(after,key)?after[key]:null;
+      if(a===b||a&&b&&geometry.every(key=>W.data.equal(a[key],b[key])))continue;
+      for(const body of [a,b])if(body){
+        const {min,max,bounded}=boundsOf(body);
+        if(!bounded)return null;
+        areas.push({axes:'xyz',min,max});
+      }
+    }
+    return areas;
+  }
   function mechanics(config,{catalog,world}) {
     const materialContacts=config.contactEvents==='material';
     check(config.contactEvents===undefined || typeof config.contactEvents==='boolean'||materialContacts,
@@ -904,7 +917,12 @@
       return count?{status:'ok',value,body:nearest}:Q.missing('no bodies','empty');
     }
     const structural=Object.keys(structures).length>0;
-    return {checkSimulationLOD(tuning){
+    return {navigationSource(field,state){
+      if(state&&(field==='clearance'||field==='support'&&!config.terrain)){
+        const key=state.bodies;
+        return {key,changes:old=>changedBounds(old,key)};
+      }
+    },checkSimulationLOD(tuning){
       check(Object.keys(tuning).every(key=>key==='contactIterations')&&
         (tuning.contactIterations===undefined||validIterations(tuning.contactIterations)),
         'Invalid mechanics simulation detail tuning');
@@ -1082,5 +1100,5 @@
     }};
   }
   W.runtime.register('mechanics',mechanics);
-  W.mechanics=Object.freeze({distance,column});
+  W.mechanics=Object.freeze({distance,column,changedBounds});
 })(KIT);

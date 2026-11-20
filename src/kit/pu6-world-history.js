@@ -146,7 +146,21 @@
         return base.status==='ok'?Q.ok(base.value-rut(state,target.point)):base;
       }}
     }:{};
-    return {inputs:{enabled:{type:'bool',default:config.enabled??true},
+    return {navigationSource(field,state){
+      if(!state||!(field==='wear'||field==='rutDepth'&&maxRut||field==='ruttedBed'&&maxRut&&!config.bed))return;
+      const key=state.cells, reach=field==='wear'?cell/2:cell;
+      return {key,changes:old=>{
+        const areas=[];
+        for(const name of new Set([...Object.keys(old),...Object.keys(key)])){
+          if((old[name]?.value??0)===(key[name]?.value??0))continue;
+          const [i,j]=name.split(',').map(Number);
+          if(!Number.isSafeInteger(i)||!Number.isSafeInteger(j))continue;
+          const x=region.min[0]+(i+.5)*cell,z=region.min[2]+(j+.5)*cell;
+          areas.push({axes:'xz',min:[x-reach,z-reach],max:[x+reach,z+reach]});
+        }
+        return areas;
+      }};
+    },inputs:{enabled:{type:'bool',default:config.enabled??true},
         ...(config.contactEvents && {contacts:'event'})},initial:()=>({cells:{},pending:[],enabled:config.enabled??true}),
       ...(maxRut&&{dependencies:{writes:['rutDepth','ruttedBed'],reads:config.bed?[config.bed]:[]},
         checkFields(query){

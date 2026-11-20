@@ -319,6 +319,14 @@
       const descriptor = resolve(fields,name);
       if (descriptor) return {name:descriptor.system+'/'+descriptor.key,...descriptor.description};
     }
+    function navigationSource(name) {
+      const descriptor=resolve(fields,name);
+      const provider=descriptor&&systems[descriptor.system];
+      return provider?.navigationSource?.(descriptor.key,states[descriptor.system])??{key:api};
+    }
+    function navigation(name) {
+      return own(systems,name)?systems[name].navigationTiles?.bind(api):undefined;
+    }
     function sampler(name,{type,units,fallback,args} = {}) {
       const descriptor = resolve(fields,name);
       const description = descriptor?.description;
@@ -394,7 +402,7 @@
         ...(description?.spatial && {type:description.type,spatial:description.spatial}),
         ...(grid ? {grid} : {}),samples:points.map(point => ({point,...api.probe(field,point,args)}))};
     }
-    const api = Object.freeze({inspect,spatial,spatialBatch,target,frame:fieldFrame,field,sampler,
+    const api = Object.freeze({inspect,spatial,spatialBatch,target,frame:fieldFrame,field,sampler,navigation,navigationSource,
       simulationClock:name=>view.simulationChunks?.clocks[name],
       renderVolume:name=>own(systems,name)?systems[name].volumeFrame?.(states[name]):null,
       renderWater:name=>own(systems,name)?systems[name].waterFrame?.(states[name]):null,

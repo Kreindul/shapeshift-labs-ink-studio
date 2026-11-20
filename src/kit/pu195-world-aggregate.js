@@ -110,6 +110,7 @@
         }}}),
         ...(provider.waterFrame&&{waterFrame:state=>provider.waterFrame(fine(state))}),
         ...(provider.volumeFrame&&{volumeFrame:state=>provider.volumeFrame(fine(state))}),
+        ...(provider.navigationSource&&{navigationSource:(field,state)=>provider.navigationSource(field,fine(state))}),
         step(state,ctx){
           const adapter=using(state);
           return adapter?advance(adapter,state,ctx):provider.step(state,ctx);

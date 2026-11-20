@@ -287,6 +287,22 @@
       return row?.kind==='water'?{kind:'water',id:row.id,depth:row.max-row.min,depthAtPoint:row.max-y,surface:row.max,
         bed:row.min,velocity:[row.current[0],row.current[2]],current:row.current}:{kind:'air'};
     }
+    function navigationSource(field,state){
+      if(!state||!['clearance','support','height','water','medium'].includes(field))return;
+      const liquid=field==='water'||field==='medium';
+      const key={edits:state.edits,wet:liquid?prepare(state).tilesAt:null};
+      function area(row){
+        if(row.op==='layer')return null;
+        const {shape}=compiled.get(row)??operation(row.op,row.args);
+        return {axes:'xyz',min:shape.min,max:shape.max};
+      }
+      return {key,changes:old=>{
+        const changes=W.navigationTiles.appended(old.edits,key.edits,area);
+        if(liquid)for(const tile of tiles)if(key.wet.get(tile.id)!==old.wet.get(tile.id))
+          changes.push({...tile.bounds,axes:'xyz'});
+        return changes;
+      }};
+    }
     const position=({state,target},read)=>state&&target.point?Q.ok(read(prepare(state),target.point)):Q.missing('state and XYZ point required');
     function action(op,state,args,ctx) {
       check(state.edits.length<maxEdits,'Volume edit budget exceeded');
@@ -341,6 +357,7 @@
         'Invalid saved volume work report');
       },
       dependencies:{reads:[id+'/clearance',id+'/material'],writes:['clearance','material','support','height','medium','water'].map(key=>id+'/'+key)},
+      navigationSource,
       occupancyField:'clearance',
       volumeFrame:state=>state?(lighting?illuminated(state).render:prepare(state).render):null,
       fields:{

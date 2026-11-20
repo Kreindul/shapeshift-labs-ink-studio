@@ -120,6 +120,12 @@
       }).sort((a,b)=>b.y-a.y||a.id.localeCompare(b.id)));
     }
     return {
+      navigationSource(field,state){
+        if(state&&['clearance','support'].includes(field)){
+          const key=state.layout.bodies;
+          return {key,changes:old=>W.mechanics.changedBounds(old,key)};
+        }
+      },
       initial:()=>freeze({pins:{},layout:initial,rejected:null}),
       actions:{refit},checkAction(type,args){if(type==='refit')pinsOf(args);},
       validateState(state){

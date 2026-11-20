@@ -26,21 +26,24 @@
     const surface=W.materials.probe(ctx.query,config.surface,[x,y,z]);
     return [{y,normal:up,id:'ground',material:surface?.id??'ground',...(includeMaterial&&surface&&{surface})}];
   }
-  function groundPlan(ctx,config,from,to,{radius=.13,maxWade=.16,maxSlope=.9,exclude}={}) {
+  function groundOptions(ctx,config,{radius=.13,maxWade=.16,maxSlope=.9,exclude}={}) {
     const region=config.bounds;
     const height=(x,z)=>config.support?
       (supports(ctx,config,x,z,region.min[1],region.max[1])[0]?.y??heightAt(ctx,config,x,z)):heightAt(ctx,config,x,z);
-    if(!zone(from,region)||!zone(to,region))return {status:'outside',points:[]};
     const travel=(x,y,z)=>{
       const water=wet(ctx,config,[x,y,z]);
       if(water&&water.surface-y>maxWade)return Infinity;
       const path=read(ctx,config.wear,[x,y,z]);
       return path?.status==='ok'?(config.wearWeight??.8)*(1-W.fields.clamp(path.value,0,1)):0;
     };
+    return {bounds:region,height,clearance:(x,y,z)=>clearance(ctx,config,[x,y+Math.max(.15,radius),z],exclude),
+      minClearance:radius,cost:travel,cell:config.cell??.25,maxSlope};
+  }
+  function groundPlan(ctx,config,from,to,{radius=.13,maxWade=.16,maxSlope=.9,exclude}={}) {
+    const options=groundOptions(ctx,config,{radius,maxWade,maxSlope,exclude}), {height,cost:travel}=options;
+    if(!zone(from,config.bounds)||!zone(to,config.bounds))return {status:'outside',points:[]};
     const start=[from[0],height(from[0],from[2]),from[2]], end=[to[0],height(to[0],to[2]),to[2]];
     if(Math.hypot(start[0]-end[0],start[2]-end[2])<1e-8)return {status:'ok',points:[start],length:0,cost:0};
-    const options={bounds:region,height,clearance:(x,y,z)=>clearance(ctx,config,[x,y+Math.max(.15,radius),z],exclude),
-      minClearance:radius,cost:travel,cell:config.cell??.25,maxSlope};
     const result=P.routes.terrain(start,end,options);
     const {route,...info}=result;
     if(route)return {...info,points:route.points};
@@ -114,15 +117,23 @@
     check(Number.isFinite(config.cell??.25)&&(config.cell??.25)>0&&Number.isFinite(config.wearWeight??.8)&&
       (config.wearWeight??.8)>=0&&Array.isArray(config.waypoints??[])&&(config.waypoints??[]).length<=48&&
       (config.waypoints??[]).every(p=>vector(p))&&Number.isFinite(config.ground??0),'Invalid navigation domain');
+    check(config.tiles===undefined||record(config.tiles),'Expected navigation tile settings');
+    const tiled=config.tiles&&W.navigationTiles.create(config,(query,profile)=>groundOptions({query},config,profile));
     function route({query,target,args}) {
       check(target.point&&vector(args.to),'Route needs start and end XYZ points');
       const mode=args.mode??'walk', radius=args.radius??.13;
       check(['walk','swim','fly'].includes(mode)&&Number.isFinite(radius)&&radius>0,'Invalid travel mode or body radius');
-      return Q.ok(mode==='walk'?groundPlan({query},config,target.point,args.to,args):
+      return Q.ok(mode==='walk'?(tiled?tiled.bind(query).route(target.point,args.to,args):groundPlan({query},config,target.point,args.to,args)):
         spatialPlan({query},config,target.point,args.to,{mode,radius,entity:args.exclude}));
     }
     return {initial:()=>null,dependencies:routeDependencies(config),
-      ...(config.surface!==undefined&&{checkFields:query=>W.materials.checkSurface(query,config.surface)}),fields:{
+      ...(tiled&&{navigationTiles:tiled}),
+      ...((config.surface!==undefined||tiled)&&{checkFields(query){
+        W.materials.checkSurface(query,config.surface);
+        if(tiled)for(const {field} of routeDependencies(config).reads)
+          check(query.field(field),'Unknown tiled navigation field '+field);
+      }}),fields:{
+      ...(tiled&&{tiles:{type:'record',qualified:true,read:({query})=>Q.ok(tiled.bind(query).report())}}),
       height:{type:'number',units:'world',read:({query,target})=>target.point?
         Q.ok(heightAt({query},config,target.point[0],target.point[2])):Q.missing('point required')}
     },traces:{route:{run:route}}};
@@ -175,8 +186,19 @@
     }
     return {initial:()=>null,fields:{suitability:{type:'record',read:suitability}}};
   }
-  function agents(config,{catalog}) {
+  function agents(config,{catalog,world}) {
     const S=W.agentStorage, freeze=P.data.freeze, emptyList=freeze([]), defaultLook=freeze([4,5,6,24]);
+    const navigation=config.navigation;
+    if(navigation!==undefined){
+      const nav=id(navigation)&&world.systems[navigation];
+      check(nav?.kind==='navigation'&&record(nav.config?.tiles),'Agents need a tiled navigation system');
+      const shared={}, defaults={cell:.25,ground:0,wearWeight:.8};
+      for(const key of ['bounds','cell','ground','bed','support','clearance','water','wear','wearWeight']){
+        check(config[key]===undefined||W.data.equal(config[key],nav.config[key]??defaults[key]),'Agent route field must match navigation '+key);
+        if(nav.config[key]!==undefined)shared[key]=nav.config[key];
+      }
+      config={...shared,...config};
+    }
     const materialContacts=config.contactEvents==='material';
     check(config.contactEvents===undefined||typeof config.contactEvents==='boolean'||materialContacts,
       'contactEvents must be boolean or material');
@@ -273,8 +295,10 @@
           shape:{x,z,a:low+radius,b:low+height-radius,radius}};
       }
     }
-    const plan = (ctx, profile, from, goal) => profile.mode==='walk' ? groundPlan(ctx,config,from,goal,profile) :
-      spatialPlan(ctx,config,from,goal,profile);
+    function plan(ctx,profile,from,goal){
+      if(profile.mode!=='walk')return spatialPlan(ctx,config,from,goal,profile);
+      return navigation?ctx.query.navigation(navigation).route(from,goal,profile):groundPlan(ctx,config,from,goal,profile);
+    }
     function one(agent,ctx,contacts,dirty,directed=false){
       const profile=profileFor(agent);
       let position=fit(ctx,profile,agent.position), previous=agent;
@@ -297,14 +321,16 @@
           previous:{...previous,position,mode:resting,route:[],cursor:0};
       }
       let corridor;
-      if (dirty && route.length) {
+      const tiles=navigation&&profile.mode==='walk'&&ctx.query.navigation(navigation);
+      const invalid=tiles&&route[cursor]&&!tiles.valid(position,route,cursor,goal,profile);
+      if (invalid||!tiles&&dirty&&route.length) {
         const envelope = P.spatial.boxOf([position,...route.slice(cursor)]);
         envelope.min[1] = Math.min(0,envelope.min[1]-(profile.drop??.5));
         envelope.max[1] = Math.max(0,envelope.max[1]+(profile.height??profile.radius*2));
         const area = P.spatial.expand(envelope,profile.radius);
-        if (ctx.spatial.changes(area).length) corridor=area;
+        if (invalid||ctx.spatial.changes(area).length) corridor=area;
       }
-      if(ctx.tick>=retry||!route.length||corridor){
+      if(corridor||(tiles?!route[cursor]&&ctx.tick>=retry:ctx.tick>=retry||!route.length)){
         const result=plan(ctx,profile,position,goal);
         route=result.points??[];
         cursor=route.length>1?1:0;
