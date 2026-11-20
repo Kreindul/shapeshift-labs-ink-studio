@@ -90,7 +90,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
   const coverageRules = toolkit.ContributionRules ?? toolkit.KIT?.procedural?.contributionRules;
   let pipeline;
   try {
-    const sources = pixelShaderSources(toolkit.PixelLook);
+    const pixelSources = options => pixelShaderSources(toolkit.PixelLook, { packedTone: true, ...options });
+    const sources = pixelSources();
     const program = source => resources.program(sources.POST_VS, source);
     const post = program(sources.POST_FS), clean = program(sources.CLEAN_FS);
     // Rebirth hosts can opt into geometry specialization through the lower
@@ -122,13 +123,15 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     let paintOverlay, paintData, lastPaintView;
     const data = table(2048, 0, maxSize), bones = table(768, 4, maxSize);
     const fine = table(1536, 7, maxSize), pattern = table(2048, 10, maxSize);
-    const toneStops = resources.texture(), toneRanks = resources.texture();
+    const toneStops = resources.texture();
     let constraintRows, constraintSlots, constraintPlan, constraintKey, constraintWorld, constraintMetadata, constraintCount, constraintMap, maskAt;
     const contributionPost = new Map(), constrainedPosts = new Map();
     let maskSites, siteState, maskTexture, glassWorld, glassData, glassIndices;
     const rasterKeys = new WeakMap();
     let rasterKey = 0;
     const sort = createDepthSorter(), transparencyAPI = toolkit.KIT?.procedural?.splatOrder;
+    const afterimagesAPI = toolkit.KIT?.afterimages;
+    const afterimageHistory = afterimagesAPI?.history(), portalAfterimages = afterimagesAPI?.history();
     const mainTransparency = new WeakMap(), portalTransparency = new WeakMap();
     let surfacePipeline, reflectionTarget, reflectionAtlas, reflectionAtlasSize;
     let simple, simpleUnavailable = false, keyProgram, damp, copy, spriteProgram, spriteEnvProgram, spriteLayer, spriteTable, anchors;
@@ -253,21 +256,23 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
             ? ({ seed }) => toolkit.KIT.procedural.materials.blueNoise({ seed })
             : undefined) : null;
         if (prepared) {
-          const stops = new Float32Array(48 * 4);
-          prepared.stops.forEach(([at, hex], i) => stops.set([...rgb(parseInt(hex.slice(1), 16)), at], i * 4));
+          // Reserve the first row for palette stops so the resolve needs only
+          // one texture for tone mapping, including in water and fog frames.
+          const width = Math.max(48, prepared.width), height = prepared.height + 1;
+          const table = new Float32Array(width * height * 4);
+          prepared.stops.forEach(([at, hex], i) => table.set([...rgb(parseInt(hex.slice(1), 16)), at], i * 4));
+          for (let y = 0; y < prepared.height; y++) for (let x = 0; x < prepared.width; x++)
+            table[((y + 1) * width + x) * 4] = prepared.thresholds[y * prepared.width + x];
           textureUnit(12, toneStops);
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 48, 1, 0, gl.RGBA, gl.FLOAT, stops);
-          textureUnit(14, toneRanks);
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, prepared.width, prepared.height, 0, gl.RED, gl.FLOAT, prepared.thresholds);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, table);
         }
         toneKey = next;
         tone = prepared;
       }
       if (tone) {
         textureUnit(12, toneStops);
-        textureUnit(14, toneRanks);
         return { u_toneOn: 1, u_toneCut: tone.cutoff, u_toneAmt: tone.amount, u_toneN: tone.stops.length,
-          u_toneStops: 12, u_toneTh: 14 };
+          u_toneStops: 12, u_toneThSize: [tone.width, tone.height] };
       }
       return { u_toneOn: 0 };
     }
@@ -420,7 +425,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const airPockets = Boolean(water.u_waterAirCount), layered = Boolean(water.u_waterLayered), atlas = Boolean(water.u_waterAtlas);
       const key = +airPockets + 2 * layered + 4 * atlas + 8 * Number(media);
       if (!wetVariants.has(key)) wetVariants.set(key, {
-        airPockets, layered, atlas, sources: pixelShaderSources(toolkit.PixelLook, { water: true, airPockets, layered, atlas, environment:media })
+        airPockets, layered, atlas, sources: pixelSources({ water: true, airPockets, layered, atlas, environment:media })
       });
       return wetVariants.get(key);
     }
@@ -514,7 +519,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       if (relighting) {
         const key = [!!wet, wet?.airPockets, wet?.layered, wet?.atlas, !!env?.media].join('/');
         if (!relitSprites.has(key)) {
-          const shaders = pixelShaderSources(toolkit.PixelLook, {
+          const shaders = pixelSources({
             water: !!wet, airPockets: wet?.airPockets, layered: wet?.layered, atlas: wet?.atlas,
             environment: !!env?.media, relighting: true
           });
@@ -523,7 +528,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         sprites = relitSprites.get(key);
       } else sprites = wet ? (wet.sprites ??= resources.program(wet.sources.SPR_VS, wet.sources.SPR_FS)) :
         env?.media ? (spriteEnvProgram ??= resources.program(sources.SPR_VS,
-          pixelShaderSources(toolkit.PixelLook,{environment:true}).SPR_FS)) : spriteProgram;
+          pixelSources({environment:true}).SPR_FS)) : spriteProgram;
       gl.useProgram(sprites.p);
       sprites.set({
         u_anc: 14, u_sprTex: 12, u_dat: 0, u_depth: 2, u_idxTex: 9, u_pixTex: 10,
@@ -544,7 +549,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       return buffer.textures[1];
     }
 
-    function captureWater(world, frame, camera, width, height) {
+    function captureWater(world, frame, camera, width, height, trailStart) {
       const plan = waterReflectionPlan(world, frame, camera, width, height, toolkit.KIT?.reflection,maxSize);
       if (!plan?.captures.length) return null;
       reflectionTarget ??= target();
@@ -569,7 +574,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         source = selectReflectionWorld(source,capture.plane,time,toolkit);
         render(source,{...frame,instances,order:undefined,changedRows:undefined,water:false,reflections:false,
           raw:frame.raw??false,outline:false,dither:0,damp:false,edges:false,clean:false,tone:false},
-          plan.width,plan.height,reflectionTarget.framebuffer,capture.camera,capture.equation,undefined,true);
+          plan.width,plan.height,reflectionTarget.framebuffer,capture.camera,capture.equation,undefined,true,trailStart);
         gl.bindFramebuffer(gl.READ_FRAMEBUFFER,reflectionTarget.framebuffer);
         textureUnit(23,reflectionAtlas);
         gl.copyTexSubImage2D(gl.TEXTURE_2D,0,(capture.slot%2)*plan.width,
@@ -579,13 +584,13 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       return plan;
     }
 
-    function render(world, frame, width, height, output, cameraOverride, plane = zero, cover, reflectionCapture = false) {
+    function render(world, frame, width, height, output, cameraOverride, plane = zero, cover, reflectionCapture = false,
+      reflectedTrailStart = 0) {
       const source = world, histories = plane === zero ? mainTransparency : portalTransparency;
       const camera = cameraOverride ?? makeCamera(world, frame, width, height);
       if (world.shadowLod && frame.shadowArt !== false)
         world = toolkit.KIT?.shadowArt?.frame(world, camera.shadowFootprint) ?? world;
       const { raw = false, outline = true, dither = 0.35, scale = 1 } = frame;
-      const captures = captureWater(world,frame,camera,width,height);
       const look = world.look ?? {};
       const tolerance = transparencyAPI?.transparency(frame.stableTransparency ?? look.stableTransparency)?.depthTolerance ?? 0;
       const budget = raw ? null : detailAPI?.prepare(look.detailBudgets);
@@ -594,8 +599,13 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const constraintDefinition = frame.paletteConstraints ?? look.paletteConstraints;
       const wantsRelight = lighting && (frame.relighting ?? world.relighting);
       let group = frame.instances;
+      const afterimageDefinition = frame.afterimages ?? look.afterimages;
+      const trails = !reflectionCapture && !frame.order && afterimageDefinition !== undefined && afterimageDefinition !== false;
+      if (trails && !afterimagesAPI) throw new Error('Afterimages need the Ink Studio KIT');
+      const rules = trails ? afterimagesAPI.prepare(afterimageDefinition) : [];
+      const normalCaptures = rules.length ? null : captureWater(world, frame, camera, width, height, 0);
       // Per-pixel material, palette, and detail rules index the expanded world.
-      if (group && (frame[graphOwner] || frame.order || tolerance || wantsRelight || world.opticalSplats || instancePlan(group).hasOpticalSplats || !raw && (constraintDefinition || look.pixel && world.pix ||
+      if (group && (rules.length || frame[graphOwner] || frame.order || tolerance || wantsRelight || world.opticalSplats || instancePlan(group).hasOpticalSplats || !raw && (constraintDefinition || look.pixel && world.pix ||
           needsDetailFlags || budget?.fineOn || budget?.fineOff))) {
         expandInstances ??= createExpandedInstances();
         const expanded = expandInstances(world,group,frame.changedRows);
@@ -603,6 +613,21 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         frame = { ...frame, changedRows:expanded.changedRows };
         group = undefined;
       }
+      const trailHistory = frame.afterimageHistory ?? (plane === zero ? afterimageHistory : portalAfterimages);
+      let trailStart = reflectedTrailStart;
+      if (!reflectionCapture && (frame.resetAfterimages || !rules.length)) trailHistory?.clear();
+      if (rules.length) {
+        const time = frame.time ?? world.lookSnapshot?.time ?? 0;
+        const poseTime = frame.stepAnimation !== false && look.pixel ? Math.floor(time * 10) / 10 : time;
+        const rows = trailHistory.frame(world, time, rules, { source, layout: frame.instances, poseTime, bornAt: frame.bornAt,
+          withdrawal: frame.sampleWithdrawal ?? world.sampleWithdrawal ?? 0 });
+        if (rows.length) {
+          trailStart = world.count;
+          world = afterimagesAPI.append(world, rows);
+        }
+      }
+      const captures = rules.length ?
+        captureWater(world, { ...frame, instances: group }, camera, width, height, trailStart) : normalCaptures;
       const constraints = !raw && prepareConstraints(world, constraintDefinition, frame.lookMasks === false);
       const coverage = !raw && (frame.coverageAware ?? look.coverageAware) === true;
       const masked = Boolean(constraints?.masked);
@@ -701,7 +726,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       if ((paintView || lastPaintView) && (!paintView || !lastPaintView || !sameValues(paintView, lastPaintView)))
         historyValid = false;
       lastPaintView = paintView;
-      const paintOnPatterns = patterned && (paintActive || !!world.opticalSplats);
+      const paintOnPatterns = patterned && (paintActive || !!trailStart || !!world.opticalSplats);
       if (paintOnPatterns) {
         paintOverlay ??= target(2);
         paintOverlay.resize(width, height);
@@ -815,7 +840,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         u_sampleWithdrawal: sampleCoverage?.amount(frame.sampleWithdrawal ?? world.sampleWithdrawal ?? 0) ?? 0,
         u_born: [frame.bornAt ?? 0, growth.rate ?? 1, growth.fade ?? 0.5, growth.loop ?? 0],
         u_crisp: +!raw, u_dilate: raw ? 0.3 : 0.15, u_near: camera.clipNear,
-        u_paintMarker: paint?.marker ?? 0,
+        u_paintMarker: paint?.marker ?? 0, u_afterimageStart: trailStart,
         ...(opticalMaterials && { u_optical: opticalUnit }),
         ...(relighting && { u_relight: relightUnit }),
         u_fog: rgb(world.pal[fog.c ?? 0] ?? 0),
@@ -895,7 +920,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         const mode = (wet ? 1+Number(wet.airPockets)+2*Number(wet.layered)+4*Number(wet.atlas) : 0) +
           16*Number(masked) + 32*Number(layeredGlass) + 64*Number(styledPattern) + 128*Number(!!constraints) +
           256*Number(!!env?.media) + 512*Number(relitPattern);
-        if (!cache.has(mode)) cache.set(mode,program(pixelShaderSources(toolkit.PixelLook,{
+        if (!cache.has(mode)) cache.set(mode,program(pixelSources({
           water:!!wet,airPockets:wet?.airPockets,layered:wet?.layered,atlas:wet?.atlas,
           paletteConstraints:!!constraints && !coverage,masked,contributions:coverage,layeredGlass,materialStyles:styledPattern,
           environment:!!env?.media,relighting:relitPattern
