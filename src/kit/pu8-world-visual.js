@@ -94,7 +94,7 @@
     S.captureAlbedo = Array.isArray(looks.look?.renderStages) &&
       looks.look.renderStages.some(rule => rule.stage === 'material');
     const mid=min.map((n,i)=>(n+max[i])/2);
-    const fields=config.fields??{}, terrain=fields.bed, water=fields.water, wear=fields.wear;
+    const fields=config.fields??{}, terrain=fields.bed, water=fields.water, wear=fields.wear, sediment=fields.sediment;
     const ramps=new Map();
     function finishFor(base,profile) {
       if (!profile) return base;
@@ -113,6 +113,11 @@
     }
     const earth=looks.material({r:[7,8,9,10,11],materialId:'terrain',surface:config.terrainSurface,rf(x,y,z,ny) {
       if (ny<.4) return [19,20,21,22];
+      const changed=sediment&&query.probe(sediment,[x,y,z]);
+      if(changed?.status==='ok'){
+        if(changed.value>.025)return [20,21,22,23,24];
+        if(changed.value<-.01)return [7,8,9];
+      }
       const result=wear&&query.probe(wear,[x,y,z]);
       return result?.status==='ok'&&result.value>.18?[19,20,21,22,23]:null;
     }}, config.terrainLookAsset);
@@ -280,8 +285,9 @@
       for (let z=min[2]+resolution/2; z<max[2]; z+=resolution) for (let x=min[0]+resolution/2; x<max[0]; x+=resolution) {
         const read=query.probe(water,[x,0,z]);
         if (read.status!=='ok' || !read.value || read.value.depth < .018) continue;
-        const {surface,depth,velocity}=read.value, speed=Math.hypot(...velocity);
-        const glow=wobble(x,z), tint=depth>.58?14:depth>.23?15:16, color=tint+(glow<.28?1:0);
+        const {surface,depth,velocity,concentration=0}=read.value, speed=Math.hypot(...velocity);
+        const glow=wobble(x,z), tint=concentration>.14?21:concentration>.075?20:depth>.58?14:depth>.23?15:16;
+        const color=tint+(glow<.28?1:0);
         B.disc(x,surface+.013,z,[0,1,0],resolution*.66,resolution*.16,B.P[color],1);
         if (speed>.12 && glow<.063) B.disc(x,surface+.032,z,[0,1,0],resolution*.4,resolution*.14,B.P[18],1);
       }

@@ -678,7 +678,7 @@ reaches the feeder.
 | `control` | Typed arithmetic, thresholds, selection, binary logic, pulses, latches, timers and hysteresis. |
 | `store` | Bounded numeric, integer, or vector accounts with named resources and units. |
 | `exchange` | Enabled links that request a fixed amount per tick or a rate per second. |
-| `water` | Bounded XZ shallow water with live bed edits, fractional face openings, conservative pump transfer, sensors and probes for the bed, depth, current and volume. An `obstacle` field may supply signed solid clearance. |
+| `water` | Bounded XZ shallow water with live bed edits, fractional face openings, conservative pump transfer, and optional sediment transport, deposition and gate silting. An `obstacle` field may supply signed solid clearance. |
 | `mechanics` | Boxes, capsules and convex compounds with swept contact and shared clearance and support queries. Fixed and powered mounts, transmission ratios and stall reports, physical separation, configurable box fracture, wheel traction, buoyancy, thrust and sail forces. |
 | `deformables` | Checkpointed XPBD cloth and rope with scene attachments, terrain and solid contact, loads, tears, support queries and rain collection. |
 | `routed-links` | Socket-to-socket cables, hoses and belt loops with guide points, slack, tension, break limits, typed signals, torque transmission and conservative transfers. |
@@ -904,6 +904,54 @@ ink-studio sim run examples/world-material-fatigue.json --actions examples/world
 ink-studio probe fatigue.run.json --field rig/fatigue --args '{"body":"cycle-beam"}'
 ink-studio probe fatigue.run.json --field rig/fatigue --args '{"joint":"hinge"}'
 ink-studio sim render fatigue.run.json --colored --out fatigue-bench.png
+```
+
+## Live sediment transport
+
+Set `sediment` on a water system to track suspended solids and an erodible
+bed. All sediment quantities are solid-equivalent thicknesses or volumes.
+`erodibleDepth` sets the initial depth of loose bed material over bedrock.
+`erodible` overrides that depth in XZ regions. `initial` seeds suspended
+thickness in regions, and `sediment-feed` adds a timed pulse using `bounds`
+and `depth`.
+
+Suspended material moves with the same fluxes that move water across cell
+faces. Hydraulic substeps limit transfers to the source's available material.
+Internal pumps carry the source concentration. `drainFraction` controls
+how much of the drain's sampled sediment is exported, with zero retaining
+the solids. An external water account transfers filtered water.
+
+`capacity` scales the concentration the current can carry with its speed.
+`maxConcentration` caps that capacity. Water with room for more material
+can erode the loose bed. A physical `surface` can supply the erosion
+`threshold` and `rate`, with `sediment.erosion` as the fallback. A loaded
+cell deposits the excess at the `settling` rate per second. Dry cells settle
+their suspension directly. Bed changes preserve local water volume and
+affect the next hydraulic substep. Live height edits account for removed
+or added solids and establish a new local reference bed.
+
+Set a gate's `siltClearance` to the bed rise that closes a fully obstructed
+face. Deposits on either side narrow the opening in proportion to the rise
+above the reference bed. `gates` and `effective-opening.<gate>` report the
+most obstructed face. The existing `gate.<gate>` signal reports the command.
+`gate-silted` and `gate-cleared` record threshold crossings in world history.
+
+`sediment` reports the solid volume ledger, including bed material,
+suspension, cumulative erosion, deposition, face transport, pump transport,
+drain export, and balance error. Probe or export `suspended`, `concentration`,
+`bed-change`, and `erodible-depth` over the water grid. Mechanics, traversal
+and rendering can bind the same `bed` field. Bed changes publish bounded
+spatial updates so route consumers can reconsider a crossing. Set
+`visual.fields.sediment` to `bed-change` to color the changed terrain.
+The standard water preview colors suspended sediment by concentration.
+
+```sh
+ink-studio sim run examples/world-sediment-gate.json --ticks 65 --record sluice.run.json
+ink-studio probe sluice.run.json --field river/gates --args '{"gate":"sluice"}'
+ink-studio probe sluice.run.json --field river/sediment
+ink-studio sim run examples/world-sediment-ford.json --ticks 65 --record ford.run.json
+ink-studio trace ford.run.json nav/route --at 3.6,0.43,0.62 --args '{"to":[3.6,0.43,1.88],"radius":0.115,"maxWade":0.18,"maxSlope":2.6}'
+ink-studio sim render ford.run.json --colored --out ford.png
 ```
 
 ## Extend the runtime in JavaScript

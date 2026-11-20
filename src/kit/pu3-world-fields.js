@@ -179,6 +179,7 @@
       return ix>=0 && ix<width && iz>=0 && iz<height ? iz*width+ix : -1;
     };
     const point = i => [origin[0]+(i%width+.5)*dx,origin[1]+(Math.floor(i/width)+.5)*dz];
+    const sedimentModel=config.sediment===undefined?null:W.sediment.create(config.sediment,{width,height,cellArea,point});
     const bed = patchList(config.bed ?? [],2), seed = patchList(config.initial ?? [],2);
     check([config.base??0,config.rain??0,config.drain??0,config.friction??.13].every(Number.isFinite) &&
       [config.rain??0,config.drain??0,config.friction??.13].every(n=>n>=0) &&
@@ -186,7 +187,7 @@
     const gates=config.gates??{}, pumps=config.pumps??{}, sensors=config.sensors??{};
     check([gates,pumps,sensors].every(group => record(group) && Object.keys(group).length<=128 &&
       Object.keys(group).every(id)), 'Invalid water controls');
-    const inputs={}, outputs={volume:'number'}, byFace=new Map(), gateInit={}, pumpInit={};
+    const inputs={}, outputs={volume:'number'}, byFace=new Map(), gateInit={}, pumpInit={}, siltFaces=new Map();
     for (const [key,spec] of Object.entries(gates)) {
       check(record(spec) && [0,1,undefined].includes(spec.axis), 'Invalid gate axis');
       bounds(spec.bounds,2);
@@ -195,6 +196,12 @@
       inputs['gate.'+key] = {type:'number',default:value};
       gateInit[key]=value;
       outputs['gate.'+key]='number';
+      if(spec.siltClearance!==undefined){
+        check(sedimentModel&&Number.isFinite(spec.siltClearance)&&spec.siltClearance>0&&spec.siltClearance<=1e7,
+          'Gate silt clearance needs live sediment and a positive height');
+        siltFaces.set(key,[]);
+        outputs['effective-opening.'+key]='number';
+      }
     }
     for (const [key,spec] of Object.entries(pumps)) {
       check(record(spec) && vector(spec.from,2) && vector(spec.to,2) && Number.isFinite(spec.rate??0) && (spec.rate??0)>=0,
@@ -215,6 +222,23 @@
         (gates[key].axis===undefined||gates[key].axis===axis) && zone([x,z],gates[key].bounds)));
       return byFace.get(cache);
     }
+    if(siltFaces.size)for(let i=0;i<width*height;i++){
+      for(const [axis,next,valid] of [[0,i+1,i%width<width-1],[1,i+width,i+width<width*height]]){
+        if(!valid)continue;
+        const other=point(next), [fx,fz]=point(i).map((n,k)=>(n+other[k])*.5);
+        for(const key of matchFaces(fx,fz,axis,i))siltFaces.get(key)?.push([i,next]);
+      }
+    }
+    const siltRise=(sediment,a,b,y,z)=>Math.max(0,y-sediment.datum[a],z-sediment.datum[b]);
+    const siltFactor=(rise,key)=>Math.max(0,1-rise/gates[key].siltClearance);
+    function gateMetrics({sediment,fluid,gate}){
+      return Object.fromEntries([...siltFaces].map(([key,faces])=>{
+        const rise=faces.reduce((max,[a,b])=>Math.max(max,siltRise(sediment,a,b,fluid.bed[a],fluid.bed[b])),0);
+        const factor=siltFactor(rise,key);
+        return [key,{command:gate[key],effective:gate[key]*factor,silt:rise,clearance:gates[key].siltClearance,clogged:factor===0,
+          faces:faces.length}];
+      }));
+    }
     function makeSolver(withTerrain = false) {
       return P.motion.shallowWater({width,height,cell,origin,maxDepth,
         ...(withTerrain?{terrain:(x,z)=>regions(bed,[x,z],config.base??0),initial:(x,z)=>regions(seed,[x,z])}:{})});
@@ -233,8 +257,10 @@
     function sample(state,x,z,i=index(x,z)) {
       if (i<0) return null;
       const depth=state.fluid.depth[i], b=state.fluid.bed[i];
+      const suspended=state.sediment?.suspended[i];
       return {bed:b,depth,surface:b+depth,velocity:depth>1e-6?
-        [state.fluid.mx[i]/depth,state.fluid.mz[i]/depth]:[0,0]};
+        [state.fluid.mx[i]/depth,state.fluid.mz[i]/depth]:[0,0],
+        ...(suspended!==undefined&&{suspended,concentration:depth>1e-6?suspended/depth:0})};
     }
     function column({state,target,system}) {
       if (!target.point) return Q.missing('point required');
@@ -249,8 +275,8 @@
         if (!state) return Q.missing('water state is unavailable');
         const cell = index(...point);
         if (cell < 0) return Q.missing('outside water grid','outside');
-        const hit = sample(state,point[0],point[1],cell);
-        return {status:'ok',value:hit[key],...(explain && {source:{kind:'cell',cell:[cell%width,Math.floor(cell/width)]}})};
+        const value=typeof key==='function'?key(state,cell):sample(state,point[0],point[1],cell)[key];
+        return {status:'ok',value,...(explain && {source:{kind:'cell',cell:[cell%width,Math.floor(cell/width)]}})};
       });
     }
     const access = config.accounts ?? {}, accounts = {}, usedCells = new Set();
@@ -290,17 +316,26 @@
     const terrainQuery=config.obstacle, surface=config.surface;
     check(terrainQuery===undefined || typeof terrainQuery==='string','Invalid obstacle field');
     check(surface===undefined || typeof surface==='string','Invalid water material surface field');
+    const legacyErosion=surface!==undefined&&!sedimentModel;
     const dependencyBounds = {axes:'xz',min:origin,max:[origin[0]+width*dx,origin[1]+height*dz]};
     return {inputs,outputs,...(exchanging && {accounts}),
       dependencies:{reads:[{field:system+'/bed',bounds:dependencyBounds},
         ...[terrainQuery,surface].filter(Boolean).map(field=>({field,bounds:dependencyBounds}))],writes:[system+'/bed']},
       ...(surface!==undefined&&{checkFields:query=>W.materials.checkSurface(query,surface)}),
-      initial:() => ({fluid:makeSolver(true).checkpoint(),gate:gateInit,pump:pumpInit,terrain:[],manual:{},
-        ...(surface!==undefined&&{eroded:0}),
-        ...(exchanging && {exchange:{sent:0,received:0}})}),
+      initial() {
+        const fluid=makeSolver(true).checkpoint();
+        return {fluid,gate:gateInit,pump:pumpInit,terrain:[],manual:{},...(legacyErosion&&{eroded:0}),
+          ...(sedimentModel&&{sediment:sedimentModel.boot(fluid.bed),silted:Object.fromEntries([...siltFaces.keys()].map(key=>[key,false]))}),
+          ...(exchanging&&{exchange:{sent:0,received:0}})};
+      },
       validateState(state) {
         solver.restore(state.fluid);
-        if (surface!==undefined) check(Number.isFinite(state.eroded)&&state.eroded>=0,'Invalid eroded bed volume');
+        if (legacyErosion) check(Number.isFinite(state.eroded)&&state.eroded>=0,'Invalid eroded bed volume');
+        if(sedimentModel){
+          sedimentModel.validate(state.sediment,state.fluid.bed);
+          check(record(state.silted)&&Object.keys(state.silted).length===siltFaces.size&&
+            [...siltFaces.keys()].every(key=>typeof state.silted[key]==='boolean'),'Invalid saved gate silt state');
+        }
         if (exchanging) check(record(state.exchange) &&
           [state.exchange.sent,state.exchange.received].every(value=>Number.isFinite(value) && value>=0),
         'Invalid water transfer balance');
@@ -313,13 +348,28 @@
         if(type==='gate')check(own(gates,args.gate)&&Number.isFinite(args.opening)&&args.opening>=0&&args.opening<=1,'Invalid gate command');
         if(type==='pump')check(own(pumps,args.pump)&&Number.isFinite(args.rate)&&args.rate>=0&&args.rate<=1e9,'Invalid pump command');
         if(type==='release')check(own(inputs,args.port),'Unknown water control');
+        if(type==='sediment-feed'){
+          bounds(args.bounds,2);
+          check(Number.isFinite(args.depth)&&args.depth>0&&args.depth<=1e7,'Sediment feed needs a positive solid-equivalent depth');
+        }
       },
       fields:{
         water:{type:'record',units:'world',read:column},
         depth:channel('number','world','depth'),
         flow:channel('vec2','world/s','velocity'),
         bed:channel('number','world','bed'),
-        ...(surface!==undefined&&{eroded:{type:'number',units:'world^3',read:({state})=>Q.ok(state.eroded)}}),
+        ...((legacyErosion||sedimentModel)&&{eroded:{type:'number',units:'world^3',read:({state})=>Q.ok(state.sediment?.totals.eroded??state.eroded)}}),
+        ...(sedimentModel&&{
+          sediment:{type:'record',units:'world^3',read:({state})=>Q.ok(sedimentModel.report(state.sediment,state.fluid.bed))},
+          suspended:channel('number','world','suspended'),
+          concentration:channel('number','1','concentration'),
+          'bed-change':channel('number','world',(state,i)=>state.fluid.bed[i]-state.sediment.datum[i]),
+          'erodible-depth':channel('number','world',(state,i)=>state.fluid.bed[i]-state.sediment.bedrock[i])
+        }),
+        ...(siltFaces.size&&{gates:{type:'record',read:({state,args})=>{
+          const rows=gateMetrics(state);
+          return args.gate===undefined?Q.ok(rows):own(rows,args.gate)?Q.ok(rows[args.gate]):Q.missing('Unknown silt-sensitive gate','missing');
+        }}}),
         mass:{type:'record',units:'world^3',read:metric}
       },
       traces:{flow:{run:({state,target,args})=>{
@@ -348,15 +398,16 @@
           const cells = terrainCells(area), previous = state.fluid.bed;
           const changed = cells.filter(index=>previous[index]!==value);
           const scope = {...area,axes:'xz'};
-          let fluid = state.fluid;
+          let fluid = state.fluid, sediment=state.sediment;
           if (changed.length) {
             const bed = previous.slice();
             for (const index of changed) bed[index] = value;
+            if(sedimentModel)sediment=sedimentModel.edit(sediment,previous,bed,changed);
             fluid = {...fluid,bed};
             ctx.spatial?.write('bed',scope,'bed-edited');
           }
           ctx.spatial?.rebuilt('water-bed',{sampled:cells.length,changed:changed.length,total:width*height},scope);
-          return {...state,fluid,terrain:[...state.terrain,{bounds:area,value,applied:true}]};
+          return {...state,fluid,...(sediment&&{sediment}),terrain:[...state.terrain,{bounds:area,value,applied:true}]};
         },
         gate(state,{gate,opening},ctx) {
           ctx.emit('gate-set',{gate,opening});
@@ -366,6 +417,11 @@
           ctx.emit('pump-set',{pump,rate});
           return {...state,manual:{...state.manual,['pump.'+pump]:rate}};
         },
+        ...(sedimentModel&&{'sediment-feed'(state,{bounds:area,depth},ctx){
+          const cells=terrainCells(area), sediment=sedimentModel.feed(state.sediment,cells,depth);
+          ctx.emit('sediment-fed',{bounds:area,cells:cells.length,volume:sediment.totals.fed-state.sediment.totals.fed});
+          return {...state,sediment};
+        }}),
         release(state,{port}) {
           const manual={...state.manual};
           delete manual[port];
@@ -374,15 +430,24 @@
       },
       step(state,ctx) {
         solver.restore(state.fluid);
-        if (state.terrain.some(row=>!row.applied))
+        let sediment=state.sediment;
+        if (state.terrain.some(row=>!row.applied)){
           solver.setTerrain((x,z,i,old)=>regions(state.terrain,[x,z],old));
+          if(sedimentModel){
+            const bed=solver.checkpoint().bed, changed=bed.flatMap((y,i)=>y!==state.fluid.bed[i]?[i]:[]);
+            sediment=sedimentModel.edit(sediment,state.fluid.bed,bed,changed);
+          }
+        }
         const gate={}, pump={};
         for (const key of Object.keys(gates)) gate[key]=clamp(state.manual['gate.'+key]??ctx.input['gate.'+key],0,1);
         for (const key of Object.keys(pumps)) pump[key]=clamp(state.manual['pump.'+key]??ctx.input['pump.'+key],0,1e9);
         const obstruction=new Map();
         const opening=(x,z,axis,left,right,{bed,level:levels})=>{
           let value=1;
-          for (const key of matchFaces(x,z,axis,left)) value=Math.min(value,gate[key]);
+          for (const key of matchFaces(x,z,axis,left)){
+            const factor=siltFaces.has(key)?siltFactor(siltRise(sediment,left,right,bed[0],bed[1]),key):1;
+            value=Math.min(value,gate[key]*factor);
+          }
           if (terrainQuery) {
             const key=left*2+axis;
             if (!obstruction.has(key)) {
@@ -404,12 +469,14 @@
           return material[i];
         }
         const drain=material?(x,z)=>Math.min(1e4,(config.drain??0)+(atCell(index(x,z))?.permeability??0)):config.drain;
+        const transport=sedimentModel?.coupling(sediment,material?atCell:null);
         solver.step(ctx.dt,{rain:config.rain,drain,friction:config.friction,
           ...(Object.keys(gates).length||terrainQuery?{opening}:{}),
+          ...(transport&&{transport}),
           transfers:Object.entries(pumps).map(([key,spec])=>({from:index(...spec.from),to:index(...spec.to),rate:pump[key]}))});
         const fluid=solver.checkpoint();
         let eroded=0, minX=width,minZ=height,maxX=-1,maxZ=-1;
-        if (material) for (let i=0;i<material.length;i++) {
+        if (legacyErosion) for (let i=0;i<material.length;i++) {
           if (fluid.depth[i]<=1e-6) continue;
           const erosion=atCell(i)?.erosion;
           if (!erosion || erosion.rate===0) continue;
@@ -424,7 +491,19 @@
         }
         if (eroded>0) ctx.spatial?.write('bed',{axes:'xz',min:[origin[0]+minX*dx,origin[1]+minZ*dz],
           max:[origin[0]+(maxX+1)*dx,origin[1]+(maxZ+1)*dz]},'surface-erosion');
-        return {...state,gate,pump,fluid,terrain:[],...(material&&{eroded:state.eroded+eroded})};
+        const next={...state,gate,pump,fluid,terrain:[],...(legacyErosion&&{eroded:state.eroded+eroded})};
+        if(transport){
+          next.sediment=transport.checkpoint();
+          const dirty=transport.dirty();
+          if(dirty)ctx.spatial?.write('bed',{axes:'xz',min:[origin[0]+dirty.minX*dx,origin[1]+dirty.minZ*dz],
+            max:[origin[0]+(dirty.maxX+1)*dx,origin[1]+(dirty.maxZ+1)*dz]},'sediment-transport');
+          next.silted={};
+          for(const [key,result] of Object.entries(gateMetrics(next))){
+            next.silted[key]=result.clogged;
+            if(result.clogged!==state.silted[key])ctx.emit(result.clogged?'gate-silted':'gate-cleared',{gate:key,...result});
+          }
+        }
+        return next;
       },
       output(state) {
         const out={volume:metric({state}).value.volume};
@@ -434,6 +513,7 @@
           out['flow.'+key]=value.depth*Math.hypot(...value.velocity);
         }
         for (const [key,value] of Object.entries(state.gate)) out['gate.'+key]=value;
+        for(const [key,row] of Object.entries(gateMetrics(state)))out['effective-opening.'+key]=row.effective;
         for (const [key,value] of Object.entries(state.pump)) out['pump.'+key]=value;
         return out;
       }

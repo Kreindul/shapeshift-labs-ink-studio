@@ -69,22 +69,23 @@
       });
       bed=changed;
     }
-    function step(duration,{rain,drain,friction=0.13,opening,transfers=[]}={}){
+    function step(duration,{rain,drain,friction=0.13,opening,transfers=[],transport}={}){
 
       if(!number(duration,0,120)||!number(friction,0,1e6)||
         (opening!==undefined&&typeof opening!=='function')||!Array.isArray(transfers)||transfers.length>4096||
+        (transport!==undefined&&!['begin','face','advect','drain','pump','settle'].every(key=>typeof transport?.[key]==='function'))||
         transfers.some(p=>!p||!integer(p.from,0,size-1)||!integer(p.to,0,size-1)||p.from===p.to||
           !open[p.from]||!open[p.to]||!number(p.rate,0,1e9))||
         [rain,drain].some(v=>v!==undefined&&typeof v!=='function'&&!number(v,0,1e4)))
         throw new Error('Water steps need bounded time, friction and nonnegative source rates');
       if(!duration)return snapshot();
       const depth=layer.depth.slice(),mx=layer.x.slice(),mz=layer.z.slice(),
-        dh=new Float64Array(size),du=new Float64Array(size),dv=new Float64Array(size);
+        dh=new Float64Array(size),du=new Float64Array(size),dv=new Float64Array(size),heightmap=transport?bed.slice():bed;
       let elapsed=0,substeps=0,totalRain=0,totalDrain=0,totalMoved=0;
       function faceFlux(left,right,axis,fraction){
         if(!fraction||left<0&&right<0)return;
         const li=left<0?right:left,ri=right<0?left:right,
-          a=depth[li],b=depth[ri],az=bed[li],bz=bed[ri],
+          a=depth[li],b=depth[ri],az=heightmap[li],bz=heightmap[ri],
           surface=Math.max(az,bz),al=Math.max(0,a+az-surface),br=Math.max(0,b+bz-surface);
         if(a<=0&&b<=0)return;
         let ax=a>dry?mx[li]/a:0,ay=a>dry?mz[li]/a:0,bx=b>dry?mx[ri]/b:0,by=b>dry?mz[ri]/b:0;
@@ -98,6 +99,7 @@
           fluxV=0.5*(alU*av+brU*bv-speed*(brV-alV)),
           correctedL=fluxU+g0*(a*a-al*al),correctedR=fluxU+g0*(b*b-br*br),
           measure=fraction/(axis===0?dx:dz);
+        if(transport&&left>=0&&right>=0&&fluxH)transport.face(left,right,measure*fluxH);
         if(left>=0){
           dh[left]-=measure*fluxH;
           du[left]-=measure*(axis===0?correctedL:fluxV);
@@ -112,7 +114,8 @@
       function interfaceFlux(left,right,axis){
         if(!opening||left<0||right<0){faceFlux(left,right,axis,1);return;}
         const [x,z]=center(left).map((v,i)=>(v+center(right)[i])*.5);
-        const fraction=opening(x,z,axis,left,right,{time:time+elapsed,bed:[bed[left],bed[right]],level:[bed[left]+depth[left],bed[right]+depth[right]]});
+        const a=heightmap[left], b=heightmap[right];
+        const fraction=opening(x,z,axis,left,right,{time:time+elapsed,bed:[a,b],level:[a+depth[left],b+depth[right]]});
         if(!number(fraction,0,1))throw new Error('Water face opening must be in [0, 1]');
         faceFlux(left,right,axis,fraction);
         if(fraction<1){
@@ -131,6 +134,7 @@
         }
         const speed=waveX/dx+waveZ/dz,dt=Math.min(duration-elapsed,maxDt,speed?cfl/speed:Infinity);
         dh.fill(0);du.fill(0);dv.fill(0);
+        transport?.begin(dt);
         for(let z=0;z<height;z++)for(let x=0;x<=width;x++){
           const j=z*width+x,left=x>0&&open[j-1]?j-1:-1,right=x<width&&open[j]?j:-1;
           interfaceFlux(left,right,0);
@@ -139,6 +143,7 @@
           const j=z*width+x,left=z>0&&open[j-width]?j-width:-1,right=z<height&&open[j]?j:-1;
           interfaceFlux(left,right,1);
         }
+        transport?.advect(depth);
         const t=time+elapsed,drag=Math.exp(-friction*dt);
         for(let i=0;i<size;i++){
           if(!open[i])continue;
@@ -148,12 +153,13 @@
             u=(mx[i]+dt*du[i])*drag,v=(mz[i]+dt*dv[i])*drag;
           let inFlow=0,outFlow=0;
           if(rain||drain){
-            const p=center(i),state={depth:d,level:bed[i]+d,bed:bed[i]},
+            const p=center(i),state={depth:d,level:heightmap[i]+d,bed:heightmap[i]},
               r=typeof rain==='function'?rain(...p,t,state):rain??0,
               s=typeof drain==='function'?drain(...p,t,state):drain??0;
             if(!number(r,0,1e4)||!number(s,0,1e4))throw new Error('Water source and drainage rates must be finite');
             inFlow=r*dt;
             outFlow=Math.min(d+inFlow,s*dt);
+            if(outFlow)transport?.drain(i,outFlow,d+inFlow);
           }
           const next=d+inFlow-outFlow,retain=next<=dry||d<=dry?0:Math.min(1,next/d),
             magnitude=retain*Math.hypot(u,v);
@@ -168,14 +174,17 @@
         for(const {from,to,rate} of transfers){
           const take=Math.min(depth[from],maxDepth-depth[to],rate*dt/cellArea);
           if(!take)continue;
+          transport?.pump(from,to,take,depth[from]);
           const remaining=(depth[from]-take)/depth[from];
           depth[from]-=take;depth[to]+=take;
           mx[from]*=remaining;mz[from]*=remaining;
           totalMoved+=take*cellArea;
         }
+        transport?.settle(heightmap,depth,mx,mz,dt,dry);
         elapsed+=dt;substeps++;
       }
       layer={depth,x:mx,z:mz};
+      bed=heightmap;
       time+=duration;added+=totalRain;drained+=totalDrain;moved+=totalMoved;
       return snapshot(substeps);
     }
