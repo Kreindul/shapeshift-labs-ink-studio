@@ -314,9 +314,11 @@
     }
     const surfaceEffects = (hasSurface || config.surfaceEffects || looks.look?.paletteConstraints || looks.look?.renderStages) &&
       { ...config.surfaceEffects, query };
+    const airborne=config.air&&W.ventilation.render(query,config.air);
     const baked=B.finish({lookSnapshot: { time: view.time ?? view.tick * view.world.dt, tick: view.tick, query }, cam:config.camera??{target:[mid[0],.05,mid[2]],dist:span*1.48,yaw:.62,pitch:.8},
       radius:span,detail:30,dither:.22,look:looks.look,paletteRoles:config.paletteRoles,
       ...(waterScene && { water: waterScene }), ...(config.atmosphere && { atmosphere: config.atmosphere }),
+      ...(airborne?.length&&{shapedAtmosphere:airborne}),
       ...(config.atmosphereEmitters && { atmosphereEmitters:config.atmosphereEmitters }),
       ...(config.volumeLighting !== undefined && {volumeLighting:config.volumeLighting}),
       ...(config.volumeQuality !== undefined && {volumeQuality:config.volumeQuality}),

@@ -1132,6 +1132,57 @@ ink-studio trace thawing-ford.run.json nav/route --at 1.7,0.66,-1.25 --args '{"t
 ink-studio sim replay thawing-ford.run.json
 ```
 
+## Ventilation and airborne transport
+
+The `ventilation` system moves air through a graph of well-mixed rooms.
+Each `rooms` entry has disjoint XYZ `bounds`, an optional
+`temperature` in degrees Celsius, and initial `concentrations`.
+The bounds set the room volume and where spatial queries read its air.
+`exterior` adds named reservoirs with fixed temperature and concentration.
+The default `outside` reservoir starts with zero smoke and dust,
+20 °C air, and 0.008 kilograms of water vapor per cubic world unit.
+
+| Setting | Meaning |
+| --- | --- |
+| `openings` | Each entry names `from` and `to` endpoints. `conductance` sets the flow response to a room pressure difference. `opening` scales conductance and mixing from zero to one. `mixing` sets equal air exchange in both directions, even at zero net flow. |
+| `fan` | A signed air drive in cubic world units per second. Positive values drive from `from` to `to`. The pressure solution balances intake and exhaust in every room, so actual flow depends on the connected return path. |
+| `wind` | On an opening, set a sample point `at`, a forward `direction` and optional effective `area`. Local wind projected on that direction contributes to the drive. Set the system's `windField` to a numeric XYZ or XZ vector field in `world/s`, or drive the `wind` XYZ input. |
+| `gate` | Optionally bind an opening to a numeric clearance `field` and up to eight XYZ `points`. Opening is effective when each sample exceeds `radius` (default zero). A live wall cut or moving door can change these samples. |
+| `tracers` | Add named airborne loads such as dust. Each tracer defines amount `units` and an optional first-order `decay` for settling or removal per second. Reads are amount per cubic world unit. `smoke` and `humidity` are built in. |
+| `sources` | Add stock to a `room` with named `rates` per second. Heating uses `rates.heat` in joules per second and the system's volumetric `heatCapacity`. |
+
+Typed controls expose `opening.<id>`, `fan.<id>`, and
+`source.<id>` (zero to one). Outputs include `flow.<id>`,
+`effective-opening.<id>`, and room temperature, humidity, smoke,
+pressure, and quality. A change between an open and closed passage emits
+`air-opening-opened` or `air-opening-closed`.
+
+Room queries expose `temperature`, `humidity`, `smoke`, every custom
+tracer, and `air-quality`. `quality` assigns concentration weights to
+tracers. The score is `1 / (1 + weighted concentration)`. Use these
+fields in ordinary habitat rules or bind the room temperature field
+to thermal water's `ambientField`. Probe `rooms` or `openings` by
+name. `budget` shows current amount, emissions, imports, exports,
+removal, and balance error for each load, including heat in joules.
+`trace <system>/airflow` follows the net flow direction through openings.
+
+For the splat view, set `visual.air` to an object with the `rooms`
+field, optional `tracer` (defaults to smoke), `scale`, `color`,
+and ray-march `step`. The bounded atmosphere reads the current room
+concentration. In the [ventilated shelter](../examples/world-ventilated-shelter.json),
+a stove adds smoke, heat, humidity and dust. The moving door opens the
+intake path so wind and an extractor can clear the room. The scout
+enters once its habitat rule accepts the measured air quality.
+
+```sh
+ink-studio sim run examples/world-ventilated-shelter.json --ticks 120 --record shelter.run.json
+ink-studio probe shelter.run.json --field air/rooms --args '{"room":"shelter"}'
+ink-studio probe shelter.run.json --field home/suitability --at -1.33,0.15,0.17 --args '{"species":"helper"}'
+ink-studio trace shelter.run.json air/airflow --args '{"from":"yard","to":"outside"}'
+ink-studio probe shelter.run.json --field air/budget
+ink-studio sim replay shelter.run.json
+```
+
 ## Extend the runtime in JavaScript
 
 ```js

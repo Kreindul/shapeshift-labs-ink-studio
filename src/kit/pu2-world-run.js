@@ -60,10 +60,11 @@
     const visualPipes=world.visual?.fields?.pipes;
     const visualIce=world.visual?.fields?.ice;
     if (consumers.length || world.visual?.fields?.surface!==undefined || visualFabric!==undefined ||
-        visualLinks!==undefined || visualPipes!==undefined || visualIce!==undefined) {
+        visualLinks!==undefined || visualPipes!==undefined || visualIce!==undefined || world.visual?.air!==undefined) {
       const query = Q.create({world},systems);
       for (const system of consumers) system.checkFields(query);
       W.materials.checkSurface(query,world.visual?.fields?.surface);
+      if(world.visual?.air!==undefined)W.ventilation.checkVisual(query,world.visual.air);
       if(visualFabric!==undefined)check((Array.isArray(visualFabric)?visualFabric:[visualFabric]).every(field=>
         typeof field==='string'&&query.field(field)?.role==='deformable-surfaces'), 'Invalid visual deformable surface field');
       if(visualLinks!==undefined)check((Array.isArray(visualLinks)?visualLinks:[visualLinks]).every(field=>
