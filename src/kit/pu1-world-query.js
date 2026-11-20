@@ -193,6 +193,15 @@
     }
     add(fields,'world',{
       entity:{type:'record',read:({target:site}) => own(world.entities,site.entity) ? ok(world.entities[site.entity]) : missing('unknown entity','missing')},
+      ...(world.simulationChunks&&{chunks:{type:'record',selector:true,read({target:site,args}){
+        const snapshot=view.simulationChunks;
+        if(!snapshot)return missing('simulation chunks are unavailable');
+        if(args.system!==undefined)return own(snapshot.clocks,args.system)?ok(snapshot.clocks[args.system]):
+          missing('unknown chunk solver','missing');
+        const name=args.chunk??site?.entity;
+        if(name!==undefined)return own(snapshot.entries,name)?ok(snapshot.entries[name]):missing('unknown simulation chunk','missing');
+        return ok(snapshot);
+      }}}),
       position:{type:'vec3',units:'world',read:({target:site}) => site.point ? ok(site.point) : missing('point or entity required')},
       history:{type:'records',read:({args}) => {
         const {after=-1e15,before=tick,entity,where,limit=history.length}=args;
@@ -323,7 +332,8 @@
         ...(accounts.length && {accounts}),systems:sorted(systems).map(id => ({
         id,...world.systems[id],inputs:systems[id].inputs ?? {},outputs:systems[id].outputs ?? {},
         actions:sorted(systems[id].actions ?? {})
-      })),actions:['world/input','world/patch','world/event',...(accounts.length ? ['world/transfer'] : [])]};
+      })),actions:['world/input','world/patch','world/event',...(accounts.length ? ['world/transfer'] : []),
+        ...(world.simulationChunks?W.simulationChunks.actions.map(name=>'world/'+name):[])]};
     }
     function spatial({point,radius,where} = {}) {
       check(vector(point) && Number.isFinite(radius) && radius >= 0, 'Expected a finite spatial query');
@@ -379,6 +389,7 @@
         ...(grid ? {grid} : {}),samples:points.map(point => ({point,...api.probe(field,point,args)}))};
     }
     const api = Object.freeze({inspect,spatial,target,frame:fieldFrame,field,sampler,
+      simulationClock:name=>view.simulationChunks?.clocks[name],
       renderVolume:name=>own(systems,name)?systems[name].volumeFrame?.(states[name]):null,
       renderWater:name=>own(systems,name)?systems[name].waterFrame?.(states[name]):null,
       select:selector=>look().select(selector),

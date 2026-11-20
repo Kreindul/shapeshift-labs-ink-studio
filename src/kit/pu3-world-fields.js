@@ -339,6 +339,11 @@
     const dependencyBounds = {axes:'xz',min:origin,max:[origin[0]+width*dx,origin[1]+height*dz]};
     const phaseFields=['temperature','ice','vapor','humidity','phase','phase-state','water','depth','flow','surface-height'];
     return {inputs,outputs,...(exchanging && {accounts}),
+      checkSimulationLOD(tuning,{every,dt}){
+        const {cfl=.42,maxDt=.055}=tuning;
+        check(Object.keys(tuning).every(key=>key==='cfl'||key==='maxDt')&&Number.isFinite(cfl)&&cfl>=.05&&cfl<=.49&&
+          Number.isFinite(maxDt)&&maxDt>=1e-6&&maxDt<=2&&every*dt<=120,'Invalid water simulation detail tuning or cadence');
+      },
       dependencies:{reads:[{field:system+'/bed',bounds:dependencyBounds},
         ...[terrainQuery,surface,thermalModel?.ambientField].filter(Boolean).map(field=>({field,bounds:dependencyBounds}))],
         writes:[system+'/bed',...(thermalModel?phaseFields.map(key=>system+'/'+key):[])]},
@@ -541,7 +546,7 @@
           ['begin','face','advect','drain','pump','settle'].map(key=>[key,(...args)=>{
             solidTransport[key](...args);heatTransport[key](...args);
           }]))}:solidTransport??heatTransport;
-        solver.step(ctx.dt,{rain:config.rain,drain,friction:config.friction,
+        solver.step(ctx.dt,{rain:config.rain,drain,friction:config.friction,...ctx.simulationLOD?.tuning,
           ...(Object.keys(gates).length||terrainQuery?{opening}:{}),
           ...(transport&&{transport}),...(heatTransport&&{bedOffset:state.thermal.ice}),
           transfers:Object.entries(pumps).map(([key,spec])=>({from:index(...spec.from),to:index(...spec.to),rate:pump[key]}))});

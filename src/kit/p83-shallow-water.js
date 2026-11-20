@@ -69,9 +69,10 @@
       });
       bed=changed;
     }
-    function step(duration,{rain,drain,friction=0.13,opening,transfers=[],transport,bedOffset}={}){
+    function step(duration,{rain,drain,friction=0.13,opening,transfers=[],transport,bedOffset,
+      cfl:stepCFL=cfl,maxDt:stepLimit=maxDt}={}){
 
-      if(!number(duration,0,120)||!number(friction,0,1e6)||
+      if(!number(duration,0,120)||!number(friction,0,1e6)||!number(stepCFL,.05,.49)||!number(stepLimit,1e-6,2)||
         (opening!==undefined&&typeof opening!=='function')||!Array.isArray(transfers)||transfers.length>4096||
         (transport!==undefined&&!['begin','face','advect','drain','pump','settle'].every(key=>typeof transport?.[key]==='function'))||
         (bedOffset!==undefined&&(!Array.isArray(bedOffset)||bedOffset.length!==size||!bedOffset.every(v=>number(v,0,1e7))))||
@@ -135,7 +136,7 @@
           waveX=Math.max(waveX,wave+(d>dry?Math.abs(mx[i]/d):0));
           waveZ=Math.max(waveZ,wave+(d>dry?Math.abs(mz[i]/d):0));
         }
-        const speed=waveX/dx+waveZ/dz,dt=Math.min(duration-elapsed,maxDt,speed?cfl/speed:Infinity);
+        const speed=waveX/dx+waveZ/dz,dt=Math.min(duration-elapsed,stepLimit,speed?stepCFL/speed:Infinity);
         dh.fill(0);du.fill(0);dv.fill(0);
         transport?.begin(dt);
         for(let z=0;z<height;z++)for(let x=0;x<=width;x++){

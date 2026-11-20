@@ -199,7 +199,10 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
   function summary(run, checks) {
     const checkpoint = run.checkpoint(), {world,tick} = checkpoint;
     const rates = run.rates?.();
+    const chunkLevels=checkpoint.simulationChunks&&Object.fromEntries(Object.values(checkpoint.simulationChunks.entries)
+      .map(({id,level})=>[id,level]));
     return {id:world.id,seed:world.seed,dt:world.dt,tick,time:tick*world.dt,...(rates && {rates}),
+      ...(chunkLevels&&{chunkLevels}),
       systems:Object.keys(checkpoint.states),commands:run.commandCounts(),events:checkpoint.history.length,historyDropped:checkpoint.dropped,
       scenario:run.scenario,...(checks?{checks}:{}),...(opt.profile?{profile:run.profile()}:{})};
   }

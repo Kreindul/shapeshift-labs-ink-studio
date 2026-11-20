@@ -162,8 +162,8 @@
       return {from,to,id:row.key,amount:Math.abs(amount)};
     }
     function requestTransfers(state,ctx){
-      if(ctx.tick%every)return [];
-      const dt=ctx.dt*every, control=controls(ctx);
+      if(!ctx.simulationLOD&&ctx.tick%every)return [];
+      const dt=ctx.simulationLOD?ctx.dt:ctx.dt*every, control=controls(ctx);
       const mixed=F.air(layout,state.water,state.gas,control.opening,control.vent);
       const outgoing=new Map(), active=[], combined=rooms.map(()=>0);
       for(const row of boundaries){
@@ -298,7 +298,7 @@
         boundaries:names(boundaries,'boundary',(state,row,i,query)=>{
           const receipt=query.probe('world/transfers').value.receipts.find(r=>r.requester===system&&r.requestId===row.key);
           return {id:row.key,chamber:rooms[row.room].key,account:row.account,head:outsideHead(row,query),receipt:receipt??null,
-            flow:receipt?receipt.applied*(receipt.to===row.local?1:-1)/(world.dt*every):0};
+            flow:receipt?receipt.applied*(receipt.to===row.local?1:-1)/(world.dt*(query.simulationClock(system)?.lastStepTicks||every)):0};
         }),
         mass:{type:'record',units,read:({state})=>Q.ok(mass(state))},
         medium:{type:'record',read:ctx=>pointReads(ctx,(state,i,at)=>Q.ok(medium(state,i,at)))},

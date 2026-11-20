@@ -239,10 +239,10 @@
     },...(transfers.length>0&&{
       checkTransfers(validate){for(const key of transfers)validate(request(specs[key].carry,key,world.dt*every),true);},
       requestTransfers(state,ctx){
-        if(ctx.tick%every)return [];
+        if(!ctx.simulationLOD&&ctx.tick%every)return [];
         return transfers.flatMap(key=>{
           if(!assess(ctx.query,state[key],specs[key],ctx.input['enable.'+key]).active)return [];
-          const order=request(specs[key].carry,key,ctx.dt*every);
+          const order=request(specs[key].carry,key,ctx.simulationLOD?ctx.dt:ctx.dt*every);
           return (Array.isArray(order.amount)?order.amount.some(Boolean):order.amount!==0)?[order]:[];
         });
       }

@@ -101,7 +101,8 @@
     })));
     const transfers = W.transfers.bind(systems);
     for (const name of transfers.producers) systems[name].checkTransfers?.(transfers.validate);
-    const schedule = W.rates.schedules(world,systems);
+    const chunks=W.simulationChunks.compile(world,systems);
+    const schedule = W.rates.schedules(world,systems,chunks);
     const incoming = new Map(), edges = new Map(), indegree = new Map();
     for (const name of ordered(systems)) {
       edges.set(name,[]);
@@ -136,7 +137,7 @@
     check(order.length === names.length, 'Instantaneous signal cycle; use a delay or a stateful system');
     const causePolicy = W.causality.policy(world.causality);
     const rates = schedule.active ? W.rates.bind(schedule,systems,ports,incoming,order) : null;
-    return {world,systems,ports,incoming,order,names,transfers,dependencies,rates,causePolicy};
+    return {world,systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,causePolicy};
   }
   function actionCheck(raw, plan, min = 1) {
     check(record(raw) && tickOK(raw.tick) && raw.tick >= min && record(raw.args ?? {}) &&
@@ -144,7 +145,7 @@
     const [system,key] = endpoint(raw.action);
     let args = raw.args ?? {};
     if (system === 'world') {
-      check(worldActions.includes(key), 'Unknown world action ' + key);
+      check(worldActions.includes(key)||plan.chunks?.actions.includes(key), 'Unknown world action ' + key);
       if (key === 'input') {
         args={...args,port:portOf(plan.world,args.port)};
         check(!plan.incoming.has(args.port), 'A connected input is driven by its source: ' + args.port);
@@ -154,7 +155,8 @@
           record(edit)&&['set','remove','merge','test'].includes(edit.op)&&(edit.op==='remove'||own(edit,'value'))&&
           ['entities','metadata'].includes(W.data.selector(edit.path)[0])),
         'Live patches may change entities and metadata');
-      } else if (key === 'transfer') plan.transfers.validate(args);
+      } else if(plan.chunks?.actions.includes(key))plan.chunks.checkAction(key,args);
+      else if (key === 'transfer') plan.transfers.validate(args);
       else check(id(args.kind), 'An event needs a kind');
     } else {
       check(own(plan.systems[system]?.actions,key), 'Unknown action ' + raw.action);
@@ -170,7 +172,7 @@
       (scenario.until === undefined || tickOK(scenario.until)), 'Invalid scenario specification');
     for (const name of scenario.allow ?? []) {
       const [system,action] = endpoint(name);
-      check(system === 'world' ? worldActions.includes(action) : own(plan.systems[system]?.actions,action),
+      check(system === 'world' ? worldActions.includes(action)||plan.chunks?.actions.includes(action) : own(plan.systems[system]?.actions,action),
         'Unknown allowed action ' + name);
     }
     const ids = new Set();
@@ -226,9 +228,10 @@
       world=result.world;
     }
     const {plan, weather = weatherProgram(world)}=result;
-    const {systems,ports,incoming,order,names,transfers,dependencies,rates,causePolicy} = plan;
+    const {systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,causePolicy} = plan;
     const projection = Q.projection(systems);
-    const slowReaders = new Map(rates ? dependencies.describe.filter(({id,reads})=>reads.length&&rates.rates[id].every>1)
+    const slowReaders = new Map(rates ? dependencies.describe.filter(({id,reads})=>reads.length&&
+      (rates.rates[id].every>1||chunks?.managed.get(id)?.schedules))
       .map(({id})=>[id,rates.rates[id].every]) : []);
     const rootInputs = Object.fromEntries(Object.entries(ports.inputs).map(([name,port]) => [name,port.default]));
     const rootOutputs = Object.fromEntries(Object.entries(ports.outputs).map(([name,port]) => [name,port.default]));
@@ -241,21 +244,28 @@
     let tick = 0, states = {}, outputs = rootOutputs, manual = rootInputs, delays = rootDelays,
       history = [], dropped = 0, lastEvents = [], scenario = {status:'running',score:0,matched:{},metrics:{}};
     let pendingWrites = [], lastDependencies = null, sampling = rates?.initial, spatialSampling = {};
-    let causalState, weatherTrackState;
+    let causalState, weatherTrackState, chunkState;
     let currentQuery, lastTransfers = [], lastSignals = {...rootInputs,...rootOutputs};
 
-    function view(worldValue = world, statesValue = states, signals = lastSignals, tickValue = tick, receipts = lastTransfers, causes = causalState) {
+    function view(worldValue = world, statesValue = states, signals = lastSignals, tickValue = tick, receipts = lastTransfers,
+      causes = causalState, chunkView = chunkState) {
       return Object.freeze({world:worldValue,states:statesValue,signals,tick:tickValue,time:tickValue*worldValue.dt,history,dropped,
         ...(receipts.length && {transfers:receipts}),...(causes && {causality:causes}),
+        ...(chunkView&&{simulationChunks:chunkView}),
         ...(weatherTrackState && {weatherTrackState})});
     }
     function context(name, worldValue, statesValue, at, input, emit, query, spatial, timing, causal) {
       const baseDt = worldValue.dt, substeps = timing?.substeps ?? 1;
       const time = timing && timing.end !== 1 ? (at-1+timing.end)*baseDt : at*baseDt;
-      const dt = timing ? baseDt*timing.every/substeps : baseDt;
+      const detail=timing?.detail;
+      const dt = detail?baseDt*((timing.substep===1?detail.elapsed-1:0)+1/substeps):
+        timing ? baseDt*timing.every/substeps : baseDt;
+      const lod=detail&&Object.freeze({chunk:detail.chunk,level:detail.level,tuning:detail.tuning,
+        activeTicks:detail.activeTicks,time:baseDt*(detail.activeTicks-1+timing.substep/substeps)});
       const randomTick = substeps>1 ? at+'.'+timing.substep : at;
       return Object.freeze({world:worldValue,query,id:name,states:statesValue,tick:at,time,dt,input,emit,
-        ...(timing && {baseDt,every:timing.every,substep:timing.substep,substeps}),...(spatial && {spatial}),...(causal && {causal}),
+        ...(timing && {baseDt,every:timing.every,substep:timing.substep,substeps}),...(lod&&{simulationLOD:lod}),
+        ...(spatial && {spatial}),...(causal && {causal}),
         random:key => P.data.hash(name+'/'+randomTick+'/'+String(key),worldValue.seed)/4294967296});
     }
     function rootedState(value) {
@@ -309,6 +319,7 @@
         ...(lastTransfers.length && {transfers:lastTransfers}),
         ...(weatherTrackState && {weatherTrackState}),
         ...(pendingWrites.length && {dependencyWrites:pendingWrites}),...(rates && {sampling}),
+        ...(chunkState&&{simulationChunks:chunkState}),
         ...(Object.keys(spatialSampling).length && {spatialSampling}),...(causalState && {causality:causalState})});
     }
     function restore(saved) {
@@ -327,8 +338,10 @@
         check(Array.isArray(payload.delays[name]) && payload.delays[name].length === rootDelays[name].length,'Invalid delay buffer ' + name);
         for (const value of payload.delays[name]) portValue(ports.inputs[name],value,name);
       }
+      if(chunks){chunks.validate(payload.simulationChunks,payload.tick);chunkState=payload.simulationChunks;}
+      else check(!own(payload,'simulationChunks'),'Unexpected simulation chunk checkpoint data');
       if (rates) {
-        rates.validate(payload.sampling,portValue,payload.tick);
+        rates.validate(payload.sampling,portValue,payload.tick,chunkState);
         sampling = payload.sampling;
       }
       for (const name of names) systems[name].validateState?.(payload.states[name]);
@@ -343,7 +356,8 @@
       if (own(payload,'spatialSampling')) {
         check(record(payload.spatialSampling),'Malformed spatial sampling buffers');
         for (const [name,notices] of Object.entries(payload.spatialSampling)) {
-          check(slowReaders.has(name) && payload.tick%slowReaders.get(name) && Array.isArray(notices) &&
+          const waiting=chunks?.managed.has(name)?chunkState.clocks[name].lastTick!==payload.tick:payload.tick%slowReaders.get(name);
+          check(slowReaders.has(name) && waiting && Array.isArray(notices) &&
             dependencies.begin(notices).affected(name).length===notices.length,'Invalid saved spatial notices for '+name);
         }
         spatialSampling = payload.spatialSampling;
@@ -371,6 +385,10 @@
         states=freeze(settled);
       }
       transfers.validateBalances(states);
+      if(chunks){
+        let focusQuery;
+        chunkState=chunks.select(chunks.blank(),at=>(focusQuery??=Q.create(view(),systems,projection)).target(at),0).state;
+      }
       const startQuery = Q.create(view(),systems,projection);
       const initialOutputs = {};
       for (const name of names) readOutputs(name,states[name],context(name,world,states,0,{},() => {},startQuery),initialOutputs);
@@ -420,6 +438,8 @@
       check(tickOK(at),'Tick budget exceeded');
       let nextWorld = world, changedEntities = new Set();
       const drafts = {...states}, nextManual = {...manual}, requests = [];
+      let nextChunkState=chunkState;
+      const commanded=chunks&&new Set();
       let trace = pendingWrites.length ? dependencies.begin(pendingWrites) : null;
       const nextWrites = [], activeTrace = () => trace ??= dependencies.begin();
       function spatial(name, stepping) {
@@ -450,6 +470,7 @@
         if (name === 'world') {
           if (key === 'input') {
             const {port,value} = item.args, descriptor = ports.inputs[port];
+            if(commanded)commanded.add(endpoint(port)[0]);
             const next = portValue(descriptor,value,port);
             if (causal && (!rates || descriptor.type!=='event' || next.length))
               causal.manual(port,root,rates && descriptor.type==='event' && nextManual[port].length>0);
@@ -472,8 +493,13 @@
             const {kind,...detail} = item.args;
             emit(kind,detail);
           }
-          if (key === 'transfer') requests.push({name,request:item.args,root});
+          if (key === 'transfer') {
+            requests.push({name,request:item.args,root});
+            if(commanded)for(const port of [item.args.from,item.args.to])commanded.add(endpoint(port)[0]);
+          }
+          if(chunks?.actions.includes(key))nextChunkState=chunks.action(nextChunkState,key,item.args,at);
         } else {
+          commanded?.add(name);
           const actionQuery = Q.create(view(nextWorld,{...drafts}),systems,projection);
           const scope=causal?.scope(name,{}, {},actionQuery,{root,queryTick:tick,queryTime:tick*nextWorld.dt});
           causal?.action(name,root);
@@ -483,12 +509,25 @@
         }
       }
       projection?.change(world.entities,nextWorld.entities,changedEntities);
+      let focusQuery;
+      const chunkStep=chunks?.select(nextChunkState,at=>(focusQuery??=Q.create(view(nextWorld,drafts),systems,projection)).target(at),at,{
+        commanded, hasEvents:name=>rates.hasEvents(name,sampling,nextManual,delays),
+        affected(name,members){
+          const external=row=>!members.includes(row.writer);
+          return spatialSampling[name]?.some(external)||trace?.affected(name).some(external);
+        },
+        emit:makeEmit('world')
+      });
+      if(chunkStep)nextChunkState=chunkStep.state;
       if (transfers.producers.length) {
         const before = Object.freeze({...drafts});
-        const requestQuery = Q.create(view(nextWorld,before,lastSignals,at,[]),systems,projection);
+        const requestQuery = Q.create(view(nextWorld,before,lastSignals,at,[],causalState,nextChunkState),systems,projection);
         for (const name of transfers.producers) {
+          const managed=chunks?.managed.has(name), detail=managed&&chunkStep.due.get(name);
+          if(managed&&!detail)continue;
           const input = currentValues(name,nextManual,{},outputs,delays);
-          const ctx = context(name,nextWorld,before,at,input,makeEmit(name),requestQuery);
+          const timing=detail&&{start:0,end:1,every:detail.every,substeps:1,substep:1,detail};
+          const ctx = context(name,nextWorld,before,at,input,makeEmit(name),requestQuery,undefined,timing||undefined);
           const planned = systems[name].requestTransfers(before[name],ctx);
           check(Array.isArray(planned) && planned.length + requests.length <= W.transfers.limit,
             'Expected a bounded transfer request list from '+name);
@@ -506,14 +545,18 @@
         nextSpatial = {...spatialSampling};
         for (const [name,every] of slowReaders) {
           const waiting = nextSpatial[name] ?? [];
-          if (at%every===0) {
+          const managed=chunks?.managed.has(name), due=managed?chunkStep.due.has(name):at%every===0;
+          if (due) {
             for (const notice of waiting) activeTrace().deliver(notice,name);
             delete nextSpatial[name];
           } else {
             const current = trace?.affected(name) ?? [];
             if (current.length) {
-              check(waiting.length+current.length<=P.spatialDependencies.limit,'Spatial sampling buffer exceeds its budget');
-              nextSpatial[name]=waiting.concat(current.map(({writer,field,bounds,reason})=>({writer,field,bounds,reason})));
+              if(managed)nextSpatial[name]=W.simulationChunks.mergeWrites(waiting,current);
+              else{
+                check(waiting.length+current.length<=P.spatialDependencies.limit,'Spatial sampling buffer exceeds its budget');
+                nextSpatial[name]=waiting.concat(current.map(({writer,field,bounds,reason})=>({writer,field,bounds,reason})));
+              }
             }
           }
         }
@@ -525,7 +568,7 @@
       function integrate(name, snapshot, input, timing, target, sources, priorOutputs) {
         if (!phaseQuery || phaseStart !== timing?.start) {
           phaseStart = timing?.start;
-          const base = view(nextWorld,snapshot,timing?.signals??lastSignals,tick,receipts);
+          const base = view(nextWorld,snapshot,timing?.signals??lastSignals,tick,receipts,causalState,nextChunkState);
           phaseQuery = Q.create(timing ? {...base,time:(tick+timing.start)*nextWorld.dt} : base,systems,projection);
         }
         const system = systems[name], state = snapshot[name];
@@ -553,7 +596,7 @@
 
       let nextStates, nextOutputs, publishedSignals, nextSampling, delayedSamples;
       if (rates) {
-        const frame = rates.advance(at,committed,outputs,nextManual,delays,lastSignals,sampling,integrate,causal);
+        const frame = rates.advance(at,committed,outputs,nextManual,delays,lastSignals,sampling,integrate,causal,chunkStep);
         ({states:nextStates,outputs:nextOutputs,signals:publishedSignals,buffers:nextSampling,delayedSamples}=frame);
       } else {
         nextStates = {}; nextOutputs = {};
@@ -577,7 +620,7 @@
       const memory = historyWith(events,nextWorld.history);
       const dependencyReport = trace && trace.report();
       const nextCausal = causal?.finish();
-      const nextView = {...view(nextWorld,freeze(nextStates),publishedSignals,at,receipts,nextCausal),...memory};
+      const nextView = {...view(nextWorld,freeze(nextStates),publishedSignals,at,receipts,nextCausal,nextChunkState),...memory};
       const nextScenario = evaluateScenario(nextView,events);
       const nextWeather = weather?.step(weatherTrackState,{time:nextView.time,view:nextView,events,
         query:Q.create(nextView,systems,projection)});
@@ -593,6 +636,7 @@
       lastEvents = freeze(events);
       lastTransfers = receipts;
       causalState = nextCausal;
+      chunkState = nextChunkState;
       sampling = nextSampling;
       spatialSampling = nextSpatial;
       pendingWrites = freeze(nextWrites);

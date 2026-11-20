@@ -22,19 +22,24 @@
   function exchange(config, {world}) {
     const specs = config.links;
     check(record(specs) && Object.keys(specs).length <= 512,'An exchange needs a bounded link table');
-    const inputs = {}, links = [];
+    const inputs = {}, links = [], rateLinks=new Set();
     for (const [key,spec] of Object.entries(specs)) {
       check(id(key) && record(spec) && own(spec,'amount') !== own(spec,'rate') &&
         (spec.enabled === undefined || typeof spec.enabled === 'boolean'),'Invalid transfer link '+key);
       inputs[key] = {type:'bool',default:spec.enabled ?? true};
       const amount = own(spec,'amount') ? spec.amount : Array.isArray(spec.rate) ?
         spec.rate.map(n=>Number.isFinite(n)?n*world.dt:null) : Number.isFinite(spec.rate)?spec.rate*world.dt:null;
+      if(own(spec,'rate'))rateLinks.add(key);
       links.push({id:key,from:spec.from,to:spec.to,amount,mode:spec.mode ?? 'partial'});
     }
     return {inputs,initial:()=>({}),checkTransfers(validate) {
       for (const link of links) validate(link,true);
-    },requestTransfers(state,{input}) {
-      return links.filter(link=>input[link.id] && (Array.isArray(link.amount) ? link.amount.some(Boolean) : link.amount !== 0));
+    },requestTransfers(state,{input,dt,simulationLOD}) {
+      const ready=links.filter(link=>input[link.id] && (Array.isArray(link.amount) ? link.amount.some(Boolean) : link.amount !== 0));
+      if(!simulationLOD||dt===world.dt)return ready;
+      const scale=dt/world.dt;
+      return ready.map(link=>rateLinks.has(link.id)?{...link,
+        amount:Array.isArray(link.amount)?link.amount.map(value=>value*scale):link.amount*scale}:link);
     }};
   }
 

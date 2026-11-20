@@ -169,8 +169,8 @@
       return {id:row.key,from,to,amount:Math.abs(amount)};
     }
     function requestTransfers(state,ctx){
-      if(ctx.tick%every)return [];
-      const dt=ctx.dt*every, combined=zeros(nodes), active=[];
+      if(!ctx.simulationLOD&&ctx.tick%every)return [];
+      const dt=ctx.simulationLOD?ctx.dt:ctx.dt*every, combined=zeros(nodes), active=[];
       for(const row of boundaries){
         const k=row.conductance*clamp(ctx.input['boundary.'+row.key],0,1);
         if(k===0||row.maxFlow===0)continue;
@@ -245,7 +245,8 @@
           const receipt=query.probe('world/transfers').value.receipts.find(r=>r.requester===system&&r.requestId===row.key);
           return {id:row.key,node:nodes[row.node].key,account:row.account,direction:row.direction,
             at:row.at,outsideHead:boundaryHead(row,query),opening:state.controls.boundaries[i],
-            flow:receipt?receipt.applied*(receipt.to===row.local?1:-1)/(world.dt*every):0,receipt:receipt??null};
+            flow:receipt?receipt.applied*(receipt.to===row.local?1:-1)/(world.dt*(query.simulationClock(system)?.lastStepTicks||every)):0,
+            receipt:receipt??null};
         }),
         mass:{type:'record',units,read:({state})=>Q.ok(mass(state))}
       },

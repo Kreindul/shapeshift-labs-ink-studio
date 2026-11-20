@@ -71,9 +71,10 @@
     const richer=fabricFields.length>0||Object.values(start).some(item=>item?.collider!==undefined||item?.structure!==undefined);
     const local=config.gravityField!==undefined;
     check(!local||typeof config.gravityField==='string','Invalid mechanics gravity field');
-    const continuous=config.continuous??(richer||local), advanced=richer||continuous||local, iterations=config.contactIterations??10;
-    check((config.continuous===undefined||typeof config.continuous==='boolean')&&Number.isSafeInteger(iterations)&&
-      iterations>=1&&iterations<=32,'Invalid mechanical contact controls');
+    const continuous=config.continuous??(richer||local), advanced=richer||continuous||local, baseIterations=config.contactIterations??10;
+    const validIterations=n=>Number.isSafeInteger(n)&&n>=1&&n<=32;
+    check((config.continuous===undefined||typeof config.continuous==='boolean')&&validIterations(baseIterations),
+      'Invalid mechanical contact controls');
     const initialBodies={}, initials={}, inputs={}, outputs={}, claimed=new Map(), driveOrder=[], mountOrder=[];
     const surface=W.surfaceState, surfaceChannels=K.procedural.surfaceState.channels(config.surfaceChannels);
     const durability=W.durability, structures={}, wearSpecs={};
@@ -374,6 +375,7 @@
       }
     }
     function step(state,ctx) {
+      const iterations=ctx.simulationLOD?.tuning.contactIterations??baseIterations;
       const fabric=fabricFields.flatMap(field=>{
         const read=ctx.query.probe(field);
         return read.status==='ok'?[{system:ctx.query.field(field).name.split('/')[0],surfaces:read.value}]:[];
@@ -902,7 +904,11 @@
       return count?{status:'ok',value,body:nearest}:Q.missing('no bodies','empty');
     }
     const structural=Object.keys(structures).length>0;
-    return {...((config.surface!==undefined||fabricFields.length||routeFields.length||structural||local)&&
+    return {checkSimulationLOD(tuning){
+      check(Object.keys(tuning).every(key=>key==='contactIterations')&&
+        (tuning.contactIterations===undefined||validIterations(tuning.contactIterations)),
+        'Invalid mechanics simulation detail tuning');
+    },...((config.surface!==undefined||fabricFields.length||routeFields.length||structural||local)&&
       {dependencies:{reads:[config.surface,config.gravityField,...fabricFields,...routeFields].filter(Boolean),
         ...(structural&&{writes:['bodies','support','clearance']})}}),
     ...((sails.length||config.surface!==undefined||fabricFields.length||routeFields.length||local) && {checkFields(query) {
