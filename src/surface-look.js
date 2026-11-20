@@ -2,6 +2,7 @@
    in world space and is shared by the software renderer and script bundle. */
 const SurfaceLook = (() => {
   const optics = typeof SceneOptics === 'undefined' ? require('./scene-optics.js') : SceneOptics;
+  const detail = typeof StableDetail === 'undefined' ? require('./stable-detail.js') : StableDetail;
   const effects = typeof SplatEffects === 'undefined' ? require('./splat-effects.js') : SplatEffects;
   const pixelLook = typeof PixelLook === 'undefined' ? require('./pixel-look.js') : PixelLook;
   let luts, stacks;
@@ -16,6 +17,7 @@ const SurfaceLook = (() => {
   const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
   const WHITE = [1, 1, 1];
   const TAU = Math.PI * 2;
+  const specularLayers = new Set(['specular','fiber','sheen','film','diffraction','glints','reflection','planarReflection']);
   const clamp = n => Math.min(1, Math.max(0, n));
   const mix = (a, b, t) => a + (b - a) * t;
   const unit = (v, fallback = AXES.y) => {
@@ -390,6 +392,7 @@ const SurfaceLook = (() => {
           layer,
           [
             'strength',
+            'detailSize',
             'steps',
             'rotation',
             'scale',
@@ -420,6 +423,8 @@ const SurfaceLook = (() => {
           ],
           id
         );
+        if (layer.detailSize !== undefined && layer.detailSize <= 0)
+          throw new RangeError(id + '.detailSize must be positive');
         if (layer.type === 'reflection' && layer.source !== undefined && !['scene', 'material'].includes(layer.source))
           throw new RangeError(id + '.source must be scene or material');
         if (layer.type === 'planarReflection') {
@@ -545,6 +550,7 @@ const SurfaceLook = (() => {
       : 1;
     output[4] = 0;
     if (prepared.projected || output.length > 5) output[5] = undefined;
+    const detailScale = sample.detailFootprint ?? sample.footprint ?? 0, stableDetail = sample.stableDetail;
     let maskFrame;
     for (const layer of layers) {
       if (typeof layer.mask === 'function' && !maskFrame) maskFrame = {
@@ -562,13 +568,16 @@ const SurfaceLook = (() => {
       }
       if (layer.effect) {
         const result = layer.effect.sample(sample, output);
-        const amount = clamp(result[3] * strength);
+        const size = layer.detailSize ?? layer.effect.detailSize;
+        const detailGain = stableDetail?.texture && size && detailScale ?
+          detail.weight(stableDetail.texture,size/detailScale) : 1;
+        const amount = clamp(result[3] * strength) * detailGain;
         if (!amount && layer.type === 'colorCurve') {
           if (step) Object.assign(step, { applied: false, effectiveWeight: 0, output: step.input });
           continue;
         }
         output[3] *= mix(1, clamp(result[4]), strength);
-        output[4] = Math.max(output[4], clamp(result[5] * strength));
+        output[4] = Math.max(output[4], clamp(result[5] * strength) * detailGain);
         if (amount >= 0.5) output[5] = layer.effect.palette;
         let clipped;
         for (let i = 0; i < 3; i++) {
@@ -594,9 +603,13 @@ const SurfaceLook = (() => {
       shading.light = layer.shadow === false ? 1 : visibility;
       for (let i = 0; i < 3; i++) rgb[i] = layer.color[i];
       const weight = clamp(layer.model(layer, shading, rgb) * strength);
-      if (layer.type === 'glints') output[4] = Math.max(output[4], weight);
+      const spark = layer.type === 'glints';
+      const size = layer.detailSize ?? (spark ? 2 * clamp(layer.radius ?? .37) * positive(layer.scale,.12) * scale : 0);
+      const range = stableDetail && (specularLayers.has(layer.type) ? stableDetail.specular : stableDetail.texture);
+      const detailGain = range && size && detailScale ? detail.weight(range,size/detailScale) : 1;
+      if (spark) output[4] = Math.max(output[4], weight * detailGain);
       const steps = layer.steps ?? settings.steps ?? 0;
-      const amount = steps > 1 ? Math.round(weight * steps) / steps : weight;
+      const amount = (steps > 1 ? Math.round(weight * steps) / steps : weight) * detailGain;
       for (let i = 0; i < 3; i++) output[i] = mix(output[i], rgb[i], amount);
       if (reflected && amount) {
         const reflection = layer.type === 'reflection' || layer.type === 'planarReflection';

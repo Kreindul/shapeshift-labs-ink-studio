@@ -96,6 +96,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
   const resources = createResources(gl);
   const sampleCoverage = toolkit.KIT?.procedural?.sampleCoverage;
   const coverageRules = toolkit.ContributionRules ?? toolkit.KIT?.procedural?.contributionRules;
+  const stableDetailAPI = toolkit.StableDetail ?? toolkit.KIT?.stableDetail;
   let pipeline;
   try {
     const pixelSources = options => pixelShaderSources(toolkit.PixelLook, { packedTone: true, ...options });
@@ -104,7 +105,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     const post = program(sources.POST_FS), clean = program(sources.CLEAN_FS);
     // Rebirth hosts can opt into geometry specialization through the lower
     // level pipeline. The canvas path specializes its own fullscreen resolve.
-    pipeline = createSplatPipeline(gl, { specialize: false, sampleCoverage, coverageRules });
+    pipeline = createSplatPipeline(gl, { specialize: false, sampleCoverage, coverageRules, stableDetail: stableDetailAPI });
     const emptyVao = resources.allocate('VertexArray');
     const maxSize = gl.getParameter(gl.MAX_TEXTURE_SIZE), maxBuffers = gl.getParameter(gl.MAX_DRAW_BUFFERS);
     const targets = createTargets(gl, resources);
@@ -144,7 +145,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     let surfacePipeline, reflectionTarget, reflectionAtlas, reflectionAtlasSize;
     let simple, simpleUnavailable = false, keyProgram, damp, copy, spriteProgram, spriteEnvProgram, spriteLayer, spriteTable, anchors;
     let lastWorld, lastData, lastCount, lastOutput, lastDetail, lastEnvironment, fineValues, materials, anchorCount = 0;
-    let packed = empty, historyIndex = 0, historyValid = false, previousVP, previousColorGrade;
+    let packed = empty, historyIndex = 0, historyValid = false, previousVP, previousColorGrade, previousDetailRanges;
     let toneKey, tone, sorted, instanceDraw, expandInstances, lastInstances;
 
     function orderFor(world, frame, camera, time, isNew, plan, width, height, scale,
@@ -613,6 +614,13 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         world = toolkit.KIT?.shadowArt?.frame(world, camera.shadowFootprint) ?? world;
       const { raw = false, outline = true, dither = 0.35, scale = 1 } = frame;
       const look = world.look ?? {};
+      const detailDefinition = frame.stableDetail ?? look.stableDetail;
+      if (detailDefinition && !stableDetailAPI) throw new Error('Stable detail needs the Ink Studio KIT');
+      const stableDetail = stableDetailAPI?.prepare(detailDefinition);
+      const detailTexture = stableDetail?.texture ?? [0,0], detailGeometry = stableDetail?.geometry ?? [0,0];
+      const detailRanges = [...detailTexture,...detailGeometry];
+      if (!sameValues(previousDetailRanges,detailRanges)) historyValid = false;
+      previousDetailRanges = detailRanges;
       const tolerance = transparencyAPI?.transparency(frame.stableTransparency ?? look.stableTransparency)?.depthTolerance ?? 0;
       const budget = raw ? null : detailAPI?.prepare(look.detailBudgets);
       const globalCleanup = !raw && (frame.clean ?? !!look.clean);
@@ -863,6 +871,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         u_arrivalPlane: plane, u_splatPlane: clip, ...(layeredGlass&&{u_glassBoundary:13,u_glassTolerance:tolerance}),
         u_sampleWithdrawal: sampleCoverage?.amount(frame.sampleWithdrawal ?? world.sampleWithdrawal ?? 0) ?? 0,
         u_born: [frame.bornAt ?? 0, growth.rate ?? 1, growth.fade ?? 0.5, growth.loop ?? 0],
+        u_detailTexture: detailTexture, u_detailGeometry: detailGeometry,
         u_crisp: +!raw, u_splatCoverage: splatCoverage, u_dilate: raw ? 0.3 : 0.15, u_near: camera.clipNear,
         u_paintMarker: paint?.marker ?? 0, u_afterimageStart: trailStart,
         ...(opticalMaterials && { u_optical: opticalUnit }),
@@ -1063,9 +1072,9 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         portalMask.resize(width, height);
         const nextCamera = withCameraPose(camera, opening.camera(cameraPose(camera)));
         const { raw, outline, dither, scale, clean, lineClean, colored, tone, edges, water, time, stepAnimation, environment,
-          stableTransparency, resetTransparency } = frame;
+          stableTransparency, resetTransparency, stableDetail } = frame;
         const destination = reconstructFrame(portal.destination, { raw, outline, dither, scale, clean, lineClean, colored, tone,
-          edges, water, time, stepAnimation, environment, stableTransparency, resetTransparency, ...portal.destinationFrame, damp: false },
+          edges, water, time, stepAnimation, environment, stableTransparency, resetTransparency, stableDetail, ...portal.destinationFrame, damp: false },
           portalReconstructionInstances);
         render(destination.world, destination.frame, width, height, portalDestination.framebuffer, nextCamera, anchorPlane(opening.to));
       }
