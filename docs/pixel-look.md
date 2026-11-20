@@ -445,6 +445,52 @@ material. `looks.bind(binding, catalog)` returns the resolved immutable
 stack and palette. Use `assetPacks.bundle` to share packs and
 `assetPacks.reviseLook` to publish a new revision.
 
+## Import and export looks
+
+`look import` wraps a standalone 3D LUT, color stack, or palette in an
+installable JSON asset pack. Use `--id pack/look` to name the asset and
+`--label "Display name"` to set its label. Existing JSON packs and
+bundles keep their IDs, revisions, parameters, and bindings. The
+import accepts the same LUT color-space, range, and domain-policy
+options as `lut import`.
+
+```sh
+node cli/ink-studio.js look import examples/blue-shadow.cube \
+  --id color/blue-shadow --out color-pack.json
+node cli/ink-studio.js look export color-pack.json \
+  --out blue-shadow.cube --exact
+node cli/ink-studio.js look export examples/relay-look-pack.json \
+  --look relay/glazed-enamel --size 33 --out enamel.cube --report enamel-report.json
+```
+
+`look export` infers the target from `--out`. Omit the path and
+use `--format json|cube|gpl|pal|hex` to write conversion data to stdout.
+For external formats, use `--look pack/look` to select an asset from
+a multi-look pack or bundle and `--params '{"name":value}'` to supply
+overrides.
+
+- **3D LUTs.** Compatible tables retain their RGB rows and input domain.
+  Other continuous stacks are sampled into a normalized sRGB grid.
+  Choose a grid edge length of 2–65 using `--size` (default 33) and
+  optionally set per-channel bounds with `--domain-min r,g,b` and
+  `--domain-max r,g,b`. The default is the unit cube or the original
+  domain of a standalone sRGB LUT. The destination application chooses
+  its own interpolation and behavior outside the domain.
+- **Palettes.** Supported text formats are GIMP `.gpl`, JASC-PAL 0100
+  `.pal`, and `.hex` with one six-digit RGB swatch per line. Native JSON
+  can also supply a swatch array or a palette constraint. Use
+  `--swatches reference.gpl` to evaluate a stack at those swatches or
+  resolve palette indices. Scene role names need their scene's role
+  definitions. Native looks support up to 48 swatches.
+  [GIMP palette format specification](https://developer.gimp.org/core/standards/gpl/)
+
+The summary goes to stderr. Save the full JSON report with `--report`.
+It marks the conversion as `exact`, `lossy`, or `sampled` and lists any
+omitted settings or metadata. RGB grid reports measure maximum channel
+error and RMSE at cell midpoints using Ink Studio's interpolation.
+Palette sampling reports 8-bit clipping and rounding. Use `--exact`
+to reject lossy or sampled conversions before the output is written.
+
 ## Shared look selectors
 
 Use `finish.look.targets` in a diorama, `visual.look.targets` on a world,

@@ -8,7 +8,7 @@ function read(file, { color, domainPolicy } = {}) {
     throw new TypeError('Expected a .cube or .json LUT file');
   const text = fs.readFileSync(path.resolve(file), 'utf8');
   if (/\.cube$/i.test(file)) return ColorLUT.parseCube(text, { color, domainPolicy });
-  const saved = ColorLUT.normalize(JSON.parse(text));
+  const saved = ColorLUT.normalize(JSON.parse(text.replace(/^\uFEFF/, '')));
   if (color === undefined && domainPolicy === undefined) return saved;
   const next = color && Object.fromEntries(['input', 'output'].map(name => [name, { ...saved.color?.[name], ...color[name] }]));
   return ColorLUT.normalize({ ...saved, color: next ?? saved.color, domainPolicy: domainPolicy ?? saved.domainPolicy });

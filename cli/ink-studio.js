@@ -299,6 +299,9 @@ const CMD = {
         '  field <scene|run> <name> --spec file.json  export a line, grid or time series',
         '  scene apply|stamp|remix|capture|history|promote <world> ...  edit or derive a world manifest',
         '  sim run|resume|fork|reset|replay|diff|sweep|render ...  run or compare fixed-tick simulations',
+        '  look import <file> [--out pack.json] [--id pack/look]   import a LUT or palette as a versioned look',
+        '  look export <file> [--out file | --format json|cube|gpl|pal|hex]   convert or sample a look',
+        '    --look pack/look --params JSON --size N --swatches palette-file --report report.json --exact',
         '  lut import <file.cube|file.json> [--out file.json]  load a 3D color table as native JSON',
         '    --input-space space --output-space space --input-range min,max --output-range min,max',
         '    --input-out-of-range preserve|clamp|error --output-out-of-range preserve|clamp|error --domain-policy clamp|error|extrapolate',
@@ -361,6 +364,9 @@ const CMD = {
         'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable off --snap --dither-space screen|world|object --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
       ].join('\n')
     );
+  },
+  look() {
+    return require('./look.js').run(pos, opt, lib().KIT.authoring);
   },
   lut() {
     const [mode, file] = pos;
