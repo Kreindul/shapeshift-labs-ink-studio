@@ -209,6 +209,12 @@ function build(id, seedOverride, { paint = true } = {}) {
   w.clock = 0;
   if (w.anim?.trackAtmosphere && opt['atmosphere-emitters'] !== undefined)
     w.anim.trackAtmosphere(lib().KIT.atmosphere.emitters.settings(w.atmosphereEmitters, atmosphereEmittersOption()));
+  if (w.anim?.motionSettings) w.anim.motionDirection = ArtDirection.prepare(w.look?.artDirection,artDirectionOption());
+  if (w.anim?.usesSceneWind) w.anim.motionEnvironment = {
+    ...skyOptions(), windField: windFieldOption(), sceneExposure: sceneExposureOption(),
+    weatherBinding: weatherOption(), weatherFronts: onOffOption('weather-fronts'), weatherTracks: onOffOption('weather-tracks'),
+    skyTransitions: skyTransitionsOption()
+  };
   if (w.anim && w.anim.stateful) w.anim.update(0, 0);
   for (const note of w.warnings || []) console.error('warning: ' + s.id + ': ' + note);
   return w;
@@ -242,19 +248,34 @@ function tap(w, t0, t1) {
 // put the world at time t. A diorama that says it remembers the past (anim.stateful) is walked there a sixtieth of a second at a time
 function pose(w, t) {
   if (!w.anim) return;
-  t = ArtDirection.time(ArtDirection.prepare(w.look?.artDirection,artDirectionOption()),t);
+  const direction = ArtDirection.prepare(w.look?.artDirection,artDirectionOption());
+  if (w.anim.motionSettings) w.anim.motionDirection = direction;
+  const sceneTime = ArtDirection.time(direction,t);
   if (w.anim.stateful) {
-    if (t < w.clock) die('this diorama cannot be run backwards: ask for times in order');
-    while (w.clock < t - 1e-9) {
-      const dt = Math.min(1 / 60, t - w.clock),
-        before = w.clock;
-      w.clock += dt;
-      /* (the time before the step is kept, not worked back out: taking the step off again can land a hair to the other side of a tap) */
-      tap(w, before, w.clock);
-      w.anim.update(dt, w.clock);
+    if (sceneTime < w.clock) die('this diorama cannot be run backwards: ask for times in order');
+    const separateCloth = direction?.cadence.scene && direction.cadence.cloth !== undefined && w.anim.hasIndependentCloth?.();
+    function advanceScene(to) {
+      while (w.clock < to - 1e-9) {
+        const dt = Math.min(1 / 60, to - w.clock), before = w.clock;
+        w.clock += dt;
+        tap(w, before, w.clock);
+        if (separateCloth) w.anim.update(dt,w.clock,{ separateCloth });
+        else w.anim.update(dt,w.clock);
+      }
     }
-  } else w.anim.update(1 / 60, t);
-  w.clock = t;
+    if (separateCloth) {
+      // Interleave fixed steps so cloth sees the held scene pose at each step.
+      let at = w.clothClock ?? w.clock;
+      while (at < t - 1e-9) {
+        const dt = Math.min(1 / 60,t-at);
+        at += dt;
+        advanceScene(ArtDirection.time(direction,at));
+        w.anim.advanceCloth(dt,at);
+      }
+      w.clothClock = t;
+    } else advanceScene(sceneTime);
+  } else w.anim.update(1 / 60, sceneTime);
+  w.clock = sceneTime;
   /* splats carried by bones on the graphics card stay at rest in the data: the tools look at a copy with them put in place */
   if (w.anim.bones) {
     if (!w.rest) w.rest = w.data;

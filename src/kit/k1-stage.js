@@ -33,6 +33,26 @@
     const flag = new Uint8Array(N),
       queue = new Int32Array(N);
     let qn = 0, atmosphereProgram, atmosphereHistory;
+    let previousDirection, preparedDirection;
+    st.motionSettings = () => {
+      const source = W.look?.artDirection;
+      if (source !== previousDirection) {
+        preparedDirection = ArtDirection.prepare(source);
+        previousDirection = source;
+      }
+      return Object.hasOwn(st, 'motionDirection') ? st.motionDirection : preparedDirection;
+    };
+    st.sceneWind = () => {
+      const options = st.motionEnvironment ?? {};
+      const sampled = EnvironmentFrame.timeline(W,options,0,null,K.weather.tracks);
+      const weather = EnvironmentFrame.opticalWeather(W,options,sampled,options.weatherFronts !== false);
+      const exposure = SceneExposure.settings(W.sceneExposure,options.sceneExposure);
+      const field = EnvironmentFrame.wind(W,options,{...sampled,weather,exposure});
+      return (x,y,z,t) => {
+        const [vx,vz] = field.airAt(x,y,z,options.skyTime ?? t + (st.t0 ?? 0)).velocity;
+        return [vx,0,vz];
+      };
+    };
     const rgba = [0, 0, 0, 0];
     st.touch = i => {
       rows[i >> 9] = 1;
@@ -46,13 +66,19 @@
     st.repaintAll = ids => {
       for (let k = 0; k < ids.length; k++) st.repaint(ids[k]);
     };
+    const clothSystems = [];
     st.add = sys => {
       st.systems.push(sys);
+      if (sys.independentCloth) clothSystems.push(sys);
       if (sys.paint) st.painters.push(sys);
       if (sys.bind) sys.bind(st);
       return sys;
     };
-    st.update = (dt, t) => {
+    st.hasIndependentCloth = () => clothSystems.length > 0;
+    st.advanceCloth = (dt, time) => {
+      for (const system of clothSystems) system.update(dt,time - st.t0,st);
+    };
+    st.update = (dt, t, { separateCloth = false } = {}) => {
       const sceneTime = t;
       if (st.t0 === undefined) st.t0 = t;
       t -= st.t0;
@@ -60,7 +86,7 @@
       st.time = t;
       st.dt = dt;
       for (let k = st.systems.length - 1; k >= 0; k--) if (st.systems[k].pre) st.systems[k].pre(dt, t, st);
-      for (const s of st.systems) if (s.update) s.update(dt, t, st);
+      for (const s of st.systems) if (s.update && !(separateCloth && s.independentCloth)) s.update(dt, t, st);
       for (let k = 0; k < qn; k++) {
         const i = queue[k],
           o = i * 16,
