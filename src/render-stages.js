@@ -26,6 +26,12 @@ const RenderStages = (() => {
     return value;
   }
 
+  function blend({ order = 0, weight = 1 } = {}) {
+    if (!Number.isSafeInteger(order)) throw new TypeError('Look order must be a safe integer');
+    if (!Number.isFinite(weight) || weight < 0 || weight > 1) throw new RangeError('Look weight must be in [0, 1]');
+    return { order, weight };
+  }
+
   function albedo(value, palette) {
     if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) return parseInt(value.slice(1), 16);
     if (Array.isArray(value) && value.length === 3 && Array.from(value).every(n => Number.isFinite(n) && n >= 0 && n <= 1))
@@ -39,21 +45,27 @@ const RenderStages = (() => {
     if (!Array.isArray(entries) || entries.length > 64) throw new TypeError('Expected up to 64 render stage rules');
     return Array.from(entries, (entry, i) => {
       if (!entry || Object.getPrototypeOf(entry) !== Object.prototype ||
-          Object.keys(entry).some(key => !['stage', 'stack', 'palette', 'select', 'mask', 'assetId'].includes(key)))
+          Object.keys(entry).some(key => !['stage', 'stack', 'palette', 'select', 'mask', 'assetId', 'order', 'weight'].includes(key)))
         throw new TypeError('Invalid render stage rule at index ' + i);
       const name = stage(entry.stage), isPalette = name === 'palette';
       if (isPalette ? !entry.palette || entry.stack !== undefined : !entry.stack || entry.palette !== undefined)
         throw new TypeError('The ' + name + ' stage needs ' + (isPalette ? 'a palette policy' : 'a color stack'));
-      if (entry.stack?.steps?.some?.(step => step?.type === 'paletteRemap'))
+      if (!isPalette && Object.getPrototypeOf(entry.stack) !== Object.prototype)
+        throw new TypeError('A render stage color stack must be an object');
+      if (Array.isArray(entry.stack?.steps) && entry.stack.steps.some(step => step?.type === 'paletteRemap'))
         throw new TypeError('Render stage stacks operate on RGB and require RGB color transforms');
       if (isPalette && entry.palette.source !== undefined)
         throw new TypeError('The palette stage samples the resolved frame');
+      const { order, weight } = blend(entry);
+      const { amount: stackAmount = 1 } = entry.stack ?? {};
+      if (!Number.isFinite(stackAmount) || stackAmount < 0 || stackAmount > 1)
+        throw new RangeError('Color stack amount must be in [0, 1]');
       const mask = effects.prepareMask(entry.mask, options.context, { validateOnly: options.validateOnly || options.skipMasks });
       return {
-        name, mask, disabled: Boolean(options.skipMasks && mask),
+        name, order, weight, stackAmount, mask, disabled: Boolean(options.skipMasks && mask),
         select: entry.select === undefined ? null : targets.prepare(entry.select),
         assetId: entry.assetId,
-        stack: isPalette ? null : stacks.prepare(entry.stack, {
+        stack: isPalette ? null : stacks.prepare({ ...entry.stack, amount: 1 }, {
           resolveColor: value => unpack(albedo(value, options.palette))
         }),
         palette: isPalette ? pixels.preparePalette(entry.palette, options) : null
@@ -79,6 +91,7 @@ const RenderStages = (() => {
         if (rule.disabled || rule.select && (!target || !targets.matches(rule.select, target))) continue;
         (slots[rule.name] ??= []).push(rule);
       }
+      for (const list of Object.values(slots)) list.sort((a, b) => a.order - b.order);
       return slots;
     };
     const global = group(scene);
@@ -103,16 +116,48 @@ const RenderStages = (() => {
     };
   }
 
-  function apply(rules, rgb, sample) {
+  const coverage = (rule, sample) => rule.mask ? sample ? rule.mask(sample) : null : 1;
+
+  function describe(rule, sample, maskWeight = coverage(rule, sample)) {
+    return {
+      asset: rule.assetId ?? null, select: rule.select, order: rule.order, weight: rule.weight,
+      ...(rule.stack && { stack: rule.stack.name, stackAmount: rule.stackAmount }),
+      ...(rule.mask && { maskWeight }),
+      effectiveWeight: maskWeight === null ? null : rule.weight * rule.stackAmount * maskWeight,
+      ...(rule.palette && { palette: rule.palette.packed })
+    };
+  }
+
+  function evaluate(rules, rgb, sample, x, y, contributions) {
     if (!rules) return rgb;
     let result = rgb;
     for (const rule of rules) {
-      const amount = rule.mask ? sample ? rule.mask(sample) : 0 : 1;
-      if (!amount) continue;
-      const changed = rule.stack.sample(result);
-      result = amount === 1 ? changed : changed.map((n, i) => result[i] + (n - result[i]) * amount);
+      const maskWeight = coverage(rule, sample);
+      const amount = rule.weight * rule.stackAmount * (maskWeight ?? 0);
+      const input = result;
+      const applied = rule.palette ? amount >= .5 : amount > 0;
+      let transformed;
+      if (applied && rule.palette) {
+        transformed = result = rule.palette.swatches[rule.palette.index(input, x, y)];
+      } else if (applied) {
+        transformed = rule.stack.sample(input);
+        result = amount === 1 ? transformed : transformed.map((n, i) => input[i] + (n - input[i]) * amount);
+      }
+      if (contributions) contributions.push({
+        ...describe(rule, sample, maskWeight), applied, input, ...(transformed && { transformed }), output: result
+      });
     }
     return result;
+  }
+
+  function apply(rules, rgb, sample) {
+    return evaluate(rules, rgb, sample, 0, 0);
+  }
+
+  function trace(rules, rgb, sample, [x, y] = [0, 0]) {
+    const contributions = [];
+    const output = evaluate(rules, rgb, sample, x, y, contributions);
+    return { rgb: output, contributions };
   }
 
   function material(rules, shaded, reference, sample) {
@@ -131,12 +176,7 @@ const RenderStages = (() => {
   }
 
   function quantize(rules, rgb, x, y, sample) {
-    let color = rgb;
-    for (const rule of rules ?? []) {
-      if (rule.mask && (!sample || rule.mask(sample) < .5)) continue;
-      color = rule.palette.swatches[rule.palette.index(color, x, y)];
-    }
-    return color;
+    return evaluate(rules, rgb, sample, x, y);
   }
 
   function finish(frame, plan, passes, time) {
@@ -170,6 +210,6 @@ const RenderStages = (() => {
     return frame;
   }
 
-  return Object.freeze({ names, stage, albedo, prepare, plan, apply, material, quantize, finish });
+  return Object.freeze({ names, stage, blend, albedo, prepare, plan, describe, trace, apply, material, quantize, finish });
 })();
 if (typeof module !== 'undefined') module.exports = RenderStages;

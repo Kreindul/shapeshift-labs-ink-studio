@@ -597,8 +597,7 @@ A versioned look asset can declare a default `stage`. A binding or a
 `look.targets` entry can override it. If the asset contains a stack and a
 palette, the stack runs at its assigned stage and the palette runs at
 `palette`. Assigning `palette` directly uses just the asset's palette.
-Within each stage the scene's matching rules run in declaration order,
-followed by any matching material-bound rules.
+Matching rules within a stage can be [ordered and blended](#stack-order-and-blending).
 
 The stages share [look selectors](#shared-look-selectors) and
 [spatial masks](#spatial-and-field-masks). Material masks use the splat
@@ -635,4 +634,54 @@ node cli/ink-studio.js render examples/render-stages.js --ortho \
   --params '{"stage":"frame"}' --out frame.png
 node cli/ink-studio.js render examples/render-stages.js --ortho \
   --params '{"stage":"palette"}' --out palette.png
+```
+
+## Stack order and blending
+
+Give a render stage rule an integer `order` (default `0`) and a
+`weight` from `0` to `1` (default `1`). Lower orders run first within
+each stage. At equal orders the inline scene rules run in declaration
+order, followed by the scene's `look.asset`, its `look.targets`, and
+then the material's rules in their declaration order.
+
+Each RGB rule receives the previous rule's output. It transforms that
+color and blends the result back over its input in working sRGB. The
+effective weight is the rule's weight multiplied by its mask coverage
+and the color stack's `amount`. When using a look asset, binding
+`strength` is already folded into that amount. Palette rules apply in
+the same order, quantizing when weight times mask coverage reaches
+`0.5`. Their output is an exact swatch.
+
+Use either an inline stack or an asset reference in a scene's
+`renderStages`. A named look can set default order and weight in its
+pack. The asset binding can override them, and fields on the outer rule
+take precedence. Asset rules in `renderStages` default to `lit` if the
+asset and binding leave the stage unspecified. Giving a scene, target,
+or material binding an explicit order or weight also opts that binding
+into stages. Legacy bindings use their existing palette pipeline.
+
+```json
+{
+  "renderStages": [
+    { "asset": "spillway/sandstone", "select": { "surface": "spillway-wall" }, "order": 10, "weight": 0.85 },
+    { "asset": "spillway/runoff", "select": { "surface": "spillway-wall" }, "order": 20, "weight": 0.9 },
+    { "asset": "spillway/blue-hour", "stage": "frame", "weight": 0.75 }
+  ]
+}
+```
+
+The `look/output` probe lists matching rules in evaluation order. With
+`stage` and `rgb`, the requested stage shows each rule's effective
+weight, input RGB, full transformed RGB, blended output, and whether
+the rule applied. Supply `at` for world-space masks and `rest` for
+rest-space masks. A mask with no sample position is reported as
+unknown and its rule is skipped in the trace.
+
+```sh
+node cli/ink-studio.js probe examples/look-blending.js --select '{"surface":"spillway-wall"}' \
+  --args '{"stage":"lit","at":[1,0.55,0],"rgb":[0.65,0.65,0.65],"limit":1}'
+node cli/ink-studio.js render examples/look-blending.js --ortho \
+  --params '{"variant":"layered"}' --out layered.png
+node cli/ink-studio.js render examples/look-blending.js --ortho \
+  --params '{"variant":"reversed"}' --out reversed.png
 ```

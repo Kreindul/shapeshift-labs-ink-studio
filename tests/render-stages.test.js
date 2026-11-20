@@ -92,3 +92,70 @@ test('staged assets survive revisions, material binding, sculpt capture and dior
     solids: [{ kind: 'ball', at: [0, 0, 0], r: 1, mat: 'stone' }] };
   assert.throws(() => K.diorama.build(invalid), /finish\.look\.renderStages/);
 });
+
+test('each RGB layer blends the previous result in order, with a shared renderer and probe trace', () => {
+  const exposure = (name, stops, amount) => ({ name, amount, steps: [{ type: 'exposure', stops }] });
+  const mask = { type: 'axis', axis: 'y', range: [-1, 1], space: 'world', interpolation: 'linear' };
+  const select = { object: 'steel' };
+  const night = { stage: 'frame', stack: exposure('Night', -1), order: 30, weight: .75 };
+  const wet = { stage: 'frame', stack: white, select, order: 20, weight: .5, mask };
+  const stone = { stage: 'frame', stack: exposure('Stone', 1, .5), select, order: 10 };
+  const bypass = { stage: 'frame', stack: paint, select, order: 40, weight: 0 };
+  const world = disc([night, wet, bypass, stone]);
+  const trace = K.world.query.fromScene(world).probe('look/output', select, {
+    stage: 'frame', rgb: [.2, .2, .2], at: [0, 0, 0]
+  }).value.targets[0];
+  const contributions = trace.stages.frame;
+  assert.deepEqual(contributions.map(rule => rule.stack), ['Stone', 'White', 'Night', 'Blue paint']);
+  assert.deepEqual(contributions.map(rule => rule.effectiveWeight), [.5, .25, .75, 0]);
+  assert.deepEqual(contributions.map(rule => rule.applied), [true, true, true, false]);
+  assert.deepEqual(contributions[1].input, contributions[0].output);
+  assert.deepEqual(contributions[1].transformed, [1, 1, 1]);
+  assert.deepEqual(contributions[3].output, trace.rgb);
+  assert(trace.rgb.every(n => Math.abs(n - .296875) < 1e-10));
+
+  const frame = studio.render(world, options);
+  assert.deepEqual(frame.rgb, studio.render(disc([stone, wet, night, bypass]), options).rgb);
+  const source = studio.render(disc([{ ...night, weight: 0 }]), options).rgb[center] / 255;
+  assert.equal(frame.rgb[center], Math.round((source * 1.5 * .75 + .25) * .625 * 255));
+  assert.notEqual(frame.rgb[center], studio.render(disc([{ ...wet, order: 1 }, stone, night]), options).rgb[center]);
+
+  const dry = RenderStages.trace(RenderStages.plan(world).at(0).frame, [.2, .2, .2]);
+  assert.equal(dry.contributions[1].maskWeight, null);
+  assert.equal(dry.contributions[1].applied, false);
+});
+
+test('asset defaults, binding and rule overrides share order across a surface and a scene', () => {
+  const A = K.authoring;
+  const id = 'blends/paint';
+  const pack = { format: 'ink-studio/asset-pack', id: 'blends', title: 'Blends', version: 1, revision: 1,
+    looks: [{ id, label: 'Paint', stack: { ...paint, amount: .5 }, order: 15, weight: .7 }] };
+  const revised = A.assetPacks.reviseLook(pack, id, { order: 20 });
+  const catalog = A.assetPacks.create({ packs: [revised] });
+  const look = A.looks.scene({ renderStages: [
+    { asset: { asset: id, strength: .5, weight: .4 }, order: 10, weight: .75 },
+    { stage: 'lit', stack: white, order: 10 },
+    { asset: false, stage: 'lit' }
+  ], targets: [{ select: { object: 'steel' }, asset: false }] }, catalog);
+  const surface = A.looks.material({}, { asset: id, order: 10 }, catalog).surface;
+  const world = disc(look.renderStages, { surface });
+  const rules = RenderStages.plan(world).at(0).lit;
+  assert.deepEqual(rules.map(rule => rule.stack.name), ['Blue paint', 'White', 'Blue paint']);
+  const traced = RenderStages.trace(rules, [0, 0, 0]);
+  assert.deepEqual(traced.contributions.map(rule => rule.effectiveWeight), [.1875, 1, .35]);
+  assert.deepEqual(traced.rgb, [.65, .65, 1]);
+  assert.throws(() => A.looks.bind({ asset: id, order: .5 }, catalog), /order/);
+  assert.throws(() => A.looks.bind({ asset: id, weight: 1.1 }, catalog), /weight/);
+  assert.throws(() => RenderStages.prepare([{ stage: 'lit', stack: paint, weight: null }]), /weight/);
+});
+
+test('palette weights gate ordered quantization while preserving exact swatches', () => {
+  const palette = (color, order, weight) => ({ stage: 'palette', order, weight, palette: { palette: [color] } });
+  const world = disc([palette('#ffffff', 30, .49), palette('#223344', 20, .5), palette('#445566', 10, 1)]);
+  const rules = RenderStages.plan(world).at(-1).palette;
+  const trace = RenderStages.trace(rules, [.2, .2, .2]);
+  assert.deepEqual(trace.contributions.map(rule => rule.applied), [true, true, false]);
+  assert.deepEqual(trace.rgb, [34 / 255, 51 / 255, 68 / 255]);
+  const frame = studio.render(world, options);
+  assert(frame.rgb.every((n, i) => n === [34, 51, 68][i % 3]));
+});

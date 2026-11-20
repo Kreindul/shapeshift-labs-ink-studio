@@ -38,16 +38,10 @@
         const sample = at || rest ? { position: rest, worldPosition: at, time } : null;
         const rows = selected.slice(0, limit).map(({ target, count, first }) => {
           const rules = first === undefined ? {} : stages.at(first);
+          const evaluated = stage && input ? RenderStages.trace(rules[stage], input, sample, pixel) : null;
           const stagesForTarget = Object.fromEntries(RenderStages.names.filter(name => rules[name]).map(name =>
-            [name, rules[name].map(rule => ({
-              asset: rule.assetId ?? null, select: rule.select,
-              ...(rule.mask && { maskWeight: sample ? rule.mask(sample) : null }),
-              ...(rule.palette && { palette: rule.palette.packed })
-            }))]));
-          const active = stage && rules[stage];
-          const sampled = stage && input && (stage === 'palette' ? RenderStages.quantize(active, input, ...pixel, sample) :
-            RenderStages.apply(active, input, sample));
-          return { target, count, stages: stagesForTarget, ...(sampled && { rgb: sampled }) };
+            [name, evaluated && stage === name ? evaluated.contributions : rules[name].map(rule => RenderStages.describe(rule, sample))]));
+          return { target, count, stages: stagesForTarget, ...(evaluated && { rgb: evaluated.rgb }) };
         });
         return W.query.ok({ matched: selected.length, targets: rows });
       }
