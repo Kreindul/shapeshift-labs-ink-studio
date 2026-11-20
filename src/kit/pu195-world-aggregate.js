@@ -22,7 +22,11 @@
     const list=preserve??Object.keys(adapter.quantities);
     check(Array.isArray(list)&&list.length>0&&new Set(list).size===list.length&&
       list.every(name=>own(adapter.quantities,name)),'Unknown or empty preserved quantities for '+label);
-    return {...adapter,model:spec.model,preserve:list};
+    return {...adapter,model:spec.model,preserve:list,spec};
+  }
+  function advance(adapter,state,ctx){
+    const data=adapter.step(state.data,ctx);
+    return state.data===data?state:freeze({...state,data:rooted(data)});
   }
   function audit(adapter,detail,aggregate,system){
     const before=adapter.measure(detail,false), after=adapter.measure(aggregate,true);
@@ -101,7 +105,7 @@
         ...(provider.volumeFrame&&{volumeFrame:state=>provider.volumeFrame(fine(state))}),
         step(state,ctx){
           const adapter=using(state);
-          return adapter?wrapped(state,adapter.step(state.data,ctx)):provider.step(state,ctx);
+          return adapter?advance(adapter,state,ctx):provider.step(state,ctx);
         },
         output(state,ctx){
           const adapter=using(state);
@@ -172,5 +176,6 @@
     return {view,transition,validate};
   }
 
-  W.simulationAggregate=Object.freeze({define,bind,rawStates});
+  const modelSpec=(state,models)=>marked(state)?models?.get(state.level)?.spec:undefined;
+  W.simulationAggregate=Object.freeze({define,bind,advance,modelSpec,rawStates});
 })(KIT);

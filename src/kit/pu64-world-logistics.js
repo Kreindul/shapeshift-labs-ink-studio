@@ -178,6 +178,7 @@
     }
     const stockField=records(containers,'container',container);
     return {initial:()=>initial,inputs,outputs,accounts:transferAccounts,checkFields,validateState,output:signals,
+      partitionStep:routes.every(row=>!row.checkRoute),
       simulationAggregate(settings){
         return W.aggregateLogistics(settings,{layout,validateDetail:validateState,accounts:transferAccounts,
           stocks:stockField.read,stockBodies});
@@ -204,5 +205,5 @@
       },traces:{supply:{selector:true,run:supply}}
     };
   }
-  W.runtime.register('logistics',logistics);
+  W.runtime.register('logistics',logistics,{worker:true});
 })(KIT);

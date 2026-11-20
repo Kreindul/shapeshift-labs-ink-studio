@@ -16,6 +16,9 @@ prepared destination views, actor and camera handoffs, and fade-based travel.
 place and grid address. Each chunk can use a configurable detail level, wake
 from explicit inputs, or hold its state in a checkpoint while sleeping.
 
+[Deterministic simulation workers](simulation-workers.md) run independent
+system steps on Node threads. A checkpoint can move between worker counts.
+
 ## Run and compare a watershed
 
 Save the starting checkpoint after the reservoir has settled.

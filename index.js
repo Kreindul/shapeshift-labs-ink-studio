@@ -106,6 +106,7 @@ module.exports = {
   createSplatPicker(world, options) {
     return module.exports.load().KIT.procedural.contributions.create(world, options);
   },
+  createSimulationWorkers: require('./src/simulation-worker-pool.js'),
   load() {
     const out = path.join(__dirname, 'dist', 'standalone.js'),
       srcs = files().concat(demoFiles()),

@@ -181,6 +181,7 @@
       return Q.ok({geometry:acousticGeometry,fractions:state.settings.map(row=>row.open)});
     }
     return {inputs,outputs,initial:()=>({stock,ledger:tracers.map(()=>Object.fromEntries(counters.map(key=>[key,0])))}),
+      partitionStep:openings.every(row=>!row.gate&&(!row.wind||windField===undefined)),
       settleInitial(state,ctx){
         const settings=control(ctx);
         return {...state,settings,...A.airflow(size,openings,settings)};
@@ -290,5 +291,5 @@
     return [K.atmosphere.field({id:rooms+'/'+tracer,mediumKind:'airborne',field,color,density:1,step,lit:false})];
   }
   W.ventilation=Object.freeze({checkVisual,render});
-  W.runtime.register('ventilation',ventilation);
+  W.runtime.register('ventilation',ventilation,{worker:true});
 })(KIT);

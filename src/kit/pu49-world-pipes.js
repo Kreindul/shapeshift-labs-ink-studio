@@ -201,7 +201,7 @@
       check(Math.abs(mass(state).error)<=1e-7*Math.max(1,initialVolume+state.imported),'Hydraulic checkpoint volume mismatch');
     }
 
-    return {initial:()=>initial,accounts,inputs,outputs,validateState,
+    return {initial:()=>initial,accounts,inputs,outputs,validateState,partitionStep:true,
       ...(boundaries.length>0&&{requestTransfers,checkTransfers(validate){
         for(const row of boundaries)validate(order(row),true);
       },checkFields(query){
@@ -254,5 +254,5 @@
     };
   }
 
-  W.runtime.register('pipe-network',pipeNetwork);
+  W.runtime.register('pipe-network',pipeNetwork,{worker:true});
 })(KIT);

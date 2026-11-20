@@ -339,6 +339,7 @@
     const dependencyBounds = {axes:'xz',min:origin,max:[origin[0]+width*dx,origin[1]+height*dz]};
     const phaseFields=['temperature','ice','vapor','humidity','phase','phase-state','water','depth','flow','surface-height'];
     return {inputs,outputs,...(exchanging && {accounts}),
+      partitionStep:terrainQuery===undefined&&surface===undefined&&thermalModel?.ambientField===undefined,
       simulationAggregate(settings){
         check(!sedimentModel&&!thermalModel&&!legacyErosion&&!exchanging&&!terrainQuery&&
           !Object.keys(gates).length&&!Object.keys(pumps).length,
@@ -627,6 +628,6 @@
   }
   W.runtime.register('control',control);
   W.runtime.register('fields',typedFields);
-  W.runtime.register('water',water);
+  W.runtime.register('water',water,{worker:true});
   W.fields = Object.freeze({zone,bounds,regions,patchList,clamp});
 })(KIT);

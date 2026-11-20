@@ -32,6 +32,7 @@ function target(opt) {
 
 module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,atmosphereEmittersOption,effectPalettesOption,stabilityOption,artDirectionOption,silhouetteOption,horizonOption,skyTransitionsOption,weatherTracksOption,skyOptions,shot,shotReplay,shotRender}) {
   const W = kit.KIT.world, R = W.runtime;
+  let workerPool;
   const args = () => opt.args ? parse(opt.args) : {};
   function sampleArgs() {
     if (opt.explain === undefined) return args();
@@ -74,7 +75,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
       ? {...input.world,...(opt.seed===undefined?{}:{seed:Number(opt.seed)}),...(opt.dt===undefined?{}:{dt:Number(opt.dt)})}
       : input.world;
     if (input.checkpoint) ensure(opt.seed===undefined && opt.dt===undefined,'A resumed run uses its checkpoint seed and timestep');
-    return R.create(source,{checkpoint:input.checkpoint,profile});
+    return R.create(source,{checkpoint:input.checkpoint,profile,workerPool});
   }
   function to(run) {
     const {tick,world} = run.view(), modes = [opt.ticks,opt.steps,opt.t].filter(v => v !== undefined);
@@ -172,7 +173,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
       temporal.push({i,rule,at});
     }
     if(temporal.length){
-      const replay=R.create(log.origin.world,{checkpoint:log.origin});
+      const replay=R.create(log.origin.world,{checkpoint:log.origin,workerPool});
       replay.schedule(log.commands);
       const exact=new Map(), deadlines=[];
       for(const item of temporal){
@@ -203,6 +204,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
       .map(({id,level})=>[id,level]));
     return {id:world.id,seed:world.seed,dt:world.dt,tick,time:tick*world.dt,...(rates && {rates}),
       ...(chunkLevels&&{chunkLevels}),
+      ...(workerPool&&{partitions:run.partitions()}),
       systems:Object.keys(checkpoint.states),commands:run.commandCounts(),events:checkpoint.history.length,historyDropped:checkpoint.dropped,
       scenario:run.scenario,...(checks?{checks}:{}),...(opt.profile?{profile:run.profile()}:{})};
   }
@@ -221,7 +223,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
     ensure(input.log,'Earlier ticks require a recording');
     const at=Number(opt.ticks);
     ensure(Number.isSafeInteger(at)&&at>=input.log.origin.tick&&at<=input.log.end.tick,'Tick lies outside the recording');
-    const run = R.create(input.log.origin.world,{checkpoint:input.log.origin});
+    const run = R.create(input.log.origin.world,{checkpoint:input.log.origin,workerPool});
     run.schedule(input.log.commands);
     run.advance(at);
     return run.checkpoint();
@@ -240,7 +242,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
     let run = runtime(input);
     if (input.log) {
       const origin = input.log.origin;
-      run = R.create(origin.world,{checkpoint:origin});
+      run = R.create(origin.world,{checkpoint:origin,workerPool});
       run.schedule(input.log.commands);
     }
     schedule(run);
@@ -255,9 +257,22 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
       }
     }});
     return respond({format:'ink-studio/spatial-dependencies',version:1,id:run.view().world.id,
-      fromTick:start,toTick:end,declarations:run.dependencies().declarations,ticks});
+      fromTick:start,toTick:end,declarations:run.dependencies().declarations,ticks,
+      ...(workerPool&&{partitions:run.partitions()})});
   }
-  function sim([mode,file,other]) {
+  function sim(args) {
+    if(opt.workers!==undefined){
+      ensure(typeof opt.workers==='string'&&/^\d+$/.test(opt.workers),'--workers needs a count from 1 to 32');
+      workerPool=require('../index.js').createSimulationWorkers(Number(opt.workers));
+    }
+    try {
+      return runSimulation(args);
+    } finally {
+      workerPool?.close();
+      workerPool=undefined;
+    }
+  }
+  function runSimulation([mode,file,other]) {
     switch (mode) {
       case 'run':
       case 'resume':
@@ -273,13 +288,13 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
       case 'dependencies': return dependencyReport(file);
       case 'reset': {
         const input=load(file);
-        finish(input.log?R.create(input.log.origin.world,{checkpoint:input.log.origin}):runtime(input));
+        finish(input.log?R.create(input.log.origin.world,{checkpoint:input.log.origin,workerPool}):runtime(input));
         break;
       }
       case 'replay': {
         const input=load(file);
         ensure(input.log,'Expected a run recording');
-        finish(R.replay(input.log,{profile:!!(opt.profile||opt.assert)}));
+        finish(R.replay(input.log,{profile:!!(opt.profile||opt.assert),workerPool}));
         break;
       }
       case 'diff': {
@@ -324,7 +339,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
       }
       case 'render': {
         const recording=shotReplay?.runtime;
-        const run=recording ? R.create(recording.origin.world,{checkpoint:recording.origin}) : runtime(load(file));
+        const run=recording ? R.create(recording.origin.world,{checkpoint:recording.origin,workerPool}) : runtime(load(file));
         if (recording) run.schedule(recording.commands);
         else schedule(run);
         ensure(typeof opt.out==='string','Simulation render needs --out image.png');

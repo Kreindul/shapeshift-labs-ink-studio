@@ -3,15 +3,74 @@
   const W = K.world, P = K.procedural, Q = W.query, freeze = P.data.freeze;
   const {check,record,id,vector,own,copy,equal,endpoint,portOf} = W.data;
   const factories = new Map();
+  const bundledPartitions = new Set();
   const clock = () => typeof performance === 'undefined' ? Date.now() : performance.now();
   const tickOK = value => Number.isSafeInteger(value) && value >= 0 && value <= 10000000;
   const ordered = value => Object.keys(value).sort();
   const worldActions = ['input','patch','event','transfer'];
   const checkpointFormat = 'ink-studio/checkpoint', runFormat = 'ink-studio/run';
 
-  function register(kind, factory) {
+  function stepTiming(world,at,timing) {
+    const baseDt=world.dt, substeps=timing?.substeps??1, detail=timing?.detail;
+    const time=timing&&timing.end!==1?(at-1+timing.end)*baseDt:at*baseDt;
+    const dt=detail?baseDt*((timing.substep===1?detail.elapsed-1:0)+1/substeps):
+      timing?baseDt*timing.every/substeps:baseDt;
+    const lod=detail&&Object.freeze({chunk:detail.chunk,level:detail.level,tuning:detail.tuning,
+      activeTicks:detail.activeTicks,time:baseDt*(detail.activeTicks-1+timing.substep/substeps)});
+    return {tick:at,time,dt,...(timing&&{baseDt,every:timing.every,substep:timing.substep,substeps}),
+      ...(lod&&{simulationLOD:lod})};
+  }
+  function randomSource(seed,name,at,timing){
+    const randomTick=timing?.substeps>1?at+'.'+timing.substep:at;
+    return key=>P.data.hash(name+'/'+randomTick+'/'+String(key),seed)/4294967296;
+  }
+  function* partitionGroups(names,barriers){
+    let start=0;
+    for(let i=0;i<names.length;i++)if(barriers.has(names[i])){
+      yield names.slice(start,i+1);
+      start=i+1;
+    }
+    if(start<names.length)yield names.slice(start);
+  }
+  function partitionKernel(source,implementations={}){
+    const world=freeze(source), catalog=W.materials.catalog(world), providers=new Map(), models=new Map();
+    const boundary=()=>{throw Error('Partition solvers need declared boundary inputs');};
+    const query=new Proxy({}, {get:boundary});
+    const restricted={world:{get:boundary},states:{get:boundary},...(world.causality&&{causal:{get:boundary}})};
+    return ({name,state,input,at,timing,model,profile})=>{
+      let provider=providers.get(name);
+      if(!provider){
+        const spec=world.systems[name];
+        const factory=own(implementations,spec.kind)?implementations[spec.kind]:factories.get(spec.kind);
+        provider=factory?.(spec.config??{},{world,id:name,catalog});
+        check(provider?.partitionStep===true,'System cannot run in a worker partition: '+name);
+        providers.set(name,provider);
+      }
+      let adapter;
+      if(model){
+        const key=name+'/'+state.level;
+        adapter=models.get(key);
+        if(!adapter){
+          adapter=W.simulationAggregate.define(provider,freeze(model),name);
+          models.set(key,adapter);
+        }
+      }
+      const effects=[];
+      const note=method=>(...args)=>{effects.push([method,args.map(value=>value===undefined?value:copy(value))]);};
+      const spatial=provider.dependencies&&Object.freeze({write:note('write'),rebuilt:note('rebuilt'),
+        changes(){throw Error('Partition solvers cannot read spatial invalidations');}});
+      const ctx=Object.freeze(Object.defineProperties({id:name,...stepTiming(world,at,freeze(timing)),input:freeze(input),query,
+        emit:note('emit'),...(spatial&&{spatial}),random:randomSource(world.seed,name,at,timing)},restricted));
+      const start=profile?clock():0, saved=freeze(state);
+      const next=adapter?W.simulationAggregate.advance(adapter,saved,ctx):provider.step(saved,ctx);
+      return { ...(next===saved?{unchanged:true}:{state:next}),effects,ms:profile?clock()-start:0 };
+    };
+  }
+
+  function register(kind, factory, { worker = false } = {}) {
     check(id(kind) && typeof factory === 'function' && !factories.has(kind), 'Invalid or duplicate system kind ' + kind);
     factories.set(kind,factory);
+    if(worker)bundledPartitions.add(kind);
   }
   const types = {
     bool:value => typeof value === 'boolean',
@@ -220,16 +279,32 @@
     return {world,plan,weather};
   }
   const validate=(source,options)=>prepare(source,options).world;
-  function create(source, {checkpoint,implementations,profile = false,validated = false} = {}) {
-    let result=validated?{world:source,plan:compile(source,implementations)}:prepare(source,{implementations});
+  function create(source, {checkpoint,implementations,profile = false,validated = false,workerPool} = {}) {
+    check(workerPool===undefined||typeof workerPool?.solve==='function','Invalid simulation worker pool');
+    const modules=workerPool?.implementations;
+    const installed=modules?{...modules,...implementations}:implementations;
+    let result=validated?{world:source,plan:compile(source,installed)}:prepare(source,{implementations:installed});
     let {world}=result;
     if (!checkpoint && world.scenario?.start?.length) {
       const edited = W.apply(world,world.scenario.start).world;
-      result=prepare(edited,{implementations});
+      result=prepare(edited,{implementations:installed});
       world=result.world;
     }
     const {plan, weather = weatherProgram(world)}=result;
     const {systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,aggregates,causePolicy} = plan;
+    const partitioned=workerPool&&new Set(names.filter(name=>{
+      const {kind}=world.systems[name];
+      return systems[name].partitionStep===true&&(own(installed,kind)?
+        own(modules,kind)&&installed[kind]===modules[kind]:bundledPartitions.has(kind));
+    }));
+    const partitionBarriers=workerPool&&new Set();
+    if(partitioned?.size)for(const {from,to,delay,sample} of incoming.values()){
+      const source=endpoint(from)[0];
+      if(!delay&&sample!=='average'&&systems[source].combinational&&partitioned.has(endpoint(to)[0]))
+        partitionBarriers.add(source);
+    }
+    const jobsBySystem=new Map();
+    let partitionBatches=0, peakWorkers=0;
     const projection = Q.projection(systems);
     const slowReaders = new Map(rates ? dependencies.describe.filter(({id,reads})=>reads.length&&
       (rates.rates[id].every>1||chunks?.managed.get(id)?.schedules))
@@ -257,18 +332,10 @@
         ...(weatherTrackState && {weatherTrackState})});
     }
     function context(name, worldValue, statesValue, at, input, emit, query, spatial, timing, causal) {
-      const baseDt = worldValue.dt, substeps = timing?.substeps ?? 1;
-      const time = timing && timing.end !== 1 ? (at-1+timing.end)*baseDt : at*baseDt;
-      const detail=timing?.detail;
-      const dt = detail?baseDt*((timing.substep===1?detail.elapsed-1:0)+1/substeps):
-        timing ? baseDt*timing.every/substeps : baseDt;
-      const lod=detail&&Object.freeze({chunk:detail.chunk,level:detail.level,tuning:detail.tuning,
-        activeTicks:detail.activeTicks,time:baseDt*(detail.activeTicks-1+timing.substep/substeps)});
-      const randomTick = substeps>1 ? at+'.'+timing.substep : at;
-      return Object.freeze({world:worldValue,query,id:name,states:aggregates?.view(statesValue)??statesValue,tick:at,time,dt,input,emit,
-        ...(timing && {baseDt,every:timing.every,substep:timing.substep,substeps}),...(lod&&{simulationLOD:lod}),
+      return Object.freeze({world:worldValue,query,id:name,states:aggregates?.view(statesValue)??statesValue,
+        ...stepTiming(worldValue,at,timing),input,emit,
         ...(spatial && {spatial}),...(causal && {causal}),
-        random:key => P.data.hash(name+'/'+randomTick+'/'+String(key),worldValue.seed)/4294967296});
+        random:randomSource(worldValue.seed,name,at,timing)});
     }
     function rootedState(value) {
       return P.data.isImmutable(value) ? value : freeze(copy(value));
@@ -572,6 +639,26 @@
       aggregates?.transition(drafts,nextChunkState,makeEmit('world'));
       const committed = freeze(drafts);
       const spent = {};
+      let workerResults=null, workerBatches=0, workersThisTick=0;
+      const offloaded=partitioned?.size?new Map():null;
+      function launch(group,snapshot,peekInput,timingFor){
+        const jobs=[];
+        for(const name of group)if(partitioned.has(name)){
+          const timing=timingFor?.(name);
+          if(timingFor&&!timing)continue;
+          const state=snapshot[name], model=W.simulationAggregate.modelSpec(state,chunks?.managed.get(name)?.models);
+          jobs.push({name,state,input:peekInput(name),at,timing,model,profile});
+        }
+        workerResults=null;
+        if(!jobs.length)return;
+        const batch=workerPool.solve(plan.world,jobs);
+        workerResults=batch.results;
+        workerBatches++;
+        workersThisTick=Math.max(workersThisTick,batch.workers);
+        for(const {name} of jobs)offloaded.set(name,(offloaded.get(name)??0)+1);
+      }
+      const prepare=partitioned?.size?launch:undefined;
+      const groupsFor=prepare&&(ordered=>partitionGroups(ordered,partitionBarriers));
       let phaseQuery, phaseStart;
       function integrate(name, snapshot, input, timing, target, sources, priorOutputs) {
         if (!phaseQuery || phaseStart !== timing?.start) {
@@ -585,7 +672,16 @@
         if (scope) for (const key of Object.keys(input)) scope.api.input(key);
         const ctx = context(name,nextWorld,snapshot,at,input,makeEmit(name,scope),phaseQuery,spatial(name,true),timing,scope?.api);
         const start = profile ? clock() : 0;
-        const next = system.step ? rootedState(system.step(state,ctx)) : state;
+        const worker=workerResults?.get(name);
+        if(worker?.error)throw Error(worker.error.message,{cause:worker.error});
+        let next=state;
+        if(worker){
+          if(!worker.unchanged)next=rootedState(worker.state);
+          for(const [method,args] of worker.effects){
+            if(method==='emit')ctx.emit(...args);
+            else ctx.spatial[method](...args);
+          }
+        }else if(system.step)next=rootedState(system.step(state,ctx));
         readOutputs(name,next,ctx,target);
         if (causal) {
           for (const key of Object.keys(system.outputs??{})) {
@@ -597,28 +693,33 @@
         if (profile) {
           const cost = spent[name] ??= {calls:0,ms:0};
           cost.calls++;
-          cost.ms += clock()-start;
+          cost.ms += clock()-start+(worker?.ms??0);
         }
         return next;
       }
 
       let nextStates, nextOutputs, publishedSignals, nextSampling, delayedSamples;
       if (rates) {
-        const frame = rates.advance(at,committed,outputs,nextManual,delays,lastSignals,sampling,integrate,causal,chunkStep);
+        const frame = rates.advance(at,committed,outputs,nextManual,delays,lastSignals,sampling,integrate,causal,chunkStep,
+          prepare&&{prepare,groupsFor});
         ({states:nextStates,outputs:nextOutputs,signals:publishedSignals,buffers:nextSampling,delayedSamples}=frame);
       } else {
         nextStates = {}; nextOutputs = {};
         const immediate = {}, observed = {};
-        for (const name of order) {
-          const input = currentValues(name,nextManual,immediate,outputs,delays);
-          for (const [key,value] of Object.entries(input)) observed[name+'/'+key] = value;
-          const sources=causal && Object.fromEntries(Object.keys(input).map(key=>{
-            const port=name+'/'+key, edge=incoming.get(port);
-            return [key,{parents:causal.held(port,edge,own(immediate,edge?.from)),source:edge?.from,delay:edge?.delay}];
-          }));
-          nextStates[name] = integrate(name,committed,input,undefined,nextOutputs,sources,outputs);
-          if (systems[name].combinational) for (const key of Object.keys(systems[name].outputs ?? {}))
-            immediate[name+'/'+key] = nextOutputs[name+'/'+key];
+        const groups=prepare?groupsFor(order):[order];
+        for(const group of groups){
+          if(prepare)prepare(group,committed,name=>currentValues(name,nextManual,immediate,outputs,delays));
+          for (const name of group) {
+            const input = currentValues(name,nextManual,immediate,outputs,delays);
+            for (const [key,value] of Object.entries(input)) observed[name+'/'+key] = value;
+            const sources=causal && Object.fromEntries(Object.keys(input).map(key=>{
+              const port=name+'/'+key, edge=incoming.get(port);
+              return [key,{parents:causal.held(port,edge,own(immediate,edge?.from)),source:edge?.from,delay:edge?.delay}];
+            }));
+            nextStates[name] = integrate(name,committed,input,undefined,nextOutputs,sources,outputs);
+            if (systems[name].combinational) for (const key of Object.keys(systems[name].outputs ?? {}))
+              immediate[name+'/'+key] = nextOutputs[name+'/'+key];
+          }
         }
         publishedSignals = {...observed,...nextOutputs};
       }
@@ -657,6 +758,11 @@
         const value = metrics.get(name) ?? {calls:0,ms:0,maxMs:0};
         metrics.set(name,{calls:value.calls+calls,ms:value.ms+ms,maxMs:Math.max(value.maxMs,ms)});
       }
+      if(workerBatches){
+        partitionBatches+=workerBatches;
+        peakWorkers=Math.max(peakWorkers,workersThisTick);
+        for(const [name,count] of offloaded)jobsBySystem.set(name,(jobsBySystem.get(name)??0)+count);
+      }
       return view();
     }
     function advance(to, {onTick,stopOnOutcome = false} = {}) {
@@ -680,10 +786,12 @@
       profile:() => rates && profile ? Object.fromEntries(names.map(name=>[name,
         metrics.get(name)??{calls:0,ms:0,maxMs:0}])) : Object.fromEntries(metrics),
       rates:() => rates ? {subdivision:rates.subdivision,systems:rates.rates} : null,
+      partitions:()=>({workers:workerPool?.size??0,peakWorkers,batches:partitionBatches,
+        systems:Object.fromEntries(names.filter(name=>jobsBySystem.has(name)).map(name=>[name,jobsBySystem.get(name)]))}),
       dependencies:() => ({declarations:dependencies.describe,
         ...(lastDependencies ?? {changes:[],affected:[],work:[]}),pending:pendingWrites}),
-      fork:() => create(world,{checkpoint:save(),implementations,profile,validated:true}),
-      reset:() => create(origin.world,{checkpoint:origin,implementations,profile,validated:true})});
+      fork:() => create(world,{checkpoint:save(),implementations,profile,validated:true,workerPool}),
+      reset:() => create(origin.world,{checkpoint:origin,implementations,profile,validated:true,workerPool})});
   }
   function replay(log, options) {
     check(record(log) && log.format === runFormat && log.version === 1, 'Invalid world recording');
@@ -698,5 +806,5 @@
       'Simulation diff needs two checkpoints at the same tick');
     return {tick:a.tick,time:{before:a.tick*a.world.dt,after:b.tick*b.world.dt},edits:Q.keyedChanges(a,b)};
   }
-  W.runtime = Object.freeze({register,validate,create,replay,diff,checkpointFormat,runFormat});
+  W.runtime = Object.freeze({register,validate,create,replay,diff,checkpointFormat,runFormat,partitionKernel});
 })(KIT);

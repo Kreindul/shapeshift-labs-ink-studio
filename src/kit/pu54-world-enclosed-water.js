@@ -260,6 +260,7 @@
       return Q.ok({geometry:acousticGeometry,fractions:state.opening,levels:rooms.map((_,i)=>level(state,i))});
     }
     return {initial:()=>initial,checkFields,validateState,inputs,outputs,accounts,waterFrame,
+      partitionStep:doors.every(row=>!row.gate),
       ...(boundaries.length>0&&{requestTransfers,checkTransfers(validate){for(const row of boundaries)validate(order(row),true);}}),
       dependencies:{writes:['medium','water','depth','phase','head','pressure'],
         reads:[...new Set([...doors,...boundaries].flatMap(row=>[row.gate?.field,row.headField]).filter(Boolean))]},
@@ -313,5 +314,5 @@
       }
     };
   }
-  W.runtime.register('enclosed-water',enclosedWater);
+  W.runtime.register('enclosed-water',enclosedWater,{worker:true});
 })(KIT);
