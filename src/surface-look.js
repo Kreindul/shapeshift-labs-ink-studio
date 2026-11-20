@@ -5,19 +5,23 @@ const SurfaceLook = (() => {
   const detail = typeof StableDetail === 'undefined' ? require('./stable-detail.js') : StableDetail;
   const effects = typeof SplatEffects === 'undefined' ? require('./splat-effects.js') : SplatEffects;
   const pixelLook = typeof PixelLook === 'undefined' ? require('./pixel-look.js') : PixelLook;
-  let curves, luts, stacks;
+  let curves, luts, stacks, colorSpace;
   try {
     curves = ColorCurves;
     luts = ColorLUT;
     stacks = ColorStack;
+    colorSpace = ColorSpace;
   } catch {
     curves = require('./color-curves.js');
     luts = require('./color-lut.js');
     stacks = require('./color-stack.js');
+    colorSpace = require('./color-space.js');
   }
   const STRIDE = 8; // binding ID (one-based), normal XYZ, visibility, optional tangent XYZ
   const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
   const WHITE = [1, 1, 1];
+  const toLinear = colorSpace.prepare('srgb', 'srgb-linear');
+  const toDisplay = colorSpace.prepare('srgb-linear', 'srgb');
   const TAU = Math.PI * 2;
   const specularLayers = new Set(['specular','fiber','sheen','film','diffraction','glints','reflection','planarReflection','localReflection']);
   const rampLayers = new Set(['diffuse', 'specular', 'fiber', 'sheen', 'glints', 'bevel']);
@@ -237,8 +241,10 @@ const SurfaceLook = (() => {
         if (to.length !== 2 || !to.every(value => Number.isFinite(value) && (local ? value >= 0 && value <= 1 : value > 0)))
           throw new RangeError(layer.id + '.drive.roughness needs a valid value or along/across pair');
         if (!local) to = to.map(value => positive(value));
-      } else if (key === 'color' && ['tint', 'specular', 'fiber', 'sheen', 'glints', 'bevel', 'planarReflection', 'localReflection'].includes(layer.type)) {
+      } else if (key === 'color' && ['tint', 'specular', 'fiber', 'sheen', 'glints', 'bevel', 'planarReflection', 'localReflection', 'transmission'].includes(layer.type)) {
         to = color(to, palette);
+      } else if (key === 'thickness' && layer.type === 'transmission') {
+        if (!Number.isFinite(to) || to < 0) throw new RangeError(layer.id + '.drive.thickness must be nonnegative');
       } else throw new RangeError(layer.id + '.drive cannot control ' + key + ' on ' + layer.type);
       return { key, signal, from, to };
     });
@@ -360,6 +366,32 @@ const SurfaceLook = (() => {
       }
       return fresnel(q.nv, layer.f0 ?? 0.04, layer.power ?? 5) * (scene ? q.skyAccess : 1);
     },
+    transmission(layer, q, col) {
+      const scene = q.transmissionSun || q.transmissionLights;
+      const normal = scene && q.skyNormal ? unit(q.skyNormal(q.n), q.n) : q.n;
+      const view = scene && q.skyView ? q.skyView : q.v;
+      const side = dot(normal, view) >= 0 ? -1 : 1;
+      const irradiance = [0, 0, 0];
+      function transmit(direction, intensity, rgb, visibility) {
+        const incident = dot(normal, direction) * side;
+        const facing = clamp((incident + layer.wrap) / (1 + layer.wrap));
+        if (!facing || !intensity) return;
+        const clear = layer.shadow === false ? 1 : visibility?.(layer.shadowBias) ?? 1;
+        const amount = facing ** layer.power * Math.exp(-layer.thickness / (0.18 + 0.82 * clamp(incident))) * intensity * clear;
+        for (let i = 0; i < 3; i++) irradiance[i] += rgb[i] * amount;
+      }
+      if (layer.source !== 'local') {
+        const sun = q.transmissionSun;
+        transmit(sun?.direction ?? q.sun, sun?.intensity ?? 1, sun?.color ?? WHITE,
+          sun?.visibility ?? (() => q.light));
+      }
+      if (layer.source !== 'sun') for (const lamp of q.transmissionLights?.() ?? [])
+        transmit(lamp.direction, lamp.intensity, lamp.color, lamp.visibility);
+      if (!irradiance.some(Boolean)) return 0;
+      toLinear(col, col);
+      for (let i = 0; i < 3; i++) col[i] *= irradiance[i];
+      return 1;
+    },
     localReflection(layer, q, col) {
       if (!q.localReflection) return 0;
       const normal = q.skyNormal ? unit(q.skyNormal(q.n), q.n) : q.n;
@@ -465,7 +497,7 @@ const SurfaceLook = (() => {
 
   function prepare(settings, palette = [], lightDirection = [-0.55, 0.72, 0.43], context = {},
     { colorCurves = true, colorLut = true, colorStack = true, paletteConstraints = true, paletteRoles, blueNoise, onPaletteClip,
-      validateOnly = false } = {}) {
+      transmission = true, validateOnly = false } = {}) {
     if (!isRecord(settings)) throw new TypeError('Surface settings must be an object');
     if (validateOnly && settings.renderStages !== undefined) {
       const stages = typeof RenderStages === 'undefined' ? require('./render-stages.js') : RenderStages;
@@ -520,7 +552,7 @@ const SurfaceLook = (() => {
     const layers = Object.entries(settings.layers || {})
       .filter(([, layer]) => layer && (layer.strength !== 0 || layer.drive?.strength !== undefined) &&
         (colorCurves || layer.type !== 'colorCurve') && (colorLut || layer.type !== 'colorLut') &&
-        (colorStack || layer.type !== 'colorStack'))
+        (colorStack || layer.type !== 'colorStack') && (transmission || layer.type !== 'transmission'))
       .map(([id, layer]) => {
         const colorLayer = ['tint', 'projected', 'colorCurve', 'colorLut', 'colorStack'].includes(layer.type);
         if (!colorLayer && !Object.hasOwn(models, layer.type))
@@ -560,7 +592,8 @@ const SurfaceLook = (() => {
             'response',
             'distortion',
             'blur',
-            ...(layer.type === 'bevel' ? ['minBend', 'softness'] : [])
+            ...(layer.type === 'bevel' ? ['minBend', 'softness'] : []),
+            ...(layer.type === 'transmission' ? ['wrap', 'shadowBias'] : [])
           ],
           id
         );
@@ -621,6 +654,14 @@ const SurfaceLook = (() => {
             throw new RangeError(id + ' bevel needs width in 0.25–8 art pixels, positive minBend, softness and power, and a valid edge');
           bevel = { width, minBend, softness, edge, power };
         }
+        let thin;
+        if (layer.type === 'transmission') {
+          const { source = 'both', thickness = 0.24, wrap = 0.12, power = 0.65, shadowBias = 0.08 } = layer;
+          if (!['sun', 'local', 'both'].includes(source) || thickness < 0 || wrap < 0 || wrap > 1 ||
+              power <= 0 || shadowBias < 0)
+            throw new RangeError(id + ' transmission needs a source, nonnegative thickness and shadowBias, wrap in [0, 1], and positive power');
+          thin = { source, thickness, wrap, power, shadowBias };
+        }
         const roughness = roughnessPair(layer.roughness);
         const local = layer.type === 'localReflection';
         if (local && (typeof layer.probe !== 'string' || !layer.probe.trim() ||
@@ -631,6 +672,7 @@ const SurfaceLook = (() => {
           ...layer,
           id,
           ...bevel,
+          ...thin,
           spatialMask,
           retainedMask,
           model: models[layer.type],
@@ -650,11 +692,13 @@ const SurfaceLook = (() => {
         };
         return { ...compiled, drive: prepareDrive(layer.drive, compiled, signals, palette) };
       });
+    const thin = layers.some(layer => layer.type === 'transmission');
+    const thinLocal = layers.some(layer => layer.type === 'transmission' && layer.source !== 'sun');
     const driven = layers.some(layer => layer.drive);
     const weather = layers.some(layer => layer.retainedMask || layer.drive?.some(entry => entry.signal.weather));
     return {
-      settings, normal, layers, driven, weather,
-      finishBeforeFog: driven || layers.some(layer => layer.type === 'tint'), sun: unit(vector(lightDirection, AXES.y)),
+      settings, normal, layers, driven, weather, thin, thinLocal,
+      finishBeforeFog: thin || driven || layers.some(layer => layer.type === 'tint'), sun: unit(vector(lightDirection, AXES.y)),
       paletteConstraint: paletteConstraints && settings.paletteConstraint !== undefined
         ? pixelLook.prepareLookPolicy(settings.paletteConstraint, { palette, roles: paletteRoles, blueNoise, context, validateOnly, onPaletteClip,
           skipMaskedStacks: !colorStack }) : null,
@@ -700,6 +744,9 @@ const SurfaceLook = (() => {
       footprint,
       seed,
       geometricNormal,
+      sun,
+      transmissionSun: sample.transmissionSun,
+      transmissionLights: sample.transmissionLights,
       reflection: sample.reflection,
       localReflection: sample.localReflection,
       reflectionTangent: sample.reflectionTangent,
@@ -810,6 +857,13 @@ const SurfaceLook = (() => {
       if (spark) output[4] = Math.max(output[4], weight * detailGain);
       const steps = layer.steps ?? settings.steps ?? 0;
       const amount = (steps > 1 ? Math.round(weight * steps) / steps : weight) * detailGain;
+      if (layer.type === 'transmission') {
+        if (!amount) continue;
+        toLinear(output, output);
+        for (let i = 0; i < 3; i++) output[i] += rgb[i] * amount;
+        toDisplay(output, output);
+        continue;
+      }
       for (let i = 0; i < 3; i++) output[i] = mix(output[i], rgb[i], amount);
       if (reflected && amount) {
         const reflection = layer.type === 'reflection' || layer.type === 'planarReflection' || layer.type === 'localReflection';

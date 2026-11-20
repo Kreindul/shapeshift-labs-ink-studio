@@ -123,4 +123,9 @@ function createLighting(lights, world, data, alpha) {
   };
 }
 
-module.exports = { rasterize, createLighting };
+function sceneOccluder(world, data, alpha) {
+  const sources = staticSources(world, data, alpha);
+  return sources.length ? (origin, direction, distance) => occludes(sources, origin, direction, distance) : null;
+}
+
+module.exports = { rasterize, createLighting, sceneOccluder };

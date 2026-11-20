@@ -189,6 +189,15 @@ function create(sun, world, pose, normalAt, cloudShadow, exposure, { shadowArt, 
       ShadowArt.transfer(art, shadow(x, y, z, normals[i], facing[i]), coarse) : 1;
     return geometry && geometry * (cloudShadow?.(x,y,z) ?? 1) * (exposure?.(x,y,z) ?? 1);
   };
+  function transmissionVisibility(i, point, normal, bias) {
+    const cosine = dot(normal, sun.direction);
+    const toward = cosine < 0 ? normal.map(value => -value) : normal;
+    const geometry = shadow && (!receives || receives(i)) ? ShadowArt.transfer(art, shadow(
+      ...point.map((value, axis) => value + sun.direction[axis] * bias), toward, Math.abs(cosine)
+    ), coarse) : 1;
+    const [x, y, z] = point;
+    return geometry * (cloudShadow?.(x, y, z) ?? 1) * (exposure?.(x, y, z) ?? 1);
+  }
   const level = (i, x, y, z) => sun.ambient + sun.intensity * facing[i] * visibility(i, x, y, z);
   function gains(i, x, y, z, rgb) {
     rgb.fill(level(i, x, y, z));
@@ -213,7 +222,7 @@ function create(sun, world, pose, normalAt, cloudShadow, exposure, { shadowArt, 
     const n = fill[i];
     return n >= 0 ? [(n >> 16)/255, (n >> 8 & 255)/255, (n & 255)/255] : null;
   };
-  return { albedo, normal: i => normals[i], level, gains, rampLevel, visibility, hasBounce: Boolean(indirect || probes) };
+  return { albedo, normal: i => normals[i], level, gains, rampLevel, visibility, transmissionVisibility, hasBounce: Boolean(indirect || probes) };
 }
 
 module.exports = { prepare, create };
