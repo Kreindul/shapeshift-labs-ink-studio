@@ -88,7 +88,9 @@
     return branch(0,indices.length);
   }
 
-  function picker(world,{time=world.lookSnapshot?.time??0,sampleWithdrawal=world.sampleWithdrawal??0}={}){
+  function picker(world,{time=world.lookSnapshot?.time??0,sampleWithdrawal=world.sampleWithdrawal??0,
+    splatCoverage=world.look?.splatCoverage}={}){
+    const coverageMode=R.coverageMode(splatCoverage);
     const {count,renderMetadata,opticalSplats}=world;
     if(!(world.data instanceof Float32Array)||!Number.isSafeInteger(count)||count<0||world.data.length<count*16||!Number.isFinite(time))
       throw new TypeError('Picking needs a baked splat world and finite time');
@@ -128,14 +130,17 @@
           const a=i*3, normals=renderMetadata?.normals;
           const normal=optical?opticalFrames(i).normal:normals&&[normals[a],normals[a+1],normals[a+2]];
           const f=normal&&V.dot(normal,d);
-          let alpha=R.alpha(-.5*(C*x*x-2*B*x*y+A*y*y)/det,density,!soft&&density>=1,world.materialPixelStyles?.[i*4]);
+          const raw=Math.round(data[i*16+11]), packedEdge=world.materialPixelStyles?.[i*4]??0;
+          const mode=R.materialCoverage(packedEdge,coverageMode), softCoverage=mode===R.softCoverage;
+          let alpha=R.alpha(-.5*(C*x*x-2*B*x*y+A*y*y)/det,density,!soft&&!softCoverage&&density>=1,
+            R.materialEdge(packedEdge),!soft&&R.continuous(mode,density,raw,optical));
           if(optical)alpha*=OpticalMaterials.slabOpacity(opticalSplats,opt,normal?f:1);
           if(alpha<R.minimum)continue;
-          const raw=Math.round(data[i*16+11]), target=(provenance??=TargetSelectors.index(world)).row(i);
+          const target=(provenance??=TargetSelectors.index(world)).row(i);
           const at=Math.abs(f)>1e-7?V.dot(normal,delta)/f:t;
           const distance=at>0&&at<=maxDistance&&Math.abs(at-t)<=3*Math.sqrt(cov[0]+cov[3]+cov[5])?at:t;
           hits.push({kind:raw&256?'glass':'splat',index:i,...(world.splatIds?.[i]&&{id:world.splatIds[i]}),
-            target,distance,point:V.mad(origin,d,distance),alpha,solid:!optical&&density>=1&&alpha>=.5&&!(raw&(16|256))});
+            target,distance,point:V.mad(origin,d,distance),alpha,solid:!optical&&!softCoverage&&density>=1&&alpha>=.5&&!(raw&(16|256))});
         }
       }
       visit(tree);

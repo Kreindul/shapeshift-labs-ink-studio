@@ -217,6 +217,7 @@ function renderFrame(world, o, preparedPalettes) {
   const onPaletteClip = audit && ((scope, i, r, g, b) => audit.palette(scope, world.pal[i], r, g, b));
   const transparent = !!o.transparent && !o.captureCoverage;
   const integrateFootprint = o.splatFilter === 'footprint';
+  const coverageMode = ContributionRules.coverageMode(o.splatCoverage ?? look.splatCoverage);
   const orderMode = o.splatOrder ?? look.splatOrder ?? 'center';
   const sortedSurfaces = orderMode === 'surface';
   const transparency = SplatOrder.transparency(o.stableTransparency ?? look.stableTransparency);
@@ -1029,7 +1030,13 @@ function renderFrame(world, o, preparedPalettes) {
       s2 = SC[i] * SC[i],
       pk = d[q + 7];
     const fieldParticle = i >= baseCount;
-    const jStyle = i * 4, edgeStyle = materialStyles?.[jStyle] || 0;
+    const jStyle = i * 4, packedEdge = world.materialPixelStyles?.[jStyle] || 0;
+    const edgeStyle = o.raw ? 0 : ContributionRules.materialEdge(packedEdge);
+    const mode = ContributionRules.materialCoverage(packedEdge, coverageMode);
+    const softCoverage = o.soft || mode === ContributionRules.softCoverage;
+    const continuousCoverage = !softCoverage && !fieldParticle &&
+      ContributionRules.continuous(mode, al, kraw, opticalActive || surface?.reveals(i));
+    const filterVariance = continuousCoverage ? ContributionRules.continuousVariance * artScale * artScale : .15;
     const styleKey = (kraw & 32768) ? 0 : materialStyles?.[jStyle + 1] || 0;
     const staged = stages ? stages.at(fieldParticle ? -1 : i) : null;
     lookPass?.begin();
@@ -1100,9 +1107,9 @@ function renderFrame(world, o, preparedPalettes) {
       w0 = c00 * b0 + c01 * b1 + c02 * b2,
       w1 = c01 * b0 + c11 * b1 + c12 * b2,
       w2 = c02 * b0 + c12 * b1 + c22 * b2;
-    const A = a0 * u0 + a1 * u1 + a2 * u2 + 0.15,
+    const A = a0 * u0 + a1 * u1 + a2 * u2 + filterVariance,
       Bq = b0 * u0 + b1 * u1 + b2 * u2,
-      C = b0 * w0 + b1 * w1 + b2 * w2 + 0.15,
+      C = b0 * w0 + b1 * w1 + b2 * w2 + filterVariance,
       det = A * C - Bq * Bq;
     if (det <= 0) continue;
     const k0 = C / det,
@@ -1151,7 +1158,7 @@ function renderFrame(world, o, preparedPalettes) {
       b += (fog[2] - b) * fogMix;
     }
     const solid = al >= 1,
-      writesDepth = !opticalActive && solid && coverage === 1 && !(flags & 1),
+      writesDepth = !opticalActive && solid && coverage === 1 && !(flags & 1) && mode !== ContributionRules.softCoverage,
       glass = (flags & 16) !== 0,
       x0 = Math.max(0, Math.floor(sx - ex)),
       x1 = Math.min(W - 1, Math.ceil(sx + ex)),
@@ -1213,8 +1220,8 @@ function renderFrame(world, o, preparedPalettes) {
         const dx = ix + 0.5 - sx,
           pw = -0.5 * (k0 * dx * dx + k2 * dy * dy) - k1 * dx * dy;
         let a;
-        if (integrateFootprint) a = footprint(dx, dy, k0, k1, k2, al, solid && !o.soft, edgeStyle);
-        else a = ContributionRules.alpha(pw, al, solid && !o.soft, edgeStyle);
+        if (integrateFootprint) a = footprint(dx, dy, k0, k1, k2, al, solid && !softCoverage, edgeStyle, continuousCoverage);
+        else a = ContributionRules.alpha(pw, al, solid && !softCoverage, edgeStyle, continuousCoverage);
         if (a < ContributionRules.minimum) continue;
         lookPass?.begin(centerMark);
         let pr = r,

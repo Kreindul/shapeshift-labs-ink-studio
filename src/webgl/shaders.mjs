@@ -30,6 +30,11 @@ export function splatShaderSources(ascii, sampleCoverage, {
   contributions = false, masked = false, textured = false, layeredGlass = false, coverageRules, materialStyles = false,
   environment = false, relighting = false, optical = false
 } = {}) {
+  const coverageStride = coverageRules?.coverageStride ?? 4;
+  const continuousMode = coverageRules?.continuousCoverage ?? 1, softMode = coverageRules?.softCoverage ?? 2;
+  const nonSurface = coverageRules?.nonSurface ?? 2559;
+  const variance = coverageRules?.continuousVariance ?? .25;
+  const continuousLow = coverageRules?.continuousLow ?? .16, continuousHigh = coverageRules?.continuousHigh ?? .30;
   const SPLAT_VS = `#version 300 es
 precision highp float; precision highp int;
 uniform highp sampler2D u_data;
@@ -38,6 +43,7 @@ uniform bool u_geometryDepth;
 uniform vec2 u_viewport;
 uniform float u_focal, u_time, u_scale, u_snap, u_dilate, u_near, u_ortho, u_idx;
 uniform float u_paintMarker; uniform int u_afterimageStart; flat out int v_paint;
+uniform int u_splatCoverage; uniform float u_materialGridScale; flat out int v_coverage;
 ${relighting ? relightTable + 'flat out vec4 v_relight;' : ''}
 ${layeredGlass ? 'uniform float u_glassTolerance; flat out float v_glassNearDepth;' : ''}
 ${optical ? `uniform highp sampler2D u_optical;
@@ -75,7 +81,7 @@ uniform vec4 u_lamp[8]; uniform float u_lamps[8]; uniform int u_lampN; uniform f
 flat out vec4 v_fm; flat out vec4 v_ft; flat out float v_fk; flat out float v_lit; flat out float v_ix;
 ${contributions || masked ? `${policyUniforms}flat out int v_policySlot;` : ''}
 ${masked ? maskUniforms + maskVaryings(textured).replaceAll('LOOK_IO','out') + maskVertex(textured) : ''}
-${materialStyles ? 'uniform highp sampler2D u_materialStyles; uniform bool u_materialPatterned; flat out vec4 v_pixelStyle; flat out float v_pixelFog;' : ''}
+${materialStyles ? 'uniform highp sampler2D u_materialStyles; uniform bool u_materialPatterned, u_materialStylesOn; flat out vec4 v_pixelStyle; flat out float v_pixelFog;' : ''}
 void main(){
   int record = a_index;
   ${instances ? `ivec2 inst = ivec2((a_instance & 15) * 16, a_instance >> 4);
@@ -254,7 +260,16 @@ ${environment ? '  v_envAxial = -cam.z;' : ''}
   ${relighting ? 'v_relight = relightAt(a_index); if (v_relight.w > 0.0) { v_relight.w += fogk; fogk = 0.0; }' : ''}
   if (fogk > 0.0) color = mix(color, u_fog, fogk);   // distance haze
   vec3 colorF = color;
-  v_depth = (flags & 1) != 0 ${optical ? '|| v_optical.w > 0.5' : ''} ? -1.0 : dn;
+  int coverage = u_splatCoverage;
+  ${materialStyles ? `
+  int encodedCoverage = int(v_pixelStyle.x / ${coverageStride}.0);
+  if (encodedCoverage > 0) coverage = encodedCoverage - 1;
+  v_pixelStyle.x = mod(v_pixelStyle.x, ${coverageStride}.0);
+  if (!u_materialStylesOn) v_pixelStyle.xy = vec2(0.0);` : ''}
+  bool continuous = coverage == ${continuousMode} && alpha >= 1.0 && (kraw & ${nonSurface}) == 0 && v_paint == 0
+    ${optical ? '&& v_optical.w < 0.5' : ''};
+  v_coverage = continuous ? ${continuousMode} : (coverage == ${softMode} ? ${softMode} : 0);
+  v_depth = coverage == ${softMode} || (flags & 1) != 0 ${optical ? '|| v_optical.w > 0.5' : ''} ? -1.0 : dn;
   float iz = -1.0 / cam.z;
   vec2 lim = 1.3 * 0.5 * u_viewport / u_focal;
   float tx = clamp(cam.x * iz, -lim.x, lim.x) / iz, ty = clamp(cam.y * iz, -lim.y, lim.y) / iz;
@@ -263,7 +278,8 @@ ${environment ? '  v_envAxial = -cam.z;' : ''}
     : mat3(u_focal * iz, 0.0, 0.0,   0.0, u_focal * iz, 0.0,   u_focal * tx * iz * iz, u_focal * ty * iz * iz, 0.0);
   mat3 T = J * mat3(u_view);
   mat3 c2 = T * cov * transpose(T);
-  float A = c2[0][0] + u_dilate, B = c2[0][1], C = c2[1][1] + u_dilate;
+  float variance = continuous ? ${variance} * u_materialGridScale * u_materialGridScale : u_dilate;
+  float A = c2[0][0] + variance, B = c2[0][1], C = c2[1][1] + variance;
   float det = A * C - B * B;
   if (det <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   v_conic = vec3(C, -B, A) / det;
@@ -300,7 +316,7 @@ ${ascii ? ascii.vsMain : ''}  gl_Position = vec4(ndc + a_corner * extN, u_geomet
 }`;
   const SPLAT_FS = `#version 300 es
 precision highp float; precision highp int;
-in vec2 v_d; in vec3 v_conic; in vec4 v_color; in float v_depth;
+in vec2 v_d; in vec3 v_conic; in vec4 v_color; in float v_depth; flat in int v_coverage;
 ${portal ? 'flat in vec3 v_portalDepth; uniform mat4 u_proj; uniform float u_ortho; uniform vec4 u_splatPlane;' :
   'flat in float v_ownerDepth;'}
 in float v_gl; in float v_as; in float v_ast;
@@ -337,6 +353,8 @@ void main(){
 ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + v_conic.z * v_d.y * v_d.y) - v_conic.y * v_d.x * v_d.y;
   if (power > 0.0 || power < -4.5) discard;
   float g = v_color.a * exp(power);
+  bool continuous = v_coverage == ${continuousMode};
+  float surfaceAlpha = continuous ? smoothstep(${continuousLow}, ${continuousHigh.toFixed(2)}, g) : 0.0;
   ${optical ? 'bool hasOptical = v_optical.w > 0.5; if (hasOptical && v_optical.x == 0.0) discard;' : ''}
   ${layeredGlass ? `
   gl_FragDepth = gl_FragCoord.z;
@@ -354,13 +372,13 @@ ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + 
     if (axial <= 0.0 || dot(u_splatPlane, vec4(axialPosition(gl_FragCoord.xy, axial, u_viewport), 1.0)) < 0.0) discard;
   }
   if (u_idx > 1.5) {
-    if (v_color.a < 0.5 || g < 0.38${optical ? ' || hasOptical' : ''}) discard;
+    if (v_coverage == ${softMode} || v_color.a < 0.5 || (continuous ? surfaceAlpha <= 0.5 : g < 0.38)${optical ? ' || hasOptical' : ''}) discard;
     o = vec4(1.0); od = vec4(0.0); oa = vec4(0.0);
     return;
   }
   ` : `
   if (u_idx > 1.5) {
-    if (v_color.a < 0.5 || g < 0.38${optical ? ' || hasOptical' : ''}) discard;
+    if (v_coverage == ${softMode} || v_color.a < 0.5 || (continuous ? surfaceAlpha <= 0.5 : g < 0.38)${optical ? ' || hasOptical' : ''}) discard;
     float k = v_ix + 1.0, z = round(clamp(v_ownerDepth, 0.0, 1.0) * 16777215.0);
     o = vec4(mod(k, 256.0), mod(floor(k / 256.0), 256.0), floor(k / 65536.0), 255.0) / 255.0;
     od = vec4(mod(z, 256.0), mod(floor(z / 256.0), 256.0), floor(z / 65536.0), 255.0) / 255.0;
@@ -369,15 +387,16 @@ ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + 
   }
   `}
   if (u_idx > 0.5) {   // the index pass (colour per pixel): which solid dab is in front here, its number in three bytes
-    if (v_color.a < 1.0 || g < 0.5 || v_depth < 0.0) discard;
+    if (v_color.a < 1.0 || (continuous ? surfaceAlpha <= 0.5 : g < 0.5) || v_depth < 0.0) discard;
     float k = v_ix + 1.0;
     o = vec4(mod(k, 256.0), mod(floor(k / 256.0), 256.0), floor(k / 65536.0), 255.0) / 255.0;
     od = vec4(0.0); ${masked ? `if (v_policySlot > 0) {${ownerMaskWrite}}` : ''}
     oa = vec4(0.0); return; }
-  bool solid = u_crisp > 0.5 && v_color.a >= 1.0;
-  float a = solid && u_hard > 0.5 ? (g > 0.5 ? 1.0 : 0.0) : contributionAlpha(power,v_color.a,solid);
+  bool solid = u_crisp > 0.5 && v_color.a >= 1.0 && v_coverage != ${softMode};
+  float a = continuous ? surfaceAlpha :
+    (solid && u_hard > 0.5 ? (g > 0.5 ? 1.0 : 0.0) : contributionAlpha(power,v_color.a,solid));
   ${materialStyles ? `
-  if (solid && u_hard < 0.5 && v_pixelStyle.x > 0.0) {
+  if (!continuous && solid && u_hard < 0.5 && v_pixelStyle.x > 0.0) {
     float width = 0.36 * (2.0 - v_pixelStyle.x);
     a = 0.99 * (width > 0.0 ? smoothstep(0.5 - width, 0.5 + width, g) : step(0.5, g));
   }` : ''}

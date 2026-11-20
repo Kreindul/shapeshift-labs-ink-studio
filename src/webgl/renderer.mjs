@@ -702,7 +702,10 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const isNew = world !== lastWorld || world.data !== lastData || world.count !== lastCount || group !== lastInstances;
       const pixel = toolkit.KIT?.pixel;
       const patterned = !raw && !!(look.pixel && world.pix && pixel?.gpu);
-      const materialStyles = !raw && !!(world.materialPixelStyles || group && instancePlan(group).hasMaterialPixelStyles);
+      const materialStyles = !!(world.materialPixelStyles || group && instancePlan(group).hasMaterialPixelStyles);
+      const coverageSetting = frame.splatCoverage ?? look.splatCoverage ?? 'legacy';
+      const splatCoverage = coverageRules?.coverageMode?.(coverageSetting) ?? ['legacy', 'continuous', 'soft'].indexOf(coverageSetting);
+      if (splatCoverage < 0) throw new RangeError('Splat coverage must be legacy, continuous or soft');
       const colored = !raw && !patterned && !coverage && (frame.colored ?? true);
       const detail = prepareDetail(world, budget);
       const scopedCleanup = !!needsDetailFlags && !!detail?.flags;
@@ -851,7 +854,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const growth = world.grow ?? {};
       shader.set({
         u_data: 0, u_bones: 4, u_fine: 7, ...(plan && { u_instances: 15 }), u_fineOn: +hasFine, u_fpal: pal, u_view: camera.view,
-        ...(materialStyles && { u_materialStyles: 16, u_materialPatterned: patterned }),
+        ...(materialStyles && { u_materialStyles: 16, u_materialPatterned: patterned, u_materialStylesOn: !raw }),
         u_proj: camera.projection, u_time: time, u_scale: scale, u_ortho: +camera.ortho,
         ...(constraints && (coverage || masked) && { u_constraintSlots:9,u_constraintRows:8,
           u_constraintDefault:constraints.defaultSlot,u_constraintMap:constraintMap,u_constraintMask:maskAt,
@@ -860,7 +863,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         u_arrivalPlane: plane, u_splatPlane: clip, ...(layeredGlass&&{u_glassBoundary:13,u_glassTolerance:tolerance}),
         u_sampleWithdrawal: sampleCoverage?.amount(frame.sampleWithdrawal ?? world.sampleWithdrawal ?? 0) ?? 0,
         u_born: [frame.bornAt ?? 0, growth.rate ?? 1, growth.fade ?? 0.5, growth.loop ?? 0],
-        u_crisp: +!raw, u_dilate: raw ? 0.3 : 0.15, u_near: camera.clipNear,
+        u_crisp: +!raw, u_splatCoverage: splatCoverage, u_dilate: raw ? 0.3 : 0.15, u_near: camera.clipNear,
         u_paintMarker: paint?.marker ?? 0, u_afterimageStart: trailStart,
         ...(opticalMaterials && { u_optical: opticalUnit }),
         ...(relighting && { u_relight: relightUnit }),
@@ -1211,17 +1214,20 @@ export function createRenderer(canvas, { toolkit, specialize = true, reuseOrder 
       const group = frame.instances, revision = group && instancePlan(group).revision;
       const time = frame.time ?? world.lookSnapshot?.time ?? 0;
       const withdrawal = frame.sampleWithdrawal ?? world.sampleWithdrawal ?? 0;
+      const splatCoverage = frame.splatCoverage ?? world.look?.splatCoverage;
+      const materialStyles = world.materialPixelStyles;
       const definition = frame.reconstruction ?? world.look?.reconstruction;
       const reconstruction = definition === undefined || definition === false ? undefined : JSON.stringify(definition);
       if (picking?.world !== world || picking.data !== world.data || picking.count !== world.count || picking.opticalSplats !== world.opticalSplats ||
           picking.group !== group || picking.revision !== revision || picking.withdrawal !== withdrawal ||
+          picking.splatCoverage !== splatCoverage || picking.materialStyles !== materialStyles ||
           picking.reconstruction !== reconstruction || picking.time !== time &&
             (reconstruction !== undefined || world.moving?.length || world.grow || world.anim?.bones)) {
         let posed = group ? pickInstances(world, group, frame.changedRows).world : world;
         if (reconstruction !== undefined) posed = reconstruct(toolkit, posed, frame, definition);
-        const picker = create(posed, { time, sampleWithdrawal: withdrawal });
+        const picker = create(posed, { time, sampleWithdrawal: withdrawal, splatCoverage });
         picking = { world, data: world.data, count: world.count, opticalSplats: world.opticalSplats,
-          group, revision, time, withdrawal, reconstruction, picker };
+          group, revision, time, withdrawal, reconstruction, splatCoverage, materialStyles, picker };
       }
       return picking.picker.ray({ water:frame.water !== false,...ray });
     },
