@@ -252,16 +252,23 @@ const PixelLook = (() => {
   }
 
   // Coordinates are top-left art pixels. Each band mixes its two adjacent palette entries.
-  function toneIndex(tone, r, g, b, x, y) {
+  function toneIndex(tone, r, g, b, x, y, trace) {
+    if (trace) trace.method = 'tone';
     const luma = r * weights[0] + g * weights[1] + b * weights[2];
-    if (luma <= tone.cutoff) return 0;
+    if (luma <= tone.cutoff) {
+      if (trace) trace.method = 'cutoff';
+      return 0;
+    }
     const value = (luma - tone.cutoff) / (1 - tone.cutoff);
     const stops = tone.stops;
     let low = 0;
     while (low < stops.length - 2 && value > stops[low + 1][0]) low++;
     const share = (value - stops[low][0]) / (stops[low + 1][0] - stops[low][0]);
     const rank = tone.thresholds[((y % tone.height + tone.height) % tone.height) * tone.width + (x % tone.width + tone.width) % tone.width];
-    return low + Number(share >= 0.5 + (rank - 0.5) * tone.amount);
+    const threshold = 0.5 + (rank - 0.5) * tone.amount;
+    if (trace && tone.amount) trace.dither = { mode:'tone', pattern:tone.pattern, coordinates:[x,y], pair:tone.palette.slice(low,low+2),
+      rank, threshold, strength:tone.amount, share };
+    return low + Number(share >= threshold);
   }
 
   function nearest(c, palette, solid) {
@@ -430,9 +437,12 @@ const PixelLook = (() => {
     }
     const mod = (n, size) => ((Math.floor(n) % size) + size) % size;
     const reservedIndex = rgb => exact.size ? exact.get(packedRgb(rgb)) : undefined;
-    function index(rgb, x = 0, y = 0, useDither = true, placement) {
+    function index(rgb, x = 0, y = 0, useDither = true, placement, trace) {
       const locked = reservedIndex(rgb);
-      if (locked !== undefined) return locked;
+      if (locked !== undefined) {
+        if (trace) trace.method = 'reserved';
+        return locked;
+      }
       const sites = lab ?? swatches, input = lab ? labPoint(rgb) : rgb;
       const hue = matchId === 4 ? hueWeight(input[3]) : 0;
       let best = matchSlots[0], firstDistance = Infinity;
@@ -463,7 +473,7 @@ const PixelLook = (() => {
         [x, y] = stability.coordinates(rule, point, ...pixel, scale);
       }
       const rank = ranks[mod(y, height) * width + mod(x, width)] / gain;
-      if (rank >= .5) return best;
+      if (rank >= .5 && !trace) return best;
       let second = best, secondDistance = Infinity, lightness;
       for (const { slot, range } of partners?.[best] ?? mixSlots) {
         if (slot === best) continue;
@@ -479,18 +489,29 @@ const PixelLook = (() => {
       }
       if (second === best) return best;
       const threshold = .5 + (rank-.5)*amount;
+      if (trace) trace.dither = { mode:'pair', pattern, coordinates:[x,y], pair:[packed[best],packed[second]],
+        authorized:Boolean(partners), rank, threshold, strength:amount };
+      let projection, length;
       if (lab) {
-        const length = matchDistance(sites[best],sites[second],matchId,hue);
+        length = matchDistance(sites[best],sites[second],matchId,hue);
         // Recover the projection using distances in the same metric used to rank the pair.
-        return length > 0 && .5*(firstDistance+length-secondDistance) >= threshold*length ? second : best;
+        if (length <= 0) return best;
+        projection = .5*(firstDistance+length-secondDistance);
+      } else {
+        projection = 0;
+        length = 0;
+        for (let k = 0; k < 3; k++) {
+          const delta = swatches[second][k] - swatches[best][k];
+          projection += weights[k] * delta * (rgb[k] - swatches[best][k]);
+          length += weights[k] * delta * delta;
+        }
       }
-      let projection = 0, length = 0;
-      for (let k = 0; k < 3; k++) {
-        const delta = swatches[second][k] - swatches[best][k];
-        projection += weights[k] * delta * (rgb[k] - swatches[best][k]);
-        length += weights[k] * delta * delta;
+      const mixed = rank < .5 && projection >= threshold * length;
+      if (trace) {
+        trace.dither.share = length ? projection / length : 0;
+        if (mixed) trace.method = 'dither-pair';
       }
-      return projection >= threshold * length ? second : best;
+      return mixed ? second : best;
     }
     return { packed, swatches, count, reserveAccess, matchSlots, width, height, ranks, amount, source, match, matchId, lab, pairs, anchor, tuning, reservedIndex, index };
   }
@@ -572,24 +593,32 @@ const PixelLook = (() => {
     return { packed, rows };
   }
 
-  function paletteIndex(policy, rgb, x, y, { scene, grade, useDither, placement } = {}) {
+  function paletteIndex(policy, rgb, x, y, { scene, grade, useDither, placement, trace } = {}) {
     const input = policy.sourceSwatches ?? scene;
     const mapping = policy.grade || (policy.source === 'graded' ? grade : undefined);
     if (input && mapping) {
       const reserved = policy.reservedIndex(rgb);
-      if (reserved !== undefined) return reserved;
+      if (reserved !== undefined) {
+        if (trace) trace.method = 'reserved';
+        return reserved;
+      }
       const at = nearest(rgb, input, false);
-      if (policy.mapOnly) return at;
+      if (policy.mapOnly) {
+        if (trace) trace.method = 'indexed-grade';
+        return at;
+      }
       rgb = mapping.slice(at * 3, at * 3 + 3);
+      if (trace) trace.matchInput = Array.from(rgb);
     }
-    return policy.index(rgb, x, y, useDither, placement);
+    return policy.index(rgb, x, y, useDither, placement, trace);
   }
 
-  function localIndex(local, id, rgb, x, y, useDither, screenX, screenY) {
+  function localIndex(local, id, rgb, x, y, useDither, screenX, screenY, trace) {
     const row = id - 1, policy = local.constraints?.[row];
     const slot = policy ? paletteIndex(policy, rgb, x, y, { scene: local.scene, grade: local.grade, useDither,
-      placement: policy.tuning && local.placement?.(screenX, screenY) }) :
+      placement: policy.tuning && local.placement?.(screenX, screenY), trace }) :
       nearest(rgb, local.palettes[row], false);
+    if (trace) trace.slot = slot;
     return local.output.rows[row][slot];
   }
 
@@ -605,7 +634,7 @@ const PixelLook = (() => {
     const shade = body.map(v => v * 0.64), luma = shade.reduce((n, v, k) => n + v * weights[k], 0);
     return shade.map(v => Math.min(1, v * Math.max(1, 0.12 / Math.max(luma, 0.001))));
   }
-  function resolve({ color, depth, w, h, palette, grade, interiorColor, dither = 0, local, contour = true, ditherAt, localDitherAt }) {
+  function resolve({ color, depth, w, h, palette, grade, interiorColor, dither = 0, local, contour = true, ditherAt, localDitherAt, inspect }) {
     const width = w / 2, height = h / 2, rgb = new Uint8Array(width * height * 3), use = new Uint32Array(local?.output.packed.length ?? palette.length);
     const mapped = i => grade ? grade.slice(i * 3, i * 3 + 3) : palette[i];
     const at = (x, y) => Math.max(0, Math.min(h - 1, y)) * w + Math.max(0, Math.min(w - 1, x));
@@ -616,12 +645,14 @@ const PixelLook = (() => {
       const average = [0, 1, 2].map(k => samples.reduce((s, c) => s + c[k], 0) / 4);
       const base = (y * width + x) * 3;
       const native = interiorColor ? [0, 1, 2].map(k => interiorColor[base + k] / 255) : average;
+      const pixel = (height - 1 - y) * width + x, trace = inspect?.pixel === pixel ? {} : undefined;
       const anchor = ditherAt?.(x, y);
       const localId = local?.at[y * width + x];
       if (localId) {
         const rule = local.constraints?.[localId - 1]?.anchor;
         const [dx, dy] = (rule ? localDitherAt?.(rule, x, y) : anchor) ?? [x, height - 1 - y];
-        const index = localIndex(local, localId, native, dx, dy, true, x, height - 1 - y);
+        const index = localIndex(local, localId, native, dx, dy, true, x, height - 1 - y, trace);
+        if (trace) inspect.local(local,localId,native,trace);
         const tone = local.output.packed[index], q = ((height - 1 - y) * width + x) * 3;
         rgb[q] = tone >> 16;
         rgb[q + 1] = (tone >> 8) & 255;
@@ -633,7 +664,7 @@ const PixelLook = (() => {
       const noise = interiorColor ? (rank - 0.5) * dither : 0;
       let selected = nearest(native.map(v => Math.max(0, Math.min(1, v + noise))), palette, false);
       let c = Array.from(mapped(selected));
-      const votes = new Map(); let best = -1, score = 0, coverage = 0;
+      const votes = new Map(); let best = -1, bestSample = 0, score = 0, coverage = 0;
       ids.forEach((id, j) => {
         if (depth[id] >= 0.995) return;
         coverage++;
@@ -643,15 +674,22 @@ const PixelLook = (() => {
       ids.forEach((id, j) => {
         if (depth[id] >= 0.995) return;
         const label = nearest(samples[j], palette, true), n = votes.get(label);
-        if (n > score) { best = label; score = n; }
+        if (n > score) { best = label; score = n; bestSample = j; }
       });
       if (best >= 0) {
         const outer = coverage < 4 || [z(x - 1, y), z(x + 1, y), z(x, y - 1), z(x, y + 1)].some(d => d >= 0.995);
         if (outer && contour) {
           selected = best;
+          if (trace) trace.method = 'contour-vote';
           const body = mapped(best), tone = ink(Array.from(body)), background = mapped(0), a = coverage / 4;
           c = body.map((v, k) => background[k] * (1 - a) + (v * 0.35 + tone[k] * 0.65) * a);
         }
+      }
+      if (trace) {
+        if (!trace.method && dither && interiorColor) trace.dither = {mode:'ordered-bias',pattern:'bayer',
+          coordinates:anchor ?? [x,y],rank,strength:dither,bias:noise};
+        inspect.scene(trace.method === 'contour-vote' ? samples[bestSample] : native,
+          inspect.colors,selected,trace.method,trace);
       }
       use[selected]++;
       const q = ((height - 1 - y) * width + x) * 3;

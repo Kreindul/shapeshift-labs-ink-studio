@@ -890,6 +890,7 @@ const CMD = {
         '  palette ramp-review [ramp.json] [--scene scene --role name] [--pixels JSON] [--out report.json]',
         '  palette distributions <reference.png> [--scene scene | --render frame.png] [--out directory]',
         '  palette error <scene> [--threshold .06] [--heatmap-max .20] [--region-limit 20] [--out directory]',
+        '  palette inspect <scene> --at x,y [--out report.json]   explain the palette choice at one art pixel',
         '  palette fit <fit.json> [--format png|data] [--tile]   fit two approved swatches and preview at native size',
         '  palette chart <chart.json> [--type chart] [--format png|data]   export an indexed swatch, bar or pair chart',
         '  palette lighting <source-or-draft.json> [--approve] [--out file.json]   suggest or save named lighting ramps',
@@ -1078,6 +1079,24 @@ const CMD = {
     if (pos[0] === 'fit') return require('./palette-fit.js')(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'chart') return require('./palette-chart.js')(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'pairs') return require('./palette-pairs.js')(pos.slice(1),opt,lib(),outputFile);
+    if (pos[0] === 'inspect') {
+      if (pos.length !== 2 || typeof opt.at !== 'string' || !/^\d+\s*,\s*\d+$/.test(opt.at) ||
+          ['t','out'].some(key=>opt[key] === true))
+        die('Use palette inspect <scene> --at x,y [--out report.json]');
+      const t = num('t',0);
+      if (!Number.isFinite(t)) die('Palette pixel inspection time must be finite');
+      const world = buildPreview(pos[1]);
+      pose(world,t);
+      const report = require('./palette-pixel.js').inspectPalettePixel(world,
+        view({t,at:list('at'),transparent:onOffOption('transparent')}));
+      const json = JSON.stringify(report,null,2)+'\n';
+      if (!opt.out) return process.stdout.write(json);
+      const file = outputFile('palette-pixel.json');
+      if (file === path.resolve(pos[1])) die('Choose a report path separate from the scene');
+      fs.mkdirSync(path.dirname(file),{recursive:true});
+      fs.writeFileSync(file,json);
+      return;
+    }
     if (pos[0] === 'error') {
       if (pos.length !== 2 || ['threshold','heatmap-max','region-limit','t','out'].some(key=>opt[key] === true))
         die('Use palette error <scene> [--threshold .06] [--heatmap-max .20] [--region-limit 20] [--out directory]');

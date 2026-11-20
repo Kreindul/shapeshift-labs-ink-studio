@@ -53,13 +53,17 @@ function capture(w,h,palettes,policies,scene,grade,{diagnostic,lit}) {
       const name = slot && (policy?.select || policy?.scope === 'surface' || !policy) ? idAt(p) : 0;
       ids[p] = row(slot+'/'+name,()=>describe(p,slot));
     }
-    function pick({policy,swatches},rgb,x,y,p) {
-      if (!policy) return swatches[PixelLook.nearest(rgb,swatches,false)];
-      const [dx,dy] = ArtStability.ditherCoordinates(stable,passes,p,x,y,policy.anchor);
-      const slot = PixelLook.paletteIndex(policy,rgb,dx,dy,{
-        scene,grade,useDither:true,
-        placement: policy.tuning && ArtStability.placement(stable,passes,p,x,y,time)
-      });
+    function pick({policy,swatches},rgb,x,y,p,trace) {
+      let slot;
+      if (!policy) slot = PixelLook.nearest(rgb,swatches,false);
+      else {
+        const [dx,dy] = ArtStability.ditherCoordinates(stable,passes,p,x,y,policy.anchor);
+        slot = PixelLook.paletteIndex(policy,rgb,dx,dy,{
+          scene,grade,useDither:true,trace,
+          placement: policy.tuning && ArtStability.placement(stable,passes,p,x,y,time)
+        });
+      }
+      if (trace) trace.slot = slot;
       return swatches[slot];
     }
     function mark(p,{kind,ramp,local,winner}) {

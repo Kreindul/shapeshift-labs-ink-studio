@@ -42,6 +42,7 @@ const SdfAssist = require('../src/sdf-assist.js');
 const SdfRaster = require('./sdf-assist.js');
 const { footprint, exportOffsets, sampledDepth } = require('./splat-sampling.js');
 const { createMaskResolve, applyMasks } = require('./look-mask-resolve.js');
+const PalettePixel = require('./palette-pixel.js');
 const PaletteComposition = require('./palette-composition.js');
 const PaletteUsage = require('./palette-usage.js');
 const { createLookPass } = require('./look-pass.js');
@@ -350,7 +351,7 @@ function renderFrame(world, o, preparedPalettes) {
         ...(frame.alpha && {alpha:frame.alpha.slice()}) };
     }
     if (captureQuantization && legacyLook) capture(beforePalette, 'legacy');
-    if (ink) frame = ArtInk.apply(frame, passes, ink, world.pal, fog, { world, depthOffset });
+    if (ink) frame = ArtInk.apply(frame, passes, ink, world.pal, fog, { world, depthOffset, inspect:paletteTrace });
     if (effects) frame = ArtEffects.apply(frame, passes, effects, t, {
       history: o.artHistory, world: o[reconstructionSource] ?? world, palette: world.pal, motionReference: frame.motionReference,
       haloSource: passes.scopedEmission && (p => emissive.profiles[passes.scopedEmission.slots[p]-1]?.glow === undefined)
@@ -364,7 +365,7 @@ function renderFrame(world, o, preparedPalettes) {
     const ownership = paletteState?.capture?.view(frame,passes,{ ...paletteState,stable,time:t,
       base:basePalette,composited:retainContributions });
     if (effectSignals) {
-      frame = EffectPalettes.apply(frame, passes, effectSignals, source, world.pal, o.captureEffectPalettes, ditherAt, ownership);
+      frame = EffectPalettes.apply(frame, passes, effectSignals, source, world.pal, o.captureEffectPalettes, ditherAt, ownership, paletteTrace);
       if (audit) for (const ramp of effectSignals.rules.ramps.values()) audit.addPalette(ramp.packed);
     }
     if (hasFocus) frame = CameraStaging.focus(frame, passes.depth, focusBands, depthOffset,
@@ -378,10 +379,11 @@ function renderFrame(world, o, preparedPalettes) {
           post?.(rule,mask,amount);
         };
       } : lookPass?.post;
-      RenderStages.finish(frame, stages, passes, t, visit, audit, ditherAt, stable, graded);
+      RenderStages.finish(frame, stages, passes, t, visit, audit, ditherAt, stable, graded, paletteTrace);
       if (effectSignals) frame = ArtEffects.paletteUse(frame,world.pal);
     }
     if (captureQuantization && !legacyLook) capture(graded ?? frame.rgb.slice(), 'frame');
+    if (paletteTrace) frame.palettePixel = paletteTrace.finish(frame,passes);
     ownership?.finish();
     if (paletteDiagnostic && !passes?.paletteOwner)
       passes = { ...passes,w:frame.w,h:frame.h,paletteOwner:new Uint32Array(frame.w*frame.h),paletteOwners:[null] };
@@ -438,6 +440,10 @@ function renderFrame(world, o, preparedPalettes) {
     px = o.px || frameBudget.artScale(cw, ch, preferred, o.raw || o.samples || o.captureCoverage ? null : look.pixelBudget),
     W = Math.ceil(cw / px),
     H = Math.ceil(ch / px);
+  const paletteTrace = o.palettePixel && !o.raw && !o.captureCoverage && (!o.samples || o.worked) ?
+    PalettePixel.create(o.palettePixel,W,H) : undefined;
+  if (paletteTrace && legacyLook) paletteTrace.colors = tone?.palette ?? evaluatedPalette ??
+    (grade ? PixelLook.gradePalette(grade) : world.pal);
   if (!o.samples && !o.captureCoverage) o.shotFrame?.({
     time:sceneTime, skyTime:ArtDirection.time(direction,o.skyTime ?? sceneTime,'environment'), camera:{ target:Array.from(T), yaw, pitch, distance:dist, lensScale, orthographic:ortho, ...(fov !== FOV && { fov }) },
     art:{ width:W, height:H, pixelSize:px }
@@ -492,14 +498,15 @@ function renderFrame(world, o, preparedPalettes) {
     };
     const amount = (o.dither === undefined ? 0.35 : o.dither) * 0.3 * world.dither;
     const img = specializedResolve ? ArtStability.resolve(native, samples, stable, palette, PixelLook, amount,
-      { local, tone, grade: !tone && grade }) :
+      { local, tone, grade: !tone && grade, inspect:paletteTrace }) :
       PixelLook.resolve(Object.assign(samples, {
-        palette, local, contour: !ink, grade, interiorColor: native.color, dither: amount,
+        palette, local, contour: !ink, grade, interiorColor: native.color, dither: amount, inspect:paletteTrace,
         ditherAt: anchoring ? (x, y) => ArtStability.ditherCoordinates(stable, native.passes, (H - 1 - y) * W + x, x, y) : null,
         localDitherAt: (rule, x, y) => ArtStability.ditherCoordinates(null, native.passes, (H - 1 - y) * W + x, x, H - 1 - y, rule)
       }));
     native.cleanDetail?.(img.rgb, !!(o.clean || (look.clean && !tone?.preserveDots)));
     applyMasks(img.rgb, native.masked);
+    if (paletteTrace) paletteTrace.steps.push(...native.paletteMaskChoices);
     const reference = captureQuantization ? new Uint8Array(img.rgb.length) : undefined;
     if (reference) for (let y = 0; y < H; y++) {
       reference.set(native.color.subarray(y*W*3, (y+1)*W*3), (H-1-y)*W*3);
@@ -859,7 +866,10 @@ function renderFrame(world, o, preparedPalettes) {
   const paletteCapture = !o.raw && (paletteDiagnostic || composedEffects) && PaletteComposition.capture(
     W,H,localPalettes,localConstraints,Array.from(world.pal,(_,i)=>hex(i)),!tone && grade,
     {diagnostic:paletteDiagnostic,lit:composedEffects && lightingEffects});
-  const paletteClaim = paletteCapture ? (i,layer,r,g,b)=>[selectSlot(i,layer),r,g,b] : undefined;
+  const paletteClaim = (paletteCapture || paletteTrace) ? (p,i,layer,r,g,b,steps) => {
+    if (p === paletteTrace?.bottom) return [selectSlot(i,layer),r,g,b,steps?.slice() ?? []];
+    if (paletteCapture) return [selectSlot(i,layer),r,g,b];
+  } : undefined;
   const paletteOutlines = paletteCapture && new Uint8Array(W*H);
   const unmasked = slot => localConstraints?.[slot - 1]?.mask ? 0 : slot;
   function selectSlot(i,layer) {
@@ -1144,9 +1154,10 @@ function renderFrame(world, o, preparedPalettes) {
       renderMeta?.materials?.[renderMeta.materialIds?.[i]]) : stable;
     return rule.dither === 'screen' ? null : rule;
   }
-  function stagedMaterial(i, rules, rgb, sample, paintedAlbedo) {
+  function stagedMaterial(i, rules, rgb, sample, paintedAlbedo, inspect) {
     const reference = world.materialAlbedo?.[i];
-    return RenderStages.material(rules, rgb, reference ? reference - 1 : undefined, sample, undefined, lookPass?.stage, paintedAlbedo);
+    return RenderStages.material(rules, rgb, reference ? reference - 1 : undefined,
+      sample, undefined, lookPass?.stage, paintedAlbedo, inspect);
   }
   let pixed = null,
     sprM = null;
@@ -1210,6 +1221,7 @@ function renderFrame(world, o, preparedPalettes) {
     if (hazeCoverage) hazeCoverage[p] = haze*a + hazeCoverage[p]*ia;
     const owned = art?.fragment(p, i, a, wd, z, emits, pr, pg, pb, sprite);
     if (owned && paletteCapture) paletteCapture.claim(p,claim?.[0] ?? selectSlot(i,paletteId),claim);
+    if (owned && p === paletteTrace?.bottom) paletteTrace.fragment = claim?.[4] ?? [];
     if (lookPass) {
       const redraw = !sectionEdge && PIX?.[i * 8] && wd && a > .5 && !surface?.reveals(i);
       lookPass.fragment(p, a, redraw ? undefined : mark);
@@ -1258,7 +1270,9 @@ function renderFrame(world, o, preparedPalettes) {
       const staged=stages && stages.at(i);
       const sample=(staged?.material || staged?.lit) && (stageMasks ? stageSample(i,position,sprite.p) : undefined);
       const paintedAlbedo = staged?.material && surface?.paintsBase(i) ? [] : undefined;
-      if (staged?.material) color=stagedMaterial(i,staged.material,color,sample,paintedAlbedo);
+      const choices = sprite.p === paletteTrace?.bottom ? [] : undefined;
+      if (staged?.material) color=stagedMaterial(i,staged.material,color,sample,paintedAlbedo,
+        choices && paletteTrace.forStage(choices));
       if (live?.normal(i)) {
         live.gains(i,...position,sunGains);
         color=color.map((v,k)=>v*sunGains[k]);
@@ -1278,14 +1292,14 @@ function renderFrame(world, o, preparedPalettes) {
         const gain = contact.sample(receiver, sprite.p, position, sprite.normal);
         color = color.map(value => value*gain);
       }
-      claim = paletteClaim?.(i,paletteId,color[0],color[1],color[2]);
+      claim = paletteClaim?.(sprite.p,i,paletteId,color[0],color[1],color[2],choices);
       if (contribution?.applies(i, paletteId)) {
         const anchor = fragmentRule(i);
         const site = sample ?? (contribution.needsSample(i, paletteId, anchor) ? stageSample(i, position, sprite.p) : undefined);
         color = contribution.shade(i, paletteId, color, sprite.p % W, H - 1 - Math.floor(sprite.p / W),
           site, highlight <= .22, undefined, anchor, claim);
       }
-      if (staged?.lit) color=RenderStages.apply(staged.lit,color,sample);
+      if (staged?.lit) color=RenderStages.apply(staged.lit,color,sample,undefined,claim?.[4] && paletteTrace.forStage(claim[4]));
     }
     if(i<0&&sprite.surface&&!sprite.emission&&directLight&&sprite.normal)color=directLight(sprite.p,position,sprite.normal,color);
     const ink = cutaway?.edge ? Cutaway.edgeWeight(cutaway.edge,sectionAt(position)) : 0;
@@ -1391,7 +1405,9 @@ function renderFrame(world, o, preparedPalettes) {
       g = liveAlbedo ? liveAlbedo[1] : (Math.floor(pk / 256) % 256) / 255,
       b = liveAlbedo ? liveAlbedo[2] : Math.floor(pk / 65536) / 255;
     const paintedAlbedo = staged?.material && surface?.paintsBase(i) ? [] : undefined;
-    if (staged?.material) [r, g, b] = stagedMaterial(i, staged.material, [r, g, b], materialSample, paintedAlbedo);
+    const centerChoices = paletteTrace && staged?.material?.some(rule=>rule.palette) ? [] : undefined;
+    if (staged?.material) [r, g, b] = stagedMaterial(i, staged.material, [r, g, b], materialSample,
+      paintedAlbedo,centerChoices && paletteTrace.forStage(centerChoices));
     r += add[i];
     g += add[i];
     b += add[i];
@@ -1638,12 +1654,15 @@ function renderFrame(world, o, preparedPalettes) {
             pb += ((shade >> 16) - (pk >> 16)) * gain;
           }
         }
+        let materialChoices = centerChoices;
         if (fi >= 0) {
           const u = clamp(Math.floor((i00 * dx + i01 * dy) * 2 + 2), 0, 3),
             v = clamp(Math.floor((i10 * dx + i11 * dy) * 2 + 2), 0, 3),
             c = FPAL[Math.floor(FN[fi + v] / (u === 0 ? 1 : u === 1 ? 64 : u === 2 ? 4096 : 262144)) % 64];
           if (c) {
-            const tile = staged?.material ? stagedMaterial(i, staged.material, c, materialSample) : c;
+            if (centerChoices && p === paletteTrace.bottom && !world.materialAlbedo?.[i]) materialChoices = [];
+            const tile = staged?.material ? stagedMaterial(i, staged.material, c, materialSample,undefined,
+              materialChoices !== centerChoices ? paletteTrace.forStage(materialChoices) : undefined) : c;
             const tileFog = !finishBeforeFog && !staged?.lit && !splatFlash && !relit && coverGain === 1 ? fogMix : 0;
             pr = (tile[0] + (fog[0] - tile[0]) * tileFog) * fineWeight + pr * (1 - fineWeight);
             pg = (tile[1] + (fog[1] - tile[1]) * tileFog) * fineWeight + pg * (1 - fineWeight);
@@ -1702,7 +1721,7 @@ function renderFrame(world, o, preparedPalettes) {
           pb = (tint ? optical[opt + 6] : pb) * scatter + optical[opt + 10] * reflection;
           a *= optical[opt];
         }
-        const claim = paletteClaim?.(i,paletteId,pr,pg,pb);
+        const claim = paletteClaim?.(p,i,paletteId,pr,pg,pb,materialChoices);
         if (staged?.lit || scoped || glassLook) {
           let sample;
           if (litMask || (scoped && contribution.needsSample(i, paletteId, ditherRule))) {
@@ -1716,8 +1735,9 @@ function renderFrame(world, o, preparedPalettes) {
             rgb = contribution.shade(i, paletteId, rgb, ix, H - 1 - iy, sample, highlight <= .22,
               lookPass?.palette, ditherRule, claim);
           }
-          if (staged?.lit) rgb = RenderStages.apply(staged.lit, rgb, sample, lookPass?.stage);
-          [pr, pg, pb] = glassLook ? glassLook(rgb, lookPass?.optics) : rgb;
+          const traceStage = claim?.[4] && paletteTrace.forStage(claim[4]);
+          if (staged?.lit) rgb = RenderStages.apply(staged.lit, rgb, sample, lookPass?.stage, traceStage);
+          [pr, pg, pb] = glassLook ? glassLook(rgb, lookPass?.optics, traceStage) : rgb;
         }
         if (bakedCloud) {
           const point = hit ?? (probeNormal ?
@@ -2047,7 +2067,9 @@ function renderFrame(world, o, preparedPalettes) {
         const masked = staged?.material?.some(rule => rule.mask) || staged?.lit?.some(rule => rule.mask);
         const sample = masked ? stageSample(i, [HX[p], HY[p], HZ[p]], p) : undefined;
         const paintedAlbedo = staged?.material && surface?.paintsBase(i) ? [] : undefined;
-        let base = staged?.material ? stagedMaterial(i, staged.material, PALC[ci], sample, paintedAlbedo) : PALC[ci];
+        const choices = p === paletteTrace?.bottom ? [] : undefined;
+        let base = staged?.material ? stagedMaterial(i, staged.material, PALC[ci], sample, paintedAlbedo,
+          choices && paletteTrace.forStage(choices)) : PALC[ci];
         if (exposure?.light && !live?.normal(i) && !(Math.round(d[i*16+11]) & (32 | 64))) {
           const gain = .24 + .76 * exposure.light(HX[p],HY[p],HZ[p]);
           if (gain < 1) base = base.map(value => value * gain);
@@ -2073,14 +2095,15 @@ function renderFrame(world, o, preparedPalettes) {
           const gain = exact ? contact.sample(receiver, p, exact.position, exact.normal) : contact.sample(receiver, p, point);
           if (gain < 1) rgb = rgb.slice(0, 3).map(value => value*gain);
         }
-        const claim = paletteClaim?.(i,c[5],rgb[0],rgb[1],rgb[2]);
+        const claim = paletteClaim?.(p,i,c[5],rgb[0],rgb[1],rgb[2],choices);
         if (contribution?.applies(i, c[5])) {
           const rule = fragmentRule(i);
           const site = sample ?? (contribution.needsSample(i, c[5], rule) ?
             stageSample(i, [HX[p], HY[p], HZ[p]], p) : undefined);
           rgb = contribution.shade(i, c[5], rgb, x, H - 1 - y, site, !(c[4] > .22), lookPass?.palette, rule, claim);
         }
-        let lit = staged?.lit ? RenderStages.apply(staged.lit, rgb, sample, lookPass?.stage) : rgb;
+        let lit = staged?.lit ? RenderStages.apply(staged.lit, rgb, sample, lookPass?.stage,
+          claim?.[4] && paletteTrace.forStage(claim[4])) : rgb;
         if (cloudShadow && !live?.normal(i) && !(Math.round(d[i * 16 + 11]) & (32 | 64))) {
           const gain = CloudField.dim(cloudShadow(HX[p], HY[p], HZ[p]));
           lit = [lit[0] * gain, lit[1] * gain, lit[2] * gain];
@@ -2098,7 +2121,8 @@ function renderFrame(world, o, preparedPalettes) {
         const kf = world.fog.max > 0 && world.fog.start < 1
           ? targetFog(sstep(world.fog.start,1,dep[p])*world.fog.max*(exposure?.fog?.(HX[p],HY[p],HZ[p])??1),protectionRule) : 0;
         if (surfaceGlint) surfaceGlint[p] = c[4] > 0.22;
-        if (claim) paletteCapture.claim(p,claim[0],claim);
+        if (claim) paletteCapture?.claim(p,claim[0],claim);
+        if (claim?.[4]) paletteTrace.fragment = claim[4];
         if (retainLayers) {
           if (localAt) localAt[p] = localSlot(i, c[5], p);
           const shaded = [0, 1, 2].map(channel => lit[channel] + (fog[channel] - lit[channel]) * kf);
@@ -2268,6 +2292,7 @@ function renderFrame(world, o, preparedPalettes) {
         if (edgePixels) edgePixels[q] = 0;
         if (axialDepth) axialDepth[q] = eyeD - R + sprD[q] * 2 * R;
         if (art) art.sprite(q, sprOwner[q], eyeD - R + sprD[q] * 2 * R);
+        if (q === paletteTrace?.bottom) paletteTrace.fragment = [];
         if (counters) counters.fragments++;
         environmentPasses?.fragment?.(q, -1, 1, 0, 0, 0);
         if (hazeCoverage) hazeCoverage[q] = 0;
@@ -2340,7 +2365,7 @@ function renderFrame(world, o, preparedPalettes) {
   }
   SubjectFocus.grade(col,W,H,focus,focusPixel,fallingCoverage);
   const masks = overlay && createMaskResolve(world, { w: W, h: H, time: t, x: X, y: Y, z: Z, depth, rayAt, span: R, ditherPixelStep: artScale },
-    overlay, localConstraints, o.maskGrade ?? (!tone && grade), lookPass?.local);
+    overlay, localConstraints, o.maskGrade ?? (!tone && grade), lookPass?.local,paletteTrace);
   const paletteState = paletteCapture && { capture:paletteCapture,mask:masks?.output,maskedSlots:overlay?.slots,
     outlined:paletteOutlines,resolved:retainContributions ? undefined : localAt };
   if (environmentPasses) passes = { w:W, h:H, ...passes, ...environmentPasses.passes };
@@ -2396,6 +2421,7 @@ function renderFrame(world, o, preparedPalettes) {
       ...(paletteState && {paletteState}),
       ...(paletteInventory && {paletteInventory}),
       ...(masks && { masked: masks.output }),
+      ...(paletteTrace && { paletteMaskChoices:paletteTrace.mask }),
       ...(atmosphere?.fog && { fog: atmosphere.fog }), ...(silhouetteMask && {silhouetteMask}), ...(effectSignals && { effectSignals }), ...(volumeStats && { volumeStats }), ...(alpha && { alpha }), ...(orderFallback && { orderFallback })
     };
   }
@@ -2518,6 +2544,8 @@ function renderFrame(world, o, preparedPalettes) {
         beforePalette[q + 2] = Math.round(clamp(b, 0, 1) * 255);
       }
       const localId = outlined ? 0 : localAt?.[p];
+      const trace = paletteTrace?.pixel === q / 3 ? {} : undefined;
+      const input = trace ? [r,g,b] : undefined;
       const localCoordinates = tone || localId || masks;
       const screenY = localCoordinates ? yo : y;
       const [ditherX, ditherY] = anchoring ?
@@ -2529,8 +2557,12 @@ function renderFrame(world, o, preparedPalettes) {
       if (tone || localId) {
         const anchor = localId && localConstraints?.[localId - 1]?.anchor;
         const [dx, dy] = anchor ? ArtStability.ditherCoordinates(null, passes, yo * W + x, x, yo, anchor) : [ditherX, ditherY];
-        const index = localId ? PixelLook.localIndex(local, localId, [r, g, b], dx, dy, !surfaceGlint?.[p], x, yo) :
-          PixelLook.toneIndex(tone, r, g, b, dx, dy);
+        const index = localId ? PixelLook.localIndex(local, localId, [r, g, b], dx, dy, !surfaceGlint?.[p], x, yo, trace) :
+          PixelLook.toneIndex(tone, r, g, b, dx, dy, trace);
+        if (trace) {
+          if (localId) paletteTrace.local(local,localId,input,trace);
+          else paletteTrace.scene(input,paletteTrace.colors,index,trace.method ?? 'tone',trace);
+        }
         const color = (localOutput?.packed || tone.palette)[index];
         use[index]++;
         out[q] = color >> 16;
@@ -2542,6 +2574,8 @@ function renderFrame(world, o, preparedPalettes) {
         const [dx,dy] = masks && screenY !== y ? (anchoring ?
           ArtStability.ditherCoordinates(stable, passes, yo*W+x, x, y) : [x,y]) : [ditherX,ditherY];
         const th = PixelLook.bayerRank(dx, dy) - 0.5;
+        if (trace && dith) trace.dither = {mode:'ordered-bias',pattern:'bayer',coordinates:[dx,dy],
+          rank:th+.5,strength:dith,bias:th*dith};
         r = clamp(r + th * dith, 0, 1);
         g = clamp(g + th * dith, 0, 1);
         b = clamp(b + th * dith, 0, 1);
@@ -2561,6 +2595,7 @@ function renderFrame(world, o, preparedPalettes) {
         }
       }
       use[bi]++;
+      if (trace) paletteTrace.scene(input,paletteTrace.colors,bi,outlined ? 'outline' : undefined,trace);
       const h = world.pal[bi];
       if (grade) {
         out[q] = Math.round(grade[bi * 3] * 255);
@@ -2716,6 +2751,7 @@ function renderFrame(world, o, preparedPalettes) {
       }
   }
   applyMasks(out, masks?.output);
+  if (paletteTrace) paletteTrace.steps.push(...paletteTrace.mask);
   return finishLook({
     w: W, h: H, px, rgb: out, drawn, use,
     ...((localOutput || tone || evaluatedPalette) && { palette: localOutput?.packed || tone?.palette || evaluatedPalette }),

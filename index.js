@@ -109,6 +109,7 @@ module.exports = {
   comparePaletteDistributions: require('./cli/palette-distributions.js').comparePaletteDistributions,
   measureQuantizationError: require('./cli/palette-error.js').measureQuantizationError,
   reviewQuantizationError: require('./cli/palette-error.js').reviewQuantizationError,
+  inspectPalettePixel: require('./cli/palette-pixel.js').inspectPalettePixel,
   exportLayers: require('./cli/export-layers.js').exportLayers,
   exportScene: require('./cli/scene-export.js').exportScene,
   readSceneReplay: require('./cli/scene-replay.js').readSceneReplay,

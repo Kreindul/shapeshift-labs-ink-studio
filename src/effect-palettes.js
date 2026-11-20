@@ -83,7 +83,7 @@ const EffectPalettes = (() => {
   }
 
   const distance = (a,b) => pixel.rgbWeights.reduce((sum,weight,i)=>sum+weight*(a[i]-b[i])**2,0);
-  function apply(frame, passes, signals, source, palette, capture, ditherAt, ownership) {
+  function apply(frame, passes, signals, source, palette, capture, ditherAt, ownership, inspect) {
     const { rules, media, backdropCloud, sky, haze } = signals;
     const { w, h, rgb } = frame, { ramps, objects, materials } = rules;
     const mask = capture ? new Uint8Array(w*h) : null;
@@ -119,6 +119,7 @@ const EffectPalettes = (() => {
         const lit = lighting(kind) && ownership?.lit;
         for (let c=0;c<3;c++) sample[c] = kind === 'emission' ? emission[q+c] :
           lit && local ? lit[bottom*3+c] : source[bottom*3+c]/255;
+        const trace = inspect?.pixel === p ? {} : undefined;
         let index;
         if (ramp.mode === 'nearest') index = pixel.nearest(sample, ramp.rgb, false);
         else {
@@ -126,11 +127,19 @@ const EffectPalettes = (() => {
           const [lo,hi] = ramp.range, span = ramp.packed.length-1;
           const step = Math.min(1, Math.max(0,(luma-lo)/(hi-lo)))*span;
           const [dx,dy] = ramp.amount && ditherAt ? ditherAt(x,y) : [x,y];
-          index = Math.min(span, Math.max(0,Math.round(step + (pixel.bayerRank(dx,dy)-.5)*ramp.amount)));
+          const rank = pixel.bayerRank(dx,dy);
+          index = Math.min(span, Math.max(0,Math.round(step + (rank-.5)*ramp.amount)));
+          if (trace) {
+            trace.method = 'luma';
+            const low = Math.floor(step), high = Math.ceil(step);
+            if (ramp.amount && low !== high) trace.dither = { mode:'tone', pattern:'bayer', coordinates:[dx,dy],
+              pair:[ramp.packed[low],ramp.packed[high]],rank,strength:ramp.amount,share:step-low };
+          }
         }
         let color = ramp.packed[index], winner = 'shared';
+        const localTrace = trace && local ? {} : undefined;
         if (local) {
-          const swatch = ownership.pick(local, sample, x, y, p);
+          const swatch = ownership.pick(local, sample, x, y, p, localTrace);
           if (distance(sample,swatch) <= distance(sample,ramp.rgb[index])) {
             color = (Math.round(swatch[0]*255)<<16) | (Math.round(swatch[1]*255)<<8) | Math.round(swatch[2]*255);
             winner = 'material';
@@ -141,6 +150,7 @@ const EffectPalettes = (() => {
         rgb[q+2] = color&255;
         if (mask) mask[p] = symbols[kind];
         ownership?.mark(p,{kind,ramp,local,winner,weight});
+        if (trace) inspect.effect(kind,ramp,local,winner,sample,index,winner === 'material' ? localTrace : trace,weight);
         changed = true;
         break;
       }

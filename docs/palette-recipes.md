@@ -294,6 +294,38 @@ RGB8 buffers use `ink.measureQuantizationError({ w, h, graded, resolved, alpha }
 { passes, threshold, heatmapMax, regionLimit })`. The optional material pass
 uses Ink's `{ w, h, materialId, materials }` format.
 
+## Inspect the palette at a pixel
+
+```sh
+ink-studio palette inspect examples/render-stages.js --params '{"stage":"palette"}' \
+  --w 760 --h 420 --px 2 --at 180,144
+```
+
+Use top-left, zero-based art pixel coordinates. Keep the camera, time,
+and art resolution of the shot you are inspecting. The command prints
+JSON, or writes it to `--out report.json`.
+
+The report names the visible surface's object and material where available.
+`winner` gives the rule, input colour, selected swatch, and its index in the
+rule's colour list. `inputRgb` preserves the matcher input even when it
+falls outside the display range of `inputColor`. `matchColor` identifies a
+separate mapped input when a legacy policy samples a graded swatch.
+
+Pair dithering reports both candidates, whether the pair was explicitly
+authorised, the sampled coordinates and rank, and the blend share and
+threshold. `method: "dither-pair"` means the alternate won. Ordered RGB
+bias reports its rank and offset. Tone ramps show their adjacent stops.
+
+`decisions` records the visible receiver's palette choices in render
+order, including scoped material or stage rules, masks, and effect
+palettes. A soft mask records its weight, and the stronger choice is
+reported as the winner until a later rule replaces it. Compare
+`outputColor` with the winning swatch to see changes from blending,
+cleanup, or finishing. The coordinates and colour refer to the scene
+pass before screen overlays. A fully transparent pixel has no winner.
+
+In Node, use `ink.inspectPalettePixel(world, { at: [x, y], ...view })`.
+
 ## Measure palette usage at export size
 
 Use the same camera, time, and art resolution as the intended export.
