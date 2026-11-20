@@ -324,6 +324,7 @@ const CMD = {
         '  atlas <id> [--directions 8 --w 96 --h 96 --fps 12 --maps depth,normal,emission,silhouette]  export a transparent sprite atlas',
         '  pose-review <id> [--directions 8 --w 96 --h 96]  review named poses at sprite resolution',
         '  motion-review <id> [--finding kind-or-id] [--out report.json]  inspect motion findings and focused playback ranges',
+        '  clip-sequence <id> [--handoff 0] [--out report.json]  inspect clip instances, retimed cues, and handoffs',
         '  passes <id> [--channels coverage,depth,normal,objectId,materialId,emission]  save art-pixel render pass previews',
         '  shimmer <id> [--mode orbit|zoom|pan|still --frames 24]  how many pixels flicker over a move, and a GIF of it',
         '  crisp <id ...|all> [--t 2 --map]   how crisp at its own pixel size: stray pixels, specks, flat area, finest frequencies,',
@@ -606,6 +607,20 @@ const CMD = {
     if (opt.finding && !findings.length) die('no motion finding matches ' + opt.finding);
     const report = JSON.stringify({ scene: world.id, duration: review.duration,
       findings: findings.map(issue => ({ ...issue, focus: review.focus(issue.id) })) }, null, 2) + '\n';
+    if (!opt.out) process.stdout.write(report);
+    else {
+      const file = path.resolve(opt.out);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, report);
+      console.log('wrote', file);
+    }
+  },
+  'clip-sequence'() {
+    const world = build(pos[0]), sequence = world.clipSequence;
+    if (!sequence?.steps || !sequence.suggestCut) die('clip-sequence needs a scene with a clip sequence');
+    const cut = opt.handoff === undefined ? undefined : sequence.suggestCut(num('handoff'));
+    const { duration, alignment, travel, steps, handoffs, keys, cues, change } = sequence;
+    const report = JSON.stringify({ scene: world.id, duration, alignment, travel, steps, handoffs, keys, cues, change, cut }, null, 2) + '\n';
     if (!opt.out) process.stdout.write(report);
     else {
       const file = path.resolve(opt.out);

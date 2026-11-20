@@ -58,14 +58,10 @@
   }
 
   function collect(puppet, probes, sample, times) {
-    const restore = puppet.pose;
-    const maps = Object.values(puppet.parts).map(part => [part, part.frame]);
     const tracks = new Map(probes.map(probe => [probe.id, { probe, points: [], parents: [] }]));
-    try {
-      for (const [part] of maps) part.frame = [];
+    return K.deform.inspectPoses(puppet, solve => {
       for (const time of times) {
-        puppet.pose = sample(time);
-        puppet.solve();
+        solve(sample(time));
         for (const { probe, points, parents } of tracks.values()) {
           const point = puppet.point(probe.part, probe.point);
           if (!xyz(point)) throw new Error('Non-finite probe position: ' + probe.id);
@@ -73,12 +69,8 @@
           parents.push(puppet.parts[probe.part].P.slice());
         }
       }
-    } finally {
-      puppet.pose = restore;
-      for (const [part, frame] of maps) part.frame = frame;
-      puppet.solve();
-    }
-    return tracks;
+      return tracks;
+    });
   }
 
   function spacingTargets(points) {

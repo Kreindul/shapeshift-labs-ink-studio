@@ -955,6 +955,23 @@
   };
   D.euler = eulerDeg;
   const ID = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  /* Inspect authored poses without changing the puppet's live pose, frame maps, or bone buffer. */
+  D.inspectPoses = (puppet, read) => {
+    const previous = puppet.pose;
+    const maps = Object.values(puppet.parts).map(part => [part, part.frame]);
+    try {
+      for (const [part] of maps) part.frame = [];
+      return read(pose => {
+        puppet.pose = pose;
+        puppet.solve();
+        return puppet;
+      });
+    } finally {
+      puppet.pose = previous;
+      for (const [part, frame] of maps) part.frame = frame;
+      puppet.solve();
+    }
+  };
   K.puppet = (W, def) => {
     const d = W.data,
       names = Object.keys(def.parts),
