@@ -351,6 +351,11 @@
     } catch (error) {
       bad('finish.look.paletteRemap', error.message);
     }
+    try {
+      PixelLook.prepareColorStack(look?.colorStack, pal, st.roles);
+    } catch (error) {
+      bad('finish.look.colorStack', error.message);
+    }
     const roleNames = Object.keys(st.roles),
       ids = new Set(),
       parts = new Set(),

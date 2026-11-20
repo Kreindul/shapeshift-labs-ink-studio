@@ -208,3 +208,53 @@ renderer. They follow the animation grade and channel curves. Palette
 remaps and protected swatches apply last. Raw output and stipple use
 their own resolve paths. See [surface LUTs](surface-materials.md#3d-luts-on-surfaces)
 to transform a material sample before compositing.
+
+## Named color stacks
+
+Use `finish.look.colorStack` in a JSON diorama, `look.colorStack`
+in `B.finish()`, or `visual.look.colorStack` in a simulation manifest.
+A stack has a `name` and ordered `steps`. Give a step an `id` to identify it
+while editing. Set `enabled: false` to skip a step or set an `amount`
+from zero to one to blend its result into the color entering that step.
+
+```json
+{
+  "name": "Cool dusk",
+  "steps": [
+    { "id": "shade", "type": "exposure", "stops": -0.25 },
+    { "id": "cool", "type": "hue", "degrees": 20, "amount": 0.6 },
+    { "id": "lantern", "type": "paletteRemap", "remap": { "rules": [], "protect": ["glow"] } }
+  ]
+}
+```
+
+| Step type | Editable settings |
+| --- | --- |
+| `exposure` | `stops` scales RGB by `2 ** stops`. |
+| `contrast` | `factor` scales each channel's distance from `pivot`, which defaults to 0.5. |
+| `saturation` | `factor` scales the distance from luminance. Zero gives grayscale and one is neutral. |
+| `hue` | `degrees` rotates the hue with the channel minimum and maximum held fixed. |
+| `channelMix` | `matrix` contains RGB weights for each of the three output channels. Optional `offset` adds an RGB triple. |
+| `curves` | `curves` takes the same luminance ramp or RGB channel curves as `look.colorCurves`. |
+| `lut` | `lut` takes a native 3D LUT, including a JSON import from `.cube`. |
+| `paletteRemap` | `remap` addresses the original palette slots by swatch, index, or role. Rules blend against the color at this point in the stack. Protected slots retain their original colors through the entire grade. |
+
+The scene stack uses Ink Studio's working RGB values. The renderer clamps
+the final stack color for display. Curves and LUTs use their own domains
+when they sample an intermediate value. Palette resolution feeds the
+animation grade, standalone curves and LUT, then the stack. A standalone
+palette remap applies last, with protections from both definitions honored.
+The CLI and WebGL share the same scene stack evaluation. Raw and stipple
+output use their existing resolve paths.
+
+The JavaScript bundle exposes `ColorStack.prepare(stack).sample(rgb, out)`
+for RGB-only stacks. A [material stack](surface-materials.md#color-stacks-on-surfaces)
+uses that same evaluation before compositing.
+
+```sh
+node cli/ink-studio.js render lab/data-shrine.json --t 4 --pitch .31 --yaw .55 --target 0,1.15,0 --color-stack off --out before.png
+node cli/ink-studio.js render lab/data-shrine.json --t 4 --pitch .31 --yaw .55 --target 0,1.15,0 --color-stack examples/lantern-dusk.json --out dusk.png
+```
+
+The same `--color-stack` option works with `sim render`. A JSON file
+overrides the authored scene stack. `off` bypasses scene and surface stacks.

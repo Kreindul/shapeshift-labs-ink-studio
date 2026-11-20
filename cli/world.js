@@ -222,7 +222,8 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt}) {
         const studio=require('../index.js');
         const image=studio.render(world,{w:Number(opt.w??720),h:Number(opt.h??475),colored:!!opt.colored,
           colorCurves:opt['color-curves']==='off'?false:undefined,
-          colorLut:require('./lut.js').override(opt.lut),t:run.view().time});
+          colorLut:require('./lut.js').override(opt.lut),
+          colorStack:require('./color-stack.js').override(opt['color-stack']),t:run.view().time});
         const output=path.resolve(opt.out);
         fs.mkdirSync(path.dirname(output),{recursive:true});
         require('./png.js').write(output,image.w,image.h,image.rgb);

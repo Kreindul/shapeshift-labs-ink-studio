@@ -1,12 +1,14 @@
 /* Projected surface effects shared by the software renderer and browser hosts. */
 const SplatEffects = (() => {
-  let curves, luts;
+  let curves, luts, stacks;
   try {
     curves = ColorCurves;
     luts = ColorLUT;
+    stacks = ColorStack;
   } catch {
     curves = require('./color-curves.js');
     luts = require('./color-lut.js');
+    stacks = require('./color-stack.js');
   }
   const clamp = x => Math.min(1, Math.max(0, x));
   const fract = x => x - Math.floor(x);
@@ -204,12 +206,22 @@ const SplatEffects = (() => {
     };
   }
 
-  function colorLut({ lut, outputPalette }, resolveColor) {
-    const lookup = luts.prepare(lut), result = [0, 0, 0, 1, 1, 0];
+  function rgbEffect(transfer, outputPalette, resolveColor) {
+    const result = [0, 0, 0, 1, 1, 0];
     return {
       palette: outputColors(outputPalette, resolveColor),
-      sample(sample, base) { return lookup.sample(base, result); }
+      sample(sample, base) { return transfer(base, result); }
     };
+  }
+
+  function colorLut({ lut, outputPalette }, resolveColor) {
+    return rgbEffect(luts.prepare(lut).sample, outputPalette, resolveColor);
+  }
+
+  function colorStack({ stack, outputPalette }, resolveColor) {
+    const plan = stacks.prepare(stack, { resolveColor });
+    if (!plan) throw new TypeError('A colorStack layer needs a stack definition');
+    return rgbEffect(plan.sample, outputPalette, resolveColor);
   }
 
   function layer(definition, context, resolveColor) {
@@ -278,6 +290,6 @@ const SplatEffects = (() => {
     };
   }
 
-  return { project, layer, colorCurve, colorLut, fieldMask, clamp, vector };
+  return { project, layer, colorCurve, colorLut, colorStack, fieldMask, clamp, vector };
 })();
 if (typeof module !== 'undefined') module.exports = SplatEffects;

@@ -71,8 +71,8 @@ function testWebGL(createRenderer, spec) {
   const canvas = document.querySelector('canvas');
   const renderer = createRenderer(canvas, { toolkit: { KIT, PixelLook } });
   const gl = canvas.getContext('webgl2'), world = KIT.diorama.build(spec);
-  function pixels(paletteRemap, colorCurves, colorLut) {
-    renderer.render(world, { paletteRemap, colorCurves, colorLut, ortho: true, colored: false, dither: 0 });
+  function pixels(paletteRemap, colorCurves, colorLut, colorStack) {
+    renderer.render(world, { paletteRemap, colorCurves, colorLut, colorStack, ortho: true, colored: false, dither: 0 });
     const rgba = new Uint8Array(canvas.width * canvas.height * 4);
     gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
     return Array.from({ length: rgba.length / 4 }, (_, i) => (rgba[i * 4] << 16) | (rgba[i * 4 + 1] << 8) | rgba[i * 4 + 2]);
@@ -101,10 +101,19 @@ function testWebGL(createRenderer, spec) {
   const colors = PixelLook.gradePalette(PixelLook.colorGrade(world.pal, world.paletteRoles, null, world.look.paletteRemap, transfer, lut));
   if (!withLut.every((color, i) => color === colors[world.pal.indexOf(before[i])]))
     throw new Error('WebGL LUT output differs from the shared CPU palette evaluation');
+  const stack = { name: 'GPU test stack', steps: [
+    { type: 'hue', degrees: 120 }, { type: 'curves', curves: transfer }, { type: 'lut', lut },
+    { type: 'paletteRemap', remap: { rules: [], protect: ['signal', 'beacon'] } },
+    { type: 'exposure', stops: -1, amount: .8 }
+  ] };
+  const stacked = pixels(false, false, false, stack);
+  const expected = PixelLook.gradePalette(PixelLook.colorGrade(world.pal, world.paletteRoles, null, false, false, false, stack));
+  if (!stacked.every((color, i) => color === expected[world.pal.indexOf(before[i])]))
+    throw new Error('WebGL did not apply the same ordered stack and protected entries');
   renderer.dispose();
 }
 
-test('WebGL matches CPU remaps, curves and LUTs with protected swatches', { skip: !process.env.INK_TEST_CHROME }, () => {
+test('WebGL matches CPU remaps, curves, LUTs and ordered stacks with protected swatches', { skip: !process.env.INK_TEST_CHROME }, () => {
   const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
   const { execFileSync } = require('node:child_process'), { pathToFileURL } = require('node:url');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ink-remap-')), url = file => pathToFileURL(file).href;

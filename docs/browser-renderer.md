@@ -51,6 +51,7 @@ tone mapping, and grading are inactive. Pass `reuseOrder: false` or
 | `paletteRemap` | Override a world's [palette remap](pixel-look.md#palette-remaps), or pass `false` to disable it. |
 | `colorCurves` | Override a world's [scene color curves](pixel-look.md#color-ramps-and-channel-curves), or pass `false` to disable them. |
 | `colorLut` | Override a world's [3D color LUT](pixel-look.md#3d-color-luts), or pass `false` to disable it. |
+| `colorStack` | Override a world's [named color stack](pixel-look.md#named-color-stacks), or pass `false` to disable it. |
 | `clean`, `lineClean`, `damp` | Control isolated-pixel cleanup, line cleanup, and per-pixel flicker damping. |
 | `edges`, `lightShape` | Toggle surface edge sprites and per-pixel line shading. |
 | `scale`, `stepAnimation` | Change the splat size or disable the shared per-pixel animation clock stepping. |

@@ -168,6 +168,33 @@ using `SurfaceLook`. The standard WebGL renderer supports
 [scene LUTs](pixel-look.md#3d-color-luts). The CLI flag `--lut off`
 bypasses both the scene LUT and these material layers.
 
+## Color stacks on surfaces
+
+Add a `colorStack` layer with a named `stack` to process the material's
+lit RGB before compositing. The layer accepts the usual `strength`,
+`mask`, `blend`, and `outputPalette` settings. Use the RGB operations,
+curves, and LUTs described in [named color stacks](pixel-look.md#named-color-stacks).
+Indexed remap steps use palette slots at scene resolve.
+
+```js
+const oxidized = KIT.surface.material({ r: [1, 2, 3] }, {
+  layers: {
+    patina: {
+      type: 'colorStack',
+      strength: 0.7,
+      stack: { name: 'Copper patina', steps: [
+        { type: 'hue', degrees: 35 },
+        { type: 'saturation', factor: 0.75 }
+      ] }
+    }
+  }
+});
+```
+
+The Node renderer and custom browser renderers using `SurfaceLook`
+can evaluate surface stacks. The standard WebGL renderer evaluates
+scene stacks during palette resolve.
+
 ## Animate the finish light
 
 Set `light.surfaceDirection` in a JSON scene, or pass `surfaceLight` to

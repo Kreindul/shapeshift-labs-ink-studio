@@ -427,10 +427,13 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const remapDefinition = frame.paletteRemap ?? look.paletteRemap;
       const curveDefinition = frame.colorCurves ?? look.colorCurves;
       const lutDefinition = frame.colorLut ?? look.colorLut;
+      const stackDefinition = frame.colorStack ?? look.colorStack;
       const hasColorGrade = (remapDefinition !== undefined && remapDefinition !== false) ||
-        (curveDefinition !== undefined && curveDefinition !== false) || (lutDefinition !== undefined && lutDefinition !== false);
+        (curveDefinition !== undefined && curveDefinition !== false) || (lutDefinition !== undefined && lutDefinition !== false) ||
+        (stackDefinition !== undefined && stackDefinition !== false);
       const colorGrade = !raw && !definition && hasColorGrade &&
-        toolkit.PixelLook.colorGrade(world.pal, world.paletteRoles, world.anim?.grade, remapDefinition, curveDefinition, lutDefinition);
+        toolkit.PixelLook.colorGrade(world.pal, world.paletteRoles, world.anim?.grade,
+          remapDefinition, curveDefinition, lutDefinition, stackDefinition);
       const grade = colorGrade || world.anim?.grade;
       const lineIndex = world.outline?.c ?? 0;
       const glass = raw ? null : world.glass;

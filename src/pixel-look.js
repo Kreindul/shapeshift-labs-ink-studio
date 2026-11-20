@@ -1,13 +1,15 @@
 /* Fixed-grid, palette-aware resolve using coverage and cluster voting.
    No per-frame palette fitting, camera movement or black ink. */
 const PixelLook = (() => {
-  let curves, luts;
+  let curves, luts, stacks;
   try {
     curves = ColorCurves;
     luts = ColorLUT;
+    stacks = ColorStack;
   } catch {
     curves = require('./color-curves.js');
     luts = require('./color-lut.js');
+    stacks = require('./color-stack.js');
   }
   const weights = [0.30, 0.55, 0.15];
   const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
@@ -74,10 +76,16 @@ const PixelLook = (() => {
       if (!isColor(color)) throw new TypeError('Palette remap output needs a #rrggbb or packed RGB color');
       for (const i of select(rule.from)) overrides.set(i, color);
     }
-    for (const from of protect) for (const i of select(from)) overrides.set(i, colors[i]);
+    const locked = new Set();
+    for (const from of protect) for (const i of select(from)) {
+      locked.add(i);
+      overrides.set(i, colors[i]);
+    }
     const base = Float32Array.from(colors.flatMap(unpack));
-    const targets = Array.from(overrides, ([i, color]) => [i, unpack(color)]);
+    const targets = new Map(Array.from(overrides, ([i, color]) => [i, Object.freeze(unpack(color))]));
     return Object.freeze({
+      target: index => targets.get(index),
+      protects: index => locked.has(index),
       grade(prior, amount = 1) {
         if (!fraction(amount)) throw new RangeError('Palette remap strength must be in [0, 1]');
         const output = base.slice();
@@ -99,22 +107,36 @@ const PixelLook = (() => {
       (byte(grade[i * 3]) << 16) | (byte(grade[i * 3 + 1]) << 8) | byte(grade[i * 3 + 2]));
   }
 
-  function colorGrade(palette, roles, prior, remap, definition, lut) {
+  function prepareColorStack(stack, palette, roles) {
+    return stacks.prepare(stack, { paletteRemap: definition => prepareRemap(definition, palette, roles) });
+  }
+
+  function colorGrade(palette, roles, prior, remap, definition, lut, stack) {
     const transfer = curves.prepare(definition), plan = prepareRemap(remap, palette, roles);
     const lookup = lut === undefined || lut === false ? null : luts.prepare(lut);
-    if (!transfer && !lookup) return plan ? plan.grade(prior) : null;
-    const grade = new Float32Array(palette.length * 3), result = [0, 0, 0];
+    const ordered = prepareColorStack(stack, palette, roles);
+    if (!transfer && !lookup && !ordered) return plan ? plan.grade(prior) : null;
+    const grade = new Float32Array(palette.length * 3), result = [0, 0, 0], protectedSlots = [];
     for (let i = 0; i < palette.length; i++) {
       const offset = i * 3;
+      if (ordered?.protects(i)) {
+        protectedSlots.push(i);
+        grade.set(unpack(palette[i]), offset);
+        continue;
+      }
       const base = prior?.length >= offset + 3 ? prior.slice(offset, offset + 3) : unpack(palette[i]);
-      const shaped = transfer ? transfer(base, result) : base;
-      if (lookup) {
-        lookup.sample(shaped, result);
+      let shaped = transfer ? transfer(base, result) : base;
+      if (lookup) shaped = lookup.sample(shaped, result);
+      if (ordered) shaped = ordered.sample(shaped, result, i);
+      if (lookup || ordered) {
         for (let channel = 0; channel < 3; channel++)
-          grade[offset + channel] = Math.max(0, Math.min(1, result[channel]));
+          grade[offset + channel] = Math.max(0, Math.min(1, shaped[channel]));
       } else grade.set(shaped, offset);
     }
-    return plan ? plan.grade(grade) : grade;
+    if (!plan) return grade;
+    const resolved = plan.grade(grade);
+    for (const i of protectedSlots) resolved.set(grade.subarray(i * 3, i * 3 + 3), i * 3);
+    return resolved;
   }
 
   function toneSettings(definition) {
@@ -321,6 +343,6 @@ vec3 inkToneResolve(vec3 color, ivec2 pixel) {
   return share >= mix(0.5, rank, u_inkToneAmount) ? b.rgb : a.rgb;
 }`;
   return { nearest, ink, resolve, glsl, presets, toneSettings, prepareTone, toneIndex, toneGlsl, bayerRank, outputPalettes,
-    prepareRemap, gradePalette, colorGrade };
+    prepareRemap, gradePalette, prepareColorStack, colorGrade };
 })();
 if (typeof module !== 'undefined') module.exports = PixelLook;
