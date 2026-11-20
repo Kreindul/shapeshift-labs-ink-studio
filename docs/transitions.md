@@ -14,6 +14,8 @@ repository root with a local server, then open
 python3 -m http.server 8000
 ```
 
+Use [Transition review](transition-review.md) to inspect native headless scene frames around environment changes and authored camera cuts.
+
 ## Play a preset
 
 Browser bundlers resolving the package's `browser` entry can import these APIs

@@ -27,6 +27,8 @@ Use [Silhouette protection](silhouette-protection.md) to tune fog and contrast o
 
 Use [Layered horizon art](layered-horizon.md) to paint a distant vista with depth-dependent parallax, bounded tiling, and camera fades.
 
+Use [Transition review](transition-review.md) to compare native export frames through changes in weather, lighting, and camera.
+
 ## Planar reflections
 
 ```js

@@ -93,6 +93,7 @@ module.exports = {
   exportGlb: require('./cli/export-glb.js'),
   render: require('./cli/render.js').render,
   silhouetteReview: require('./cli/silhouette-review.js').silhouetteReview,
+  transitionReview: require('./cli/transition-review.js').transitionReview,
   spriteAtlas: require('./cli/sprite-atlas.js').spriteAtlas,
   readSpriteAtlas: require('./cli/sprite-atlas.js').readSpriteAtlas,
   readHorizonBands: require('./cli/horizon-bands.js').readHorizonBands,

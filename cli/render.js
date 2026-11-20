@@ -111,11 +111,12 @@ function render(world, o, preparedPalettes) {
     yaw = o.yaw === undefined ? c.yaw : o.yaw,
     pitch = o.pitch === undefined ? c.pitch : o.pitch,
     an = world.anim || {},
+    cameraMotion = o.lockCamera ? {} : an,
     dist0 = o.dist || c.dist / (o.zoom || 1),
     /* a diorama's own zoom (a camera punch) moves the eye, not the size of an art pixel */
-    dist = dist0 / (an.zoom || 1),
+    dist = dist0 / (cameraMotion.zoom || 1),
     T0 = o.target || c.target,
-    T = an.kick ? [T0[0] + an.kick[0], T0[1] + an.kick[1], T0[2] + an.kick[2]] : T0,
+    T = cameraMotion.kick ? [T0[0] + cameraMotion.kick[0], T0[1] + cameraMotion.kick[1], T0[2] + cameraMotion.kick[2]] : T0,
     cw = o.w || 900,
     ch = o.h || 620;
   const audit = o.lookAudit === true ? createAudit() : o.lookAudit;

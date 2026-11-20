@@ -653,6 +653,8 @@ const CMD = {
         '  variants <id> --seeds 3,7,12 [--group silhouette|openness|wear --motion]  render a ranked seed contact sheet',
         '  atlas <id> [--directions 8 --pitches 0,0.7 --w 96 --h 96 --fps 12 --maps depth,normal,emission,silhouette]  export a transparent sprite atlas',
         '  silhouette-review <scene> --directions 8 --w 96 --h 96   paired export-size views and edge contrast',
+        '  transition-review <scene> [--plan file.json] --w 160 --h 90 [--out sheet.png]',
+        '    compare native frames around midnight, weather beats, or cuts [--scale N --fail-on-flags]',
         '  pose-review <id> [--directions 8 --w 96 --h 96]  review named poses at sprite resolution',
         '  motion-review <id> [--finding kind-or-id] [--out report.json]  inspect motion findings and focused playback ranges',
         '  clip-sequence <id> [--handoff 0] [--out report.json]  inspect clip instances, retimed cues, and handoffs',
@@ -965,6 +967,20 @@ const CMD = {
       pitches:opt.pitches===undefined?undefined:list('pitches'),times,fps,pose });
     writeAtlas(directory, atlas);
     console.log('wrote', directory, atlas.metadata.frames.length, 'frames');
+  },
+  'transition-review'() {
+    const world = buildPreview();
+    if (opt.plan !== undefined && typeof opt.plan !== 'string') die('--plan needs a transition review JSON file');
+    if (opt.out !== undefined && (typeof opt.out !== 'string' || !/\.png$/i.test(opt.out)))
+      die('Transition review output needs a PNG filename');
+    const plan = opt.plan === undefined ? world.transitionReview : JSON.parse(fs.readFileSync(path.resolve(opt.plan), 'utf8'));
+    const { transitionReview } = require('./transition-review.js');
+    const { image, report } = transitionReview(world,{ plan, width:num('w',160), height:num('h',90), scale:num('scale',1), view:view(), pose });
+    const file = save(world.id+'-transition-review.png',image);
+    const reportFile = file.replace(/\.png$/i,'')+'.json';
+    fs.writeFileSync(reportFile, JSON.stringify(report,null,2)+'\n');
+    console.log('wrote',reportFile, '('+report.flagCount+' flags)');
+    if (opt['fail-on-flags'] && report.flagCount) process.exitCode = 2;
   },
   'silhouette-review'() {
     const world=buildPreview(), time=num('t',0);
