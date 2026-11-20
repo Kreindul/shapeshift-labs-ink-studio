@@ -382,6 +382,87 @@ node examples/raster-composition.cjs raster-composition-review
 ink-studio graph run raster-composition-review/composition.json --out raster-composition-review/graph
 ```
 
+## Drawing, layout, and regions
+
+Use `draw.render` with `width`, `height`, and a `commands` array to
+make a transparent standalone raster. Commands draw in order, in
+top-left pixel coordinates. Set `edges: "hard"` for pixel coverage or
+use the default `"smooth"` coverage. Hex colors accept RGB and RGBA.
+
+| Command | Settings |
+| --- | --- |
+| `rect`, `ellipse` | Specify `rect: [x, y, width, height]`, `fill`, optional `stroke` and stroke `width`. Rectangles also accept a corner `radius`. |
+| `polygon` | Set `points` for one contour or `rings` for several. Fill uses even-odd coverage, so a second contour can cut a hole. |
+| `path` | Use 2D `points`, a linked typed path in `source`, or an SVG-style `d` string. Set `color` or `stroke` and `width`. For filled contours, set `fill` and close each contour. |
+| `ribbon` | Follow a 2D path with a constant width or one width per path point. Set `fill`, optional `stroke` and `strokeWidth`, and a `miterLimit` for corners. |
+| `text` | Set `text`, integer `at: [x,y]`, `color`, and optional bitmap typography settings. |
+| `arrow`, `grid` | Use the screen-space settings from [Drawing primitives](drawing-primitives.md). |
+
+`draw.path` turns one `d` contour into a typed `{points, closed}` path.
+The path syntax supports absolute and relative `M L H V Q C A Z`.
+Use `options.steps` to sample curves. `draw.render` can also fill
+multiple closed contours from one `d` string. `draw.ribbon` accepts a
+typed `source` and returns a polygon command ready to draw. Assemble
+linked commands in explicit order with `data.record` and `data.collect`.
+
+`draw.text` generates a standalone bitmap raster and `metrics` with
+its width, height, line count and scale. It uses Ink's 6×8 glyphs,
+with integer `scale`, `tracking`, and `leading`, optional `columns`
+for character wrapping, and `align: "left" | "center" | "right"`.
+Supply `customGlyphs` as a map from characters to rows of `#` and
+spaces to draw symbols in the same grid.
+
+### Relative boxes
+
+`layout.boxes` takes the canvas `width`, `height`, and a `boxes` array.
+Each entry has an `id` and optionally a `parent`, `size`, `offset`,
+`anchor`, `pivot`, and `padding`. Parents use their content rectangle
+as the coordinate system for children. Size and offset accept pixels
+or percentage strings relative to the parent span. Anchor fractions
+select a point in the parent and pivot fractions select a point in the
+child. Padding uses a number or four left, top, right, bottom values.
+The result is keyed by ID. Each box reports a pixel-rounded `rect`
+and `content` rectangle.
+
+```json
+{"id":"legend","parent":"sheet","size":["45%",18],"anchor":[1,1],"pivot":[1,1],"offset":[-4,-3]}
+```
+
+Get a named box with `data.get`. Pass the box and a `source` raster to
+`layout.place` to produce a layer for `raster.stack`. Set `options.fit`
+to `contain`, `cover`, `stretch`, or `none`. Fractional `align` defaults
+to the center. Placement uses `content` by default and clips overflow.
+Set `area: "rect"` to use the outer box, or `clip: false` to allow spill.
+
+### Flood fill and connected components
+
+- `raster.floodFill` takes a `source` and `options.seed: [x,y]`. It
+  replaces the connected region with `color` and returns a byte `mask`
+  and `stats` with area and pixel bounds. Choose `connectivity` of 4 or 8.
+  Set `tolerance` to the maximum byte difference from the seed in each
+  RGBA channel.
+- `raster.components` thresholds the selected `channel` into adjoining
+  regions. The default selects alpha on alpha-bearing sources and luma
+  otherwise. Choose `threshold`, `invert`, `minArea`, and 4- or 8-way
+  `connectivity`. IDs follow the first covered pixel in row-major order.
+  The result contains component records with IDs, areas, seeds, and
+  bounding rectangles, plus a one-channel `labels` raster with zero
+  for background.
+- `raster.extractComponent` takes the original `source`, `labels`, and a
+  component record. It crops to the component bounds and clears pixels
+  outside that component. Use it in an `array.map` group to pass the
+  isolated sprites to `raster.pack`.
+
+The library provides the same operations under
+`ink.load().KIT.procedural.drawing2d`. The [tide chart example](../examples/drawing-layout.cjs)
+renders two chart sizes, fills shoreline and lagoon regions, draws the
+route ribbon, and extracts three symbols to a native atlas.
+
+```sh
+node examples/drawing-layout.cjs drawing-layout-review
+ink-studio graph run drawing-layout-review/tide-chart.json --out drawing-layout-review/graph
+```
+
 ## Geometry and attributes
 
 `geometry.meshPaths(mesh, { sources, edgeCost, maxCost })` supports native and imported indexed meshes. It returns per-vertex distances and predecessors, plus `path(vertex)`, `curves(vertices)` and a sampled `distanceAt(point)` field. The cost function receives positions, vertex IDs, length and adjacent faces. Return infinity to block an edge.
