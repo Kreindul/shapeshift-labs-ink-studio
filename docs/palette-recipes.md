@@ -221,6 +221,43 @@ samples and call `KIT.palette.extract({ width, height, data }, options)`.
 An `ImageData` object can be passed directly. Both entry points accept
 `{ size, alpha }` and return the CLI's report.
 
+## Compare colour distributions with a reference
+
+```sh
+ink-studio palette distributions reference.png --scene examples/animated-palette-fields.js \
+  --w 340 --h 178 --px 1 --raw --t 4 --out distribution-review
+ink-studio palette distributions reference.png --render exported-frame.png --out distribution-review
+```
+
+`comparison.png` puts both images beside each other and uses the same
+histogram scale for each pair of charts. `distributions.json` records the
+pixel counts, shares, and Studio-minus-reference changes. The previews are
+resized for the sheet. The counts come from the source pixels and use the
+share of each image so different resolutions can be compared.
+
+Brightness uses OKLab lightness. Saturation uses HSV saturation. Hue
+uses 30° HSV families plus a neutral group for greys and colours below
+the neutral saturation or OKLab chroma threshold. The tonal rows divide
+the image into shadows, midtones, and highlights. Accents can overlap
+those rows and require both high saturation and high chroma. Each row
+shows how much of the image it covers and each family's share within it,
+with the most frequent actual swatch for that family.
+
+Use `--bins` for the number of brightness and saturation intervals (2–32,
+default 12) and `--alpha visible|opaque|all` to choose which pixels count.
+The default `visible` counts partially transparent pixels once using their
+stored RGB and skips fully transparent pixels. A `--settings` JSON file can
+set `shadow` and `highlight` (default 0.40 and 0.75), `neutralSaturation`
+and `neutralChroma` (0.10 and 0.02), and `accentSaturation` and
+`accentChroma` (0.65 and 0.10).
+
+In Node, `ink.comparePaletteDistributions(reference, studio, options)`
+accepts PNG paths, PNG buffers, or decoded RGB or RGBA rasters and returns
+`{ report, image }`. Pass a frame from `ink.render` to compare it directly.
+Use `KIT.palette.distributions(image, options)` or
+`KIT.palette.compareDistributions(reference, studio, options)` for
+just the measurements on decoded image data.
+
 ## Measure palette usage at export size
 
 Use the same camera, time, and art resolution as the intended export.
