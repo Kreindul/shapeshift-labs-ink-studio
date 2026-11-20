@@ -161,6 +161,8 @@ function build(id, seedOverride) {
   if (s.lookPreviewPacks !== undefined) w.lookPreviewPacks = s.lookPreviewPacks;
   w.name = s.name;
   w.clock = 0;
+  if (w.anim?.trackAtmosphere && opt['atmosphere-emitters'] !== undefined)
+    w.anim.trackAtmosphere(lib().KIT.atmosphere.emitters.settings(w.atmosphereEmitters, atmosphereEmittersOption()));
   if (w.anim && w.anim.stateful) w.anim.update(0, 0);
   for (const note of w.warnings || []) console.error('warning: ' + s.id + ': ' + note);
   return w;
@@ -224,7 +226,7 @@ function pose(w, t) {
 const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
 if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
   die('--px needs a positive integer');
-let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, celestialOverride, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, splatFieldsOverride, inputSpriteAtlas;
+let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, celestialOverride, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, splatFieldsOverride, atmosphereEmittersOverride, inputSpriteAtlas;
 function skyProfileOverrides(value) {
   if (typeof value !== 'string') die('--sky-profile expects track=profile pairs');
   const pairs = value.split(',').map(entry => entry.split('=').map(part => part.trim()));
@@ -310,6 +312,15 @@ function celestialOption() {
   if (value === 'off') return false;
   if (value === 'on' || value === true) return true;
   return celestialOverride ??= require('../src/celestial-tracks.js').compile(JSON.parse(fs.readFileSync(path.resolve(value), 'utf8')));
+}
+
+function atmosphereEmittersOption() {
+  const value = opt['atmosphere-emitters'];
+  if (value === undefined) return undefined;
+  if (value === 'off') return false;
+  if (value === 'on' || value === true) return true;
+  return atmosphereEmittersOverride ??= require('../index.js').load().KIT.atmosphere.emitters.compile(
+    JSON.parse(fs.readFileSync(path.resolve(value), 'utf8')));
 }
 
 function splatFieldsOption() {
@@ -454,6 +465,7 @@ const view = extra =>
       shapedAtmosphere: shapedAtmosphereOption(),
       volumeCutouts: volumeCutoutsOption(),
       splatFields: splatFieldsOption(),
+      atmosphereEmitters: atmosphereEmittersOption(),
       spriteAtlases: spriteAtlasOption(),
       spriteAtlasMode: opt['sprite-atlas-mode'],
       aerialPerspective: aerialOption(),
@@ -502,7 +514,7 @@ function die(m) {
   console.error(m);
   process.exit(1);
 }
-const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view});
+const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,atmosphereEmittersOption});
 const worldCommands = new Set(['inspect','probe','trace','field','scene','sim']);
 const CMD = {
   help() {
@@ -603,6 +615,7 @@ const CMD = {
         'exposure options: --scene-exposure on|off|file.json',
         'aerial options: --aerial-perspective on|off --aerial-start units --aerial-density per-unit --aerial-contrast 0..1',
         'view options: --surface off (no finish layers) --water off --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --px1 (native art pixels) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (remove lone pixels) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n',
+        'socket emitter options: --atmosphere-emitters on|off|file.json',
         'animated splat options: --splat-fields on|off|file.json',
         'sprite options: --sprite-atlas on|off|atlas.json --sprite-at x,y,z --sprite-scale n --sprite-atlas-mode card|impostor',
         'shaped fog options: --shaped-atmosphere on|off|file.json --volume-cutouts on|off|file.json',

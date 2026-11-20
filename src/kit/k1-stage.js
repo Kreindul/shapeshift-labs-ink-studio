@@ -32,7 +32,7 @@
       };
     const flag = new Uint8Array(N),
       queue = new Int32Array(N);
-    let qn = 0;
+    let qn = 0, atmosphereProgram, atmosphereHistory;
     const rgba = [0, 0, 0, 0];
     st.touch = i => {
       rows[i >> 9] = 1;
@@ -53,6 +53,7 @@
       return sys;
     };
     st.update = (dt, t) => {
+      const sceneTime = t;
       if (st.t0 === undefined) st.t0 = t;
       t -= st.t0;
       dt = dt < 0 ? 0 : dt > 0.05 ? 0.05 : dt;
@@ -78,6 +79,7 @@
         rows[i >> 9] = 1;
       }
       qn = 0;
+      atmosphereHistory?.capture(sceneTime, socketPose);
       return true;
     };
     st.poke = (o, d) => {
@@ -91,7 +93,7 @@
     };
     st.partOf = i => (st.rig ? st.rig.bid[i] : 0);
     // named points to hang things on (an eye, a pipe's mouth): given where they are at rest and which rig part carries them; where() says where one is now
-    const sockets = (st.sockets = {});
+    const sockets = (st.sockets = Object.create(null));
     st.socket = (name, p, part, dir) => {
       sockets[name] = { p, part: part || null, dir: dir || [0, 1, 0] };
     };
@@ -99,6 +101,21 @@
       const s = sockets[name];
       return !s ? null : s.part && st.rig && st.rig.has(s.part) ? st.rig.at(s.part, s.p) : s.p;
     };
+    function socketPose({ socket: name }) {
+      const s = sockets[name];
+      if (!s) return null;
+      const p = st.where(name);
+      const dir = s.part && st.rig?.has(s.part) ? V.sub(st.rig.at(s.part, V.add(s.p,s.dir)),p) : s.dir;
+      return { p, dir };
+    }
+    st.trackAtmosphere = program => {
+      if (atmosphereProgram === program) return;
+      atmosphereProgram = program;
+      const targets = program?.targets?.filter(target => target.entity === undefined);
+      atmosphereHistory = targets?.length ? K.atmosphere.emitters.history(targets,program.lifetime) : null;
+    };
+    st.atmosphereSocket = (target,time) => atmosphereHistory?.has(target) ? atmosphereHistory.at(target,time) : socketPose(target);
+    st.trackAtmosphere(W.atmosphereEmitters);
     W.anim = st;
     return st;
   };

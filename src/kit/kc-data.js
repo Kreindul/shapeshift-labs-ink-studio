@@ -300,6 +300,11 @@
       bad('finish.celestialTracks', error.message);
     }
     try {
+      K.atmosphere.emitters.settings(st.finish.atmosphereEmitters);
+    } catch (error) {
+      bad('finish.atmosphereEmitters', error.message);
+    }
+    try {
       K.splatFields.settings(st.finish.splatFields);
     } catch (error) {
       bad('finish.splatFields', error.message);

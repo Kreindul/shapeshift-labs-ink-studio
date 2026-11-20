@@ -49,6 +49,7 @@
       if (item.sockets !== undefined) check(record(item.sockets) && Object.entries(item.sockets).every(([name, p]) => id(name) && vector(p)),
         'Invalid sockets for ' + key);
     }
+    K.atmosphere.emitters.settings(result.visual?.atmosphereEmitters);
     const checked = new Set();
     for (const key of Object.keys(result.entities)) {
       let current = key;

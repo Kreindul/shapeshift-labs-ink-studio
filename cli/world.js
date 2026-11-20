@@ -30,7 +30,7 @@ function target(opt) {
   return {};
 }
 
-module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions}) {
+module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,atmosphereEmittersOption}) {
   const W = kit.KIT.world, R = W.runtime;
   const args = () => opt.args ? parse(opt.args) : {};
   function sampleArgs() {
@@ -87,6 +87,24 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions}
   function schedule(run) {
     if (opt.actions) run.schedule(read(opt.actions));
   }
+  function advanceVisual(run, tick) {
+    const emitters = kit.KIT.atmosphere.emitters;
+    const { world, tick: start } = run.view();
+    const program = emitters.settings(world.visual?.atmosphereEmitters, atmosphereEmittersOption?.());
+    const targets = program?.targets.filter(target => target.entity !== undefined);
+    if (!targets?.length || tick < start) {
+      run.advance(tick);
+      return;
+    }
+    const history = emitters.history(targets, program.lifetime);
+    function observe(view, query) {
+      history.capture(view.time, target => emitters.entityPose(query, target));
+    }
+    run.advance(Math.max(start, tick-Math.ceil(program.lifetime/world.dt)-1));
+    observe(run.view(), run.query());
+    run.advance(tick, {onTick:observe});
+    return history.at;
+  }
   function visualSnapshot(input) {
     let run = runtime(input);
     const tick = opt.steps === undefined && opt.ticks === undefined && opt.t === undefined ? run.view().tick : to(run);
@@ -96,10 +114,10 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions}
       run.schedule(input.log.commands);
     }
     schedule(run);
-    run.advance(tick);
+    const atmospherePose = advanceVisual(run,tick);
     const view = run.view(), Preview = require('./look-preview.js');
     const world = Preview.withAlbedo(() => W.visual(kit, view, run.query()));
-    return { ...world, id: view.world.id, assetPacks: view.world.assetPacks,
+    return { ...world, ...(atmospherePose && {atmospherePose}), id: view.world.id, assetPacks: view.world.assetPacks,
       ...(!input.checkpoint && { lookPreviewPacks: view.world.assetPacks }) };
   }
   function lookSnapshot(file) {
@@ -300,15 +318,17 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions}
       case 'render': {
         const input=load(file), run=runtime(input);
         schedule(run);
-        run.advance(to(run));
+        const atmospherePose=advanceVisual(run,to(run));
         ensure(typeof opt.out==='string','Simulation render needs --out image.png');
         const world=W.visual(kit,run.view(),run.query());
+        if (atmospherePose) world.atmospherePose=atmospherePose;
         const studio=require('../index.js');
         const image=studio.render(world,{w:Number(opt.w??720),h:Number(opt.h??475),colored:!!opt.colored,
           colorCurves:opt['color-curves']==='off'?false:undefined,
           colorLut:require('./lut.js').override(opt.lut),
           paletteConstraints:require('./palette-constraints.js').override(opt['palette-constraints']),
           water:opt.water==='off'?false:undefined,
+          atmosphere:opt.atmosphere==='off'?false:undefined, atmosphereEmitters:atmosphereEmittersOption?.(),
           coverageAware:opt['coverage-aware']===undefined?undefined:opt['coverage-aware']!=='off',
           lookMasks:opt['look-masks']==='off'?false:undefined,
           colorStack:require('./color-stack.js').override(opt['color-stack']),t:run.view().time});

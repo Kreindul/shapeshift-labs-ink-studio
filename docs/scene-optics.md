@@ -17,6 +17,8 @@ Use [Animated splat fields](animated-splat-fields.md) for drifting particles, au
 
 Use [Celestial tracks](celestial-tracks.md) to key authored suns, moons, stars, and eclipses on the same clock as sky profiles.
 
+Use [Atmosphere emitters](atmosphere-emitters.md) to release smoke, steam, spray, or fog from fixed or moving scene sockets.
+
 ## Planar reflections
 
 ```js

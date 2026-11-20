@@ -45,7 +45,7 @@ const Precipitation = require('./precipitation.js');
 const RainImpacts = require('./rain-impacts.js');
 const AtlasSprites = require('../src/atlas-sprites.js');
 const AtlasRaster = require('./atlas-sprites.js');
-let SplatFields;
+let SplatFields, AtmosphereEmitters;
 const { cameraRays, surfacePoint, reflectionSampler, atmosphereQuality, mediaSampler, applyAtmosphere } = require('./scene-optics.js');
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x),
   sstep = (a, b, x) => {
@@ -300,36 +300,45 @@ function render(world, o, preparedPalettes) {
     ? (time,x,z,_fallback,y=0) => flow.sample(x,y,z,time) : weatherWindHere;
   const airAt = (x,y,z) => localWind ? Airflow.frame(localWind(skyTime,x,z,wind.velocity,y)) : wind;
   const windAt = flow ? flow.open : weatherWindAt;
+  const travel = (at, birth, time) => {
+    const age = time - birth;
+    return flow ? flow.travel(...at, skyTime - age, skyTime) : airAt(...at).velocity.map(v => v * age);
+  };
   const splatSource = o.splatFields === true ? world.splatFields : o.splatFields ?? world.splatFields;
   const fields = splatSource && (SplatFields ??= require('../index.js').load().KIT.splatFields).compile(splatSource);
-  const N = baseCount + (fields?.count ?? 0);
-  const birthIds = fields?.count && captureMotion ? new Float64Array(N) : undefined;
+  const emitterSource = o.atmosphereEmitters === true ? world.atmosphereEmitters : o.atmosphereEmitters ?? world.atmosphereEmitters;
+  const emitters = emitterSource ? (AtmosphereEmitters ??= require('../index.js').load().KIT.atmosphere.emitters).compile(emitterSource) : null;
+  const emitted = emitters && emitters.frame(t, {
+    volumes: o.atmosphere !== false, travel,
+    socket(target, birth) {
+      if (target.entity === undefined) return an.atmosphereSocket?.(target,birth);
+      return world.atmospherePose ? world.atmospherePose(target,birth) : AtmosphereEmitters.entityPose(world.lookSnapshot?.query,target);
+    }
+  });
+  const splatCount = fields?.count ?? 0, emittedCount = emitted?.count ?? 0;
+  const N = baseCount + splatCount + emittedCount;
+  const birthIds = N > baseCount && captureMotion ? new Float64Array(N) : undefined;
   let d = world.data;
-  if (fields?.count) {
+  if (N > baseCount) {
     d = new Float32Array(N * 16);
     d.set(world.data.subarray(0, baseCount * 16));
-    fields.write(d, baseCount, t, {
-      birthIds,
-      travel(at, birth, time) {
-        const age = time - birth;
-        return flow ? flow.travel(...at, skyTime - age, skyTime) : airAt(...at).velocity.map(v => v * age);
-      }
-    });
+    if (splatCount) fields.write(d, baseCount, t, { birthIds, travel });
+    if (emittedCount) emitted.write(d, baseCount + splatCount, birthIds);
   }
   const mediumLook = medium => optics?.transform(medium) ?? PixelLook.mediumTransform(paletteRules, medium);
+  const colorForVolume = volume => mediumLook(TargetSelectors.medium(volume.id, volume.mediumKind ?? volume.type, volume.tags));
   const atmosphereSources = o.atmosphere === false ? [] : [
     ...(world.atmosphere||[]), ...SceneOptics.shapedVolumes(world.shapedAtmosphere,o.shapedAtmosphere)
   ];
-  const volumes = atmosphereSources.length ?
-    SceneOptics.prepareVolumes(atmosphereSources, world.pal, volume =>
-      mediumLook(TargetSelectors.medium(volume.id, volume.mediumKind ?? volume.type, volume.tags)), weather?.fogGain) : [];
+  const volumes = SceneOptics.prepareVolumes(atmosphereSources, world.pal, colorForVolume, weather?.fogGain);
+  if (emitted?.volumes.length) volumes.push(...SceneOptics.prepareVolumes(emitted.volumes, world.pal, colorForVolume));
   const sourceWater = o.water !== false && world.water?.count && world.water.raySegments ? world.water : null;
   const water = sourceWater && (optics || paletteRules) ?
     sourceWater.mapColors((id, kind) => mediumLook(TargetSelectors.medium(id, kind))) : sourceWater;
   const glassIndex = optics && TargetSelectors.index(world);
   const glassLooks = glassIndex && new Map();
   const centers = captureMotion ? new Float32Array(N * 2).fill(NaN) : null;
-  const motionReference = centers && { w: W, h: H, centers, ...(birthIds && { birthIds, baseCount, splatSource }) };
+  const motionReference = centers && { w: W, h: H, centers, ...(birthIds && { birthIds, baseCount, splatSource, emitterSource }) };
   const art = createArtPasses([...passSelection].filter(name => name !== 'target' && name !== 'mask'), W, H);
   const rayAt = cameraRays(V, eye, W, H, focal, ortho);
   const celestial = CelestialTracks.settings(world.celestialTracks, o.celestialTracks)?.frame(skyTime);
@@ -498,7 +507,7 @@ function render(world, o, preparedPalettes) {
     overlay.owners[pixel] = i;
     return unmasked(layer) || unmasked(fallbackSlot) || 0;
   }
-  const hasEffectInk = fields?.count || world.effectParticles?.length || world.surfaces?.some(({ settings }) =>
+  const hasEffectInk = N > baseCount || world.effectParticles?.length || world.surfaces?.some(({ settings }) =>
     Object.values(settings.layers || {}).some(layer => layer?.type === 'projected'));
   const detail = hasEffectInk ? new Uint8Array(W * H) : null;
   // where each splat is at this moment, and what it looks like

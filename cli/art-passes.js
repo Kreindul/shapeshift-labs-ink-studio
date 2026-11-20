@@ -168,7 +168,8 @@ function createArtPasses(request, w, h) {
           if (i < 0 || !Number.isFinite(previous.centers[i]) || !Number.isFinite(geometry.centers[i])) continue;
           const ownerId = ids[p];
           if (current?.birthIds && ownerId >= current.baseCount &&
-              (current.splatSource !== previous.splatSource || current.baseCount !== previous.baseCount ||
+              (current.splatSource !== previous.splatSource || current.emitterSource !== previous.emitterSource ||
+                current.baseCount !== previous.baseCount ||
                 current.birthIds[ownerId] !== previous.birthIds?.[ownerId])) continue;
           vectors[p * 2] = geometry.centers[i] - previous.centers[i];
           vectors[p * 2 + 1] = geometry.centers[i + 1] - previous.centers[i + 1];
