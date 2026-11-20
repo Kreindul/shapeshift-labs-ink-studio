@@ -309,7 +309,10 @@ function render(world, o, preparedPalettes) {
   ];
   const skySource = o.skyEnvironment ?? world.skyEnvironment;
   const skyTime = ArtDirection.time(direction,o.skyTime ?? sceneTime,'environment');
-  const clock = skySource ? SkyEnvironment.compile(skySource) : null;
+  let clock = skySource ? SkyEnvironment.compile(skySource) : null;
+  if (clock && o.skyTransitions !== undefined) clock = clock.withTransitions(o.skyTransitions);
+  if (!clock && o.skyTransitions !== undefined && o.skyTransitions !== false && skySource !== false)
+    throw new TypeError('Sky transitions need a sky environment');
   const environment = clock?.frame(skyTime, o.skyProfiles);
   const effectRules = EffectPalettes.activate(effectPaletteSettings, environment?.parameters);
   const weather = weatherFrame(world, o, skySource, clock, environment?.parameters, skyTime);

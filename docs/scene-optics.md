@@ -31,6 +31,8 @@ Use [Transition review](transition-review.md) to compare native export frames th
 
 Use [Environment packs](environment-packs.md) to share versioned sky, weather, and atmosphere settings across scenes.
 
+Use [Interruptible transitions](interruptible-sky.md) to carry the current sky and weather values into a new transition.
+
 ## Planar reflections
 
 ```js
