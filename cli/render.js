@@ -1305,8 +1305,9 @@ function renderFrame(world, o, preparedPalettes) {
     const fogMix = !(flags & 2) && world.fog.max > 0 && world.fog.start < 1
       ? targetFog(sstep(world.fog.start,1,dn)*world.fog.max*(exposure?.fog?.(x,y,z)??1),rule) : 0;
     const reflectInRaster = (planar || reflectedSky) && !pixelSurface;
+    const finishBeforeFog = reflectInRaster || !pixelSurface && surface?.finishBeforeFog(i);
     const normal = fragmentSurface ? surface.surfaceNormal(i) : null;
-    const centerFog = !opticalActive && !reflectInRaster && !staged?.lit && !liveNormal && !splatFlash && !relit && coverGain === 1;
+    const centerFog = !opticalActive && !finishBeforeFog && !staged?.lit && !liveNormal && !splatFlash && !relit && coverGain === 1;
     if (fogMix && centerFog) {
       r += (fog[0] - r) * fogMix;
       g += (fog[1] - g) * fogMix;
@@ -1418,7 +1419,7 @@ function renderFrame(world, o, preparedPalettes) {
           const shade = shadeFraction > MaterialPixelStyle.thresholds(shadeMode,
             Math.floor(ix / artScale), Math.floor(iy / artScale)) ? highStyle : lowStyle;
           if (shade !== pk) {
-            const visibility = reflectInRaster || staged?.lit || splatFlash || relit || coverGain < 1 ? 1 : 1 - fogMix;
+            const visibility = finishBeforeFog || staged?.lit || splatFlash || relit || coverGain < 1 ? 1 : 1 - fogMix;
             const gain = visibility / 255;
             pr += ((shade & 255) - (pk & 255)) * gain;
             pg += ((shade >> 8 & 255) - (pk >> 8 & 255)) * gain;
@@ -1431,7 +1432,7 @@ function renderFrame(world, o, preparedPalettes) {
             c = FPAL[Math.floor(FN[fi + v] / (u === 0 ? 1 : u === 1 ? 64 : u === 2 ? 4096 : 262144)) % 64];
           if (c) {
             const tile = staged?.material ? stagedMaterial(i, staged.material, c, materialSample) : c;
-            const tileFog = !reflectInRaster && !staged?.lit && !splatFlash && !relit && coverGain === 1 ? fogMix : 0;
+            const tileFog = !finishBeforeFog && !staged?.lit && !splatFlash && !relit && coverGain === 1 ? fogMix : 0;
             pr = (tile[0] + (fog[0] - tile[0]) * tileFog) * fineWeight + pr * (1 - fineWeight);
             pg = (tile[1] + (fog[1] - tile[1]) * tileFog) * fineWeight + pg * (1 - fineWeight);
             pb = (tile[2] + (fog[2] - tile[2]) * tileFog) * fineWeight + pb * (1 - fineWeight);
@@ -1519,7 +1520,7 @@ function renderFrame(world, o, preparedPalettes) {
           pg = Lightning.shade(pg, splatFlash[1]);
           pb = Lightning.shade(pb, splatFlash[2]);
         }
-        if (opticalActive || staged?.lit || (fragmentSurface && reflectInRaster) || liveNormal || splatFlash || relit || coverGain < 1) {
+        if (opticalActive || staged?.lit || (fragmentSurface && finishBeforeFog) || liveNormal || splatFlash || relit || coverGain < 1) {
           pr += (fog[0] - pr) * fogMix;
           pg += (fog[1] - pg) * fogMix;
           pb += (fog[2] - pb) * fogMix;
