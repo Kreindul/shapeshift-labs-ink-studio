@@ -5,7 +5,7 @@
   const object = value => value && Object.getPrototypeOf(value) === Object.prototype;
   const fields = [
     'skyEnvironment','skyReflections','aerialPerspective','celestialTracks','cloudField','cloudShadows','cloudRepresentation',
-    'weatherBinding','windField','lightning','sceneExposure','precipitation','rainImpacts','liveSun',
+    'weatherBinding','weatherTracks','windField','lightning','sceneExposure','precipitation','rainImpacts','liveSun',
     'atmosphere','shapedAtmosphere','volumeCutouts','volumeLighting','volumeQuality','splatFields','atmosphereEmitters'
   ];
   const lookFields = ['horizonBands','effectPalettes','artDirection','stable','silhouetteProtection'];
@@ -73,6 +73,7 @@
       windField, cloudField, cloudRepresentation, cloudShadows, sceneExposure, atmosphere, shapedAtmosphere, volumeCutouts,
       splatFields, atmosphereEmitters, look } = source;
     const sky = skyEnvironment === undefined || skyEnvironment === false ? null : SkyEnvironment.compile(skyEnvironment);
+    K.weather.tracks.compile(skyEnvironment === false ? false : sky,source.weatherTracks);
     const weather = WeatherBinding.settings(weatherBinding);
     if (weather && skyEnvironment !== false) {
       WeatherBinding.bind(sky,weather);

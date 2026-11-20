@@ -313,6 +313,13 @@ function render(world, o, preparedPalettes) {
   if (clock && o.skyTransitions !== undefined) clock = clock.withTransitions(o.skyTransitions);
   if (!clock && o.skyTransitions !== undefined && o.skyTransitions !== false && skySource !== false)
     throw new TypeError('Sky transitions need a sky environment');
+  if (skySource !== false && o.weatherTracks !== false && world.weatherTracks !== undefined && world.weatherTracks !== false) {
+    const { KIT } = require('../index.js').load();
+    const track = KIT.weather.tracks.compile(clock,world.weatherTracks);
+    const cues = world.weatherTrackState ? track.transitions(world.weatherTrackState)
+      : track.sceneTransitions(world.animationTimeline?.cues?.());
+    if (cues.length) clock = clock.withTransitions([...clock.transitions,...cues]);
+  }
   const environment = clock?.frame(skyTime, o.skyProfiles);
   const effectRules = EffectPalettes.activate(effectPaletteSettings, environment?.parameters);
   const weather = weatherFrame(world, o, skySource, clock, environment?.parameters, skyTime);

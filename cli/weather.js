@@ -6,7 +6,7 @@ function weatherFrame(world, options, source, environment, parameters, time) {
   if (override === false || source === false || (override === undefined && (authored === undefined || authored === false))) return null;
   const pins = JSON.stringify(Object.entries(options.skyProfiles ?? {}).sort(([a], [b]) => a.localeCompare(b)));
   const track = typeof source?.sample === 'function' ? source : JSON.stringify(source);
-  const transitions = JSON.stringify(options.skyTransitions);
+  const transitions = JSON.stringify(environment?.transitions);
   const retained = options.retainedWeather !== false;
   const frontsEnabled = options.weatherFronts !== false;
   let cached = sessions.get(world);

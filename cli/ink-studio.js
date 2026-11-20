@@ -528,6 +528,7 @@ const view = extra =>
       weatherBinding: weatherOption(),
       retainedWeather: onOffOption('retained-weather'),
       weatherFronts: onOffOption('weather-fronts'),
+      weatherTracks: onOffOption('weather-tracks'),
       windField: windFieldOption(),
       lightning: lightningOption(),
       sceneExposure: sceneExposureOption(),
@@ -590,7 +591,8 @@ function die(m) {
   console.error(m);
   process.exit(1);
 }
-const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,atmosphereEmittersOption,effectPalettesOption,stabilityOption,artDirectionOption,silhouetteOption,horizonOption,skyTransitionsOption});
+const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,atmosphereEmittersOption,effectPalettesOption,stabilityOption,artDirectionOption,silhouetteOption,horizonOption,skyTransitionsOption,
+  weatherTracksOption:() => onOffOption('weather-tracks')});
 const worldCommands = new Set(['inspect','probe','trace','field','scene','sim']);
 const CMD = {
   help() {
@@ -692,7 +694,7 @@ const CMD = {
         'cloud options: --cloud-field cirrus|coastal-stratus|cumulus|storm-front|file.json|off --cloud-representation auto|card|impostor|volume|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',
         'celestial options: --celestial-tracks on|off|file.json',
         'sky options: --sky-environment file.json|off --sky-time seconds --sky-profile track=profile --sky-transitions file.json|off --sky-reflections scene|material',
-        'weather options: --weather-binding on|off|file.json --retained-weather on|off --weather-fronts on|off --world-precipitation on|off|file.json --rain-impacts on|off|file.json',
+        'weather options: --weather-binding on|off|file.json --retained-weather on|off --weather-fronts on|off --weather-tracks on|off --world-precipitation on|off|file.json --rain-impacts on|off|file.json',
         'wind options: --wind-field on|off|file.json',
         'lightning options: --lightning on|off|file.json',
         'exposure options: --scene-exposure on|off|file.json',

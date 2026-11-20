@@ -352,6 +352,11 @@
     } catch (error) {
       bad('finish.weatherBinding', error.message);
     }
+    try {
+      K.weather.tracks.compile(st.finish.skyEnvironment,st.finish.weatherTracks);
+    } catch (error) {
+      bad('finish.weatherTracks',error.message);
+    }
     if (st.finish.cloudField !== undefined && st.finish.cloudField !== false) {
       try {
         K.clouds.compile(st.finish.cloudField);

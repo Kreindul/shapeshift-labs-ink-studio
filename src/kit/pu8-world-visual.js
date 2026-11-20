@@ -332,6 +332,7 @@
       radius:span,detail:30,dither:.22,look:looks.look,paletteRoles:config.paletteRoles,
       ...K.authoring.environments.rendererSettings(config),
       ...(config.environmentSource && {environmentSource:config.environmentSource}),
+      ...(view.weatherTrackState && {weatherTrackState:view.weatherTrackState}),
       ...(waterScene && { water: waterScene }),
       ...(airborne?.length && {shapedAtmosphere:[...(config.shapedAtmosphere || []),...airborne]}),
       ...(config.reflections && { reflections: config.reflections }), ...(surfaceEffects&&{surfaceEffects})});

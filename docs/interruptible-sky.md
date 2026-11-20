@@ -9,6 +9,8 @@ ink-studio clip examples/interruptible-sky.js --from 1 --to 6 --fps 12 --w 200 -
 ink-studio transition-review examples/interruptible-sky.js --w 200 --h 120 --raw --out trigger-review.png
 ```
 
+Use [Conditional weather tracks](conditional-weather.md) to trigger the same transition from a scene cue, a region, or a simulation condition.
+
 ## Author or trigger a transition
 
 Put a `transitions` array next to `profiles`, `sequences`, and `tracks` in a sky definition. It works in JSON dioramas and in the `skyEnvironment` of an environment pack.

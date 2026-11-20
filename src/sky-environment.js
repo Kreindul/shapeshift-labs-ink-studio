@@ -7,7 +7,7 @@ const SkyEnvironment = (() => {
     color = require('./color-space.js');
   }
   const decode = color.prepare('srgb', 'srgb-linear'), encode = color.prepare('srgb-linear', 'srgb');
-  const TAU = Math.PI * 2;
+  const TAU = Math.PI * 2, transitionLimit = 2048;
   const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
   const mix = (a, b, t) => a + (b - a) * t;
   const mod = (n, period) => {
@@ -197,7 +197,7 @@ const SkyEnvironment = (() => {
     }
 
     function transitionList(source) {
-      return Object.freeze(Array.from(list(source,2048,'Sky transitions'), raw => {
+      return Object.freeze(Array.from(list(source,transitionLimit,'Sky transitions'), raw => {
         const { at, profile, duration, ease = 'smooth' } = record(raw,'Sky transition');
         if (Object.keys(raw).some(key => !['at','profile','duration','ease'].includes(key)))
           throw new TypeError('A sky transition needs at, profile, duration and optional ease');
@@ -356,6 +356,6 @@ const SkyEnvironment = (() => {
     }
     return sky.celestial ? sky.celestial.shade(ray, output) : output;
   }
-  return Object.freeze({ compile, shade, aerial, airTransmission, scattering, withCelestials });
+  return Object.freeze({ compile, shade, aerial, airTransmission, scattering, withCelestials, transitionLimit });
 })();
 if (typeof module !== 'undefined') module.exports = SkyEnvironment;

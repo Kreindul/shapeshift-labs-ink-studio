@@ -33,6 +33,8 @@ Use [Environment packs](environment-packs.md) to share versioned sky, weather, a
 
 Use [Interruptible transitions](interruptible-sky.md) to carry the current sky and weather values into a new transition.
 
+Use [Conditional weather tracks](conditional-weather.md) to drive sky transitions from cues and simulation state.
+
 ## Planar reflections
 
 ```js
