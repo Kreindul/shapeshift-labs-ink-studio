@@ -72,6 +72,7 @@ const TargetSelectors = (() => {
   function media(world) {
     return [
       ...(world.atmosphere ?? []).map(volume => medium(volume.id, volume.mediumKind ?? volume.type, volume.tags)),
+      ...(world.atmosphereDepthBands || []).map(band => medium(band.id, 'fog', band.tags)),
       ...(world.water?.media ?? []).map(item => medium(item.id, item.kind)),
       ...(world.reflections ?? []).map(item => medium(item.id, 'reflection', item.tags))
     ];

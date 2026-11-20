@@ -6,7 +6,7 @@
   const fields = [
     'skyEnvironment','skyReflections','aerialPerspective','celestialTracks','cloudField','cloudShadows','cloudRepresentation',
     'weatherBinding','weatherTracks','windField','lightning','sceneExposure','precipitation','rainImpacts','liveSun',
-    'atmosphere','shapedAtmosphere','volumeCutouts','volumeLighting','volumeQuality','splatFields','atmosphereEmitters'
+    'atmosphere','shapedAtmosphere','atmosphereDepthBands','volumeCutouts','volumeLighting','volumeQuality','splatFields','atmosphereEmitters'
   ];
   const lookFields = ['horizonBands','effectPalettes','artDirection','stable','silhouetteProtection',
     'surfaceLightRamps','colorCurves','shadowArt','ink','contactShadows','edgeFilter'];
@@ -94,6 +94,7 @@
       throw new TypeError('Invalid cloud representation');
     if (atmosphere !== undefined && atmosphere !== false) SceneOptics.prepareVolumes(atmosphere,palette);
     SceneOptics.shapedVolumes(shapedAtmosphere);
+    AtmosphereDepthBands.settings(source.atmosphereDepthBands,undefined,palette);
     VolumeCutouts.settings(volumeCutouts);
     K.splatFields.settings(splatFields);
     K.atmosphere.emitters.settings(atmosphereEmitters);

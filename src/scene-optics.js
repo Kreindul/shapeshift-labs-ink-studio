@@ -64,14 +64,19 @@ const SceneOptics = (() => {
       ...(optical !== undefined && { optical: opticalMaterials.material(optical) }) };
   };
   function fog(options = {}) {
-    const { bottom, top } = options;
+    const { bottom, top, depthBand } = options;
     if (
       (bottom !== undefined && !Number.isFinite(bottom)) ||
       (top !== undefined && !Number.isFinite(top)) ||
       (bottom !== undefined && top !== undefined && bottom >= top)
     )
       throw new RangeError('Invalid height-fog range');
-    return { type: 'fog', ...common(options), bottom, top };
+    if (depthBand !== undefined && (!depthBand || !Array.isArray(depthBand.axis) || depthBand.axis.length !== 3 ||
+      !depthBand.axis.every(Number.isFinite) || !Number.isFinite(depthBand.low) || !Number.isFinite(depthBand.high) ||
+      depthBand.high <= depthBand.low || !Number.isFinite(depthBand.step) || depthBand.step <= 0 ||
+      depthBand.sample !== undefined && typeof depthBand.sample !== 'function'))
+      throw new TypeError('Invalid bound atmosphere depth band');
+    return { type: 'fog', ...common(options), bottom, top, ...(depthBand && {depthBand}) };
   }
   function sphere(options) {
     return {
@@ -184,6 +189,8 @@ const SceneOptics = (() => {
   function interval(volume, from, dir, stop, start) {
     const range = [Math.max(start, volume.near), Math.min(stop, volume.far ?? stop)];
     if (range[1] <= range[0]) return null;
+    const band=volume.depthBand;
+    if (band && !slab(range,dot(from,band.axis),dot(dir,band.axis),band.low,band.high)) return null;
     switch (volume.type) {
       case 'fog':
         return slab(range, from[1], dir[1], volume.bottom ?? -Infinity, volume.top ?? Infinity) ? range : null;
@@ -250,7 +257,8 @@ const SceneOptics = (() => {
       return result;
     }
     hits.sort((a, b) => a[0] - b[0]);
-    if (options?.cloudShadow || options?.flash || options?.exposure?.fog || options?.cutouts?.fog || hits.some(([, volume]) => volume.type === 'field' || volume.densityField))
+    if (options?.cloudShadow || options?.flash || options?.exposure?.fog || options?.cutouts?.fog || hits.some(([, volume]) =>
+      volume.type === 'field' || volume.densityField || volume.depthBand?.sample))
       return volumeLight.integrate(hits, origin, direction, stop, result, options);
     result[0] = result[1] = result[2] = 0;
     result[3] = 1;

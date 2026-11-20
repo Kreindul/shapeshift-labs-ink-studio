@@ -218,7 +218,7 @@ function traceMedia(volumes, segments, origin, direction, stop, result, sample, 
 function mediaSampler(volumes, water, rayAt, width, horizon, options, aerial) {
   const size = options.fogTransmittance ? 9 : options.effectCoverage ? 8 : 6;
   const rays = [], sample = [0, 0, 0, 1], result = new Float64Array(size);
-  const fields = volumes.some(volume => volume.type === 'field' || volume.densityField);
+  const fields = volumes.some(volume => volume.type === 'field' || volume.densityField || volume.depthBand?.sample);
   const tile = fields && options.jitter !== 'off' ? volumeNoise(options.seed) : null;
   const samples = fields ? options.samples : 1;
   const query = { ...options, reflectionCurrent:water?.mediumAt, jitter: .5 };
@@ -297,12 +297,13 @@ function mediaSampler(volumes, water, rayAt, width, horizon, options, aerial) {
 
 function applyAtmosphere(volumes, col, depths, rayAt, W, H, horizon, quality, time, media, capture, history, viewKey, fogScales) {
   const light = [0, 0, 0, 1], sample = [0, 0, 0, 1];
-  const fields = volumes.some(volume => volume.type === 'field' || volume.densityField);
+  const fields = volumes.some(volume => volume.type === 'field' || volume.densityField || volume.depthBand?.sample);
   const query = { ...quality, time, media };
   // Reusing a density history would leave trails on animated lights and clear pockets.
   const transient = quality.flash || quality.cutouts?.fog || fogScales;
   if (transient) history?.clear();
-  const temporal = fields && !transient && !quality.cloudShadow && !volumes.some(v => v.densityField) && !media?.animatedLocals && quality.jitter === 'spatiotemporal' && history;
+  const temporal = fields && !transient && !quality.cloudShadow && !volumes.some(v => v.densityField || v.depthBand?.sample) &&
+    !media?.animatedLocals && quality.jitter === 'spatiotemporal' && history;
   const tile = fields && quality.jitter !== 'off' ? volumeNoise(quality.seed) : null;
   const accumulation = temporal ? new Float32Array(W * H * 4) : null;
   const frame = temporal ? Math.floor(time * 60) : 0;

@@ -61,6 +61,7 @@ const EmissiveFinishes = require('../src/emissive-finishes.js');
 const AreaRaster = require('./area-lights.js');
 const surfaceShading = require('./surface-shading.js');
 const SceneOptics = require('../src/scene-optics.js');
+const AtmosphereDepthBands = require('../src/atmosphere-depth-bands.js');
 const SkyEnvironment = require('../src/sky-environment.js');
 const HorizonBands = require('../src/horizon-bands.js');
 const CloudField = require('../src/cloud-field.js');
@@ -489,6 +490,7 @@ function renderFrame(world, o, preparedPalettes) {
     -(V[4] * V[12] + V[5] * V[13] + V[6] * V[14]),
     -(V[8] * V[12] + V[9] * V[13] + V[10] * V[14])
   ];
+  const nominalEye = ortho ? eye.map((value, i) => value - depthOffset * V[2 + i * 4]) : eye;
   const paintView = { direction: [V[2], V[6], V[10]], ...(ortho ? {} : { eye }) };
   const paint = o.paintCorrections === false ? null : world.paintCorrections;
   const climate = resolveEnvironment(world,o,sceneTime,direction);
@@ -541,7 +543,11 @@ function renderFrame(world, o, preparedPalettes) {
   }
   const mediumLook = medium => optics?.transform(medium) ?? PixelLook.mediumTransform(paletteRules, medium);
   const colorForVolume = volume => mediumLook(TargetSelectors.medium(volume.id, volume.mediumKind ?? volume.type, volume.tags));
-  const volumes = SceneOptics.prepareVolumes(atmosphereSources(world,o), world.pal, colorForVolume, weather?.fogGain);
+  const depthBands = o.atmosphere === false ? [] : AtmosphereDepthBands.settings(
+    world.atmosphereDepthBands,o.atmosphereDepthBands,world.pal);
+  const bandVolumes = depthBands.length ? require('../index.js').load().KIT.atmosphere.depthBands.frame(depthBands,
+    {origin:nominalEye,forward:[-V[2],-V[6],-V[10]]},{time:skyTime,seed:world.seed}) : [];
+  const volumes = SceneOptics.prepareVolumes([...atmosphereSources(world,o),...bandVolumes], world.pal, colorForVolume, weather?.fogGain);
   if (emitted?.volumes.length) volumes.push(...SceneOptics.prepareVolumes(emitted.volumes, world.pal, colorForVolume));
   const sourceWater = o.water !== false && world.water?.count && world.water.raySegments ? world.water : null;
   const water = sourceWater && (optics || paletteRules) ?
@@ -584,8 +590,7 @@ function renderFrame(world, o, preparedPalettes) {
   });
   for(const sample of surfaceFragments)if(!sample.sdf)sprites.push(sample);
   sprites.sort((a,b)=>b.z-a.z);
-  const cloudEye = ortho ? eye.map((value, i) => value - (eyeD - dist) * V[2 + i * 4]) : eye;
-  const cloudView = clouds?.view?.(cloudEye, ortho ? [V[2],V[6],V[10]] : null);
+  const cloudView = clouds?.view?.(nominalEye, ortho ? [V[2],V[6],V[10]] : null);
   const axialDepth = volumes.length || water || aerial || cloudView ? new Float32Array(W * H).fill(Infinity) : null;
   const fogScales = protection?.affectsFog && axialDepth ? new Float64Array(W*H).fill(1) : null;
   const silhouetteMask = protection && o.captureSilhouetteProtection ? new Uint16Array(W*H) : null;
@@ -595,7 +600,7 @@ function renderFrame(world, o, preparedPalettes) {
   }
   // The bands use the nominal eye and sky rays. The foreground still uses its original camera and depth.
   const horizonArt = (!transparent || skyPass) && !o.captureCoverage &&
-    HorizonBands.prepare(look.horizonBands, o.horizonBands)?.frame({ eye:cloudEye, yaw, pitch, distance:dist, parameters:environment?.parameters });
+    HorizonBands.prepare(look.horizonBands, o.horizonBands)?.frame({ eye:nominalEye, yaw, pitch, distance:dist, parameters:environment?.parameters });
   const backdropClouds = clouds?.visible && !cloudView;
   const skyBase = backdropClouds && !sky ? hex(0) : bg;
   const skyOverlay = (flash || cloudView) && !sky && !backdropClouds;
@@ -626,7 +631,8 @@ function renderFrame(world, o, preparedPalettes) {
   const skyReflectionSource = o.skyReflections ?? world.skyReflections;
   if (skyReflectionSource !== undefined && !['scene', 'material'].includes(skyReflectionSource))
     throw new RangeError('Sky reflections source must be scene or material');
-  const horizon = Math.max(eyeD + 2 * R, cloudView?.horizon(eye) ?? 0);
+  const horizon = Math.max(eyeD + 2 * R, cloudView?.horizon(eye) ?? 0,
+    ...depthBands.filter(band=>band.density>0).map(band=>band.depth[1]+depthOffset));
   const volumeLighting = o.volumeLighting ?? world.volumeLighting;
   let localLighting;
   const prepareVolumeLight = () => volumeLighting ? (localLighting ??= SceneOptics.lighting(volumeLighting, world.pal,
@@ -648,7 +654,7 @@ function renderFrame(world, o, preparedPalettes) {
   const rain = RainImpacts.frame(rainConfig, precipitation?.contacts, skyTime);
   const volumeWind = !windConfig && world.volumeWind && !o.wind && !weather?.wind && !an.wind
     ? Airflow.frame(world.volumeWind).velocity : null;
-  const volumeFlow = volumes.some(v => v.type === 'field') && (volumeWind && exposure?.wind
+  const volumeFlow = volumes.some(v => v.type === 'field' || v.depthBand?.wind) && (volumeWind && exposure?.wind
     ? WindField.create(WindField.settings(true), { ambient:() => volumeWind, exposure }) : flow)?.frame(skyTime);
   const atmosphereOptions = () => {
     const quality = atmosphereQuality({ ...world.volumeQuality, ...o.volumeQuality });
@@ -971,7 +977,7 @@ function renderFrame(world, o, preparedPalettes) {
     gls = new Float32Array(W * H);
   const skyCloud = skyPass && cloudView && [0, 0, 0, 1];
   for (let i = 0; i < W * H; i++) {
-    const sampled = (showSky || captureSky) ? skySample(skyDirection(i), skyColor, cloudEye, false, cloudSignal) : null;
+    const sampled = (showSky || captureSky) ? skySample(skyDirection(i), skyColor, nominalEye, false, cloudSignal) : null;
     const background = showSky ? sampled : bg;
     if (skyPass) {
       const q = environmentPasses.top(i) * 3, color = sampled ?? hex(0);

@@ -38,7 +38,7 @@ function target(opt) {
   return {};
 }
 
-module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,inkOption,atmosphereEmittersOption,effectPalettesOption,stabilityOption,artDirectionOption,silhouetteOption,horizonOption,skyTransitionsOption,weatherTracksOption,skyOptions,cameraOptions,compositeOption,shot,shotReplay,shotRender}) {
+module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,inkOption,atmosphereEmittersOption,depthBandsOption,effectPalettesOption,stabilityOption,artDirectionOption,silhouetteOption,horizonOption,skyTransitionsOption,weatherTracksOption,skyOptions,cameraOptions,compositeOption,shot,shotReplay,shotRender}) {
   const W = kit.KIT.world, R = W.runtime;
   let workerPool;
   const args = () => opt.args ? parse(opt.args) : {};
@@ -559,6 +559,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
           horizonBands:horizonOption?.(), skyTransitions:skyTransitionsOption?.(), weatherTracks:weatherTracksOption?.(),
           ...skyOptions?.(), ...cameraOptions?.(), composite:compositeOption?.(),
           atmosphere:opt.atmosphere==='off'?false:undefined, atmosphereEmitters:atmosphereEmittersOption?.(),
+          atmosphereDepthBands:depthBandsOption?.(),
           coverageAware:opt['coverage-aware']===undefined?undefined:opt['coverage-aware']!=='off',
           lookMasks:opt['look-masks']==='off'?false:undefined,
           colorStack:require('./color-stack.js').override(opt['color-stack']),t:run.view().time,

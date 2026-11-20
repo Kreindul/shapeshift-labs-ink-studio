@@ -27,6 +27,13 @@
     shaft: SceneOptics.shaft,
     field: SceneOptics.field,
     shaped: SceneOptics.shaped,
+    depthBands: Object.freeze({
+      settings:AtmosphereDepthBands.settings,
+      frame(bands,camera,{time=0,seed=0}={}) {
+        return AtmosphereDepthBands.frame(bands,camera,time,seed,(scale,localSeed)=>
+          K.procedural.fields.compile({type:'fbm',octaves:2,source:{type:'simplex',scale}},{seed:localSeed}));
+      }
+    }),
     cutouts: VolumeCutouts.compile,
     lighting: SceneOptics.lighting,
     occluder: SceneOptics.occluder,

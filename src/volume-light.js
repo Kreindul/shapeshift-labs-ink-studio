@@ -189,7 +189,7 @@ const VolumeLight = (() => {
     const exposureLength=exposure?.fogDistance && ((a,b)=>exposure.fogDistance(origin,direction,a,b));
     const effectiveLength = cutRay ? (a,b) => cutRay.distance(a,b,exposureLength) : exposureLength;
     const rateFloor = (exit - entry) / maxSteps;
-    const hasField = segments.some(([, volume]) => volume.type === 'field' || volume.densityField);
+    const hasField = segments.some(([, volume]) => volume.type === 'field' || volume.densityField || volume.depthBand?.sample);
     for (const [end, volume, sign] of segments) {
       if (hasField && result[3] < .001) break;
       if (active.size && end > last) {
@@ -197,6 +197,7 @@ const VolumeLight = (() => {
         for (const v of active) {
           if (v.type === 'field') minStep = Math.min(minStep, v.step * stepScale);
           if (v.densityField) minStep = Math.min(minStep, v.densityField.step * stepScale);
+          if (v.depthBand?.sample) minStep = Math.min(minStep, v.depthBand.step * stepScale);
         }
         if (minStep === Infinity) {
           let density = 0;
@@ -255,8 +256,8 @@ const VolumeLight = (() => {
             for (let i=0;i<volumes.length;i++) {
               if (gaps?.[i] >= distance) continue;
               const v = volumes[i];
-              if (counters && v.densityField) counters.densitySamples++;
-              const localDensity = v.density * (v.densityField?.sample(x,z) ?? 1) * mist;
+              if (counters && (v.densityField || v.depthBand?.sample)) counters.densitySamples++;
+              const localDensity = v.density * (v.densityField?.sample(x,z) ?? 1) * (v.depthBand?.sample?.(x,y,z,options) ?? 1) * mist;
               if (v.type !== 'field') {
                 density += localDensity;
                 for (let k = 0; k < 3; k++) rgb[k] += localDensity * (v.rgb[k] * gain + .45 * (strike?.[k] ?? 0));

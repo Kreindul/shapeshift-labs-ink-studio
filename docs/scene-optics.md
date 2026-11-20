@@ -321,6 +321,39 @@ Fog can occupy a height slab with `bottom` and `top`, or cover the whole view. S
 
 Hosts can use `K.atmosphere.prepare(world.atmosphere, world.pal)` and `K.atmosphere.trace(volumes, eye, unitDirection, distance)`. Trace returns premultiplied RGB and remaining transmittance `[r, g, b, t]`, so the final colour is the returned RGB plus `t` times the scene RGB.
 
+## Atmosphere depth bands
+
+Use `atmosphereDepthBands` on a JavaScript world, in a diorama's `finish`, or in a simulation's `visual` settings. Each named band is an optical volume between two depths along the viewing axis. Perspective and orthographic views both measure from the authored camera. The volume stops at the visible surface, so nearby rails can stay clear while mist crosses behind them.
+
+```json
+[
+  {
+    "id": "crossing mist",
+    "depth": [8.8, 24.2],
+    "feather": [2.8, 5.2],
+    "height": [0.60, 3.1],
+    "heightFeather": [0.38, 0.82],
+    "density": 0.185,
+    "color": "#bdd0da",
+    "texture": { "scale": [3.4, 0.59, 1.85], "strength": 0.93, "seed": 27,
+      "velocity": [0.8, 0.015, -0.14], "windInfluence": 0.3 }
+  }
+]
+```
+
+- `depth` and optional world-space `height` are pairs in scene units. `feather` and `heightFeather` accept one distance or separate distances for the two edges. Keep some overlap between neighboring bands if the fog should stay continuous across them.
+- `density` controls extinction. `color` accepts a hex color, normalized RGB, or a scene palette index. Named bands take the same fog weather bindings, volume cutouts, and exposure controls as other fog. They contribute to the fog transmittance export.
+- `texture.scale` accepts one length or separate XYZ lengths. A narrow Y scale makes horizontal filaments. `velocity` moves the texture in world units per second on the environment clock. `windInfluence` blends in scene wind. The seed and world coordinates keep the texture stable during a camera move.
+- `step` optionally sets the sampling distance in scene units for a feathered or textured band. A band with zero feathering and no texture uses the analytic fog path when the other active optics allow it.
+
+Use `--atmosphere-depth-bands on|off|file.json` or `render(world, { atmosphereDepthBands })` to select the authored list, disable the bands, or supply a replacement list. The CLI includes a band file in saved shot recipes. Reuse the same list under an environment preset's `settings.atmosphereDepthBands`.
+
+```sh
+node cli/ink-studio.js render examples/cliff-depth-bands.js --t 1.8 --w 336 --h 190 --px 1 --out cliff.png
+```
+
+The headless renderer binds the list for the current camera. Custom hosts can use `K.atmosphere.depthBands.settings` and pass its result to `K.atmosphere.depthBands.frame(bands, { origin, forward }, { time, seed })`. Feed the resulting volumes to the shared atmosphere sampler. Pass the nominal camera origin and a forward vector pointing into the scene.
+
 ## Bounded density and lit volumes
 
 Use [geometry-shaped atmosphere](geometry-shaped-atmosphere.md) to fit clouds and fog to paths, signed-distance shapes, or terrain. [Volume cutouts](volume-cutouts.md) clear feathered pockets in those volumes.

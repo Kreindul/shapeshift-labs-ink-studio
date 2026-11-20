@@ -466,6 +466,11 @@
       bad('finish.shapedAtmosphere', error.message);
     }
     try {
+      AtmosphereDepthBands.settings(st.finish.atmosphereDepthBands, undefined, st.palette);
+    } catch (error) {
+      bad('finish.atmosphereDepthBands', error.message);
+    }
+    try {
       SceneExposure.settings(st.finish.sceneExposure);
     } catch (error) {
       bad('finish.sceneExposure', error.message);

@@ -446,6 +446,15 @@ function shapedAtmosphereOption() {
     JSON.parse(fs.readFileSync(path.resolve(value), 'utf8')));
 }
 
+let depthBandsOverride;
+function depthBandsOption() {
+  const value=opt['atmosphere-depth-bands'];
+  if (value===undefined) return undefined;
+  if (value==='off') return false;
+  if (value==='on' || value===true) return true;
+  return depthBandsOverride ??= JSON.parse(fs.readFileSync(path.resolve(value),'utf8'));
+}
+
 function cloudFieldOption() {
   const value = opt['cloud-field'];
   if (value === undefined) return undefined;
@@ -726,6 +735,7 @@ const view = extra =>
       contactShadows: contactShadowsOption(),
       atmosphere: opt.atmosphere === 'off' ? false : undefined,
       shapedAtmosphere: shapedAtmosphereOption(),
+      atmosphereDepthBands: depthBandsOption(),
       volumeCutouts: volumeCutoutsOption(),
       splatFields: splatFieldsOption(),
       atmosphereEmitters: atmosphereEmittersOption(),
@@ -794,7 +804,7 @@ function die(m) {
   console.error(m);
   process.exit(1);
 }
-const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,inkOption,atmosphereEmittersOption,effectPalettesOption,stabilityOption,artDirectionOption,silhouetteOption,horizonOption,skyTransitionsOption,
+const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,inkOption,atmosphereEmittersOption,depthBandsOption,effectPalettesOption,stabilityOption,artDirectionOption,silhouetteOption,horizonOption,skyTransitionsOption,
   weatherTracksOption:() => onOffOption('weather-tracks'),skyOptions,cameraOptions,compositeOption,shot,shotReplay,shotRender});
 const worldCommands = new Set(['inspect','probe','trace','field','data-inputs','scene','sim']);
 const CMD = {
@@ -945,6 +955,7 @@ const CMD = {
         'sprite options: --sprite-atlas on|off|atlas.json --sprite-at x,y,z --sprite-scale n --sprite-atlas-mode card|impostor|scenery',
         '                --sprite-cels edits.json|off --sprite-playback once|loop',
         'shaped fog options: --shaped-atmosphere on|off|file.json --volume-cutouts on|off|file.json',
+        'atmosphere bands: --atmosphere-depth-bands on|off|file.json',
         'fog lighting options: --volume-local-lights on|off --volume-local-shadows on|off',
         'silhouette protection: --silhouette-protection on|off|file.json',
         'layered horizon: --horizon-bands on|off|file.json',

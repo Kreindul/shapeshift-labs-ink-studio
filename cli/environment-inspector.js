@@ -1,5 +1,6 @@
 const ArtDirection = require('../src/art-direction.js');
 const SkyEnvironment = require('../src/sky-environment.js');
+const AtmosphereDepthBands = require('../src/atmosphere-depth-bands.js');
 const { resolveEnvironment,resolveWind,resolveLighting,atmosphereSources } = require('./environment.js');
 
 function inspectEnvironment(world, options = {}) {
@@ -23,6 +24,8 @@ function inspectEnvironment(world, options = {}) {
     const gain = weather?.fogGain({id}) ?? 1;
     return {id:id ?? null,type,weatherDensityScale:typeof gain === 'number' ? gain : gain.sample(x,z)};
   });
+  const depthBands = options.atmosphere === false ? [] : AtmosphereDepthBands.settings(
+    world.atmosphereDepthBands,options.atmosphereDepthBands,world.pal);
   const airReport = air.flow?.inspect(x,y,z,skyTime);
   return {
     format:'ink-studio/environment-inspection',version:1,
@@ -46,7 +49,8 @@ function inspectEnvironment(world, options = {}) {
     },
     atmosphere:{
       aerial:options.atmosphere === false ? null : SkyEnvironment.aerial(world.aerialPerspective,options.aerialPerspective,environment?.parameters),
-      volumes:fogVolumes
+      volumes:fogVolumes,
+      ...(depthBands.length && {depthBands})
     }
   };
 }
