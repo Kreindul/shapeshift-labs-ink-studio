@@ -152,6 +152,13 @@
       const target=targetFor(entityId);
       if(sample)finish={...finish,materialAt:sample};
       hasSurface ||= Boolean(finish.surface);
+      if(entry.collider){
+        const {min,max}=W.colliders.geometry(entry);
+        const bounds=W.fields.bounds({min:min.map(v=>v-resolution),max:max.map(v=>v+resolution)});
+        S.implicitForm({bounds,sd:(x,y,z)=>W.colliders.distance(entry,[x,y,z],true)},finish,
+          {res:resolution*.72,tag:entry.id,target});
+        return;
+      }
       S.box(entry.position,entry.half,finish,{ax:axis,res:resolution*.72,
         rd:Math.min(.055,...entry.half)*.4,tag:entry.id,target:sample?{...target,surface:undefined}:target});
     }

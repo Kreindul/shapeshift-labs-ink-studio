@@ -677,16 +677,15 @@ reaches the feeder.
 | `store` | Bounded numeric, integer, or vector accounts with named resources and units. |
 | `exchange` | Enabled links that request a fixed amount per tick or a rate per second. |
 | `water` | Bounded XZ shallow water with live bed edits, fractional face openings, conservative pump transfer, sensors and probes for the bed, depth, current and volume. An `obstacle` field may supply signed solid clearance. |
-| `mechanics` | Oriented box bodies and shared clearance or support queries, fixed and powered mounts, transmission ratios and stall reports, physical separation, configurable fracture, wheel traction, buoyancy, thrust and sail forces. |
+| `mechanics` | Boxes, capsules and convex compounds with swept contact and shared clearance and support queries. Fixed and powered mounts, transmission ratios and stall reports, physical separation, configurable box fracture, wheel traction, buoyancy, thrust and sail forces. |
 | `navigation` | Bounded walking, swimming or flying route traces. Ground search can take depth, clearance and wear into account. Hosts can also expose the volumetric traversal graph. |
 | `habitat` | Authored species rules evaluate world fields and nearby or reachable resources. Probes return a score, suitability and the reasons behind the decision. |
 | `agents` | Ground, swim and flight movement with replanning, scene-aware destinations and optional limb contacts. Agents publish their real movement contacts for other systems. |
 | `wear` | Optional wear from contact-producing systems or submitted contact batches. Track local accumulation and recovery, and use `enabled` to control updates. Trace a durable route and promote it with `scene promote <run> <trace> --as id`, supplying its endpoints through `--at` and JSON `--args`. |
 
-The mechanics model uses bounded box colliders and approximate contact,
-traction and buoyancy. Water handles one surface column per XZ cell. Keep a
-simulation's resolution and bounds appropriate to these models. Use the same
-query names to provide richer implementations for individual scenes.
+Water handles one surface column per XZ cell. Keep a simulation's resolution
+and bounds appropriate to the models it uses. Use the same query names to
+provide richer implementations for individual scenes.
 
 `history.where` defines which events are meaningful to the world.
 `history.limit` bounds retention, and the readout reports how many events
@@ -696,6 +695,48 @@ A rule supplies `id`, a negative starting tick in `start`, optional
 String values can reference `{id}`, `{index}` and `{tick}`. A
 `{"$choose":[...]}` value selects from authored alternatives by seed.
 The earlier events and their world edits survive in the derived manifest.
+
+## Shaped colliders and swept movement
+
+Use `half` for a box body or `collider` for a shape defined in the body's local
+XYZ coordinates. The body's position and rotation apply to the whole shape.
+
+| `collider.kind` | Shape parameters |
+| --- | --- |
+| `capsule` | Segment endpoints `a` and `b` and a `radius`. Matching endpoints make a sphere. |
+| `box` | `half` extents with optional local offset `at` and yaw `turn` in radians. |
+| `convex` | `vertices` and ordered `faces` made of vertex indices. Supply one closed convex shell with planar faces. A hull can have up to 24 vertices and 32 faces. |
+| `compound` | `parts` with up to 12 boxes, capsules or convex hulls. The gaps between the parts remain open. |
+
+Add `continuous: true` to a mechanics system to sweep translations in impact
+order. A system with any authored `collider` enables sweeps by default. Set
+`continuous: false` to use discrete movement with shape-aware overlap
+correction. A box-only system defaults to its original solver. Set
+`contactIterations` from 1 to 32 to tune simultaneous contact resolution in
+the shape-aware solver. The default is 10.
+
+Sweeps use the current orientation during translation. Angular and joint
+motion use pose integration followed by overlap correction. Flat ground and
+body colliders participate in the sweeps. Terrain heightfields use sampled
+ground contact. Box bodies support live reshape, fracture and box surface
+charts.
+
+Clearance and support sample the collider geometry, including openings between
+compound parts. Wheel contacts can report the ID and material of the supporting
+body. The built-in body renderer bakes the authored collider silhouette.
+
+`rig/impacts` in the workshop example contains the last tick's swept contacts.
+Each entry has body IDs `a` and `b`, zero-based `parts`, an A-to-B `normal`, an
+approach `speed` in world units per second, and `at`, a fraction of the tick.
+Flat-ground contacts use `b: null` and `-1` for its part index. If `limited` is
+true, the solver exhausted its contact budget and stopped the remaining
+translation for that tick. Checkpoints and replays retain the report.
+
+```sh
+ink-studio sim run examples/world-continuous-colliders.json --ticks 1 --record workshop.run.json
+ink-studio probe workshop.run.json --field rig/impacts
+ink-studio sim render workshop.run.json --colored --out workshop.png
+```
 
 ## Extend the runtime in JavaScript
 

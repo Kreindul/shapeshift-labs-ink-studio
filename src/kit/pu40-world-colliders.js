@@ -1,0 +1,253 @@
+/* Convex cores, rounded segments and compound collision queries. */
+(function(K) {
+  const W=K.world, P=K.procedural, {V,M}=K, {check,record,vector}=W.data;
+  const {clamp}=W.fields, {freeze}=P.data;
+  const eps=1e-8, axisX=[1,0,0], down=[0,-1,0];
+  const shapes=new WeakMap(), boxes=new WeakMap(), poses=new WeakMap();
+  const xyz=point=>vector(point)&&point.every(n=>Math.abs(n)<=1e4);
+  const positive=n=>Number.isFinite(n)&&n>=.005&&n<=1e4;
+  const keys=(row,allowed)=>record(row)&&Object.keys(row).every(key=>allowed.includes(key));
+  const between=(v,a,b)=>v>=a-eps&&v<=b+eps;
+  const length2=v=>V.dot(v,v);
+  const closest=(p,a,b)=>{
+    const step=V.sub(b,a), length=length2(step);
+    return length?V.mad(a,step,clamp(V.dot(V.sub(p,a),step)/length,0,1)):a;
+  };
+
+  function poly(vertices,faces,directions) {
+    const edges=new Map();
+    for(const face of faces)for(let i=0;i<face.length;i++){
+      const a=face[i], b=face[(i+1)%face.length], key=Math.min(a,b)+'/'+Math.max(a,b);
+      const row=edges.get(key)??{a,b,count:0};
+      row.count++;
+      edges.set(key,row);
+    }
+    check([...edges.values()].every(row=>row.count===2)&&new Set(faces.flat()).size===vertices.length,
+      'Convex collider faces must form one closed shell');
+    const pairs=[...edges.values()].map(({a,b})=>[a,b]), adjacent=vertices.map(()=>[]);
+    for(const [a,b] of pairs){adjacent[a].push(b);adjacent[b].push(a);}
+    const connected=new Set([0]);
+    for(const i of connected)for(const j of adjacent[i])connected.add(j);
+    check(connected.size===vertices.length,'Convex collider faces must share a connected shell');
+    return {kind:'poly',vertices,faces,directions,edges:pairs};
+  }
+  function box(half,at=[0,0,0],turn=0) {
+    const R=M.rot([0,1,0],turn), [x,y,z]=half;
+    const vertices=[[-x,-y,-z],[x,-y,-z],[x,y,-z],[-x,y,-z],
+      [-x,-y,z],[x,-y,z],[x,y,z],[-x,y,z]].map(p=>V.add(at,M.app(R,p)));
+    const normals=[[0,0,-1],[0,0,1],[0,-1,0],[1,0,0],[0,1,0],[-1,0,0]].map(p=>M.app(R,p));
+    return poly(vertices,P.pieces.boxFaces,normals);
+  }
+  function component(raw) {
+    check(record(raw),'Expected a collider part');
+    if(raw.kind==='capsule'){
+      check(keys(raw,['kind','a','b','radius'])&&xyz(raw.a)&&xyz(raw.b)&&positive(raw.radius),'Invalid capsule collider');
+      return {kind:'capsule',vertices:[raw.a,raw.b],radius:raw.radius};
+    }
+    if(raw.kind==='box'){
+      check(keys(raw,['kind','at','half','turn'])&&vector(raw.half)&&raw.half.every(positive)&&
+        xyz(raw.at??[0,0,0])&&Number.isFinite(raw.turn??0),'Invalid box collider');
+      return box(raw.half,raw.at,raw.turn);
+    }
+    check(raw.kind==='convex'&&keys(raw,['kind','vertices','faces'])&&Array.isArray(raw.vertices)&&
+      raw.vertices.length>=4&&raw.vertices.length<=24&&raw.vertices.every(xyz)&&Array.isArray(raw.faces)&&
+      new Set(raw.vertices.map(p=>p.join('/'))).size===raw.vertices.length&&
+      raw.faces.length>=4&&raw.faces.length<=32&&raw.faces.every(face=>Array.isArray(face)&&
+        face.length>=3&&face.length<=24&&new Set(face).size===face.length),'Invalid bounded convex collider');
+    P.pieces.convex(raw.vertices,raw.faces);
+    const center=V.mul(raw.vertices.reduce(V.add),1/raw.vertices.length), normals=[];
+    const faces=raw.faces.map(indices=>{
+      const [a,b,c]=indices.map(i=>raw.vertices[i]), n=V.norm(V.cross(V.sub(b,a),V.sub(c,b)));
+      const reverse=V.dot(n,V.sub(a,center))<0, face=reverse?indices.slice().reverse():indices;
+      const normal=reverse?V.mul(n,-1):n;
+      check(face.every((index,i)=>{
+        const p=raw.vertices[index], q=raw.vertices[face[(i+1)%face.length]], edge=V.sub(q,p);
+        return V.len(edge)>eps&&face.every(j=>V.dot(V.cross(edge,V.sub(raw.vertices[j],p)),normal)>=-eps);
+      }),'A convex collider face needs an ordered convex boundary');
+      normals.push(normal);
+      return face;
+    });
+    return poly(raw.vertices,faces,normals);
+  }
+  function local(shape) {
+    check(record(shape),'Expected a collider');
+    let compiled=shapes.get(shape);
+    if(compiled)return compiled;
+    const raw=shape.kind==='compound'?shape.parts:[shape];
+    check(Array.isArray(raw)&&raw.length>=1&&raw.length<=12&&
+      (shape.kind!=='compound'||keys(shape,['kind','parts'])),'Invalid bounded collider compound');
+    compiled=raw.map(component);
+    const half=[0,1,2].map(i=>Math.max(...compiled.flatMap(part=>part.vertices.map(p=>Math.abs(p[i])+(part.radius??0)))));
+    const output=freeze({parts:compiled,half});
+    shapes.set(shape,output);
+    return output;
+  }
+  function geometry(body) {
+    if(poses.has(body))return poses.get(body);
+    let parts;
+    if(body.collider)parts=local(body.collider).parts;
+    else {
+      if(!boxes.has(body.half))boxes.set(body.half,box(body.half));
+      parts=[boxes.get(body.half)];
+    }
+    const result=parts.map((part,partId)=>{
+      const points=part.vertices.map(p=>V.add(body.position,M.app(body.rotation,p))), radius=part.radius??0;
+      const min=[0,1,2].map(i=>Math.min(...points.map(p=>p[i]))-radius);
+      const max=[0,1,2].map(i=>Math.max(...points.map(p=>p[i]))+radius);
+      const dirs=part.directions?.map(n=>M.app(body.rotation,n))??[];
+      const faces=part.faces?.map((face,i)=>({ids:face,n:dirs[i]}))??[];
+      const edges=part.edges??[[0,1]], vectors=[];
+      for(const [i,j] of edges){
+        const d=V.sub(points[j],points[i]);
+        if(length2(d)<=eps*eps)continue;
+        const v=V.norm(d);
+        if(!vectors.some(u=>Math.abs(V.dot(u,v))>1-1e-12))vectors.push(v);
+      }
+      return {kind:part.kind,part:partId,points,radius,faces,edges,vectors,min,max};
+    });
+    const bounds={min:[0,1,2].map(i=>Math.min(...result.map(p=>p.min[i]))),
+      max:[0,1,2].map(i=>Math.max(...result.map(p=>p.max[i])))};
+    const built={parts:result,...bounds};
+    poses.set(body,built);
+    return built;
+  }
+  function closestFace(point,part,face) {
+    const {ids,n}=face, points=part.points;
+    const projected=V.mad(point,n,-V.dot(n,V.sub(point,points[ids[0]])));
+    let nearest=projected, best=Infinity, inside=true;
+    for(let i=0;i<ids.length;i++){
+      const a=points[ids[i]], b=points[ids[(i+1)%ids.length]];
+      if(V.dot(V.cross(V.sub(b,a),V.sub(projected,a)),n)<-eps)inside=false;
+      const q=closest(projected,a,b), gap=length2(V.sub(q,projected));
+      if(gap<best){best=gap;nearest=q;}
+    }
+    return inside?projected:nearest;
+  }
+  function partDistance(part,point,fast=false) {
+    if(part.kind==='capsule')return V.dist(point,closest(point,...part.points))-part.radius;
+    const plane=Math.max(...part.faces.map(face=>V.dot(face.n,V.sub(point,part.points[face.ids[0]]))));
+    if(plane<=0||fast)return plane;
+    return Math.min(...part.faces.map(face=>V.dist(point,closestFace(point,part,face))));
+  }
+  function distance(body,point,fast=false) {
+    return Math.min(...geometry(body).parts.map(part=>partDistance(part,point,fast)));
+  }
+  function rayPoly(part,from,delta,limit) {
+    let low=0, high=limit, normal;
+    for(const {ids,n} of part.faces){
+      const den=V.dot(n,delta), off=V.dot(n,V.sub(part.points[ids[0]],from));
+      if(Math.abs(den)<eps){if(off<0)return null;continue;}
+      const t=off/den;
+      if(den<0&&t>=low){low=t;normal=n;}
+      if(den>0)high=Math.min(high,t);
+      if(low>high)return null;
+    }
+    return {t:low,normal};
+  }
+  function rayCapsule(part,from,dir,limit) {
+    const [a,b]=part.points, d=V.sub(b,a), length=V.len(d), axis=length?V.mul(d,1/length):axisX;
+    let best;
+    function intersection(start,tangent,accept) {
+      const A=length2(tangent), B=V.dot(start,tangent), C=length2(start)-part.radius**2, discriminant=B*B-A*C;
+      if(A<=eps**2||discriminant<0)return;
+      const t=(-B-Math.sqrt(discriminant))/A;
+      if(!between(t,0,limit)||!accept(t)||best&&t>=best.t)return;
+      const point=V.mad(from,dir,Math.max(0,t)), normal=V.norm(V.sub(point,closest(point,a,b)));
+      if(V.dot(normal,dir)<-eps)best={t:Math.max(0,t),normal};
+    }
+    const aa=V.sub(from,a), axial=V.dot(aa,axis), along=V.dot(dir,axis);
+    if(length>eps)intersection(V.mad(aa,axis,-axial),V.mad(dir,axis,-along),t=>between(axial+along*t,0,length));
+    intersection(aa,dir,t=>length<=eps||axial+along*t<=eps);
+    if(length>eps)intersection(V.sub(from,b),dir,t=>axial+along*t>=length-eps);
+    return best;
+  }
+  function columns(body,x,z,low,high) {
+    const {parts}=geometry(body), origin=[x,high,z], span=high-low;
+    return parts.flatMap(part=>{
+      const hit=part.kind==='poly'?rayPoly(part,origin,down,span):rayCapsule(part,origin,down,span);
+      if(!hit?.normal||hit.normal[1]<=eps)return [];
+      const point=V.mad(origin,down,hit.t);
+      if(parts.some(other=>other!==part&&partDistance(other,point,true)<-eps))return [];
+      return [{y:point[1],normal:hit.normal,id:body.id,material:body.material,part:part.part}];
+    }).sort((a,b)=>b.y-a.y||a.part-b.part);
+  }
+  function closestSegments(p,q,r,s) {
+    const a=V.sub(q,p), b=V.sub(s,r), v=V.sub(p,r), aa=length2(a), bb=length2(b),
+      ab=V.dot(a,b), av=V.dot(a,v), bv=V.dot(b,v), det=length2(V.cross(a,b));
+    let u=det>1e-14*aa*bb?clamp((ab*bv-bb*av)/det,0,1):0, t=bb?clamp((ab*u+bv)/bb,0,1):0;
+    u=aa?clamp((ab*t-av)/aa,0,1):0;
+    return [V.mad(p,a,u),V.mad(r,b,t)];
+  }
+  function projection(part,axis,offset) {
+    const dots=part.points.map(p=>V.dot(p,axis)), shift=offset?V.dot(offset,axis):0;
+    return [Math.min(...dots)-part.radius+shift,Math.max(...dots)+part.radius+shift];
+  }
+  function sat(a,b,offset) {
+    let gap=-Infinity, normal;
+    function test(axis) {
+      const [lo,hi]=projection(a,axis,offset), [min,max]=projection(b,axis);
+      if(min-hi>gap){gap=min-hi;normal=axis;}
+      if(lo-max>gap){gap=lo-max;normal=V.mul(axis,-1);}
+    }
+    for(const f of a.faces)test(f.n);
+    for(const f of b.faces)test(f.n);
+    for(const u of a.vectors)for(const v of b.vectors){
+      const cross=V.cross(u,v), length=V.len(cross);
+      if(length>eps)test(V.mul(cross,1/length));
+    }
+    return {gap,normal};
+  }
+  function separation(a,b,offset) {
+    if(a.kind==='poly'&&b.kind==='poly')return sat(a,b,offset);
+    if(a.kind==='poly'){
+      const inverse=separation(b,a,offset&&V.mul(offset,-1));
+      return {gap:inverse.gap,normal:V.mul(inverse.normal,-1)};
+    }
+    const [p,q]=offset?a.points.map(v=>V.add(v,offset)):a.points;
+    let pair, nearest=Infinity;
+    function take(from,to) {
+      const gap=length2(V.sub(from,to));
+      if(gap<nearest){nearest=gap;pair=[from,to];}
+    }
+    if(b.kind==='capsule')take(...closestSegments(p,q,...b.points));
+    else{
+      if(rayPoly(b,p,V.sub(q,p),1))return sat(a,b,offset);
+      for(const f of b.faces){take(p,closestFace(p,b,f));take(q,closestFace(q,b,f));}
+      for(const [i,j] of b.edges)take(...closestSegments(p,q,b.points[i],b.points[j]));
+    }
+    const gap=Math.sqrt(nearest), radial=a.radius+b.radius;
+    if(gap>eps)return {gap:gap-radial,normal:V.mul(V.sub(pair[1],pair[0]),1/gap)};
+    const u=a.vectors[0], v=b.vectors[0], cross=u&&v&&V.cross(u,v);
+    return {gap:-radial,normal:cross&&V.len(cross)>eps?V.norm(cross):u||v?V.perp(u??v):axisX};
+  }
+  const intersects=(a,b,offset=[0,0,0])=>a.min.every((n,i)=>n+Math.min(0,offset[i])<=b.max[i]+eps&&
+    a.max[i]+Math.max(0,offset[i])>=b.min[i]-eps);
+  function contact(a,b) {
+    let best=null;
+    for(const left of geometry(a).parts)for(const right of geometry(b).parts){
+      if(!intersects(left,right))continue;
+      const hit=separation(left,right);
+      if(hit.gap<=eps&&(!best||hit.gap<best.gap))best={...hit,parts:[left.part,right.part]};
+    }
+    return best;
+  }
+  function sweep(a,b,delta) {
+    let best=null;
+    for(const left of geometry(a).parts)for(const right of geometry(b).parts){
+      if(!intersects(left,right,delta))continue;
+      let time=0;
+      for(let i=0;i<48;i++){
+        const hit=separation(left,right,time?V.mul(delta,time):null), approach=V.dot(delta,hit.normal);
+        if(approach<=eps)break;
+        if(hit.gap<=eps||i===47){
+          if(!best||time<best.time)best={...hit,time,parts:[left.part,right.part],...(i===47&&hit.gap>eps&&{limited:true})};
+          break;
+        }
+        time+=hit.gap/approach;
+        if(time>1||best&&time>=best.time)break;
+      }
+    }
+    return best;
+  }
+  W.colliders=Object.freeze({local,geometry,distance,columns,contact,sweep});
+})(KIT);
