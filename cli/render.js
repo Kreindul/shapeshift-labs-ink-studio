@@ -123,6 +123,7 @@ const edgeCoverageThreshold = .03;
 const afterimageRows = Symbol('afterimage rows');
 const reconstructionSource = Symbol('reconstruction source');
 const captureCamera = Symbol('rendered camera');
+const sampledPresentation = Symbol('sampled presentation');
 const scopedGlowPass = Symbol('emissive glow pass');
 const probeCamera = Symbol('reflection probe camera');
 const probeCaptures = Symbol('reflection probe captures');
@@ -156,6 +157,11 @@ function render(world, o, preparedPalettes) {
       }) };
     }
   }
+  if (!o?.[sampledPresentation] && world.timeline && !o?.samples && !o?.captureCoverage) {
+    const time = o?.t ?? world.lookSnapshot?.time ?? 0;
+    const presentation = require('../index.js').load().KIT.presentationTimeline.sample(world, time, o);
+    o = { ...o, ...presentation, [sampledPresentation]: true };
+  }
   const inspection = o?.inspection ?? world.look?.inspection;
   if (inspection !== undefined && inspection !== false && !o?.samples && !o?.captureCoverage) {
     const start = o?.renderStats ? performance.now() : 0;
@@ -180,20 +186,23 @@ function render(world, o, preparedPalettes) {
   if (graph?.passes.length) {
     const start = o?.renderStats ? performance.now() : 0;
     const requested = ArtPasses.select(o?.passes);
-    const passes = graph.needsOwner ? [...new Set([...requested, 'splatId'])] : o?.passes;
+    const diagnostic = graph.needsOwner || graph.needsDepth;
+    const passes = diagnostic ? [...new Set([...requested, ...(graph.needsOwner ? ['splatId'] : []),
+      ...(graph.needsDepth ? ['depth'] : [])])] : o?.passes;
     let camera;
-    const base = render(world, { ...o, renderGraph: false, passes,
+    const base = render(world, { ...o, renderGraph: false, renderHistory: undefined, passes,
       ...(graph.needsCamera && cameraCapture(o, view => { camera ??= view; })) }, preparedPalettes);
     const time = o?.t ?? world.lookSnapshot?.time ?? 0;
     const kit = require('../index.js').load().KIT;
-    const frame = { ...base, ...runGraph(graph, base, world, time, kit.poly2.text, camera, kit.annotations.anchor) };
-    if (base.passes && graph.needsOwner) {
+    const frame = { ...base, ...runGraph(graph, base, world, time, kit.poly2.text, camera, kit.annotations.anchor, { ...o, renderHistoryKey: o?.renderHistoryKey ?? o?.[reconstructionSource] }) };
+    if (base.passes && diagnostic) {
       if (requested.length) frame.passes = ArtPasses.subset(base.passes, requested);
       else delete frame.passes;
     }
     if (frame.renderStats) frame.renderStats.frameMs = performance.now() - start;
     return frame;
   }
+  if (!o?.samples && !o?.captureCoverage) o?.renderHistory?.clear();
   const definition = o?.composite ?? world.look?.composite;
   if (definition !== undefined && definition !== false && !o?.samples && !o?.captureCoverage) {
     const start = o?.renderStats ? performance.now() : 0;
@@ -253,6 +262,7 @@ function renderFrame(world, o, preparedPalettes) {
     T = cameraMotion.kick ? [T0[0] + cameraMotion.kick[0], T0[1] + cameraMotion.kick[1], T0[2] + cameraMotion.kick[2]] : T0,
     cw = o.w || 900,
     ch = o.h || 620;
+  const depthOffset = ortho && !authored ? 2 * world.radius + 4 : 0;
   const audit = o.lookAudit === true ? createAudit() : o.lookAudit;
   const onPaletteClip = audit && ((scope, i, r, g, b) => audit.palette(scope, world.pal[i], r, g, b));
   const transparent = !!o.transparent && !o.captureCoverage;
@@ -327,7 +337,7 @@ function renderFrame(world, o, preparedPalettes) {
     for (const channel of ['objectId', 'materialId', 'emission', 'protected']) passSelection.add(channel);
   }
   const finishLook = (frame, passes, fog, effectSignals, source) => {
-    if (ink) frame = ArtInk.apply(frame, passes, ink, world.pal, fog);
+    if (ink) frame = ArtInk.apply(frame, passes, ink, world.pal, fog, { world, depthOffset });
     if (effects) frame = ArtEffects.apply(frame, passes, effects, t, {
       history: o.artHistory, world: o[reconstructionSource] ?? world, palette: world.pal, motionReference: frame.motionReference,
       haloSource: passes.scopedEmission && (p => emissive.profiles[passes.scopedEmission.slots[p]-1]?.glow === undefined)
@@ -440,7 +450,7 @@ function renderFrame(world, o, preparedPalettes) {
   lookPass = createLookPass(W, H, passSelection, o.lookPassRegistry);
   /* Legacy orthographic views back the eye away. Authored rigs keep their rail or orbit position. */
   const oh = dist * tangent,
-    eyeD = ortho && !authored ? dist + 2 * world.radius + 4 : dist,
+    eyeD = dist + depthOffset,
     reflectionPlane = o.reflectionPlane,
     focal = ortho ? H / 2 / oh : H / 2 / tangent,
     cameraView = probeView?.matrix ?? viewMatrix(yaw, pitch, eyeD, T),
