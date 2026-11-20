@@ -570,6 +570,55 @@ ink-studio probe sign.run.json --field rig/surface-state --args '{"body":"sign.0
 ink-studio sim render sign.run.json --colored --out sign.png
 ```
 
+## Constraint-based construction
+
+A `construction` system solves placements for named points and their
+sockets. A point has a preferred `position` and optional `sockets` with
+XYZ offsets in world-axis directions. Constraint references take a
+point name or `point/socket`. The solver keeps each preferred coordinate
+as close as the hard bounds allow, in sorted point-ID order.
+
+| Constraint | Arguments and result |
+| --- | --- |
+| `pin` | `point` and `position` fix a point or socket in XYZ. Override the position by constraint ID when refitting. |
+| `align` | `a` and `b` coincide, or `b` stays at the optional XYZ `offset` from `a`. |
+| `level` | The named `points` share the same world Y. |
+| `range` | Bounds the directional difference from `a` to `b` along `axis` using `min`, `max`, or both. |
+| `opening` | Requires a minimum `width` along X or Z and a minimum `height` along Y. Each uses `a`, `b`, and `min`. Width also uses `axis`. Optional `passage: {a, b}` checks that a level corridor with those dimensions clears the fitted parts. |
+
+Attach `blocks` to references with `at`, `offset`, and `half`. Each
+entry in `spans` stretches a box between `a` and `b` using its
+`width`, `depth`, and optional `rise` and `lateral` offsets. Render
+the resulting `bodies` field and use `support` and `clearance` for
+collision and navigation. `visual.fields.bodies` accepts a single field
+or a list of fields when a scene includes more than one body provider.
+
+`bridge/refit` accepts a `pins` map and publishes the layout when the
+constraints and passage checks pass. A failed attempt leaves the last
+accepted layout in place. `bridge/fit` reports the last attempt or
+previews a specified `pins` map without publishing it. A
+`conflict` includes a contradictory chain of authored constraints
+for each affected axis. The bounds in the chain sum to a negative
+number even though the coordinate differences around a closed cycle
+sum to zero. A `blocked` passage reports the constraint ID and the
+parts obstructing its corridor. Use `bridge/layout` for the current
+published parts and sockets.
+
+The [canal bridge](../examples/world-construction-bridge.json) refits
+at tick 2 and rejects a height mismatch, an overlong span, and an
+obstructed passage at later ticks.
+
+```sh
+ink-studio sim run examples/world-construction-bridge.json --ticks 8 --record bridge.run.json
+ink-studio probe bridge.run.json --field bridge/layout
+ink-studio probe bridge.run.json --field bridge/fit --args '{"pins":{"east-anchor":[6,1.43,0]}}'
+ink-studio sim render bridge.run.json --colored --out bridge.png
+```
+
+JavaScript callers can also use
+`KIT.procedural.construct.constraints.compile(points, constraints)`
+and call `solve(pins)` to fit the coordinate constraints.
+
 ## Author a world
 
 A manifest has `format: "ink-studio/world"`, `version: 1`, a stable `id`,
@@ -623,6 +672,7 @@ reaches the feeder.
 | `fields` | Typed spatial fields with defaults, grids, regions and a `set` action. |
 | `materials` | Grid of versioned surface materials with local moisture, temperature, coefficients, and appearance. |
 | `volume` | Editable 3D solid with material layers, collision and support queries, fixed-head connected water, and locally retained splats. |
+| `construction` | Constraint-fitted points, sockets, blocks, spans, and passage clearance with live refits and conflict reports. |
 | `control` | Typed arithmetic, thresholds, selection, binary logic, pulses, latches, timers and hysteresis. |
 | `store` | Bounded numeric, integer, or vector accounts with named resources and units. |
 | `exchange` | Enabled links that request a fixed amount per tick or a rate per second. |

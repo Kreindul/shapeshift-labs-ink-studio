@@ -139,18 +139,8 @@
       return Math.max(y-height(x,z), min[1]-y, min[0]-x, x-max[0], min[2]-z, z-max[2]);
     }
     if(!volume)S.implicitForm({bounds:{min,max},sd:groundDistance},earth,{res:resolution,target:{surface:'terrain'}});
-    let bodies=[];
-    if (fields.bodies) {
-      const reading=query.probe(fields.bodies);
-      if (reading.status==='ok') bodies=Object.values(reading.value);
-    }
-    let surfaceAtlas;
-    if(bodies.some(body=>body.surfaceState)){
-      const field=query.field(fields.bodies)?.name;
-      if(field)surfaceAtlas=query.probe(field.slice(0,field.lastIndexOf('/'))+'/surface-charts').value;
-    }
-    for (const entry of bodies) {
-      if (!entry.half || !entry.position) continue;
+    function drawBody(entry,surfaceAtlas) {
+      if (!entry.half || !entry.position) return;
       const ramp=entry.look??[1,2,3,4,5,6];
       const rotation=entry.rotation??M.id();
       const axis=[0,1,2].map(i=>[rotation[i],rotation[i+3],rotation[i+6]]);
@@ -164,6 +154,18 @@
       hasSurface ||= Boolean(finish.surface);
       S.box(entry.position,entry.half,finish,{ax:axis,res:resolution*.72,
         rd:Math.min(.055,...entry.half)*.4,tag:entry.id,target:sample?{...target,surface:undefined}:target});
+    }
+    const bodyFields=Array.isArray(fields.bodies)?fields.bodies:fields.bodies?[fields.bodies]:[];
+    for(const source of bodyFields) {
+      const reading=query.probe(source);
+      if(reading.status!=='ok')continue;
+      const bodies=Object.values(reading.value);
+      let surfaceAtlas;
+      if(bodies.some(body=>body.surfaceState)){
+        const field=query.field(source)?.name;
+        if(field)surfaceAtlas=query.probe(field.slice(0,field.lastIndexOf('/'))+'/surface-charts').value;
+      }
+      for(const body of bodies)drawBody(body,surfaceAtlas);
     }
     for (const [id,entity] of Object.entries(view.world.entities)) {
       if (!entity.visual?.half) continue;
