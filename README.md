@@ -898,6 +898,7 @@ module.exports = {
 ```
 
 Then `ink-studio scenes`, `render`, `snap` and other commands operate on that collection. The load callback returns the toolkit exports alongside `SCENES`.
+Use [`ink-studio reel`](docs/reel.md) to share selected stills and motion captures from that collection in one offline HTML file.
 
 ## Browser renderer
 

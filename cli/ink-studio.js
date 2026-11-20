@@ -871,6 +871,7 @@ const CMD = {
         '  turn <id> [--n 8] [--t 0]   the diorama from all round, on one sheet',
         '  clip <id> [--from 0 --to 6 --fps 12]   animated PNG (also --text, --feedback-fps 24, --feedback-cuts 2.5,4)',
         '    --camera-pan x,y,z --camera-orbit degrees --px 1   review slow camera motion at native art resolution',
+        '  reel <manifest.json> [--out reel.html] [--clean]   export selected captures as an offline reel',
         '  ghost <id> [--t 2 --spacing 0.12 --n 2 | --ghosts 1.6,1.8]   one moment with those either side laid faintly over it',
         '  acts                        the ready clips, reactions, easings and cues, by name',
         '  motion <id> [--from 0 --to 12]   numbers about how it moves: speed, jumps, what goes underground',
@@ -1922,6 +1923,15 @@ const CMD = {
     }
     shot?.finish(f,{fps,suffixes});
     console.log('wrote', f, frames.length, 'frames at', fps, 'a second (an animated PNG: a browser will play it)');
+  },
+  reel() {
+    if (pos.length !== 1 || Object.keys(opt).some(key => !['out', 'clean'].includes(key)) ||
+        opt.out === true || (opt.clean !== undefined && opt.clean !== true))
+      die('Use reel <manifest.json> [--out reel.html] [--clean]');
+    const file = outputFile('reel.html');
+    if (!/\.html$/i.test(file) || file === path.resolve(pos[0])) die('A reel needs a separate .html output');
+    const result = require('./reel.js').write(file, pos[0], { clean: opt.clean });
+    console.log('wrote', file, result.shots, 'shots and', result.frames, 'captured frames');
   },
   motion() {
     const w = build(pos[0]);
