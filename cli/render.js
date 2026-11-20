@@ -224,6 +224,10 @@ function render(world, o, preparedPalettes) {
     px = o.px || frameBudget.artScale(cw, ch, preferred, o.raw || o.samples || o.captureCoverage ? null : look.pixelBudget),
     W = Math.ceil(cw / px),
     H = Math.ceil(ch / px);
+  if (!o.samples && !o.captureCoverage) o.shotFrame?.({
+    time:sceneTime, skyTime:ArtDirection.time(direction,o.skyTime ?? sceneTime,'environment'), camera:{ target:Array.from(T), yaw, pitch, distance:dist, lensScale, orthographic:!!o.ortho },
+    art:{ width:W, height:H, pixelSize:px }
+  });
   const historyFrames = effects?.smear && o.artHistory ? o.artHistory.previous(t, W, H, world) : [];
   const motionFrame = historyFrames[Math.max(0, historyFrames.length - (effects?.smear?.frames || 1))];
   const motionFrom = o.motionFrom ?? motionFrame?.motionReference;

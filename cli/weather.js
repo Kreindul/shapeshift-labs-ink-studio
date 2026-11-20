@@ -17,6 +17,7 @@ function weatherBinding(world, options, source, environment) {
       profiles: options.skyProfiles, frontsEnabled,
       createSurface: settings => require('../index.js').load().KIT.procedural.motion.surfaceWeather(settings)
     });
+    options.shotWeather?.restore?.(binding);
     cached = { authored, override, track, transitions, pins, retained, frontsEnabled, binding };
     sessions.set(world, cached);
   }

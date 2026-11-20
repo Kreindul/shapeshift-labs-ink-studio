@@ -162,6 +162,20 @@ const WeatherBinding = (() => {
       }
       return snapshot;
     }
+    function surfaceCheckpoint() {
+      return solver && { tick, step:surface.step, state:solver.checkpoint() };
+    }
+    function restoreSurface(checkpoint) {
+      const expectedTime = checkpoint?.tick * surface?.step;
+      if (!surface || !Number.isSafeInteger(checkpoint?.tick) || checkpoint.tick < 0 ||
+          checkpoint.step !== surface.step || !Number.isFinite(checkpoint.state?.time) ||
+          Math.abs(checkpoint.state.time - expectedTime) > Math.max(1, expectedTime) * 1e-8)
+        throw new TypeError('Invalid retained weather checkpoint');
+      const restored = createSurface(surface.options);
+      snapshot = restored.restore(checkpoint.state);
+      tick = checkpoint.tick;
+      solver = restored;
+    }
     const fogFronts = active.filter(front => front.target.fogDensity !== undefined);
     const fogStep = fogFronts.length ? Math.min(...fogFronts.map(front => front.step)) : 0;
     const localWind = active.some(front => front.target.wind);
@@ -214,7 +228,7 @@ const WeatherBinding = (() => {
       return { channels:{...defaults,...channels}, global, local, frontsEnabled,
         fronts, rainGain:Math.min(1,(local.rain ?? 0)/rainFull), snowGain:Math.min(1,(local.snowfall ?? 0)/snowFull) };
     }
-    return Object.freeze({ sample, forcing, frame, surfaceAt, inspect });
+    return Object.freeze({ sample, forcing, frame, surfaceAt, surfaceCheckpoint, restoreSurface, inspect });
   }
 
   return Object.freeze({ settings, bind });

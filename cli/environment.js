@@ -40,6 +40,7 @@ function resolveEnvironment(world,o,sceneTime,direction,trace = false) {
   const environment = clock?.frame(skyTime,o.skyProfiles);
   const binding = weatherBinding(world,o,source,clock);
   const weather = binding?.frame(skyTime,environment?.parameters);
+  o.shotWeather?.capture?.(binding);
   const exposure = SceneExposure.settings(world.sceneExposure,o.sceneExposure);
   const cutouts = VolumeCutouts.settings(world.volumeCutouts,o.volumeCutouts)?.frame(time);
   return { source,skyTime,time,clock,environment,binding,weather,exposure,cutouts,origins,conditional };

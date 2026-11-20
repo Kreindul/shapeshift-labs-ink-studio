@@ -30,7 +30,7 @@ function target(opt) {
   return {};
 }
 
-module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,atmosphereEmittersOption,effectPalettesOption,stabilityOption,artDirectionOption,silhouetteOption,horizonOption,skyTransitionsOption,weatherTracksOption}) {
+module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,atmosphereEmittersOption,effectPalettesOption,stabilityOption,artDirectionOption,silhouetteOption,horizonOption,skyTransitionsOption,weatherTracksOption,skyOptions,shot,shotReplay,shotRender}) {
   const W = kit.KIT.world, R = W.runtime;
   const args = () => opt.args ? parse(opt.args) : {};
   function sampleArgs() {
@@ -320,10 +320,20 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         break;
       }
       case 'render': {
-        const input=load(file), run=runtime(input);
-        schedule(run);
-        const atmospherePose=advanceVisual(run,to(run));
+        const recording=shotReplay?.runtime;
+        const run=recording ? R.create(recording.origin.world,{checkpoint:recording.origin}) : runtime(load(file));
+        if (recording) run.schedule(recording.commands);
+        else schedule(run);
         ensure(typeof opt.out==='string','Simulation render needs --out image.png');
+        const output=path.resolve(opt.out);
+        shot?.destination(output);
+        const atmospherePose=advanceVisual(run,recording?.end.tick ?? to(run));
+        if (recording) ensure(W.data.equal(run.checkpoint(),recording.end),
+          'Shot simulation checkpoint diverged at tick '+recording.end.tick);
+        if (shot) {
+          shot.seed(run.view().world.seed);
+          shot.runtime(run.recording());
+        }
         const world=W.visual(kit,run.view(),run.query());
         if (atmospherePose) world.atmospherePose=atmospherePose;
         const studio=require('../index.js');
@@ -333,13 +343,14 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
           paletteConstraints:require('./palette-constraints.js').override(opt['palette-constraints']),
           water:opt.water==='off'?false:undefined, effectPalettes:effectPalettesOption?.(), stable:stabilityOption?.(), artDirection:artDirectionOption?.(), silhouetteProtection:silhouetteOption?.(),
           horizonBands:horizonOption?.(), skyTransitions:skyTransitionsOption?.(), weatherTracks:weatherTracksOption?.(),
+          ...skyOptions?.(),
           atmosphere:opt.atmosphere==='off'?false:undefined, atmosphereEmitters:atmosphereEmittersOption?.(),
           coverageAware:opt['coverage-aware']===undefined?undefined:opt['coverage-aware']!=='off',
           lookMasks:opt['look-masks']==='off'?false:undefined,
-          colorStack:require('./color-stack.js').override(opt['color-stack']),t:run.view().time});
-        const output=path.resolve(opt.out);
+          colorStack:require('./color-stack.js').override(opt['color-stack']),t:run.view().time,...shotRender});
         fs.mkdirSync(path.dirname(output),{recursive:true});
         require('./png.js').write(output,image.w,image.h,image.rgb);
+        shot?.finish(output);
         break;
       }
       default: throw Error('Use sim run|resume|fork|reset|replay|diff|sweep|render|dependencies');

@@ -154,6 +154,7 @@ function preview(opt) {
   let first, last;
   return {
     settings: { passes: channels, lookPassRegistry },
+    suffixes: [...channels.map(channel => '-'+channel+'.png'), '-passes.json'],
     capture(frame, scale) {
       first ??= { width: frame.w, height: frame.h, scale };
       last = frame.passes;
