@@ -9,14 +9,71 @@ The graph contains an ordered `passes` list of up to 32 entries and an optional 
 | `mask` | Outputs coverage for downstream passes. An optional `rect` uses `[x, y, width, height]` and `feather` softens its edges inward. A `volume` masks visible world surfaces in a feathered ellipsoid. `invert` flips the combined coverage. |
 | `grade` | Applies an RGB `stack` to the input. CPU and WebGL use the same sampled color cube. `cubeSize` defaults to 33 and accepts 2–65. |
 | `reflection` | Mirrors the current image or a named `source` along `axis` (`x` or `y`). `line` sets the reflection line in output pixels and defaults to the midpoint. |
-| `distortion` | Samples the input or a named `source` using an XY `offset` in pixels and optional per-axis wave `amplitude`. `period` is in pixels, and `phase` and `rate` are in cycles and cycles per second. |
-| `composite` | Blends a named `source` image using `over` or `add`, or draws a single [mixed-resolution layer](mixed-resolution.md) from `layer` using its own resolution, filtering and blend settings. |
+| `distortion` | Samples the input or a named `source` using an XY `offset`, wave `amplitude`, or [scanline controls](#scanline-distortion). `period` is in pixels, and `phase` and `rate` are in cycles and cycles per second. |
+| `composite` | Blends a named `source` image using `over` or `add`, or draws a single [mixed-resolution layer](mixed-resolution.md) from `layer` using its own resolution, filtering and blend settings. Use `isolated: true` to start this pass on transparent pixels. |
 | `history` | Captures the visible pixels of a required target selector. Choose `hold` or `persistence`. An optional mask controls capture coverage. The current depth owner scopes the history overlay. |
 | `feedback` | Warps and decays the previous signal and composites new emission into it. Accepts an earlier image or a mixed-resolution emission layer. |
 
 Screen coordinates are in final output pixels from the top left. Reflected and distorted samples outside the image leave the input pixel unchanged. Graph reflection and distortion work on screen images. Scene-space planar capture, glass refraction and depth-dependent media use the scene renderer.
 
 Passes can set `select` to a named object, entity, material, surface, prefab or tag selector. The selection follows the visible depth-writing splat at each pixel of the world grid. A `mask` reference can narrow the selection further. `opacity` scales the effect from zero to one. A pass with `enabled: false` keeps its image input or supplies zero mask coverage. Requested diagnostic buffers remain on the native world grid.
+
+## Scanline distortion
+
+Give a distortion pass `rows` to change its source sampling one output row
+at a time. JSON accepts keys with increasing `at` values from 0 at the top
+to 1 at the bottom. Ink interpolates the keys and holds the nearest value
+outside their span.
+
+```json
+{
+  "id": "water-ripple",
+  "type": "distortion",
+  "select": {"material": "water"},
+  "amplitude": [2, 0],
+  "period": 9,
+  "rate": 0.5,
+  "depthThreshold": 0.25,
+  "rows": [
+    {"at": 0.4},
+    {"at": 1, "offset": [3, 0], "scale": [0.92, 1], "tint": [-8, 5, 16]}
+  ]
+}
+```
+
+- `scale` scales the XY sample around the center of the output image.
+  `offset` adds XY output pixels. The pass’s offset and sine wave then
+  contribute their usual shifts.
+- `tint` adds or subtracts RGB channel values in the range −255 to 255,
+  with the result clamped to the color range. Source alpha is preserved.
+  Each omitted field defaults to identity.
+- In JavaScript, `rows` can also be a callback. It receives
+  `{ y, v, width, height, time }` once per output row. `y` is the zero-based
+  row and `v` is its position from 0 to 1. Return the row fields or
+  `undefined` for identity.
+- `depthThreshold` compares the destination and sampled pixel on the
+  native scene depth grid. Their axial depths must be within this distance
+  in world units. A scene surface and the backdrop never match. Rejected
+  samples leave the destination alone. Use this with the scene or a
+  screen-aligned branch derived from it. WebGL uses its quantized depth buffer.
+- Use a preceding `composite` pass with `isolated: true` to make a named
+  image with transparency. Reference it as the distortion's `source` and
+  set `blend: "over"` to keep the destination visible through empty pixels.
+  The default blend is `"replace"`. Use `wrap: true` to repeat the image
+  at both edges.
+
+[Evening at the Millrace](../examples/raster-millrace.js) uses a water
+selector and depth rejection to ripple a bridge reflection.
+[Low Flight Over the Tidal Flats](../examples/raster-tidal-flats.js) maps
+rows of a repeating aerial tile into the foreground and composites a distant
+skyline above it.
+
+```sh
+ink-studio clip examples/raster-millrace.js --from 0 --to 6 --fps 12 \
+  --w 240 --h 160 --px 1 --out millrace.png
+ink-studio clip examples/raster-tidal-flats.js --from 0 --to 6 --fps 12 \
+  --w 240 --h 144 --px 1 --out tidal-flats.png
+```
 
 ## Moving world reveals
 

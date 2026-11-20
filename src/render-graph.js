@@ -17,8 +17,8 @@ const RenderGraph = (() => {
     mask: ['rect', 'feather', 'invert', 'volume'],
     grade: ['stack', 'cubeSize'],
     reflection: ['source', 'axis', 'line'],
-    distortion: ['source', 'offset', 'amplitude', 'period', 'rate', 'phase'],
-    composite: ['source', 'layer', 'blend'],
+    distortion: ['source', 'offset', 'amplitude', 'period', 'rate', 'phase', 'rows', 'depthThreshold', 'blend', 'wrap'],
+    composite: ['source', 'layer', 'blend', 'isolated'],
     history: ['mode', 'halfLife', 'cameraMotion'],
     feedback: ['source', 'layer', 'halfLife', 'cameraMotion', 'gain', 'threshold', 'filter', 'blend', 'warp']
   };
@@ -36,6 +36,51 @@ const RenderGraph = (() => {
   function finite(value, field) {
     if (!Number.isFinite(value)) throw new RangeError(field + ' must be finite');
     return value;
+  }
+
+  const identityRow = [0, 0, 1, 1, 0, 0, 0, 0];
+  function rowValues(row, keys) {
+    record(row, keys, 'distortion row');
+    const { offset = [0, 0], scale = [1, 1], tint = [0, 0, 0] } = row;
+    if (!tuple(offset, 2) || !tuple(scale, 2) || !tuple(tint, 3) ||
+        [...offset, ...scale].some(n => !Number.isFinite(Math.fround(n))) ||
+        tint.some(n => n < -255 || n > 255))
+      throw new RangeError('A distortion row needs finite XY offset and scale and RGB tint in [-255, 255]');
+    return [...offset, ...scale, ...tint, 0];
+  }
+
+  function prepareRows(rows) {
+    if (rows === undefined || typeof rows === 'function') return rows;
+    if (!Array.isArray(rows) || !rows.length || rows.length > 4096)
+      throw new TypeError('Distortion rows need a sampler or 1 to 4096 row keys');
+    let previous = -1;
+    return Array.from(rows, row => {
+      const values = rowValues(row, ['at', 'offset', 'scale', 'tint']);
+      const { at } = row;
+      if (!Number.isFinite(at) || at < 0 || at > 1 || at <= previous)
+        throw new RangeError('Distortion row keys need strictly increasing positions in [0, 1]');
+      previous = at;
+      return { at, values };
+    });
+  }
+
+  function rowTable(rows, width, height, time) {
+    if (!rows) return;
+    const table = new Float32Array(height * 8), dynamic = typeof rows === 'function';
+    let left = 0;
+    for (let y = 0; y < height; y++) {
+      const v = height === 1 ? 0 : y / (height - 1), index = y * 8;
+      if (dynamic) {
+        const row = rows({ y, v, width, height, time });
+        table.set(row === undefined ? identityRow : rowValues(row, ['offset', 'scale', 'tint']), index);
+      } else {
+        while (left + 1 < rows.length && v >= rows[left + 1].at) left++;
+        const a = rows[left], b = rows[Math.min(left + 1, rows.length - 1)];
+        const t = a === b ? 0 : clamp((v - a.at) / (b.at - a.at));
+        for (let k = 0; k < 7; k++) table[index + k] = a.values[k] * (1 - t) + b.values[k] * t;
+      }
+    }
+    return table;
   }
 
   function prepare(value) {
@@ -97,11 +142,16 @@ const RenderGraph = (() => {
           break;
         }
         case 'distortion': {
-          const { offset = [0, 0], amplitude = [0, 0], period = 32, rate = 0, phase = 0 } = pass;
+          const { offset = [0, 0], amplitude = [0, 0], period = 32, rate = 0, phase = 0,
+            rows, depthThreshold, blend = 'replace', wrap = false } = pass;
           if (!tuple(offset, 2) || !tuple(amplitude, 2) || !Number.isFinite(period) || period <= 0)
             throw new RangeError('Distortion needs finite XY offset and amplitude and a positive period');
+          if (!['replace', 'over'].includes(blend) || typeof wrap !== 'boolean' ||
+              depthThreshold !== undefined && (!Number.isFinite(depthThreshold) || depthThreshold < 0))
+            throw new RangeError('Distortion needs replace or over blending, boolean wrap and a nonnegative depth threshold');
           Object.assign(node, { offset: offset.slice(), amplitude: amplitude.slice(), period,
-            rate: finite(rate, 'Distortion rate'), phase: finite(phase, 'Distortion phase'), source: reference(pass.source ?? input, 'image') });
+            rate: finite(rate, 'Distortion rate'), phase: finite(phase, 'Distortion phase'), source: reference(pass.source ?? input, 'image'),
+            rows: prepareRows(rows), depthThreshold, blend, wrap });
           break;
         }
         case 'history': {
@@ -134,6 +184,9 @@ const RenderGraph = (() => {
         case 'composite': {
           if ((pass.layer === undefined) === (pass.source === undefined))
             throw new TypeError('A composite pass needs a previous image source or one mixed-resolution layer');
+          if (pass.isolated !== undefined && typeof pass.isolated !== 'boolean')
+            throw new TypeError('Composite isolated must be boolean');
+          node.isolated = pass.isolated === true;
           if (pass.layer !== undefined) {
             if (pass.blend !== undefined) throw new TypeError('Set layer blending on the layer');
             node.needsCamera = compositor.settings({ layers: [pass.layer] }).needsCamera;
@@ -146,7 +199,7 @@ const RenderGraph = (() => {
           break;
         }
       }
-      node.dependencies = [...new Set(node.enabled ? [input, mask, node.source].filter(Boolean) : [input].filter(Boolean))];
+      node.dependencies = [...new Set(node.enabled ? [node.isolated ? undefined : input, mask, node.source].filter(Boolean) : [input].filter(Boolean))];
       outputs.set(id, type === 'mask' ? 'mask' : 'image');
       if (type !== 'mask') current = id;
       nodes.push(node);
@@ -158,7 +211,8 @@ const RenderGraph = (() => {
     passes.forEach((node, i) => node.dependencies.forEach(id => lastUse.set(id, i)));
     const historyPasses = passes.filter(node => node.enabled && (node.type === 'history' || node.type === 'feedback'));
     if (historyPasses.length > maxHistoryPasses) throw new RangeError('A graph supports up to four live screen history passes');
-    const plan = { passes, output, lastUse, historyPasses, needsDepth: passes.some(node => node.enabled && node.volume),
+    const plan = { passes, output, lastUse, historyPasses,
+      needsDepth: passes.some(node => node.enabled && (node.volume || node.depthThreshold !== undefined)),
       needsOwner: passes.some(node => node.enabled && node.select),
       needsCamera: passes.some(node => node.enabled && node.needsCamera) };
     if (readSnapshot) compiled.set(value, plan);
@@ -362,6 +416,6 @@ const RenderGraph = (() => {
     return volume.feather ? clamp((1 - distance) / volume.feather) : Number(distance <= 1);
   }
 
-  return Object.freeze({ prepare, create, cube, selection, layer, history, feedbackMotion, replay, volumeCoverage });
+  return Object.freeze({ prepare, create, cube, selection, layer, history, feedbackMotion, replay, volumeCoverage, rowTable });
 })();
 if (typeof module !== 'undefined') module.exports = RenderGraph;

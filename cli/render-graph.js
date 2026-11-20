@@ -1,5 +1,6 @@
 const FrameComposite = require('../src/frame-composite.js');
-const { cube, selection, layer, history, feedbackMotion, volumeCoverage } = require('../src/render-graph.js');
+const { cube, selection, layer, history, feedbackMotion, volumeCoverage, rowTable } = require('../src/render-graph.js');
+const wrap = (n, size) => n - Math.floor(n / size) * size;
 
 function runGraph(plan, frame, world, time, text, camera, resolve, options) {
   const { w, h, passes } = frame;
@@ -35,11 +36,13 @@ function runGraph(plan, frame, world, time, text, camera, resolve, options) {
       const oldSignal = feedback && memory.capture && memory.decay > 0 &&
         { data: memory.value, w, h, filter: node.filter };
       const motion = oldSignal && feedbackMotion(node, time, memory.elapsed, w, h);
-      output = maskPass ? new Uint8Array(w * h) : input.slice();
-      const { rect, feather, opacity } = node;
+      output = maskPass ? new Uint8Array(w * h) : node.isolated ? new Uint8Array(w * h * 4) : input.slice();
+      const { rect, feather, opacity, depthThreshold } = node;
       const line = node.line ?? (node.axis === 'x' ? w : h) * .5;
       const isReflection = node.type === 'reflection';
+      const scanlines = rowTable(node.rows, w, h, time);
       const theta = node.type === 'distortion' ? 2 * Math.PI * ((node.phase + time * node.rate) % 1) : 0;
+      const frequency = 2 * Math.PI / node.period;
       for (let y = .5, p = 0; y < h; y++) for (let x = .5; x < w; x++, p++) {
         const native = nativeIndex(x, y, p);
         const chosen = rows ? rows[owner?.[native] ?? 0] !== 0 : true;
@@ -124,18 +127,34 @@ function runGraph(plan, frame, world, time, text, camera, resolve, options) {
           } else for (let c = 0; c < 4; c++) color[c] = source[q + c];
           FrameComposite.blend(output, q, color, weight * (raster?.opacity ?? 1), (raster?.blend ?? node.blend) === 'add');
         } else {
-          let X = x, Y = y;
+          let X = x, Y = y, row = 0;
           if (isReflection) {
             if (node.axis === 'x') X = line * 2 - x;
             else Y = line * 2 - y;
           } else {
-            const frequency = 2 * Math.PI / node.period;
+            if (scanlines) {
+              row = Math.floor(y) * 8;
+              X = (x - w * .5) * scanlines[row + 2] + w * .5 + scanlines[row];
+              Y = (y - h * .5) * scanlines[row + 3] + h * .5 + scanlines[row + 1];
+            }
             X += node.offset[0] + node.amplitude[0] * Math.sin(y * frequency + theta);
             Y += node.offset[1] + node.amplitude[1] * Math.sin(x * frequency + theta);
+            if (node.wrap) { X = wrap(X, w); Y = wrap(Y, h); }
           }
-          if (X < 0 || Y < 0 || X >= w || Y >= h) continue;
-          const at = (Math.floor(Y) * w + Math.floor(X)) * 4;
-          for (let c = 0; c < 4; c++) output[q + c] = Math.round(input[q + c] * (1 - weight) + source[at + c] * weight);
+          if (!(X >= 0 && Y >= 0 && X < w && Y < h)) continue;
+          const sx = Math.floor(X), sy = Math.floor(Y), sample = sy * w + sx;
+          if (depthThreshold !== undefined) {
+            if (!depth) continue;
+            const a = depth[native], b = depth[nativeIndex(sx + .5, sy + .5, sample)];
+            if (a !== b && (!Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a - b) > depthThreshold)) continue;
+          }
+          const at = sample * 4, alpha = source[at + 3];
+          color[3] = alpha;
+          for (let c = 0; c < 3; c++) color[c] = scanlines ?
+            Math.max(0, Math.min(alpha, source[at + c] + scanlines[row + 4 + c] * alpha / 255)) : source[at + c];
+          if (node.blend === 'over') FrameComposite.blend(output, q, color, weight, false);
+          else for (let c = 0; c < 4; c++)
+            output[q + c] = Math.round(input[q + c] * (1 - weight) + color[c] * weight);
         }
       }
       if (memory?.capture) memory.save(held);

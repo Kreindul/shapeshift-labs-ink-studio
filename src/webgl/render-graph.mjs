@@ -7,6 +7,7 @@ const fragment = `#version 300 es
 precision highp float;
 precision highp int;
 uniform sampler2D u_input, u_source, u_mask, u_owner, u_selected, u_depth, u_history;
+uniform highp sampler2D u_rows;
 uniform highp sampler3D u_cube;
 uniform vec2 u_size, u_offset, u_amplitude;
 uniform int u_operation;
@@ -24,14 +25,23 @@ uniform float u_volumeFeather, u_decay;
 uniform vec2 u_feedbackPivot, u_feedbackTransform, u_threshold;
 uniform float u_blockSize, u_gain;
 uniform bool u_feedbackLinear, u_hasThreshold;
+uniform bool u_scanlines, u_rejectDepth, u_hasDepth, u_isolated, u_over, u_wrap;
+uniform float u_depthThreshold;
 out vec4 color;
 
 ${layerSamplingGLSL}
+
+float depthAt(vec2 pixel) {
+  ivec2 size = textureSize(u_depth, 0);
+  ivec2 site = min(ivec2(pixel / u_size * vec2(size)), size - 1);
+  return texelFetch(u_depth, ivec2(site.x, size.y - 1 - site.y), 0).r;
+}
 
 void main() {
   ivec2 pos = ivec2(gl_FragCoord.xy);
   vec4 inputColor = texelFetch(u_input, pos, 0);
   if (u_operation == 0) { color = inputColor; return; }
+  if (u_isolated) inputColor = vec4(0.0);
   vec2 pixel = vec2(gl_FragCoord.x, u_size.y - gl_FragCoord.y);
   float weight = u_hasMask ? texelFetch(u_mask, pos, 0).r : 1.0;
   float chosen = 1.0;
@@ -121,18 +131,40 @@ void main() {
     color.rgb = min(vec3(color.a), over.rgb + inputColor.rgb * (u_add ? 1.0 : 1.0 - over.a));
   } else {
     vec2 sourcePixel = pixel;
+    vec3 tint = vec3(0.0);
     if (u_operation == 3) {
       if (u_reflectX) sourcePixel.x = 2.0 * u_line - sourcePixel.x;
       else sourcePixel.y = 2.0 * u_line - sourcePixel.y;
-    } else sourcePixel += u_offset + u_amplitude * sin(pixel.yx * u_frequency + u_phase);
-    if (all(greaterThanEqual(sourcePixel, vec2(0.0))) && all(lessThan(sourcePixel, u_size)))
-      color = mix(inputColor, layerAt(u_source, sourcePixel, u_size, false, false), weight);
+    } else {
+      if (u_scanlines) {
+        vec4 transform = texelFetch(u_rows, ivec2(0, int(pixel.y)), 0);
+        vec2 pivot = u_size * 0.5;
+        sourcePixel = (sourcePixel - pivot) * transform.zw + pivot + transform.xy;
+        tint = texelFetch(u_rows, ivec2(1, int(pixel.y)), 0).rgb / 255.0;
+      }
+      sourcePixel += u_offset + u_amplitude * sin(pixel.yx * u_frequency + u_phase);
+      if (u_wrap) sourcePixel = mod(sourcePixel, u_size);
+    }
+    if (!(all(greaterThanEqual(sourcePixel, vec2(0.0))) && all(lessThan(sourcePixel, u_size)))) return;
+    if (u_rejectDepth) {
+      if (!u_hasDepth) return;
+      float a = depthAt(pixel), b = depthAt(floor(sourcePixel) + 0.5);
+      bool aSky = a >= 1.0, bSky = b >= 1.0;
+      if (aSky != bSky || (!aSky && abs(a - b) * (u_depthRange.y - u_depthRange.x) > u_depthThreshold)) return;
+    }
+    vec4 sampled = layerAt(u_source, sourcePixel, u_size, false, false);
+    sampled.rgb = clamp(sampled.rgb + tint * sampled.a, vec3(0.0), vec3(sampled.a));
+    if (u_over) {
+      sampled *= weight;
+      color = sampled + inputColor * (1.0 - sampled.a);
+    } else color = mix(inputColor, sampled, weight);
   }
 }`;
 
 export function createRenderGraph(gl, { api, program, resources, target, textureUnit, fullscreen, maxSize }) {
   const shader = program(fragment), scene = target();
-  const selected = resources.texture(), raster = resources.texture(), cube = resources.allocate('Texture');
+  const selected = resources.texture(), raster = resources.texture(), rows = resources.texture();
+  const cube = resources.allocate('Texture');
   const pool = [], historyFree = [];
   const history = api.history({ release: buffer => historyFree.push(buffer) });
   let lastCube;
@@ -146,10 +178,11 @@ export function createRenderGraph(gl, { api, program, resources, target, texture
 
   function execute(world, frame, plan, w, h, destination, present) {
     scene.resize(w, h);
-    let ownership, camera, depth;
+    let ownership, camera, depth, depthRange;
     present(world, { ...frame, ...(plan.needsCamera && captureFrameCamera(frame, view => { camera = view; })),
       ...(plan.needsDepth && { [inspectionDepth](scene, texture, view) {
         depth = texture;
+        depthRange = view.depthRange;
         frame[inspectionDepth]?.(scene, texture, view);
       } }),
       [graphOwner]: plan.needsOwner ? (world, texture) => { ownership = { world, texture }; } : undefined },
@@ -178,6 +211,7 @@ export function createRenderGraph(gl, { api, program, resources, target, texture
         const memory = feedback || node.type === 'history' ? openHistory(node) : null;
         const mask = outputs.get(node.mask), table = node.type === 'grade' && api.cube(node);
         const layer = node.layer && (!feedback || memory.capture) && api.layer(node, w, h, world, time, camera, gl);
+        const scanlines = api.rowTable(node.rows, w, h, time);
         const select = node.enabled && ownership && node.select && JSON.stringify(node.select);
         const opacity = node.opacity * (node.layer && !feedback ? layer?.opacity ?? 0 : 1);
         if (layer?.gpu) textureUnit(1, layer.gpu.texture);
@@ -208,6 +242,8 @@ export function createRenderGraph(gl, { api, program, resources, target, texture
         textureUnit(3, ownership?.texture ?? scene.textures[0]);
         textureUnit(5, select ? selected : scene.textures[0]);
         textureUnit(6, depth ?? scene.textures[0]);
+        textureUnit(8, scanlines ? rows : scene.textures[0]);
+        if (scanlines) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 2, h, 0, gl.RGBA, gl.FLOAT, scanlines);
         const values = {
           u_input: 0, u_source: 1, u_mask: 2, u_owner: 3, u_cube: 4, u_selected: 5, u_size: [w, h],
           u_operation: node.operation, u_opacity: opacity, u_enabled: node.enabled, u_hasMask: Boolean(mask),
@@ -215,9 +251,13 @@ export function createRenderGraph(gl, { api, program, resources, target, texture
           ...(node.rect && { u_rect: node.rect, u_feather: node.feather }),
           u_invert: node.invert ?? false, u_cubeSize: table?.size ?? 1,
           u_depth: 6, u_history: 7, u_volume: Boolean(node.volume && depth && camera),
+          u_rows: 8, u_scanlines: Boolean(scanlines), u_isolated: node.isolated ?? false,
+          u_wrap: node.wrap ?? false, u_over: node.type === 'distortion' && node.blend === 'over',
+          u_rejectDepth: node.depthThreshold !== undefined, u_hasDepth: Boolean(depth),
+          u_depthThreshold: node.depthThreshold ?? 0, u_depthRange: depthRange ?? [0, 1],
           ...(node.volume && depth && camera && { u_volumeAt: node.volume.at, u_extent: node.volume.extent,
             u_volumeFeather: node.volume.feather, u_eye: camera.eye, u_view: camera.view,
-            u_depthRange: camera.depthRange, u_projectionScale: [camera.tangent * camera.aspect, camera.tangent],
+            u_projectionScale: [camera.tangent * camera.aspect, camera.tangent],
             u_ortho: camera.ortho }),
           u_layer: Boolean(layer), ...(layer && { u_layerDest: layer.dest, u_layerTopDown: !layer.gpu,
             u_layerRegion: layer.gpu?.region ?? [0, 0, layer.w, layer.h] }), u_linear: layer?.filter === 'linear', u_add: (feedback ? node.blend : layer?.blend ?? node.blend) === 'add',
