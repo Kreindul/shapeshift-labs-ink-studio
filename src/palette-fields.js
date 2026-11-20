@@ -232,13 +232,82 @@ const PaletteFields = (() => {
     return Object.freeze({palette:swatches,outputPalette,index,sample,measure,raster});
   }
 
+  function rampRaster(sample, outputPalette, w, h) {
+    rasterSize(w,h);
+    const rgb = new Uint8Array(w*h*3), row = new Uint8Array(w*3), color = [0,0,0];
+    for (let x=0;x<w;x++) {
+      sample((x+.5)/w,color);
+      for (let i=0;i<3;i++) row[x*3+i] = Math.round(color[i]*255);
+    }
+    for (let y=0;y<h;y++) rgb.set(row,y*row.length);
+    return {w,h,rgb,outputPalette};
+  }
+
+  function grayscale(definition, resolveColor) {
+    const { palette, metric = 'nearest', range = [0,1] } = definition;
+    if (Object.keys(definition).some(key => !['type','palette','metric','range'].includes(key)) ||
+        !['nearest','lightness'].includes(metric) || !pair(range) || !range.every(fraction) || range[0] > range[1])
+      throw new RangeError('Grayscale ramps need a palette, nearest or lightness metric and ordered gray endpoints in [0, 1]');
+    const outputPalette = readSwatches(palette,resolveColor);
+    const lightness = Object.freeze(outputPalette.map(color=>spaces.toOKLab(color)[0]));
+    const [low,high] = range, span = high-low, gray = [0,0,0];
+    function setTarget(t) {
+      if (!Number.isFinite(t)) throw new TypeError('Palette ramp coordinate must be finite');
+      gray.fill(low+coord(t)*span);
+    }
+    function pick(targetLightness) {
+      if (metric === 'nearest') return pixels.nearest(gray,outputPalette);
+      targetLightness ??= spaces.toOKLab(gray)[0];
+      let index = 0, best = Infinity;
+      for (let i=0;i<lightness.length;i++) {
+        const error = Math.abs(lightness[i]-targetLightness);
+        if (error < best) { index = i; best = error; }
+      }
+      return index;
+    }
+    function index(t) {
+      setTarget(t);
+      return pick();
+    }
+    function sample(t,out=[0,0,0]) {
+      const color = outputPalette[index(t)];
+      for (let i=0;i<3;i++) out[i] = color[i];
+      return out;
+    }
+    function measure(t) {
+      setTarget(t);
+      const targetLightness = spaces.toOKLab(gray)[0];
+      const slot = pick(targetLightness), color = outputPalette[slot];
+      const error = metric === 'nearest' ? Math.sqrt(dot(gray.map((v,i)=>(v-color[i])**2),pixels.rgbWeights)) :
+        Math.abs(lightness[slot]-targetLightness);
+      return {index:slot,color,gray:gray[0],targetLightness,swatchLightness:lightness[slot],error};
+    }
+    function report(width=192) {
+      if (!Number.isSafeInteger(width) || width < 1 || width > 4096)
+        throw new RangeError('A grayscale report needs a width from 1 to 4096 pixels');
+      const swatches = outputPalette.map((rgb,index)=>({index,rgb,lightness:lightness[index],pixels:0}));
+      const bands = [];
+      for (let pixel=0;pixel<width;pixel++) {
+        const slot = index((pixel+.5)/width);
+        swatches[slot].pixels++;
+        const band = bands.at(-1);
+        if (band?.index === slot) band.endPixel = pixel+1;
+        else bands.push({index:slot,startPixel:pixel,endPixel:pixel+1});
+      }
+      return {type:'grayscale',metric,range:[low,high],width,swatches,bands};
+    }
+    return Object.freeze({type:'grayscale',metric,range:Object.freeze(range.slice()),outputPalette,index,sample,measure,report,
+      raster:(w,h)=>rampRaster(sample,outputPalette,w,h)});
+  }
+
   function ramp(definition, resolveColor = swatch) {
-    if (!record(definition)) throw new TypeError('A palette ramp needs a spectrum or primary definition');
+    if (!record(definition)) throw new TypeError('A palette ramp needs a spectrum, primary or grayscale definition');
     const { type, steps, palette } = definition;
+    if (type === 'grayscale') return grayscale(definition,resolveColor);
     const fields = type === 'spectrum' ? ['hue','saturation','brightness'] :
       type === 'primary' ? ['accent','accentAt','shadow','highlight'] : null;
     if (!fields || Object.keys(definition).some(key => !['type','steps','palette',...fields].includes(key)))
-      throw new TypeError('A palette ramp needs spectrum or primary controls');
+      throw new TypeError('Unknown palette ramp type or controls');
     if (steps !== undefined && (!Number.isSafeInteger(steps) || steps < 2 || steps > 48))
       throw new RangeError('Palette ramp steps must be an integer from 2 to 48');
 
@@ -292,17 +361,7 @@ const PaletteFields = (() => {
       for (let i=0;i<3;i++) out[i] = color[i];
       return out;
     }
-    function raster(w,h) {
-      rasterSize(w,h);
-      const rgb = new Uint8Array(w*h*3), row = new Uint8Array(w*3), color = [0,0,0];
-      for (let x=0;x<w;x++) {
-        sample((x+.5)/w,color);
-        for (let i=0;i<3;i++) row[x*3+i] = Math.round(color[i]*255);
-      }
-      for (let y=0;y<h;y++) rgb.set(row,y*row.length);
-      return {w,h,rgb,outputPalette};
-    }
-    return Object.freeze({type,outputPalette,sample,raster});
+    return Object.freeze({type,outputPalette,sample,raster:(w,h)=>rampRaster(sample,outputPalette,w,h)});
   }
 
   return Object.freeze({ hueBrightness, polar, coverage, ramp });

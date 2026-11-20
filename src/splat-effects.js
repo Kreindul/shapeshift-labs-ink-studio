@@ -330,14 +330,18 @@ const SplatEffects = (() => {
     return queried(source, context);
   }
 
-  function colorCurve({ ramp, channels, color, source = 'luminance', outputPalette }, context, resolveColor) {
-    if (ramp === undefined && source !== 'luminance')
+  function colorCurve({ ramp, paletteRamp, channels, color, source = 'luminance', outputPalette }, context, resolveColor) {
+    if (paletteRamp !== undefined && (ramp !== undefined || channels !== undefined || color !== undefined))
+      throw new TypeError('A palette ramp uses its own color and ramp controls');
+    const paletteTransfer = paletteRamp === undefined ? null : paletteFields.ramp(paletteRamp,resolveColor);
+    if (ramp === undefined && !paletteTransfer && source !== 'luminance')
       throw new TypeError('A color curve source requires a ramp');
-    const transfer = curves.prepare({ ramp, channels, color }, resolveColor);
-    const lookup = ramp === undefined ? null : curveSource(source, context);
+    const transfer = paletteTransfer ? (base,out,value = curves.luminance(base)) => paletteTransfer.sample(value,out) :
+      curves.prepare({ ramp, channels, color }, resolveColor);
+    const lookup = ramp === undefined && !paletteTransfer ? null : curveSource(source, context);
     const result = [0, 0, 0, 0, 1, 0];
     return {
-      palette: outputColors(outputPalette, resolveColor),
+      palette: outputColors(outputPalette, resolveColor) ?? paletteTransfer?.outputPalette,
       depth: source === 'depth',
       sample(sample, base) {
         const value = lookup?.(sample, base);

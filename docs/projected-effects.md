@@ -281,7 +281,7 @@ The layer can also show the error or boundary view. Its output palette defaults 
 
 ### Palette ramps
 
-Use `pattern: 'palette-ramp'` to project a [spectrum or primary ramp](palette-recipes.md#spectrum-and-primary-ramps) onto a surface. Put the ramp definition inside `paletteRamp`, use `axis: 'along'` for the first projection axis or `axis: 'across'` for the second, and set `size: [width, height]` in projection units. The layer affects that rectangle unless `wrap: true` repeats it. Finite bands or palette-constrained ramps supply their output swatches to the existing surface finish.
+Use `pattern: 'palette-ramp'` to project a [spectrum or primary ramp](palette-recipes.md#spectrum-and-primary-ramps) or a [grayscale match](palette-recipes.md#grayscale-and-brightness-matches) onto a surface. Put the ramp definition inside `paletteRamp`, use `axis: 'along'` for the first projection axis or `axis: 'across'` for the second, and set `size: [width, height]` in projection units. The layer affects that rectangle unless `wrap: true` repeats it. Finite bands or palette-constrained ramps supply their output swatches to the existing surface finish.
 
 ```json
 {
@@ -289,6 +289,20 @@ Use `pattern: 'palette-ramp'` to project a [spectrum or primary ramp](palette-re
   "pattern": "palette-ramp",
   "projection": {"origin": [-1, 0, 0], "along": [1, 0, 0], "across": [0, 1, 0]},
   "paletteRamp": {"type": "primary", "accent": "#28a796", "steps": 12, "axis": "across", "size": [2, 1]}
+}
+```
+
+A `colorCurve` layer can also apply a `paletteRamp` to the material's lit luminance. Use the usual `source` setting to read height, depth, or a scene field instead. A palette ramp takes the place of the curve's authored `ramp`, `channels`, and colour-space settings.
+
+```json
+{
+  "type": "colorCurve",
+  "source": "luminance",
+  "paletteRamp": {
+    "type": "grayscale",
+    "metric": "lightness",
+    "palette": ["#171728", "#294b73", "#24847e", "#f4c46e", "#f7edda"]
+  }
 }
 ```
 

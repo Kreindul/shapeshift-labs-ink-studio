@@ -270,3 +270,20 @@ Use the same ramp definitions in [projected materials](projected-effects.md#pale
 ```
 
 Sky axes use radians. Elevation starts at the horizon and defaults to the full upper hemisphere. Azimuth starts at world +Z, increases toward +X, and defaults to one turn. The sky blends the ramp above the horizon before drawing the sun. Overcast reduces the blend, and an optional `gain` can bind `strength` to a nonnegative numeric profile channel. Scene reflections that sample the sky see the same ramp.
+
+## Grayscale and brightness matches
+
+Compile `K.palette.ramp({type: 'grayscale', palette, metric, range})` to map a neutral gray strip to exact palette swatches. Supply 1–48 hex colours or normalized RGB triples. The gray target rises left to right in sRGB and covers `[0, 1]` by default. Use a narrower `range`, such as `[0.2, 0.85]`, to target a particular part of the tonal scale.
+
+- `nearest` (default) compares the neutral target and swatches using Ink’s weighted RGB distance. Swatches closer to neutral can win over saturated ones.
+- `lightness` compares only OKLab lightness. Saturated swatches can fill dark, middle, or light bands according to their perceived lightness. Both metrics use palette order to break ties.
+
+Use `index(t)` for the original swatch index, `sample(t)` for its RGB value, or `measure(t)` for the gray target, swatch, their OKLab lightness values, and the selected metric's error. The `report(width)` method lists each swatch's pixel count and the bands in the exported strip. Band starts are inclusive and ends are exclusive. Match the report width to the texture width to align the readings pixel for pixel. Swatches with zero pixels are unused at that resolution.
+
+```sh
+ink-studio palette field examples/grayscale-ramp.json --w 192 --h 32 --out gray-match.png
+ink-studio palette field examples/grayscale-ramp.json --w 192 --format data --out gray-match.json
+ink-studio render examples/grayscale-ramp-reliefs.js --w 312 --h 124 --px 1 --raw --out nautilus-press.png
+```
+
+Export the strip as a lookup texture for shaded print, halftones, or light-level bands. Use the same definition in a [projected ramp or material colour curve](projected-effects.md#palette-ramps). The [Nautilus press](../examples/grayscale-ramp-reliefs.js) applies both matching methods to the same lit sculpt.

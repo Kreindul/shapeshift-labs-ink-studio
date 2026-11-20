@@ -852,7 +852,7 @@ const CMD = {
         '  curve <family.json> [--distance n] [--text INK] [--out file.json]   sample reusable curve families',
         '  ornament <pattern.json> [--format pigment|relief|tiles] [--out file]   export a wallpaper or frieze pattern',
         '  palette plot <plot.json> [--space rgb|oklab] [--orbit degrees] [--format png|data]   render a palette in 3D',
-        '  palette field <field.json> [--saturation 0–1] [--w 192 --h 96]   render a palette field or ramp',
+        '  palette field <field.json> [--w width --h height] [--format png|data]   render a palette field or report grayscale bands',
         '  palette <recipe.json> [--t seconds] [--out palette.json]   sample palette recipes, paths and animation',
         '  inspect <scene|run>         discover fields, actions, ports and entities',
         '  environment inspect <scene|run> --at x,y,z [--t seconds] [--out report.json]   explain sky and local weather',
@@ -1021,14 +1021,14 @@ const CMD = {
   palette() {
     if (pos[0] === 'plot') return require('./palette-plot.js')(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'field') {
-      if (pos.length !== 2 || ['w', 'h', 'saturation', 'view', 'out'].some(key => opt[key] === true))
-        die('Use palette field <field.json> [--saturation 0–1] [--view nearest|error|boundary] [--w width --h height --out field.png]');
+      if (pos.length !== 2 || ['w', 'h', 'saturation', 'view', 'out', 'format'].some(key => opt[key] === true))
+        die('Use palette field <field.json> [--saturation 0–1] [--view nearest|error|boundary] [--format png|data] [--w width --h height --out file]');
       const input = JSON.parse(fs.readFileSync(path.resolve(pos[1]), 'utf8'));
       if (!input || Array.isArray(input) || typeof input !== 'object') die('A palette field needs a JSON object');
       const { type = 'hue-brightness', ...definition } = input;
-      const ramp = type === 'spectrum' || type === 'primary';
+      const ramp = ['spectrum','primary','grayscale'].includes(type);
       if (!ramp && !['hue-brightness','polar','coverage'].includes(type))
-        die('Palette field type must be hue-brightness, polar, coverage, spectrum or primary');
+        die('Palette field type must be hue-brightness, polar, coverage, spectrum, primary or grayscale');
       if (opt.view !== undefined) {
         if (type !== 'coverage') die('--view applies to coverage fields');
         definition.view = opt.view;
@@ -1037,7 +1037,17 @@ const CMD = {
       const polar = type === 'polar', api = lib().KIT.palette;
       const compile = type === 'hue-brightness' ? api.hueBrightness : api[type];
       const field = ramp ? api.ramp({type,...definition}) : compile(definition);
-      const image = field.raster(num('w', polar ? 128 : 192), num('h', polar ? 128 : ramp ? 32 : 96));
+      const format = opt.format ?? 'png', width = num('w', polar ? 128 : 192);
+      if (format === 'data' && type === 'grayscale') {
+        const json = JSON.stringify(field.report(width),null,2)+'\n';
+        if (!opt.out) { process.stdout.write(json); return; }
+        const file = outputFile('grayscale-ramp.json');
+        fs.mkdirSync(path.dirname(file),{recursive:true});
+        fs.writeFileSync(file,json);
+        return;
+      }
+      if (format !== 'png') die('Palette fields use PNG, or data for a grayscale report');
+      const image = field.raster(width, num('h', polar ? 128 : ramp ? 32 : 96));
       const name = ramp ? type+'-ramp' : polar ? 'polar-colour' : type === 'coverage' ? 'palette-coverage' : 'hue-brightness';
       save(name+'.png',image,image.alpha);
       return;
