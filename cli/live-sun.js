@@ -151,7 +151,7 @@ function shadowMap(sun, data, { x, y, z, alpha, scale }, normalAt, casts) {
   };
 }
 
-function create(sun, world, pose, normalAt, cloudShadow, exposure, { shadowArt, footprint } = {}) {
+function create(sun, world, pose, normalAt, cloudShadow, exposure, { shadowArt, footprint, probes } = {}) {
   // Albedo exists on opted-in sculpt bakes and explicitly described builder rows.
   // Older pixel-material bakes still carry the original material ramps.
   const fill = new Int32Array(pose.alpha.length).fill(-1);
@@ -193,11 +193,13 @@ function create(sun, world, pose, normalAt, cloudShadow, exposure, { shadowArt, 
   function gains(i, x, y, z, rgb) {
     rgb.fill(level(i, x, y, z));
     const offset = i * 3;
-    if (!indirect || !(indirect[offset] || indirect[offset+1] || indirect[offset+2])) return rgb;
-    // Add bounce energy in linear light, preserving the existing neutral live-light response.
+    const local = probes?.(i,x,y,z,normals[i]);
+    if (!local && (!indirect || !(indirect[offset] || indirect[offset+1] || indirect[offset+2]))) return rgb;
+    // Blend the local irradiance into the hemisphere fill in linear light.
     linear(rgb, rgb);
-    const openness = exposure?.(x,y,z) ?? 1;
-    for (let c = 0; c < 3; c++) rgb[c] += indirect[offset+c] * openness;
+    const mix = local?.mix ?? 0, openness = exposure?.(x,y,z) ?? 1;
+    for (let c = 0; c < 3; c++)
+      rgb[c] += (indirect?.[offset+c] ?? 0) * openness * (1-mix) + (local?.rgb[c] ?? 0) * mix;
     return srgb(rgb, rgb);
   }
   function rampLevel(i, x, y, z, tint) {
@@ -211,7 +213,7 @@ function create(sun, world, pose, normalAt, cloudShadow, exposure, { shadowArt, 
     const n = fill[i];
     return n >= 0 ? [(n >> 16)/255, (n >> 8 & 255)/255, (n & 255)/255] : null;
   };
-  return { albedo, normal: i => normals[i], level, gains, rampLevel, visibility, hasBounce: Boolean(indirect) };
+  return { albedo, normal: i => normals[i], level, gains, rampLevel, visibility, hasBounce: Boolean(indirect || probes) };
 }
 
 module.exports = { prepare, create };

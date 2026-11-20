@@ -418,6 +418,11 @@
       bad('finish.areaLights', error.message);
     }
     try {
+      BounceProbes.prepare(st.finish.bounceProbes);
+    } catch (error) {
+      bad('finish.bounceProbes', error.message);
+    }
+    try {
       SplatRelighting.settings(st.finish.relighting);
     } catch (error) {
       bad('finish.relighting', error.message);

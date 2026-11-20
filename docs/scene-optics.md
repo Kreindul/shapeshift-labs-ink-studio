@@ -172,6 +172,10 @@ Use `--stable-transparency blend` to turn on blending with the default 0.04 spac
 for a scene without an authored setting. The tide gauge scene provides a colored
 pane that moves through bounded mist, world-space rain, and a reflective basin.
 
+## Local bounce probes
+
+[Add local bounce probes](bounce-probes.md) for baked surface color transfer and directional sky fill that follows the active environment profile.
+
 ## Shaped area lights
 
 [Set up shaped emitters](area-lights.md) to give windows and lanterns a world-space size, soft or stepped shadows, and a visible silhouette in planar reflections.

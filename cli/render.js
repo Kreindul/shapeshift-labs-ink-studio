@@ -53,6 +53,7 @@ const ContributionRules = require('../src/contribution-rules.js');
 const Airflow = require('../src/airflow.js');
 const LightSchedule = require('../src/light-schedule.js');
 const LiveSun = require('./live-sun.js');
+const ProbeLighting = require('./bounce-probes.js');
 const AreaLights = require('../src/area-lights.js');
 const AreaRaster = require('./area-lights.js');
 const surfaceShading = require('./surface-shading.js');
@@ -816,23 +817,34 @@ function renderFrame(world, o, preparedPalettes) {
     SC[i] = sc;
     depth[i] = V[2] * x + V[6] * y + V[10] * z + V[14];
   }
+  const probes = ProbeLighting.create(world,o.bounceProbes,baseSky,sun,o[reconstructionSource]);
+  function receivesDiffuse(i) {
+    return i >= 0 && i < baseCount && AL[i] >= 1 && !(Math.round(d[i*16+11]) & (16 | 32 | 64 | 128 | 256 | 2048 | 32768)) &&
+      !world.opticalSplats?.[i*OpticalMaterials.STRIDE+3] && !surface?.reveals(i) &&
+      ContributionRules.materialCoverage(world.materialPixelStyles?.[i*4] ?? 0,coverageMode) !== ContributionRules.softCoverage;
+  }
+  const probeReceiver = i => probes && receivesDiffuse(i) && probes.receives(i);
   if (sun) {
     const frames = sampleFrames(world, t), normals = [];
     const normalAt = i => normals[i] ?? (normals[i] = frames(i).normal ?? false);
     live = LiveSun.create(sun, world, { x: X, y: Y, z: Z, alpha: AL, scale: SC }, normalAt, cloudShadow, exposure?.light,
-      { shadowArt: o.shadowArt, footprint: shadowFootprint });
+      { shadowArt: o.shadowArt, footprint: shadowFootprint,
+        probes: probes && ((i,x,y,z,n) => n && probeReceiver(i) ? probes.sample([x,y,z],n) : null) });
   }
   const contact = contactSettings && ContactDepth.create(contactSettings, world, d, { x:X, y:Y, z:Z, alpha:AL, scale:SC },
     sampleFrames(world, t), coverageMode, rayAt, surface?.reveals);
   const optical = world.opticalSplats && OpticalMaterials.frame(world, { view: V, eye, ortho },
     sampleFrames(world, t), { x: X, y: Y, z: Z });
   const areaLight = areaLights.length && AreaRaster.createLighting(areaLights,world,d,AL);
-  const areaFrames = areaLight && sampleFrames(world,t), areaNormals = [];
-  function areaNormal(i) {
-    if (i < 0 || i >= baseCount || AL[i] < 1 || Math.round(d[i*16+11]) & (16 | 32 | 64 | 128 | 256 | 2048 | 32768) ||
-        optical?.[i*OpticalMaterials.STRIDE+3] || surface?.reveals(i) ||
-        ContributionRules.materialCoverage(world.materialPixelStyles?.[i*4] ?? 0,coverageMode) === ContributionRules.softCoverage) return null;
-    return areaNormals[i] ?? (areaNormals[i] = areaFrames(i).normal ?? false);
+  const diffuseFrames = (areaLight || probes) && sampleFrames(world,t), diffuseNormals = [];
+  function diffuseNormal(i) {
+    return diffuseNormals[i] ?? (diffuseNormals[i] = receivesDiffuse(i) && diffuseFrames(i).normal || false);
+  }
+  function probeAlbedo(i) {
+    const packed = world.materialAlbedo?.[i];
+    if (!packed) return;
+    const color=packed-1;
+    return [color>>16,(color>>8)&255,color&255].map(n=>n/255);
   }
   const relight = relative && SplatRelighting.rows(world, relative, sampleFrames(world, t), { x: X, y: Y, z: Z, alpha: AL });
   let mn = Infinity;
@@ -1046,7 +1058,9 @@ function renderFrame(world, o, preparedPalettes) {
         live.gains(i,...position,sunGains);
         color=color.map((v,k)=>v*sunGains[k]);
       }
-      if (areaLight && areaNormal(i)) color = areaLight(sprite.p, position, sprite.normal, color);
+      if (areaLight && diffuseNormal(i)) color = areaLight(sprite.p, position, sprite.normal, color);
+      if (!live?.normal(i) && probeReceiver(i))
+        color = probes.shade(position,sprite.normal,color,undefined,0,probeAlbedo(i));
       if (surface?.has(i) && !PIX?.[i*8]) {
         const value=surface.shade(i,...position,X[i],Y[i],Z[i],...color,sprite.p%W+.5,Math.floor(sprite.p/W)+.5,
           undefined,fragmentReflection);
@@ -1263,7 +1277,9 @@ function renderFrame(world, o, preparedPalettes) {
       .24 + .76 * exposure.light(x,y,z) : 1;
     const rule = subject?.(i);
     const contactReceiver = contact?.at(i);
-    const areaReceiver = areaLight && areaNormal(i);
+    const areaReceiver = areaLight && diffuseNormal(i);
+    const localProbe = !liveNormal && probeReceiver(i) && diffuseNormal(i);
+    const localAlbedo = localProbe && probeAlbedo(i);
     const fogMix = !(flags & 2) && world.fog.max > 0 && world.fog.start < 1
       ? targetFog(sstep(world.fog.start,1,dn)*world.fog.max*(exposure?.fog?.(x,y,z)??1),rule) : 0;
     const reflectInRaster = (planar || reflectedSky) && !pixelSurface;
@@ -1421,9 +1437,11 @@ function renderFrame(world, o, preparedPalettes) {
           pg -= Math.max(0, pg - fog[1]*bakedFog)*(1 - gain);
           pb -= Math.max(0, pb - fog[2]*bakedFog)*(1 - gain);
         }
-        if (areaReceiver) {
-          const point = exact?.position ?? surfacePoint(rayAt(ix+.5,iy+.5),areaReceiver,x,y,z,-cz,3*Math.sqrt(c00+c11+c22));
-          [pr,pg,pb] = areaLight(p,point,exact?.normal ?? areaReceiver,[pr,pg,pb],fog,centerFog ? fogMix : 0);
+        if (areaReceiver || localProbe) {
+          const n = exact?.normal ?? (areaReceiver || localProbe);
+          const point = exact?.position ?? surfacePoint(rayAt(ix+.5,iy+.5),n,x,y,z,-cz,3*Math.sqrt(c00+c11+c22));
+          if (areaReceiver) [pr,pg,pb] = areaLight(p,point,n,[pr,pg,pb],fog,centerFog ? fogMix : 0);
+          if (localProbe) [pr,pg,pb] = probes.shade(point,n,[pr,pg,pb],fog,centerFog ? fogMix : 0,localAlbedo);
         }
         const scoped = contribution?.applies(i, paletteId);
         if (opticalActive) {
@@ -1760,10 +1778,11 @@ function renderFrame(world, o, preparedPalettes) {
           if (gain < 1) base = base.map(value => value * gain);
         }
         if (bounceTints && live.normal(i)) base = base.map((value, channel) => value * bounceTints[p * 3 + channel]);
-        const receiverNormal = areaLight && areaNormal(i);
+        const receiverNormal = (areaLight || !live?.normal(i) && probeReceiver(i)) && diffuseNormal(i);
         if (receiverNormal) {
-          const exact = sdf?.hits[p];
-          base = areaLight(p,exact?.position ?? [HX[p],HY[p],HZ[p]],exact?.normal ?? receiverNormal,base);
+          const exact = sdf?.hits[p], point = exact?.position ?? [HX[p],HY[p],HZ[p]], n = exact?.normal ?? receiverNormal;
+          if (areaLight) base = areaLight(p,point,n,base);
+          if (!live?.normal(i) && probeReceiver(i)) base = probes.shade(point,n,base,undefined,0,probeAlbedo(i));
         }
         const finishedSurface = surface?.has(i);
         const c = finishedSurface ? surface.shade(i, HX[p], HY[p], HZ[p], X[i], Y[i], Z[i], ...base, x + 0.5, y + 0.5,
