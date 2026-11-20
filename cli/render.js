@@ -9,6 +9,7 @@ const TargetSelectors = require('../src/target-selectors.js');
 const { createArtPasses, sampleFrames } = require('./art-passes.js');
 const ArtPasses = require('../src/art-passes.js');
 const ArtInk = require('../src/art-ink.js');
+const EffectPalettes = require('../src/effect-palettes.js');
 const ArtEffects = require('../src/art-effects.js');
 const ArtStability = require('../src/art-stability.js');
 const { footprint, sampledDepth } = require('./splat-sampling.js');
@@ -133,6 +134,9 @@ function render(world, o, preparedPalettes) {
   const coverageAware = !o.raw && (o.coverageAware ?? look.coverageAware ?? Boolean(optics || scopedReflection)) === true;
   const retainContributions = coverageAware || Boolean(stages || optics);
   const legacyLook = styled && !retainContributions;
+  const effectPaletteSettings = styled ? EffectPalettes.prepare(
+    o.effectPalettes === true ? look.effectPalettes : o.effectPalettes ?? look.effectPalettes, world.pal
+  ) : !o.raw && !o.captureCoverage ? o.effectPaletteCapture : null;
   const ink = styled ? ArtInk.prepare(o.ink ?? look.ink, world.pal) : null;
   const effects = styled ? ArtEffects.prepare(o.artEffects ?? look.effects, world.pal) : null;
   const stable = ArtStability.prepare(o.stable ?? look.stable);
@@ -148,6 +152,12 @@ function render(world, o, preparedPalettes) {
   if (effects) for (const channel of ArtEffects.channels) passSelection.add(channel);
   if (effects?.smear && o.artHistory) passSelection.add('emissionMotion');
   if (ink) for (const channel of ArtInk.channels) passSelection.add(channel);
+  if (effectPaletteSettings) {
+    for (const channel of ['coverage', 'depth']) passSelection.add(channel);
+    if (effectPaletteSettings.ramps.has('emission')) passSelection.add('emission');
+    if (effectPaletteSettings.objects.size) passSelection.add('objectId');
+    if (effectPaletteSettings.materials.size) passSelection.add('materialId');
+  }
   if (anchoring) {
     passSelection.add('splatId');
     passSelection.add(stable.dither === 'world' ? 'position' : 'objectPosition');
@@ -155,12 +165,16 @@ function render(world, o, preparedPalettes) {
   if (specializedResolve || (legacyLook && stable?.protect.size)) {
     for (const channel of ['objectId', 'materialId', 'emission', 'protected']) passSelection.add(channel);
   }
-  const finishLook = (frame, passes, fog) => {
+  const finishLook = (frame, passes, fog, effectSignals, source) => {
     if (ink) frame = ArtInk.apply(frame, passes, ink, world.pal, fog);
     if (effects) frame = ArtEffects.apply(frame, passes, effects, t, {
       history: o.artHistory, world, palette: world.pal, motionReference: frame.motionReference
     });
     if (styled && stages?.post) RenderStages.finish(frame, stages, passes, t, lookPass?.post, audit);
+    if (effectSignals) {
+      frame = EffectPalettes.apply(frame, passes, effectSignals, source, world.pal, o.captureEffectPalettes);
+      if (audit) for (const ramp of effectSignals.rules.ramps.values()) audit.addPalette(ramp.packed);
+    }
     if (audit) {
       frame.lookAudit = audit.report();
     }
@@ -205,6 +219,7 @@ function render(world, o, preparedPalettes) {
     const native = render(world, Object.assign({}, o, { colored: false, samples: true, worked: true, px, passes: [...passSelection], artInkActive: !!ink,
       captureMotion, motionFrom, maskGrade: !tone && grade, reflectionTint: effects?.reflection,
       previewPalette: globalPaletteMark, lookAudit: audit,
+      effectPaletteCapture: effectPaletteSettings,
       captureFog: o.captureFog || ink?.ramps.has('fog') }), paletteRules);
     const samples = render(
       world,
@@ -220,7 +235,7 @@ function render(world, o, preparedPalettes) {
         artGridScale: 2,
         volumeHistory: null,
         artInkActive: !!ink,
-        captureMotion: false, motionFrom: undefined, reflectionTint: effects?.reflection,
+        captureMotion: false, motionFrom: undefined, effectPaletteCapture: null, reflectionTint: effects?.reflection,
         passes: specializedResolve ? ['coverage'] : false,
         lookAudit: false
       })
@@ -248,7 +263,7 @@ function render(world, o, preparedPalettes) {
       native.alpha && { alpha: native.alpha },
       (native.orderFallback || samples.orderFallback) && { orderFallback: true },
       native.volumeStats && { volumeStats: native.volumeStats },
-      o.captureFog && native.fog && { fog: native.fog }), native.passes, native.fog);
+      o.captureFog && native.fog && { fog: native.fog }), native.passes, native.fog, native.effectSignals, native.color);
   }
   lookPass = createLookPass(W, H, passSelection, o.lookPassRegistry);
   /* orthographic (o.ortho): no perspective, every ray parallel, the picture as big as the perspective one is at the target. The eye
@@ -283,6 +298,7 @@ function render(world, o, preparedPalettes) {
   const skyTime = o.skyTime ?? t;
   const clock = skySource ? SkyEnvironment.compile(skySource) : null;
   const environment = clock?.frame(skyTime, o.skyProfiles);
+  const effectRules = EffectPalettes.activate(effectPaletteSettings, environment?.parameters);
   const weather = weatherFrame(world, o, skySource, clock, environment?.parameters, skyTime);
   const exposure = SceneExposure.settings(world.sceneExposure, o.sceneExposure);
   const cutouts = VolumeCutouts.settings(world.volumeCutouts,o.volumeCutouts)?.frame(t);
@@ -369,12 +385,12 @@ function render(world, o, preparedPalettes) {
   const backdropClouds = clouds?.visible && !cloudView;
   const skyBase = backdropClouds && !sky ? hex(0) : bg;
   const skyOverlay = (flash || cloudView) && !sky && !backdropClouds;
-  const skySample = (sky || clouds?.visible || flash) && ((direction, out, origin, reflection) => {
+  const skySample = (sky || clouds?.visible || flash) && ((direction, out, origin, reflection, cloudSignal) => {
     if (sky) SkyEnvironment.shade(sky, direction, out);
     else for (let c = 0; c < 3; c++) out[c] = skyBase[c];
     if (origin) {
       flash?.sky(origin, direction, out);
-      if (!cloudView || reflection) clouds?.paint(origin, direction, out, flash?.light);
+      if (!cloudView || reflection) clouds?.paint(origin, direction, out, flash?.light, cloudSignal);
     }
     return out;
   });
@@ -384,6 +400,9 @@ function render(world, o, preparedPalettes) {
   const skyRayAt = pixel => skyRay(pixel % W + .5, Math.floor(pixel / W) + .5);
   const skyDirection = pixel => skyRayAt(pixel).direction;
   const skyColor = showSky && [0, 0, 0];
+  const trackMedia = effectRules && ['fog', 'clouds', 'sky'].some(kind => effectRules.ramps.has(kind));
+  const backdropCloud = trackMedia && showSky && backdropClouds ? new Float32Array(W * H) : null;
+  const cloudSignal = backdropCloud && [0];
   // Orthographic geometry uses an artificial camera setback. Measure aerial distance from the nominal eye.
   const air = aerial && { ...aerial, start: aerial.start + eyeD - dist,
     color: sky ? (pixel, direction) => SkyEnvironment.scattering(sky, ortho ? skyDirection(pixel) : direction) : () => hex(0) };
@@ -419,7 +438,7 @@ function render(world, o, preparedPalettes) {
     quality.wind = volumeWind ?? wind.velocity;
     if (volumeFlow) quality.windOffset = volumeFlow.windOffset;
     const media = volumes.some(volume => volume.type === 'field') ? prepareVolumeLight() : undefined;
-    return { ...quality, time: t, cloudShadow, flash, media, exposure, cutouts, cloud:cloudView,
+    return { ...quality, time: t, cloudShadow, flash, media, exposure, cutouts, cloud:cloudView, effectCoverage: trackMedia,
       cloudStart:cloudView && eyeD-dist };
   };
   const geometrySample = probe || sortedSurfaces || aerial || cloudShadow || flash || cloudView ? sampleFrames(world, t) : null;
@@ -641,13 +660,15 @@ function render(world, o, preparedPalettes) {
   for (let i = 0; i < N; i++) order[i] = i;
   order.sort((a, b) => depth[a] - depth[b]);
   const mediaOptions = (water || aerial || cloudView) && atmosphereOptions();
+  const hazeCoverage = effectRules?.ramps.get('fog')?.geometry && world.fog.max > 0 && new Float32Array(W * H);
   const rayMedia = mediaOptions && mediaSampler(volumes, water, rayAt, W, mediumHorizon, mediaOptions, air);
   const retainLayers = retainContributions || Boolean(rayMedia);
   const col = new Float32Array(W * H * 3),
     dep = new Float32Array(W * H),
     gls = new Float32Array(W * H);
   for (let i = 0; i < W * H; i++) {
-    const background = showSky ? skySample(skyDirection(i), skyColor, cloudEye) : bg;
+    const background = showSky ? skySample(skyDirection(i), skyColor, cloudEye, false, cloudSignal) : bg;
+    if (backdropCloud) backdropCloud[i] = cloudSignal[0];
     const backdrop = rayMedia ? rayMedia.shade(i, horizon, background, false) : background;
     col[i * 3] = backdrop[0];
     col[i * 3 + 1] = backdrop[1];
@@ -692,7 +713,7 @@ function render(world, o, preparedPalettes) {
     FPAL = FN ? world.pal.map((h, i) => hex(i)) : null;
   let deferred = sortedSurfaces ? new Map() : null, deferredCount = 0, orderFallback = false;
   function composite(p, i, z, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, mark,
-    opticalDepth = z, sprite) {
+    opticalDepth = z, sprite, haze = 0) {
     const p3 = p * 3, ia = 1 - a;
     if (rayMedia) [pr, pg, pb] = rayMedia.shade(p, opticalDepth, [pr, pg, pb]);
     if (retainLayers && glass && bend && !contributions) contributions = contributionLayers(col, captured, W, H, false, bend);
@@ -701,6 +722,7 @@ function render(world, o, preparedPalettes) {
     col[p3 + 1] = pg * a + col[p3 + 1] * ia;
     col[p3 + 2] = pb * a + col[p3 + 2] * ia;
     if (captured) captured[p] = a + captured[p] * ia;
+    if (hazeCoverage) hazeCoverage[p] = haze*a + hazeCoverage[p]*ia;
     if (art) art.fragment(p, i, a, wd, z, emits, pr, pg, pb, sprite);
     if (lookPass) {
       const redraw = PIX?.[i * 8] && wd && a > .5 && !surface?.reveals(i);
@@ -741,7 +763,7 @@ function render(world, o, preparedPalettes) {
     const dn=normalizedDepth(z), fogMix=world.fog.max>0&&world.fog.start<1 ?
       sstep(world.fog.start,1,dn)*world.fog.max*(exposure?.fog?.(...sprite.position)??1) : 0;
     const rgb=color.map((value,c)=>value+(fog[c]-value)*fogMix);
-    return [-1,z,dn,alpha,...rgb,alpha>=.5,false,0,0,false,false,alpha<.5,false,undefined,z,sprite];
+    return [-1,z,dn,alpha,...rgb,alpha>=.5,false,0,0,false,false,alpha<.5,false,undefined,z,sprite,fogMix];
   }
   function playSprites(through,queued) {
     while (spriteIndex<sprites.length && sprites[spriteIndex].z>=through) {
@@ -1062,12 +1084,12 @@ function render(world, o, preparedPalettes) {
           const entry = { sort: flags & 4 ? Infinity : surfaceZ, index: n, center: -cz,
             sample: [i, surfaceZ, clamp((surfaceZ - (eyeD - R)) / (2 * R), 0, 1), a, pr, pg, pb,
               wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, lookPass && { ...lookPass.mark },
-              aerial || cloudView ? surfaceZ : undefined] };
+              aerial || cloudView ? surfaceZ : undefined, undefined, fogMix] };
           if (!deferred.has(p)) deferred.set(p, []);
           deferred.get(p).push(entry);
           deferredCount++;
         } else composite(p, i, -cz, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass,
-          lookPass?.mark, aerial || cloudView ? surfaceZ : undefined);
+          lookPass?.mark, aerial || cloudView ? surfaceZ : undefined, undefined, fogMix);
       }
     }
   }
@@ -1500,6 +1522,7 @@ function render(world, o, preparedPalettes) {
         if (transparent) captured[q] = 1;
         if (axialDepth) axialDepth[q] = eyeD - R + sprD[q] * 2 * R;
         if (art) art.sprite(q, sprOwner[q], eyeD - R + sprD[q] * 2 * R);
+        if (hazeCoverage) hazeCoverage[q] = 0;
         lookPass?.fragment(q, 1);
         if (localAt) localAt[q] = 0;
         if (overlay) overlay.slots[q] = 0;
@@ -1512,21 +1535,30 @@ function render(world, o, preparedPalettes) {
   }
   contributions?.refract(gls, dep);
   let atmosphere, volumeStats = mediaOptions?.stats ? rayMedia.stats : undefined;
-  if (rayMedia && (ink?.ramps.has('fog') || o.captureFog)) {
-    const fog = new Float32Array(W * H);
-    for (let p = 0; p < fog.length; p++) {
+  const captureFog = ink?.ramps.has('fog') || o.captureFog;
+  const effectMedia = trackMedia && axialDepth && new Float32Array(W * H * 3);
+  if (rayMedia && (captureFog || effectMedia)) {
+    const fog = captureFog && new Float32Array(W * H);
+    for (let p = 0; p < W*H; p++) {
       const depth = axialDepth[p], covered = Number.isFinite(depth);
       rayMedia.shade(p, covered ? depth : horizon, bg, covered);
-      fog[(H - 1 - Math.floor(p / W)) * W + p % W] = rayMedia.opacity();
+      const q = (H - 1 - Math.floor(p / W)) * W + p % W;
+      if (fog) fog[q] = rayMedia.opacity();
+      if (effectMedia) rayMedia.contributions(effectMedia, q * 3);
     }
     atmosphere = { fog };
   } else if (axialDepth && !rayMedia) {
     const quality = atmosphereOptions();
     atmosphere = applyAtmosphere(volumes, col, axialDepth, rayAt, W, H, horizon, quality, t, quality.media,
-      ink?.ramps.has('fog') || o.captureFog || transparent, o.volumeHistory,
+      captureFog || effectMedia || transparent, o.volumeHistory,
       o.volumeHistory && [W, H, focal, ortho, o.volumeLocalLights, o.volumeLocalShadows, ...V].join('/'));
+    if (effectMedia) for (let p = 0; p < W*H; p++) {
+      effectMedia[p*3] = atmosphere.fog[p];
+      effectMedia[p*3+2] = 1-atmosphere.fog[p];
+    }
     if (quality.stats) volumeStats = atmosphere.stats;
   }
+  const effectSignals = effectRules && { rules: effectRules, sky: showSky && !!sky, backdropCloud, media: effectMedia, haze: hazeCoverage };
   let passes = art?.finalize(world, t, { x: X, y: Y, z: Z, rayAt, span: R,
     detail, sprM, surfaceGlint, centers, motionFrom, motionReference });
   if (o.captureCoverage) {
@@ -1602,10 +1634,11 @@ function render(world, o, preparedPalettes) {
       w: W, h: H, color: Uint8Array.from(c2, v => Math.round(clamp(v, 0, 1) * 255)), depth: dep, drawn,
       ...(localAt && { localAt, localPalettes, localConstraints }), ...(detail && { detail }), ...(passes && { passes }), ...(motionReference && { motionReference }),
       ...(masks && { masked: masks.output }),
-      ...(atmosphere?.fog && { fog: atmosphere.fog }), ...(volumeStats && { volumeStats }), ...(alpha && { alpha }), ...(orderFallback && { orderFallback })
+      ...(atmosphere?.fog && { fog: atmosphere.fog }), ...(effectSignals && { effectSignals }), ...(volumeStats && { volumeStats }), ...(alpha && { alpha }), ...(orderFallback && { orderFallback })
     };
   }
   // the second pass: an outline where the picture steps back sharply, a little ordered noise, then the nearest colour of the palette
+  const effectColor = effectSignals && new Uint8Array(W * H * 3);
   const out = new Uint8Array(W * H * 3),
     np = world.pal.length,
     pal = [];
@@ -1699,6 +1732,12 @@ function render(world, o, preparedPalettes) {
         r = line[0];
         g = line[1];
         b = line[2];
+      }
+      if (effectColor) {
+        const at = p*3;
+        effectColor[at] = Math.round(clamp(r, 0, 1) * 255);
+        effectColor[at+1] = Math.round(clamp(g, 0, 1) * 255);
+        effectColor[at+2] = Math.round(clamp(b, 0, 1) * 255);
       }
       if (retainContributions) {
         if (audit) audit.pixel('composite', q / 3, r, g, b);
@@ -1898,7 +1937,7 @@ function render(world, o, preparedPalettes) {
     ...(detail && { detail }), ...(motionReference && { motionReference }),
     ...(volumeStats && { volumeStats }), ...(o.captureFog && atmosphere?.fog && { fog: atmosphere.fog }),
     ...(alpha && { alpha }), ...(orderFallback && { orderFallback })
-  }, passes, atmosphere?.fog);
+  }, passes, atmosphere?.fog, effectSignals, effectColor);
 }
 // make every art pixel k screen pixels wide, the way the page shows it
 function upscale(img, k) {

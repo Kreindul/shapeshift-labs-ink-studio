@@ -383,6 +383,11 @@
     if (look?.pixelSize !== undefined && (!Number.isSafeInteger(look.pixelSize) || look.pixelSize < 1))
       bad('finish.look.pixelSize', 'pixelSize must be a positive integer');
     try {
+      EffectPalettes.prepare(look?.effectPalettes, st.palette);
+    } catch (error) {
+      bad('finish.look.effectPalettes', error.message);
+    }
+    try {
       ArtInk.prepare(look?.ink, st.palette);
     } catch (error) {
       bad('finish.look.ink', error.message);

@@ -233,7 +233,7 @@ const CloudField = (() => {
       const view=useDetail && rendered ? (eye,parallel) => asset.view(eye,parallel,mode,shift,shade,opacity,cutouts) : null;
       const reflections=(useDetail || geometry) && rendered ? asset.view([0,0,0],null,'volume',shift,shade,opacity,cutouts) : null;
       const reflectionSample=[0,0,0,1];
-      function paintVolume(origin, ray, out, flashAt) {
+      function paintVolume(origin, ray, out, flashAt, signal) {
         const range = [0,horizon];
         if (!clip(range,origin[1],ray[1],low,high) || (!repeat &&
             (!clip(range,origin[0],ray[0],minX+dx,maxX+dx) || !clip(range,origin[2],ray[2],minZ+dz,maxZ+dz)))) return out;
@@ -264,23 +264,28 @@ const CloudField = (() => {
             lightSum[c]+=weight*Math.min(1,(style?mix(rgb[c],style.rgb[c],brightness):rgb[c])+(flash?.[c]??0));
           through-=weight;
         }
-        for (let c=0;c<3;c++) out[c]=out[c]*(1-opacity*(1-through))+opacity*lightSum[c];
+        const amount = opacity*(1-through);
+        if (signal) signal[0] = amount;
+        for (let c=0;c<3;c++) out[c]=out[c]*(1-amount)+opacity*lightSum[c];
         return out;
       }
-      function paint(origin, direction, out, light) {
+      function paint(origin, direction, out, light, signal) {
+        if (signal) signal[0] = 0;
         if (!rendered) return out;
         if (reflections) {
           reflections.trace(origin,direction,0,Infinity,reflectionSample);
+          if (signal) signal[0] = 1-reflectionSample[3];
           for (let c=0;c<3;c++) out[c]=reflectionSample[c]+out[c]*reflectionSample[3];
           return out;
         }
-        if (thickness>0) return paintVolume(origin,direction,out,light);
+        if (thickness>0) return paintVolume(origin,direction,out,light,signal);
         if (Math.abs(direction[1]) < 1e-8) return out;
         const distance=(height-origin[1])/direction[1];
         if (distance <= 0) return out;
         const x = origin[0] + distance * direction[0], z = origin[2] + distance * direction[2];
         const coverage = sample(cells,x,z), amount = opacity*coverage*(cutouts?.gain(x,height,z)??1);
         if (!(amount>0)) return out;
+        if (signal) signal[0] = amount;
         const flash = light?.(x,height,z);
         const rim = style ? Math.max(0,lx*direction[0]+ly*direction[1]+lz*direction[2])**12 : 0;
         const brightness = style ? lit(x,z,.5,coverage,rim) : 0;

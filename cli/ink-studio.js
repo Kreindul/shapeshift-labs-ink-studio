@@ -226,7 +226,7 @@ function pose(w, t) {
 const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
 if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
   die('--px needs a positive integer');
-let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, celestialOverride, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, splatFieldsOverride, atmosphereEmittersOverride, inputSpriteAtlas;
+let lutOverride, stackOverride, effectPalettesOverride, constraintsOverride, skyOverride, skyProfiles, celestialOverride, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride, volumeCutoutsOverride, splatFieldsOverride, atmosphereEmittersOverride, inputSpriteAtlas;
 function skyProfileOverrides(value) {
   if (typeof value !== 'string') die('--sky-profile expects track=profile pairs');
   const pairs = value.split(',').map(entry => entry.split('=').map(part => part.trim()));
@@ -312,6 +312,14 @@ function celestialOption() {
   if (value === 'off') return false;
   if (value === 'on' || value === true) return true;
   return celestialOverride ??= require('../src/celestial-tracks.js').compile(JSON.parse(fs.readFileSync(path.resolve(value), 'utf8')));
+}
+
+function effectPalettesOption() {
+  const value = opt['effect-palettes'];
+  if (value === undefined) return undefined;
+  if (value === 'off') return false;
+  if (value === 'on' || value === true) return true;
+  return effectPalettesOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
 }
 
 function atmosphereEmittersOption() {
@@ -420,6 +428,7 @@ const view = extra =>
         ...(opt['dither-space'] && { dither: opt['dither-space'] }),
         ...(opt.resolve && { resolve: opt.resolve })
       } : undefined,
+      effectPalettes: effectPalettesOption(),
       artEffects: opt.effects === 'off' ? false : opt.effects,
       ink: opt.ink === 'off' ? false : opt.ink,
       tone: opt.tone === 'off' ? false : opt.tone,
@@ -514,7 +523,7 @@ function die(m) {
   console.error(m);
   process.exit(1);
 }
-const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,atmosphereEmittersOption});
+const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,atmosphereEmittersOption,effectPalettesOption});
 const worldCommands = new Set(['inspect','probe','trace','field','scene','sim']);
 const CMD = {
   help() {
@@ -620,6 +629,7 @@ const CMD = {
         'sprite options: --sprite-atlas on|off|atlas.json --sprite-at x,y,z --sprite-scale n --sprite-atlas-mode card|impostor',
         'shaped fog options: --shaped-atmosphere on|off|file.json --volume-cutouts on|off|file.json',
         'fog lighting options: --volume-local-lights on|off --volume-local-shadows on|off',
+        'effect palette options: --effect-palettes on|off|file.json',
         'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable off --snap --dither-space screen|world|object --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
       ].join('\n')
     );

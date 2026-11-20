@@ -19,6 +19,8 @@ Use [Celestial tracks](celestial-tracks.md) to key authored suns, moons, stars, 
 
 Use [Atmosphere emitters](atmosphere-emitters.md) to release smoke, steam, spray, or fog from fixed or moving scene sockets.
 
+Use [Effect palette ramps](effect-palettes.md) to reserve tone steps for fog, clouds, night skies, and emissive details.
+
 ## Planar reflections
 
 ```js

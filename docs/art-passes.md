@@ -70,6 +70,8 @@ const look = {
 };
 ```
 
+Use [Effect palette ramps](effect-palettes.md) to author independent fog, cloud, sky, and emission colors using the rendered effect coverage.
+
 Give a line a fixed color, separate highlight and shadow colors, or steps along its authored material ramp. A material rule can override or disable any line independently. A palette reserved for a named material applies only to that material. The emission and fog ramps are keyed by their render signals.
 
 Camera snapping applies to orthographic projection. World-space dithering samples at the visible surface. Object-space dithering maps the sample back to the splat's rest frame, using the rig transform where available. Screen-space dithering follows the art grid. Use `--ortho --snap`, `--dither-space screen|world|object`, and `--resolve native|coverage|clusters`. The coverage and cluster modes render four subpixels per art pixel and can protect named objects, materials, glints and small emissive details.
