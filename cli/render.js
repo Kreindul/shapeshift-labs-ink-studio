@@ -371,13 +371,13 @@ function renderFrame(world, o, preparedPalettes) {
       frame = ArtEffects.paletteUse(EmissiveFinishes.applyGlow(frame, passes, emissive.profiles), world.pal);
     }
     const ditherAt = anchoring ? (x,y) => ArtStability.ditherCoordinates(stable, passes, y*frame.w+x, x, y) : undefined;
-    if (styled && stages?.post) RenderStages.finish(frame, stages, passes, t, lookPass?.post, audit, ditherAt);
     if (effectSignals) {
       frame = EffectPalettes.apply(frame, passes, effectSignals, source, world.pal, o.captureEffectPalettes, ditherAt);
       if (audit) for (const ramp of effectSignals.rules.ramps.values()) audit.addPalette(ramp.packed);
     }
     if (hasFocus) frame = CameraStaging.focus(frame, passes.depth, focusBands, depthOffset,
-      styled && (!o.colored || !!tone));
+      styled && !stages && (!o.colored || !!tone));
+    if (styled && stages?.post) RenderStages.finish(frame, stages, passes, t, lookPass?.post, audit, ditherAt);
     if (framing) frame.cameraStaging = {
       ...CameraStaging.inspect(framing, world, { w: frame.w, h: frame.h, splatId: passes?.splatId }),
       camera: { yaw, pitch, distance: dist, target: Array.from(T), orthographic: ortho, fov: 2*Math.atan(tangent),
@@ -1102,9 +1102,9 @@ function renderFrame(world, o, preparedPalettes) {
       renderMeta?.materials?.[renderMeta.materialIds?.[i]]) : stable;
     return rule.dither === 'screen' ? null : rule;
   }
-  function stagedMaterial(i, rules, rgb, sample) {
+  function stagedMaterial(i, rules, rgb, sample, paintedAlbedo) {
     const reference = world.materialAlbedo?.[i];
-    return RenderStages.material(rules, rgb, reference ? reference - 1 : undefined, sample, undefined, lookPass?.stage);
+    return RenderStages.material(rules, rgb, reference ? reference - 1 : undefined, sample, undefined, lookPass?.stage, paintedAlbedo);
   }
   let pixed = null,
     sprM = null;
@@ -1214,7 +1214,8 @@ function renderFrame(world, o, preparedPalettes) {
       color=live?.albedo(i) ?? [(packed&255)/255, (packed>>8&255)/255, (packed>>16)/255];
       const staged=stages && stages.at(i);
       const sample=(staged?.material || staged?.lit) && (stageMasks ? stageSample(i,position) : undefined);
-      if (staged?.material) color=stagedMaterial(i,staged.material,color,sample);
+      const paintedAlbedo = staged?.material && surface?.paintsBase(i) ? [] : undefined;
+      if (staged?.material) color=stagedMaterial(i,staged.material,color,sample,paintedAlbedo);
       if (live?.normal(i)) {
         live.gains(i,...position,sunGains);
         color=color.map((v,k)=>v*sunGains[k]);
@@ -1224,7 +1225,7 @@ function renderFrame(world, o, preparedPalettes) {
         color = probes.shade(position,sprite.normal,color,undefined,0,probeAlbedo(i));
       if (surface?.has(i) && !PIX?.[i*8]) {
         const value=surface.shade(i,...position,X[i],Y[i],Z[i],...color,sprite.p%W+.5,Math.floor(sprite.p/W)+.5,
-          undefined,fragmentReflection);
+          undefined,fragmentReflection,paintedAlbedo);
         color=value.slice(0,3);
         highlight=value[4]; paletteId=value[5];
         reflected=fragmentReflection?.slice();
@@ -1338,7 +1339,8 @@ function renderFrame(world, o, preparedPalettes) {
     let r = liveAlbedo ? liveAlbedo[0] : (pk % 256) / 255,
       g = liveAlbedo ? liveAlbedo[1] : (Math.floor(pk / 256) % 256) / 255,
       b = liveAlbedo ? liveAlbedo[2] : Math.floor(pk / 65536) / 255;
-    if (staged?.material) [r, g, b] = stagedMaterial(i, staged.material, [r, g, b], materialSample);
+    const paintedAlbedo = staged?.material && surface?.paintsBase(i) ? [] : undefined;
+    if (staged?.material) [r, g, b] = stagedMaterial(i, staged.material, [r, g, b], materialSample, paintedAlbedo);
     r += add[i];
     g += add[i];
     b += add[i];
@@ -1450,7 +1452,7 @@ function renderFrame(world, o, preparedPalettes) {
     const centered = hasSurface && !pixelSurface && !fragmentSurface;
     if (centered) {
       [r, g, b, coverage, glint, centerPalette] = surface.shade(i, x, y, z, x, y, z, r, g, b, undefined, undefined,
-        lookPass?.surface, centerReflection);
+        lookPass?.surface, centerReflection, paintedAlbedo);
     }
     const splatFlash = flash && !(flags & 6) ? flash.light(x, y, z, liveNormal || (!fieldParticle ? geometrySample(i).normal : null)) : null;
     if (pixelSurface && splatFlash) patternFlashes.set(i, splatFlash);
@@ -1620,7 +1622,7 @@ function renderFrame(world, o, preparedPalettes) {
         if (fragmentSurface) {
           hit = exact?.position ?? surfacePoint(rayAt(ix + 0.5, iy + 0.5), normal, x, y, z, -cz, R);
           [pr, pg, pb, alpha, highlight, paletteId] = surface.shade(i, ...hit, x, y, z, pr, pg, pb, ix + 0.5, iy + 0.5,
-            lookPass?.surface, fragmentReflection);
+            lookPass?.surface, fragmentReflection, paintedAlbedo);
           reflected = fragmentReflection;
         }
         if (relit) {
@@ -1992,7 +1994,8 @@ function renderFrame(world, o, preparedPalettes) {
         lookPass?.begin();
         const masked = staged?.material?.some(rule => rule.mask) || staged?.lit?.some(rule => rule.mask);
         const sample = masked ? stageSample(i, [HX[p], HY[p], HZ[p]]) : undefined;
-        let base = staged?.material ? stagedMaterial(i, staged.material, PALC[ci], sample) : PALC[ci];
+        const paintedAlbedo = staged?.material && surface?.paintsBase(i) ? [] : undefined;
+        let base = staged?.material ? stagedMaterial(i, staged.material, PALC[ci], sample, paintedAlbedo) : PALC[ci];
         if (exposure?.light && !live?.normal(i) && !(Math.round(d[i*16+11]) & (32 | 64))) {
           const gain = .24 + .76 * exposure.light(HX[p],HY[p],HZ[p]);
           if (gain < 1) base = base.map(value => value * gain);

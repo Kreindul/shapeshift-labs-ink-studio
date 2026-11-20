@@ -105,6 +105,19 @@ host can supply both `position` and `worldPosition` to `SurfaceLook.shade`.
   before output palette selection. In ordinary color and stipple, dominant
   local palette regions use the same art grid as the rest of the scene.
 
+### Paint before or after lighting
+
+Set a projected color layer's `stage` to `material` to paint the base
+before the renderer restores its lighting. This also works for tint and
+color transfer layers. The default `lit` paints on the shaded surface.
+
+Material paint layers run in their authored order before lit finish layers.
+They keep geometric lighting and use the scene's output resolve. To protect
+an emissive graphic across compositing and grading, use a
+[scoped final palette rule](pixel-look.md#explicit-render-stages)
+with the graphic's swatches. The [harbour signal works](../examples/palette-placement.js)
+shows both placements with the same indexed artwork.
+
 ### Banded pigment
 
 Use `pattern: 'bands'` and `bandChannel` to turn a sampled field into

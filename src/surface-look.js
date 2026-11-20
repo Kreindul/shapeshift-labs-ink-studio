@@ -5,6 +5,7 @@ const SurfaceLook = (() => {
   const detail = typeof StableDetail === 'undefined' ? require('./stable-detail.js') : StableDetail;
   const kits = typeof SurfaceDetailKits === 'undefined' ? require('./surface-detail-kits.js') : SurfaceDetailKits;
   const effects = typeof SplatEffects === 'undefined' ? require('./splat-effects.js') : SplatEffects;
+  const stages = typeof RenderStages === 'undefined' ? require('./render-stages.js') : RenderStages;
   const pixelLook = typeof PixelLook === 'undefined' ? require('./pixel-look.js') : PixelLook;
   let curves, luts, stacks, colorSpace;
   try {
@@ -25,6 +26,8 @@ const SurfaceLook = (() => {
   const toDisplay = colorSpace.prepare('srgb-linear', 'srgb');
   const TAU = Math.PI * 2;
   const specularLayers = new Set(['specular','fiber','sheen','film','diffraction','glints','reflection','planarReflection','localReflection']);
+  const colorLayers = new Set(['tint','projected','colorCurve','colorLut','colorStack']);
+  const basePaint = layer => layer?.stage === 'material' && colorLayers.has(layer.type);
   const rampLayers = new Set(['diffuse', 'specular', 'fiber', 'sheen', 'glints', 'bevel']);
   const hasBevel = settings => Object.values(settings.layers ?? {}).some(layer =>
     layer?.type === 'bevel' && (layer.strength !== 0 || layer.drive?.strength !== undefined));
@@ -583,7 +586,9 @@ const SurfaceLook = (() => {
         (colorStack || layer.type !== 'colorStack') && (transmission || layer.type !== 'transmission') &&
         (detailKits || layer.type !== 'detailKit'))
       .map(([id, layer]) => {
-        const colorLayer = ['tint', 'projected', 'colorCurve', 'colorLut', 'colorStack'].includes(layer.type);
+        const colorLayer = colorLayers.has(layer.type);
+        if (colorLayer && layer.stage !== undefined && !['material','lit'].includes(layer.stage))
+          throw new RangeError(id + '.stage must be material or lit for a surface color layer');
         const kit = layer.type === 'detailKit' && kits.prepare(layer.pattern, value => color(value,palette));
         if (!colorLayer && !kit && !Object.hasOwn(models, layer.type))
           throw new RangeError('Unknown surface layer: ' + layer.type);
@@ -723,6 +728,8 @@ const SurfaceLook = (() => {
         };
         return { ...compiled, drive: prepareDrive(layer.drive, compiled, signals, palette) };
       });
+    const paintsBase = layers.some(basePaint);
+    if (paintsBase) layers.sort((a,b)=>Number(basePaint(b))-Number(basePaint(a)));
     const thin = layers.some(layer => layer.type === 'transmission');
     const thinLocal = layers.some(layer => layer.type === 'transmission' && layer.source !== 'sun');
     const driven = layers.some(layer => layer.drive || layer.effect?.boundAxes);
@@ -730,9 +737,9 @@ const SurfaceLook = (() => {
     const hasKits = layers.some(layer=>layer.kit);
     const kitExposure = layers.some(layer=>layer.kit?.exposure);
     return {
-      settings, normal, layers, driven, weather, thin, thinLocal, hasKits, kitExposure,
+      settings, normal, layers, driven, weather, thin, thinLocal, hasKits, kitExposure, paintsBase,
       needsDistance: layers.some(layer=>layer.type==='bevel' || layer.kit?.recipe==='crevice-moss' && layer.kit.crevices!=='joints'),
-      finishBeforeFog: thin || driven || hasKits || layers.some(layer => layer.type === 'tint'), sun: unit(vector(lightDirection, AXES.y)),
+      finishBeforeFog: thin || driven || hasKits || paintsBase || layers.some(layer => layer.type === 'tint'), sun: unit(vector(lightDirection, AXES.y)),
       paletteConstraint: paletteConstraints && settings.paletteConstraint !== undefined
         ? pixelLook.prepareLookPolicy(settings.paletteConstraint, { palette, roles: paletteRoles, blueNoise, context, validateOnly, onPaletteClip,
           skipMaskedStacks: !colorStack }) : null,
@@ -802,7 +809,15 @@ const SurfaceLook = (() => {
       bl = dot(b, sun);
     const rgb = [0, 0, 0];
     reflected?.fill(0);
-    for (let i = 0; i < 3; i++) output[i] = base[i];
+    let unlit = prepared.paintsBase;
+    const shaded = unlit && output === base ? Array.from(base).slice(0,3) : base;
+    const albedo = unlit && (sample.albedo ?? shaded);
+    for (let i = 0; i < 3; i++) output[i] = unlit ? albedo[i] : shaded[i];
+    const reapplyLight = unlit && (() => {
+      const lit = stages.repaint(shaded,albedo,output);
+      for (let i=0;i<3;i++) output[i] = lit[i];
+      unlit = false;
+    });
     output[3] = settings.opacity
       ? clamp(
           mix(settings.opacity.facing ?? 1, settings.opacity.grazing ?? 1, (1 - nv) ** (settings.opacity.power ?? 3))
@@ -829,6 +844,7 @@ const SurfaceLook = (() => {
     });
     let maskFrame;
     for (let layer of layers) {
+      if (unlit && !basePaint(layer)) reapplyLight();
       if (typeof layer.mask === 'function' && !maskFrame) maskFrame = {
         normal: geometricNormal, tangent: geometricTangent, bitangent: cross(geometricNormal, geometricTangent),
         footprint: sample.footprint || 0, time: sample.time || 0
@@ -848,7 +864,7 @@ const SurfaceLook = (() => {
         if (strength && visit) visit(layer,layer.mask ? maskWeight : null,strength,settings);
         continue;
       }
-      const step = trace && layer.effect && { layer: layer.id, type: layer.type,
+      const step = trace && layer.effect && { layer: layer.id, type: layer.type, ...(unlit && { stage:'material' }),
         ...(layer.stack?.name && { stack: layer.stack.name }), maskWeight, input: output.slice(0, 3) };
       if (step) trace.push(step);
       if (!strength) {
@@ -867,7 +883,7 @@ const SurfaceLook = (() => {
         }
         output[3] *= mix(1, clamp(result[4]), strength);
         output[4] = Math.max(output[4], clamp(result[5] * strength) * detailGain);
-        if (amount >= 0.5) output[5] = layer.effect.palette;
+        if (!unlit && amount >= 0.5) output[5] = layer.effect.palette;
         let clipped;
         for (let i = 0; i < 3; i++) {
           const next = layer.blend === 'add' ? output[i] + result[i] :
@@ -923,9 +939,10 @@ const SurfaceLook = (() => {
       }
     }
     if (prepared.paletteConstraint) output[5] = prepared.paletteConstraint.swatches;
+    if (unlit) reapplyLight();
     return output;
   }
 
-  return { STRIDE, hasBevel, needsDistance, material, merge, prepare, shade, prepareLightTrack, lightRamps, withLightRamps };
+  return { basePaint, STRIDE, hasBevel, needsDistance, material, merge, prepare, shade, prepareLightTrack, lightRamps, withLightRamps };
 })();
 if (typeof module !== 'undefined') module.exports = SurfaceLook;
