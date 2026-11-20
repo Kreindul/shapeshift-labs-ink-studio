@@ -281,7 +281,7 @@ function skyTransitionsOption() {
   if (typeof value !== 'string') die('--sky-transitions needs a JSON array file or off');
   return skyTransitionsOverride ??= JSON.parse(fs.readFileSync(path.resolve(value),'utf8'));
 }
-let inspectionOverride, shadowArtOverride, compositeOverride, renderGraphOverride, afterimagesOverride, reconstructionOverride;
+let inspectionOverride, shadowArtOverride, compositeOverride, cutawayOverride, renderGraphOverride, afterimagesOverride, reconstructionOverride;
 function shadowArtOption() {
   const value = opt['shadow-art'];
   if (value === undefined) return;
@@ -581,6 +581,13 @@ function edgeFilterOption() {
   return edgeFilterOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
 }
 
+function cutawayOption() {
+  if (opt.cutaway === 'off') return false;
+  if (opt.cutaway === undefined) return undefined;
+  if (typeof opt.cutaway !== 'string') die('--cutaway needs a JSON file or off');
+  return cutawayOverride ??= JSON.parse(fs.readFileSync(path.resolve(opt.cutaway), 'utf8'));
+}
+
 function compositeOption() {
   if (opt.composite === 'off') return false;
   if (opt.composite === undefined) return undefined;
@@ -659,6 +666,7 @@ const view = extra =>
         (inspectionOverride ??= JSON.parse(fs.readFileSync(path.resolve(opt.inspection), 'utf8'))),
       inspectionFocus: opt['inspection-focus'],
       composite: compositeOption(),
+      cutaway: cutawayOption(),
       renderGraph: opt['render-graph'] === 'off' ? false : opt['render-graph'] === undefined ? undefined :
         (renderGraphOverride ??= JSON.parse(fs.readFileSync(path.resolve(opt['render-graph']), 'utf8'))),
       reconstruction: opt.reconstruction === 'off' ? false : opt.reconstruction === undefined ? undefined :
@@ -757,6 +765,7 @@ const CMD = {
       [
         'ink-studio <command> <diorama id | lab/file.js> [options]',
         '',
+        '  palette <recipe.json> [--t seconds] [--out palette.json]   sample palette recipes, paths and animation',
         '  inspect <scene|run>         discover fields, actions, ports and entities',
         '  environment inspect <scene|run> --at x,y,z [--t seconds] [--out report.json]   explain sky and local weather',
         '  probe <scene|run> --field name [--at x,y,z | --entity id] [--explain]  sample world state',
@@ -894,9 +903,23 @@ const CMD = {
         'layered horizon: --horizon-bands on|off|file.json',
         'art direction: --art-direction on|off|painted-pixel|storm-silhouette|soft-dawn|file.json',
         'effect palette options: --effect-palettes on|off|file.json',
-        'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable on|off|file.json --stable-detail on|off|file.json --edge-filter on|off|file.json --contact-shadows on|off|file.json --area-lights on|off|file.json --bounce-probes on|off|file.json --snap on|off --dither-space screen|world|object --dither-spacing n --dither-origin x,y,z --resolve native|coverage|clusters --splat-order center|surface --splat-coverage legacy|continuous|soft --sdf-assist on|off|file.json --stable-transparency on|off|blend --fragment-budget N --inspection file.json|off --inspection-focus id --composite file.json|off --render-graph file.json|off --afterimages file.json|off --reconstruction file.json|off --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
+        'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable on|off|file.json --stable-detail on|off|file.json --edge-filter on|off|file.json --contact-shadows on|off|file.json --area-lights on|off|file.json --bounce-probes on|off|file.json --snap on|off --dither-space screen|world|object --dither-spacing n --dither-origin x,y,z --resolve native|coverage|clusters --splat-order center|surface --splat-coverage legacy|continuous|soft --sdf-assist on|off|file.json --stable-transparency on|off|blend --fragment-budget N --inspection file.json|off --inspection-focus id --composite file.json|off --cutaway file.json|off --render-graph file.json|off --afterimages file.json|off --reconstruction file.json|off --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
       ].join('\n')
     );
+  },
+  palette() {
+    if (!pos[0]) die('palette needs a recipe, path or animation JSON file');
+    const definition = JSON.parse(fs.readFileSync(path.resolve(pos[0]), 'utf8'));
+    const api = lib().KIT.palette, time = num('t', 0);
+    if (!Number.isFinite(time)) die('palette time must be finite');
+    const result = definition.keys ? api.animate(definition).sample(time) :
+      definition.anchors ? api.recipe(definition) : api.path(definition);
+    const report = { palette: result.palette ?? result.hex, rgb: result.rgb,
+      ...(result.roles && { roles: result.roles, ramps: result.ramps }),
+      ...(result.time !== undefined && { time: result.time, phase: result.phase }) };
+    const json = JSON.stringify(report, null, 2) + '\n';
+    if (opt.out) { const file = path.resolve(opt.out); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, json); }
+    else process.stdout.write(json);
   },
   authoring() {
     return require('./authoring.js')(pos, opt, {

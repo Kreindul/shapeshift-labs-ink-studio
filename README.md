@@ -310,6 +310,8 @@ Synchronize records, filters, and time across charts, maps, tables, and WebGL sc
 
 Render scalar slices, contours, and isosurfaces alongside vector streamlines and glyphs. [Field and volume visualization](docs/field-visualization.md)
 
+Move section planes, depth ranges, and spatial masks across a native render. [Interactive cutaways and clipping](docs/cutaways.md)
+
 The [unified scene timeline](docs/scene-timeline.md) synchronizes camera motion, rig poses, lights, effects, audio cues, and world events through keyframes and nested sequences.
 
 Use `K.rig` for tagged rigid parts, `K.creature` for a creature rig, and `K.puppet` for hierarchical parts with deformation. `K.anim` provides clips, easing, layers, state machines, constraints, facial controls and presentation cues. `K.acts` provides ready-made action and reaction clips.
@@ -999,3 +1001,5 @@ Licensed under the [MIT License](LICENSE).
 Surface fragments can detach, follow shared wind, gather into live forms, and rejoin animated parts. See [surface materialisation](docs/materialisation.md) and the [interactive matter relay](examples/materialisation.html).
 
 Named targets can drive shared brackets, labels, glyph ripples, depth visibility and optional magnified views. See [target inspection effects](docs/target-inspection.md) and the [interactive relay observatory](examples/target-inspection.html).
+
+`KIT.palette` adds dependency-free two-color recipes, independent OKLCh channel curves, named material roles, reference-ramp transfer, and seekable palette paths. See [palette recipes](docs/palette-recipes.md) and the [interactive Chromatic garden](examples/palette-recipes.html). Export colors with `ink-studio palette examples/palette-recipe.json`.
