@@ -265,5 +265,5 @@
     return system;
   }
 
-  K.splatEffects = Object.freeze({ project: SplatEffects.project, field, context, surfaceSource, emitter });
+  K.splatEffects = Object.freeze({ project: SplatEffects.project, prepareMask: SplatEffects.prepareMask, field, context, surfaceSource, emitter });
 })(KIT);

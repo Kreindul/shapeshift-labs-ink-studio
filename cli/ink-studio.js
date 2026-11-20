@@ -235,6 +235,7 @@ const view = extra =>
         (stackOverride ??= require('./color-stack.js').override(opt['color-stack'])),
       paletteConstraints: opt['palette-constraints'] === undefined ? undefined :
         (constraintsOverride ??= require('./palette-constraints.js').override(opt['palette-constraints'])),
+      lookMasks: opt['look-masks'] === 'off' ? false : undefined,
       raw: !!opt.raw,
       colored: !!opt.colored,
       splatOrder: opt['splat-order'],
@@ -305,6 +306,7 @@ const CMD = {
         '  stats <id>                  splat counts, colours used, size, cost per frame, warnings',
         '  render <id> [--t 1.5]       one PNG rendered on the CPU',
         '  render <id> --palette-constraints <file.json|off>   override target palettes and dither settings',
+        '  render <id> --look-masks off   bypass masked look bindings',
         '  render <scene.json> --asset-pack <pack-or-bundle.json>   install look assets for this invocation',
         '  ramps <id> [--n 12]         the ramps it is shaded on, and which only get darker without turning; a turning one is offered from the same palette',
         '  values <id> [--t 1.5]       the value check: the picture sorted into dark, middle and light, and whether it reads in three tones',

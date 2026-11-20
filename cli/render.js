@@ -10,6 +10,7 @@ const ArtInk = require('../src/art-ink.js');
 const ArtEffects = require('../src/art-effects.js');
 const ArtStability = require('../src/art-stability.js');
 const { footprint, sampledDepth } = require('./splat-sampling.js');
+const { createMaskResolve, applyMasks } = require('./look-mask-resolve.js');
 const blueNoiseTiles = new WeakMap();
 function blueNoise(world, { seed }) {
   if (!blueNoiseTiles.has(world)) blueNoiseTiles.set(world, new Map());
@@ -130,7 +131,8 @@ function render(world, o, preparedPalettes) {
     throw new RangeError('look.pixelSize must be a positive integer');
   const tone = styled ? PixelLook.prepareTone(o.tone ?? look.tone, settings => blueNoise(world, settings)) : null;
   const paletteRules = styled ? PixelLook.preparePaletteConstraints(o.paletteConstraints ?? look.paletteConstraints, {
-    palette: world.pal, roles: world.paletteRoles, blueNoise: settings => blueNoise(world, settings)
+    palette: world.pal, roles: world.paletteRoles, blueNoise: settings => blueNoise(world, settings),
+    context: world.surfaceEffects, skipMasks: o.lookMasks === false, skipMaskedStacks: o.colorStack === false
   }) : preparedPalettes;
   const colorGrade = styled && !tone && PixelLook.colorGrade(world.pal, world.paletteRoles, an.grade,
     o.paletteRemap ?? look.paletteRemap, o.colorCurves ?? look.colorCurves, o.colorLut ?? look.colorLut,
@@ -149,12 +151,14 @@ function render(world, o, preparedPalettes) {
   const captureMotion = !!o.captureMotion || passSelection.has('motion') || passSelection.has('emissionMotion');
   if (styled && (specializedResolve || (o.colored && !tone))) {
     const native = render(world, Object.assign({}, o, { colored: false, samples: true, worked: true, px, passes: [...passSelection], artInkActive: !!ink,
-      captureMotion, motionFrom, reflectionTint: effects?.reflection, captureFog: o.captureFog || ink?.ramps.has('fog') }), paletteRules);
+      captureMotion, motionFrom, maskGrade: !tone && grade, reflectionTint: effects?.reflection,
+      captureFog: o.captureFog || ink?.ramps.has('fog') }), paletteRules);
     const samples = render(
       world,
       Object.assign({}, o, {
         colored: false,
         samples: true,
+        lookMasks: false,
         pick: undefined,
         px: px / 2,
         w: W * px,
@@ -182,6 +186,7 @@ function render(world, o, preparedPalettes) {
         palette, local, contour: !ink, grade, interiorColor: native.color, dither: amount,
         ditherAt: anchoring ? (x, y) => ArtStability.ditherCoordinates(stable, native.passes, (H - 1 - y) * W + x, x, y) : null
       }));
+    applyMasks(img.rgb, native.masked);
     return finishLook(Object.assign(img, { px, drawn: samples.drawn },
       evaluatedPalette && !local && { palette: evaluatedPalette },
       !specializedResolve && native.detail && { detail: native.detail },
@@ -277,10 +282,19 @@ function render(world, o, preparedPalettes) {
   const localAt = localPalettes.length && !o.raw ? new Uint32Array(W * H) : null;
   const targetSlots = paletteRules?.slots(world);
   const defaultSlot = paletteRules?.defaultSlot || 0;
-  function localSlot(i, layer) {
+  const overlay = localAt && localConstraints?.some(policy => policy?.mask) &&
+    { slots: new Uint32Array(W * H), owners: new Uint32Array(W * H) };
+  const fallbackSlot = defaultSlot ? layerPalettes.length + defaultSlot : 0;
+  const unmasked = slot => localConstraints?.[slot - 1]?.mask ? 0 : slot;
+  function localSlot(i, layer, pixel) {
     const target = targetSlots?.[i];
-    if (target) return layerPalettes.length + target;
-    return layer || (defaultSlot ? layerPalettes.length + defaultSlot : 0);
+    const slot = target ? layerPalettes.length + target : layer || fallbackSlot;
+    if (!overlay) return slot;
+    const masked = slot && !unmasked(slot);
+    overlay.slots[pixel] = masked ? slot : 0;
+    if (!masked) return slot;
+    overlay.owners[pixel] = i;
+    return unmasked(layer) || unmasked(fallbackSlot) || 0;
   }
   const hasEffectInk = world.effectParticles?.length || world.surfaces?.some(({ settings }) =>
     Object.values(settings.layers || {}).some(layer => layer?.type === 'projected'));
@@ -431,7 +445,7 @@ function render(world, o, preparedPalettes) {
     if (captured) captured[p] = a + captured[p] * ia;
     if (art) art.fragment(p, i, a, wd, z, emits, pr, pg, pb);
     if (surfaceGlint && a > 0.5) surfaceGlint[p] = highlight > 0.22 || detailParticle;
-    if (localAt && a > 0.5) localAt[p] = localSlot(i, paletteId);
+    if (localAt && a > 0.5) localAt[p] = localSlot(i, paletteId, p);
     if (detail) {
       const q = (H - 1 - Math.floor(p / W)) * W + p % W;
       if (a > 0.5) detail[q] = 0;
@@ -934,7 +948,7 @@ function render(world, o, preparedPalettes) {
           kf = world.fog.max > 0 && world.fog.start < 1 ? sstep(world.fog.start, 1, dep[p]) * world.fog.max : 0;
         if (surfaceGlint) surfaceGlint[p] = c[4] > 0.22;
         if ((surfaceOverlay?.[p * 4 + 3] || 0) < 0.5) {
-          if (localAt) localAt[p] = localSlot(i, c[5]);
+          if (localAt) localAt[p] = localSlot(i, c[5], p);
           if (detail && surface?.projected(i) && c[4] > 0.22) detail[(H - 1 - y) * W + x] = 1;
         }
         col[p * 3] = c[0] + (fog[0] - c[0]) * kf;
@@ -1068,6 +1082,7 @@ function render(world, o, preparedPalettes) {
         if (axialDepth) axialDepth[q] = eyeD - R + sprD[q] * 2 * R;
         if (art) art.sprite(q, sprOwner[q], eyeD - R + sprD[q] * 2 * R);
         if (localAt) localAt[q] = 0;
+        if (overlay) overlay.slots[q] = 0;
         if (detail) detail[(H - 1 - Math.floor(q / W)) * W + q % W] = 0;
         dep[q] = sprD[q]; // (so the clean-up sees it as part of the thing, and leaves it as drawn)
         pixed[q] = 1;
@@ -1102,6 +1117,8 @@ function render(world, o, preparedPalettes) {
       if (a > 1e-6) for (let c = 0; c < 3; c++) col[p * 3 + c] /= a;
     }
   }
+  const masks = overlay && createMaskResolve(world, { w: W, h: H, time: t, x: X, y: Y, z: Z, depth, rayAt, span: R },
+    overlay, localConstraints, o.maskGrade ?? (!tone && grade));
   if (o.samples) {
     // (the picture the contour look takes its insides from is worked on first, as the page does: glass bends it, contact shade darkens it)
     let c2 = col;
@@ -1133,9 +1150,16 @@ function render(world, o, preparedPalettes) {
           c2[p * 3 + 2] = col[q * 3 + 2] * k;
         }
     }
+    if (masks) for (let p = 0; p < W * H; p++) {
+      if (!overlay.slots[p]) continue;
+      const q = p * 3, x = p % W, y = H - 1 - Math.floor(p / W);
+      const [dx, dy] = passes?.splatId && stable ? ArtStability.ditherCoordinates(stable, passes, y * W + x, x, y) : [x, y];
+      masks.record(p, c2[q], c2[q + 1], c2[q + 2], dx, dy);
+    }
     return {
       w: W, h: H, color: Uint8Array.from(c2, v => Math.round(clamp(v, 0, 1) * 255)), depth: dep, drawn,
       ...(localAt && { localAt, localPalettes, localConstraints }), ...(detail && { detail }), ...(passes && { passes }), ...(motionReference && { motionReference }),
+      ...(masks && { masked: masks.output }),
       ...(atmosphere?.fog && { fog: atmosphere.fog }), ...(volumeStats && { volumeStats }), ...(alpha && { alpha }), ...(orderFallback && { orderFallback })
     };
   }
@@ -1237,8 +1261,9 @@ function render(world, o, preparedPalettes) {
       const localId = outlined ? 0 : localAt?.[p];
       let ditherX = x, ditherY = y;
       if (anchoring) [ditherX, ditherY] = ArtStability.ditherCoordinates(stable, passes, yo * W + x, x, y);
+      const localY = anchoring && passes.splatId[yo * W + x] ? ditherY : yo;
+      if (masks && !outlined) masks.record(p, r, g, b, ditherX, localY);
       if (tone || localId) {
-        const localY = anchoring && passes.splatId[yo * W + x] ? ditherY : yo;
         const index = localId ? PixelLook.localIndex(local, localId, [r, g, b], ditherX, localY, !surfaceGlint?.[p]) :
           PixelLook.toneIndex(tone, r, g, b, ditherX, anchoring && passes.splatId[yo * W + x] ? ditherY : yo);
         const color = (localOutput?.packed || tone.palette)[index];
@@ -1414,6 +1439,7 @@ function render(world, o, preparedPalettes) {
         out[q + 2] = src[best + 2];
       }
   }
+  applyMasks(out, masks?.output);
   return finishLook({
     w: W, h: H, px, rgb: out, drawn, use,
     ...((localOutput || tone || evaluatedPalette) && { palette: localOutput?.packed || tone?.palette || evaluatedPalette }),

@@ -10,7 +10,8 @@
   function visualLooks(world, catalog) {
     const config = world.visual ?? {}, entities = world.entities;
     const assets = K.authoring.looks, paletteOptions = { palette: config.palette ?? palette,
-      roles: config.paletteRoles, blueNoise: K.procedural.materials.blueNoise };
+      roles: config.paletteRoles, blueNoise: K.procedural.materials.blueNoise,
+      context: config.surfaceEffects && K.splatEffects.context(config.surfaceEffects), validateOnly: true };
     const look = assets.scene(config.look, catalog), inherited = new Map(), surfaces = new Map();
     function surface(binding) {
       if (!surfaces.has(binding)) {
@@ -43,7 +44,7 @@
       return binding;
     }
     function validate() {
-      if (Object.hasOwn(config.look ?? {}, 'asset') || Object.hasOwn(config.look ?? {}, 'targets')) {
+      if (look?.paletteConstraints || Object.hasOwn(config.look ?? {}, 'asset') || Object.hasOwn(config.look ?? {}, 'targets')) {
         PixelLook.prepareColorStack(look.colorStack, paletteOptions.palette, paletteOptions.roles);
         PixelLook.preparePaletteConstraints(look.paletteConstraints, paletteOptions);
       }
@@ -51,8 +52,8 @@
       function check(binding) {
         if (binding === undefined || checked.has(binding)) return;
         const settings = surface(binding);
-        if (settings) SurfaceLook.prepare(settings, paletteOptions.palette, undefined, undefined,
-          { paletteRoles: paletteOptions.roles, blueNoise: paletteOptions.blueNoise });
+        if (settings) SurfaceLook.prepare(settings, paletteOptions.palette, undefined, paletteOptions.context,
+          { paletteRoles: paletteOptions.roles, blueNoise: paletteOptions.blueNoise, validateOnly: true });
         checked.add(binding);
       }
       check(config.terrainLookAsset);
@@ -160,9 +161,11 @@
       }
       B.describeSplats?.(first,B.count(),{material:'water',target:{medium:water,mediumKind:'water',surface:'water'}});
     }
+    const surfaceEffects = (hasSurface || config.surfaceEffects || looks.look?.paletteConstraints) &&
+      { ...config.surfaceEffects, query };
     return B.finish({cam:config.camera??{target:[mid[0],.05,mid[2]],dist:span*1.48,yaw:.62,pitch:.8},
       radius:span,detail:30,dither:.22,look:looks.look,paletteRoles:config.paletteRoles,
-      ...((hasSurface||config.surfaceEffects)&&{surfaceEffects:{...config.surfaceEffects,query}})});
+      ...(surfaceEffects&&{surfaceEffects})});
   }
   W.visual = visual;
   W.validateLooks = (world, catalog) => visualLooks(world, catalog).validate();

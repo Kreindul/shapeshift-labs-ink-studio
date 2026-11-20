@@ -121,7 +121,7 @@
     const base = {world, states, signals, tick, time:view.time ?? tick * world.dt};
     const locations = new Map(), active = new Set();
     let spatialIndex, aliases, appearance;
-    const look = () => appearance ??= W.lookQuery(visual ?? (() => W.visual({makeBuilder,makeSculpt},view,api)));
+    const look = () => appearance ??= W.lookQuery(visual ?? (() => W.visual({makeBuilder,makeSculpt},view,api)),base.time);
 
     function location(id) {
       if (locations.has(id)) return locations.get(id);
@@ -310,7 +310,7 @@
   }
   function fromScene(w, time=0) {
     if(typeof w.query==='function'){
-      const wrapped=w.query(w,time), appearance=W.lookQuery(()=>w);
+      const wrapped=w.query(w,time), appearance=W.lookQuery(()=>w,time);
       return Object.freeze({...wrapped, select:appearance.select,
         inspect(options){
           const result=wrapped.inspect(options);

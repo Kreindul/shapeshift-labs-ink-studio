@@ -298,6 +298,24 @@ const PixelLook = (() => {
     return { packed, swatches, count, width, height, ranks, amount, source, reservedIndex, index };
   }
 
+  function prepareLookPolicy(definition, options = {}) {
+    if (!record(definition)) throw new TypeError('Expected a look palette policy');
+    const { stack, assetId, mask, ...policy } = definition;
+    const active = options.skipMaskedStacks && mask ? undefined : stack;
+    if (stack && !active && !Object.keys(policy).length) return null;
+    const grade = active && colorGrade(options.palette, options.roles, undefined, false, false, false, active);
+    const mapOnly = Boolean(grade && !Object.keys(policy).length);
+    const plan = preparePalette(mapOnly ? { palette: ['#000000'] } : policy, options);
+    if (mapOnly) {
+      plan.packed = gradePalette(grade);
+      plan.swatches = plan.packed.map(unpack);
+    }
+    const effects = mask !== undefined && mask !== false ?
+      (typeof SplatEffects === 'undefined' ? require('./splat-effects.js') : SplatEffects) : null;
+    return Object.assign(plan, { grade, mapOnly, assetId, sourceSwatches: grade ? Array.from(options.palette, unpack) : undefined,
+      mask: effects?.prepareMask(mask, options.context, { validateOnly: options.validateOnly }) });
+  }
+
   function preparePaletteConstraints(definition, options) {
     if (definition === undefined || definition === false) return null;
     if (!record(definition) || Object.keys(definition).some(key => key !== 'default' && key !== 'targets'))
@@ -306,22 +324,17 @@ const PixelLook = (() => {
     if (!Array.isArray(targets) || targets.length > 63)
       throw new RangeError('Palette constraints accept up to 63 targets');
     const rules = [], palettes = [];
-    const defaultSlot = fallback === undefined ? 0 : palettes.push(preparePalette(fallback, options));
+    const defaultPolicy = fallback === undefined || (options?.skipMasks && fallback?.mask) ? null :
+      prepareLookPolicy(fallback, options);
+    const defaultSlot = defaultPolicy ? palettes.push(defaultPolicy) : 0;
     for (const target of targets) {
       if (!record(target)) throw new TypeError('Expected a palette target');
-      const { select, object, material, stack, assetId, ...policy } = target;
+      const { select, object, material, ...policy } = target;
       if (select !== undefined && (object !== undefined || material !== undefined))
         throw new TypeError('Use select or legacy object and material fields on a target');
       const filter = selectors.prepare(select ?? { ...(object !== undefined && { object }), ...(material !== undefined && { material }) });
-      const grade = stack && colorGrade(options.palette, options.roles, undefined, false, false, false, stack);
-      const mapOnly = Boolean(grade && !Object.keys(policy).length);
-      const plan = preparePalette(mapOnly ? { palette: ['#000000'] } : policy, options);
-      if (mapOnly) {
-        plan.packed = gradePalette(grade);
-        plan.swatches = plan.packed.map(unpack);
-      }
-      Object.assign(plan, { grade, mapOnly, assetId, sourceSwatches: grade ? Array.from(options.palette, unpack) : undefined });
-      rules.push({ select: filter, slot: palettes.push(plan) });
+      const prepared = options?.skipMasks && policy.mask ? null : prepareLookPolicy(policy, options);
+      if (prepared) rules.push({ select: filter, slot: palettes.push(prepared) });
     }
     if (!palettes.length) return null;
 
@@ -382,6 +395,7 @@ const PixelLook = (() => {
     const slot = plan?.match(medium);
     if (!slot) return undefined;
     const policy = plan.palettes[slot - 1];
+    if (policy.mask) return undefined;
     return rgb => unpack(policy.packed[paletteIndex(policy, rgb, 0, 0, { useDither: false })]);
   }
 
@@ -511,7 +525,7 @@ vec3 inkToneResolve(vec3 color, ivec2 pixel) {
   return share >= mix(0.5, rank, u_inkToneAmount) ? b.rgb : a.rgb;
 }`;
   return { nearest, ink, resolve, glsl, presets, toneSettings, prepareTone, toneIndex, toneGlsl, bayerRank, outputPalettes, localIndex,
-    preparePalette, preparePaletteConstraints, paletteIndex, mediumTransform,
+    preparePalette, prepareLookPolicy, preparePaletteConstraints, paletteIndex, mediumTransform,
     prepareRemap, gradePalette, prepareColorStack, colorGrade };
 })();
 if (typeof module !== 'undefined') module.exports = PixelLook;

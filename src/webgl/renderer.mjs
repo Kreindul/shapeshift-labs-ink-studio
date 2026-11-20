@@ -178,7 +178,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       if (key === constraintKey && world === constraintWorld && world.renderMetadata === constraintMetadata &&
           world.count === constraintCount) return constraintPlan;
       const plan = toolkit.PixelLook.preparePaletteConstraints(definition, {
-        palette: world.pal, roles: world.paletteRoles, blueNoise: toolkit.KIT?.procedural?.materials?.blueNoise
+        palette: world.pal, roles: world.paletteRoles, blueNoise: toolkit.KIT?.procedural?.materials?.blueNoise, skipMasks: true
       });
       if (plan) {
         constraintRows ??= resources.texture();

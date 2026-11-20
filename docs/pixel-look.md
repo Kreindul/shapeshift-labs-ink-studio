@@ -500,3 +500,55 @@ IDs, winning rule, and output swatches. Supply normalized shaded RGB and
 optional art pixel coordinates to sample the look's palette resolve
 without a viewport. A selector with no matches reports `missing`. Validation
 checks against the requested scene or simulation tick.
+
+## Spatial and field masks
+
+Give a look asset or its binding a `mask` to blend the finished look over
+the underlying surface color. A binding can replace the asset's mask or
+set `mask: false` to use the look across the entire target. A selector
+rule can also supply its own `mask`.
+
+```json
+{
+  "select": { "surface": "spillway-wall" },
+  "asset": "spillway/damp-stone",
+  "mask": { "type": "query", "field": "runoff/wetness", "space": "world", "range": [0.02, 0.9] }
+}
+```
+
+| Mask type | Scalar source |
+| --- | --- |
+| `axis` | Distance along `axis` from `origin`. Use `x`, `y`, `z`, or an XYZ vector. |
+| `query` | A numeric scene query field. Optional `path` selects a value inside a record, `args` passes query arguments, and `fallback` supplies a value for unavailable samples. |
+| `field` | A named projected field and `channel` in `surfaceEffects.fields`. |
+| `texture` | An alpha, red, green, blue, or luminance channel in an existing RGB or RGBA `raster` frame set. Optional two-component `scale` and `offset` place one texture repeat. |
+
+Projected fields and textures use the existing plane, cylinder, or
+ribbon `projection`. `space: "world"` anchors the mask in the scene.
+`space: "rest"` attaches it to the surface's rest coordinates so it
+travels with a moving part. Queries default to world space. The other
+masks default to rest space.
+
+`range` maps the sampled scalar to a weight between zero and one. The
+default interpolation is `smooth`, with `linear` and `step` also
+available. Use `invert` to reverse the weight. A missing query sample
+contributes zero weight unless it has a numeric fallback. At zero
+weight the renderer uses the underlying color, and at one it uses the
+full looked color. Intermediate weights can introduce colors between
+the base and target swatches.
+
+Use `probe --select` with an `at` world point or `rest` point inside
+`--args` to report the mask weight. Supply `rgb` to sample the blended
+output and optional `base` RGB to specify its underlying color.
+
+```sh
+node cli/ink-studio.js render examples/wet-spillway.js --ortho --look-masks off --out dry.png
+node cli/ink-studio.js render examples/wet-spillway.js --ortho --out damp.png
+node cli/ink-studio.js probe examples/wet-spillway.js --select '{"surface":"spillway-wall"}' \
+  --args '{"at":[1,0.55,0],"rgb":[0.65,0.65,0.65],"limit":1}'
+```
+
+The CLI resolves masked bindings on splats at their sampled surface
+positions. JavaScript renderer hosts can evaluate the same masks with
+`KIT.splatEffects.prepareMask(settings, context)`. Standard WebGL
+currently evaluates unmasked look rules.

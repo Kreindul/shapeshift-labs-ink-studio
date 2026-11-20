@@ -295,7 +295,8 @@ const SurfaceLook = (() => {
   }
 
   function prepare(settings, palette = [], lightDirection = [-0.55, 0.72, 0.43], context = {},
-    { colorCurves = true, colorLut = true, colorStack = true, paletteConstraints = true, paletteRoles, blueNoise } = {}) {
+    { colorCurves = true, colorLut = true, colorStack = true, paletteConstraints = true, paletteRoles, blueNoise,
+      validateOnly = false } = {}) {
     if (!isRecord(settings)) throw new TypeError('Surface settings must be an object');
     numeric(settings, ['scale', 'seed', 'steps'], 'surface');
     if (settings.layers !== undefined && !isRecord(settings.layers))
@@ -389,7 +390,9 @@ const SurfaceLook = (() => {
             throw new RangeError(id + ' needs nonnegative blur and distortion');
         }
         const fieldMask = layer.mask?.type === 'field' ? effects.fieldMask(layer.mask, context) : null;
-        if (layer.mask && typeof layer.mask !== 'function' && !fieldMask) {
+        const spatialMask = ['axis', 'texture', 'query'].includes(layer.mask?.type)
+          ? effects.prepareMask(layer.mask, context, { validateOnly }) : fieldMask;
+        if (layer.mask && typeof layer.mask !== 'function' && !spatialMask) {
           if (!isRecord(layer.mask)) throw new TypeError(id + '.mask must be an object');
           if (!['noise', 'stripes', 'checker'].includes(layer.mask.type))
             throw new RangeError('Unknown surface mask: ' + layer.mask.type);
@@ -402,7 +405,7 @@ const SurfaceLook = (() => {
           let effect;
           if (layer.type === 'colorLut' || layer.type === 'colorStack') effect = effects[layer.type](layer, resolveColor);
           else effect = (layer.type === 'projected' ? effects.layer : effects.colorCurve)(layer, context, resolveColor);
-          return { ...layer, id, blend, strength: clamp(layer.strength ?? 1), effect, fieldMask };
+          return { ...layer, id, blend, strength: clamp(layer.strength ?? 1), effect, spatialMask };
         }
         if (layer.colors !== undefined && !Array.isArray(layer.colors))
           throw new TypeError(id + '.colors must be a list');
@@ -417,7 +420,7 @@ const SurfaceLook = (() => {
         return {
           ...layer,
           id,
-          fieldMask,
+          spatialMask,
           model: models[layer.type],
           strength: clamp(layer.strength ?? 1),
           roughness: [roughness[0], roughness[1] ?? roughness[0]].map(v =>
@@ -436,8 +439,9 @@ const SurfaceLook = (() => {
     return {
       settings, normal, layers, sun: unit(vector(lightDirection, AXES.y)),
       paletteConstraint: paletteConstraints && settings.paletteConstraint !== undefined
-        ? pixelLook.preparePalette(settings.paletteConstraint, { palette, roles: paletteRoles, blueNoise }) : null,
-      projected: layers.some(layer => layer.effect || layer.fieldMask),
+        ? pixelLook.prepareLookPolicy(settings.paletteConstraint, { palette, roles: paletteRoles, blueNoise, context, validateOnly,
+          skipMaskedStacks: !colorStack }) : null,
+      projected: layers.some(layer => layer.effect || layer.spatialMask),
       depth: layers.some(layer => layer.effect?.depth),
       reveals: layers.some(layer => layer.effect?.reveals)
     };
@@ -503,7 +507,7 @@ const SurfaceLook = (() => {
         footprint: sample.footprint || 0, time: sample.time || 0
       };
       const strength = layer.strength *
-        (layer.fieldMask ? layer.fieldMask(sample) : maskAt(layer.mask, p, seed, position, maskFrame));
+        (layer.spatialMask ? layer.spatialMask(sample) : maskAt(layer.mask, p, seed, position, maskFrame));
       if (!strength) continue;
       if (layer.effect) {
         const result = layer.effect.sample(sample, output);

@@ -377,7 +377,7 @@
     }
     try {
       PixelLook.preparePaletteConstraints(look?.paletteConstraints, {
-        palette: pal, roles: st.roles, blueNoise: K.procedural.materials.blueNoise
+        palette: pal, roles: st.roles, blueNoise: K.procedural.materials.blueNoise, context: surfaceEffects, validateOnly: true
       });
     } catch (error) {
       bad('finish.look.paletteConstraints', error.message);
@@ -409,7 +409,7 @@
           try {
             const { surface } = materialLook({}, m, catalog);
             if (surface) K.surface.prepare(surface, pal, st.sun, surfaceEffects,
-              { paletteRoles: st.roles, blueNoise: K.procedural.materials.blueNoise });
+              { paletteRoles: st.roles, blueNoise: K.procedural.materials.blueNoise, validateOnly: true });
           } catch (error) {
             bad(path + (m.lookAsset !== undefined ? '.lookAsset' : '.surface'), error.message);
           }

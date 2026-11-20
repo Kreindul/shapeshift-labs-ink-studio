@@ -150,6 +150,88 @@ const SplatEffects = (() => {
     };
   }
 
+  const pointFor = (sample, space) => space === 'world' ? sample.worldPosition ?? sample.position : sample.position;
+  function queried(source, context) {
+    const { field, path = [], args, fallback, space = 'world' } = source;
+    if (typeof field !== 'string' || !field.trim() || !['rest', 'world'].includes(space) ||
+        (fallback !== undefined && !Number.isFinite(fallback)))
+      throw new TypeError('A query sample needs a field, valid space and optional finite fallback');
+    if (!Array.isArray(path) || path.length > 64 || !Array.from(path).every(key =>
+      typeof key === 'string' && key.length || Number.isSafeInteger(key) && key >= 0))
+      throw new TypeError('Query paths need property names or array indices');
+    if (args !== undefined && (!args || Object.getPrototypeOf(args) !== Object.prototype))
+      throw new TypeError('Query arguments need a settings object');
+    return sample => {
+      const point = pointFor(sample, space);
+      const result = point && context?.query?.probe(field, point, args);
+      let value = result?.status === 'ok' ? result.value : undefined;
+      for (const key of path) value = value != null && Object.hasOwn(value, key) ? value[key] : undefined;
+      return Number.isFinite(value) ? value : fallback;
+    };
+  }
+
+  function prepareMask(definition, context, { validateOnly = false } = {}) {
+    if (definition === undefined || definition === false) return null;
+    if (!definition || Object.getPrototypeOf(definition) !== Object.prototype)
+      throw new TypeError('Expected spatial mask settings or false');
+    const { type, range = [0, 1], invert = false, interpolation = 'smooth' } = definition;
+    const space = definition.space ?? (type === 'query' ? 'world' : 'rest');
+    if (!vector(range, 2) || !(range[1] > range[0]) || !Number.isFinite(range[1] - range[0]) ||
+        typeof invert !== 'boolean' || !['linear', 'smooth', 'step'].includes(interpolation) ||
+        !['world', 'rest'].includes(space))
+      throw new RangeError('A mask needs increasing finite bounds, a space, interpolation and a boolean invert');
+    let read;
+    switch (type) {
+      case 'axis': {
+        const { axis = 'y', origin = [0, 0, 0] } = definition;
+        const named = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
+        const direction = typeof axis === 'string' && Object.hasOwn(named, axis) ? named[axis] : axis;
+        if (!vector(direction, 3) || !vector(origin, 3)) throw new TypeError('An axis mask needs an XYZ axis and origin');
+        const normal = unit(direction);
+        read = sample => {
+          const point = pointFor(sample, space);
+          return point && dot(subtract(point, origin), normal);
+        };
+        break;
+      }
+      case 'field': {
+        const { channel, field } = definition;
+        if (typeof channel !== 'string' || !channel || typeof field !== 'string' || !field)
+          throw new TypeError('A projected field mask needs a field and channel');
+        const lookup = coordinates({ ...definition, space }, [channel],
+          validateOnly && !context?.fields?.[field] ? { fields: { [field]: { channels: [channel], frame: () => null } } } : context);
+        read = sample => pointFor(sample, space) ? lookup(sample)?.at(channel) : undefined;
+        break;
+      }
+      case 'query':
+        read = queried({ ...definition, space }, context);
+        break;
+      case 'texture': {
+        const { channel = 'alpha', scale = [1, 1], offset = [0, 0], raster: texture } = definition;
+        const channels = ['red', 'green', 'blue', 'luminance', 'alpha'];
+        if (!channels.includes(channel) || !vector(scale, 2) || scale.some(n => n <= 0) || !vector(offset, 2))
+          throw new TypeError('A texture mask needs a channel, positive XY scale and finite offset');
+        const lookup = coordinates({ projection: definition.projection, space }, [], context);
+        const pixels = raster(texture), color = [0, 0, 0], slot = channels.indexOf(channel);
+        read = sample => {
+          const loc = pointFor(sample, space) && lookup(sample);
+          if (!loc) return undefined;
+          const alpha = pixels((loc.u - offset[0]) / scale[0], (loc.v - offset[1]) / scale[1], sample.time ?? 0, color);
+          return slot === 4 || !alpha ? alpha : alpha * (slot === 3 ? dot(color, [.30, .55, .15]) : color[slot]);
+        };
+        break;
+      }
+      default: throw new RangeError('Unknown spatial mask: ' + type);
+    }
+    return sample => {
+      const value = read(sample);
+      if (!Number.isFinite(value)) return 0;
+      const x = clamp((value - range[0]) / (range[1] - range[0]));
+      const amount = interpolation === 'smooth' ? x * x * (3 - 2 * x) : interpolation === 'step' ? Number(x === 1) : x;
+      return invert ? 1 - amount : amount;
+    };
+  }
+
   function outputColors(values, resolveColor) {
     if (values === undefined) return undefined;
     if (!Array.isArray(values) || !values.length || values.length > 48 || !Array.from(values).every(value => value !== undefined))
@@ -174,18 +256,7 @@ const SplatEffects = (() => {
     }
     if (typeof context?.query?.probe !== 'function')
       throw new TypeError('A world field ramp needs a scene query snapshot');
-    const path = source.path ?? [];
-    if (!Array.isArray(path) || path.length > 64 || !Array.from(path).every(key =>
-      typeof key === 'string' && key.length || Number.isSafeInteger(key) && key >= 0))
-      throw new TypeError('Color ramp query paths need property names or array indices');
-    if (source.args !== undefined && (!source.args || Object.getPrototypeOf(source.args) !== Object.prototype))
-      throw new TypeError('Color ramp query arguments need a settings object');
-    return sample => {
-      const result = context.query.probe(source.field, sample.worldPosition ?? sample.position, source.args);
-      let value = result.status === 'ok' ? result.value : undefined;
-      for (const key of path) value = value != null && Object.hasOwn(value, key) ? value[key] : undefined;
-      return Number.isFinite(value) ? value : source.fallback;
-    };
+    return queried(source, context);
   }
 
   function colorCurve({ ramp, channels, color, source = 'luminance', outputPalette }, context, resolveColor) {
@@ -290,6 +361,6 @@ const SplatEffects = (() => {
     };
   }
 
-  return { project, layer, colorCurve, colorLut, colorStack, fieldMask, clamp, vector };
+  return { project, layer, colorCurve, colorLut, colorStack, fieldMask, prepareMask, clamp, vector };
 })();
 if (typeof module !== 'undefined') module.exports = SplatEffects;

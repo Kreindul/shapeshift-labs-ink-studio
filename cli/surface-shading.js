@@ -28,7 +28,8 @@ function surfaceShading(world, options, camera) {
   const materials = world.surfaces.map(({ settings, light }) =>
     SurfaceLook.prepare(settings, world.pal, liveLight ?? light, world.surfaceEffects,
       { colorCurves: options.colorCurves !== false, colorLut: options.colorLut !== false, colorStack: options.colorStack !== false,
-        paletteConstraints: options.paletteConstraints !== false, paletteRoles: world.paletteRoles, blueNoise }));
+        paletteConstraints: options.paletteConstraints !== false && (options.lookMasks !== false || !settings.paletteConstraint?.mask),
+        paletteRoles: world.paletteRoles, blueNoise }));
   const ids = new Map();
   const palettes = [], constraints = [];
   for (const material of materials) {
