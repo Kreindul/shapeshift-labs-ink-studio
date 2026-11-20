@@ -185,6 +185,42 @@ A channel may be a constant or `{ stops: [[position, value], ...], interpolation
 
 `rgb` and `hex` contain 2–4,096 evenly spaced preview samples. They do not limit continuous sampling. Very dark or nearly neutral colors can have numerically unstable measured hue; hue is visually immaterial when chroma is zero.
 
+## Extract a reference palette
+
+```sh
+ink-studio palette extract reference.png --size 24 --alpha visible --out palette-report.json
+```
+
+Indexed PNGs keep the complete embedded palette in slot order,
+including unused entries, duplicate colours, and alpha bytes.
+`swatches[].pixels` counts actual index references and
+`includedPixels` counts the references admitted by the alpha mode.
+The size setting applies to full-colour extraction.
+
+For full-colour PNGs, `--size` sets a maximum of 1–256 swatches and
+defaults to 32. Colours and their counts are exact when they fit.
+Otherwise a deterministic, frequency-weighted median cut produces the
+requested number of swatches. Each count is the number of source pixels
+represented by that group. The report marks reduction with
+`reduced: true`, `method: "weighted-median-cut"`, and the count of
+`sourceSwatches`. The `palette` list contains RGB8 hex colours. PNGs
+with 16-bit channels round RGB to 8 bits before counting distinct
+colours, and the report includes the source `bitDepth`.
+
+The default `visible` alpha mode excludes fully transparent pixels and
+counts partially transparent pixels using their stored RGB. Use
+`opaque` to count only fully opaque pixels, or `all` to include hidden
+RGB. The report gives separate transparent, partial, opaque, included,
+and excluded counts. A fully transparent full-colour image returns an
+empty palette in `visible` mode. For an animated PNG, extraction reads
+the default image.
+
+In Node, call `ink.readReferencePalette(filenameOrPngBuffer, options)`.
+For other image formats, decode the source to RGB or RGBA integer
+samples and call `KIT.palette.extract({ width, height, data }, options)`.
+An `ImageData` object can be passed directly. Both entry points accept
+`{ size, alpha }` and return the CLI's report.
+
 ## Transfer a reference ramp
 
 ```js

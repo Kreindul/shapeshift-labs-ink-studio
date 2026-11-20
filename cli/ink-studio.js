@@ -884,6 +884,7 @@ const CMD = {
         '  curve <family.json> [--distance n] [--text INK] [--out file.json]   sample reusable curve families',
         '  ornament <pattern.json> [--format pigment|relief|tiles] [--out file]   export a wallpaper or frieze pattern',
         '  palette plot <plot.json> [--space rgb|oklab] [--orbit degrees] [--format png|data]   render a palette in 3D',
+        '  palette extract <reference.png> [--size 32] [--alpha visible|opaque|all] [--out report.json]',
         '  palette fit <fit.json> [--format png|data] [--tile]   fit two approved swatches and preview at native size',
         '  palette chart <chart.json> [--type chart] [--format png|data]   export an indexed swatch, bar or pair chart',
         '  palette lighting <source-or-draft.json> [--approve] [--out file.json]   suggest or save named lighting ramps',
@@ -1069,6 +1070,21 @@ const CMD = {
     if (pos[0] === 'plot') return require('./palette-plot.js')(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'fit') return require('./palette-fit.js')(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'chart') return require('./palette-chart.js')(pos.slice(1), opt, lib(), outputFile);
+    if (pos[0] === 'extract') {
+      if (pos.length !== 2 || Object.entries(opt).some(([key,value])=>!['size','alpha','out'].includes(key) || value === true))
+        die('Use palette extract <reference.png> [--size 32] [--alpha visible|opaque|all] [--out report.json]');
+      const source = path.resolve(pos[1]);
+      const report = require('../index.js').readReferencePalette(source,{size:num('size',32),alpha:opt.alpha});
+      const json = JSON.stringify(report,null,2)+'\n';
+      if (!opt.out) return process.stdout.write(json);
+      const file = outputFile('reference-palette.json');
+      const input = fs.statSync(source), output = fs.statSync(file,{throwIfNoEntry:false});
+      if (output && input.dev === output.dev && input.ino === output.ino)
+        die('Write the palette report to a separate file from the reference image');
+      fs.mkdirSync(path.dirname(file),{recursive:true});
+      fs.writeFileSync(file,json);
+      return;
+    }
     if (pos[0] === 'lighting') {
       if (pos.length !== 2 || (opt.approve !== undefined && opt.approve !== true) || opt.out === true)
         die('Use palette lighting <source-or-draft.json> [--approve] [--out file.json]');
