@@ -1,11 +1,11 @@
 const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
 const ContributionRules = require('../src/contribution-rules.js');
 
-function footprint(dx, dy, k0, k1, k2, gain, hard, edge) {
+function footprint(dx, dy, k0, k1, k2, gain, hard, edge, continuous) {
   let total = 0;
   for (const v of [-.25, .25]) for (const u of [-.25, .25]) {
     const x = dx + u, y = dy + v;
-    total += ContributionRules.alpha(-.5 * (k0 * x * x + k2 * y * y) - k1 * x * y, gain, hard, edge);
+    total += ContributionRules.alpha(-.5 * (k0 * x * x + k2 * y * y) - k1 * x * y, gain, hard, edge, continuous);
   }
   return total * .25;
 }

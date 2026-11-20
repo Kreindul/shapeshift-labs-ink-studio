@@ -351,9 +351,12 @@
     }
     return best;
   }
-  function sweep(a,b,delta) {
+  const separatedHeight=(a,b,dy)=>a.min[1]+Math.min(0,dy)>=b.max[1]-eps||
+    a.max[1]+Math.max(0,dy)<=b.min[1]+eps;
+  function sweep(a,b,delta,{allowSurfaceSlide=false}={}) {
     let best=null;
     for(const left of geometry(a).parts)for(const right of geometry(b).parts){
+      if(allowSurfaceSlide&&separatedHeight(left,right,delta[1]))continue;
       if(!intersects(left,right,delta))continue;
       let time=0;
       for(let i=0;i<48;i++){
@@ -369,9 +372,42 @@
     }
     return best;
   }
+  function sweepYaw(a,b,delta,turn) {
+    const start=geometry(a), other=geometry(b), end=V.add(a.position,delta);
+    const pairs=[];
+    let reach=0;
+    for(const left of start.parts){
+      const radius=left.radius+Math.max(...left.points.map(point=>
+        Math.hypot(point[0]-a.position[0],point[2]-a.position[2])));
+      for(const right of other.parts){
+        if(separatedHeight(left,right,delta[1])||
+          [0,2].some(axis=>Math.min(a.position[axis],end[axis])-radius>right.max[axis]||
+            Math.max(a.position[axis],end[axis])+radius<right.min[axis]))continue;
+        pairs.push([left.part,right]);
+        reach=Math.max(reach,radius);
+      }
+    }
+    if(!pairs.length)return null;
+    // Each separating gap bounds the safe travel. Translation plus the outermost
+    // point's angular travel bounds the displacement between samples.
+    const travel=V.len(delta)+reach*Math.abs(turn);
+    let time=0;
+    for(let i=0;i<64;i++){
+      const posed=time===0?start:geometry({...a,position:V.mad(a.position,delta,time),
+        rotation:M.mul(M.rot([0,1,0],turn*time),a.rotation)});
+      let best;
+      for(const [index,right] of pairs){
+        const hit=separation(posed.parts[index],right);
+        if(!best||hit.gap<best.gap)best={...hit,parts:[index,right.part]};
+      }
+      if(best.gap<=eps||i===63)return {...best,time,...(i===63&&best.gap>eps&&{limited:true})};
+      if(!travel||time+best.gap/travel>=1)return null;
+      time+=best.gap/travel;
+    }
+  }
   function capsuleColumn(a,b,radius,origin,low) {
     const hit=rayCapsule({points:[a,b],radius},origin,down,origin[1]-low);
     return hit&&{point:V.mad(origin,down,hit.t),normal:hit.normal};
   }
-  W.colliders=Object.freeze({local,geometry,distance,columns,ray,contact,sweep,capsuleColumn});
+  W.colliders=Object.freeze({local,geometry,distance,columns,ray,contact,sweep,sweepYaw,capsuleColumn});
 })(KIT);

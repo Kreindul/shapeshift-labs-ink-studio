@@ -2,10 +2,33 @@
 const ContributionRules = (() => {
   const cutoff = 4.5, minimum = .004, maximum = .99;
   const solidLow = .38, solidHigh = .62;
+  const coverageModes = ['legacy', 'continuous', 'soft'];
+  const continuousCoverage = 1, softCoverage = 2;
+  const coverageStride = 4, continuousVariance = .25;
+  const continuousLow = .16, continuousHigh = .30;
+  // Motion kinds, non-depth strokes, emission, backgrounds, hidden rows, glass and text.
+  const nonSurface = 15 | 16 | 32 | 64 | 128 | 256 | 2048;
+  function coverageMode(value = 'legacy') {
+    const mode = coverageModes.indexOf(value);
+    if (mode < 0) throw new RangeError('Splat coverage must be legacy, continuous or soft');
+    return mode;
+  }
+  function materialCoverage(packed, fallback) {
+    const encoded = Math.floor(packed / coverageStride);
+    return encoded ? encoded - 1 : fallback;
+  }
+  function materialEdge(packed) { return packed % coverageStride; }
+  function continuous(mode, density, code, optical) {
+    return mode === continuousCoverage && density >= 1 && !(code & nonSurface) && !optical;
+  }
   const clamp = n => Math.max(0, Math.min(1, n));
-  function alpha(power, density, solid, materialEdge = 0) {
+  function alpha(power, density, solid, materialEdge = 0, continuous = false) {
     if (power > 0 || power < -cutoff) return 0;
     const g = density * Math.exp(power);
+    if (continuous) {
+      const t = clamp((g - continuousLow) / (continuousHigh - continuousLow));
+      return t * t * (3 - 2 * t);
+    }
     if (!solid) return Math.min(maximum, g);
     if (materialEdge >= 2) return g >= .5 ? maximum : 0;
     const width = materialEdge ? .36 * (2 - materialEdge) : 0;
@@ -54,6 +77,8 @@ float contributionAlpha(float power, float density, bool solid) {
     }
     return { contributions, transmission, ...(spectrum&&{transmissionRGB:spectrum}) };
   }
-  return Object.freeze({ cutoff, minimum, maximum, alpha, axis, plane, supportsMask, reduce, glsl });
+  return Object.freeze({ cutoff, minimum, maximum, alpha, axis, plane, supportsMask, reduce, glsl,
+    coverageMode, materialCoverage, materialEdge, continuous, continuousCoverage, softCoverage,
+    coverageStride, continuousVariance, continuousLow, continuousHigh, nonSurface });
 })();
 if (typeof module !== 'undefined') module.exports = ContributionRules;

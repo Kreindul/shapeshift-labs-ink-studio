@@ -18,8 +18,10 @@ const MaterialPixelStyle = (() => {
   }
   function prepare(value) {
     if (value === undefined || value === false) return null;
-    record(value, ['edgeHardness', 'dither', 'highlight', 'shadeSteps'], 'style');
-    const { edgeHardness, dither = 'none', shadeSteps, highlight } = value;
+    record(value, ['edgeHardness', 'dither', 'highlight', 'shadeSteps', 'coverage'], 'style');
+    const { edgeHardness, dither = 'none', shadeSteps, highlight, coverage } = value;
+    const rules = typeof ContributionRules === 'undefined' ? require('./contribution-rules.js') : ContributionRules;
+    const coverageCode = coverage === undefined ? 0 : 1 + rules.coverageMode(coverage);
     if (edgeHardness !== undefined && (!Number.isFinite(edgeHardness) || edgeHardness < 0 || edgeHardness > 1))
       throw new RangeError('Material edgeHardness must be between 0 and 1');
     if (!modes.includes(dither)) throw new TypeError('Material dither must be none, bayer, checker or diagonal');
@@ -34,7 +36,8 @@ const MaterialPixelStyle = (() => {
         throw new RangeError('Material highlight strength must be between 0 and 1');
       glint = Object.freeze({ shape, strength });
     }
-    return Object.freeze({ edge: edgeHardness === undefined ? 0 : 1 + edgeHardness,
+    const edge = edgeHardness === undefined ? 0 : 1 + edgeHardness;
+    return Object.freeze({ edge: edge + coverageCode * rules.coverageStride,
       mode: modes.indexOf(dither), steps: shadeSteps ?? 0, highlight: glint });
   }
 

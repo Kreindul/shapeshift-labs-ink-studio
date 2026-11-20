@@ -1579,6 +1579,9 @@ uses splat samples from the wall that the committed revision removed.
 
 ## Character traversal and follow cameras
 
+Use [shared boarding](boarding.md) for occupied mounts, carts, and ferries
+whose movement must clear both the carrier and its passengers.
+
 `KIT.world.characters.create({tuning, selectMode, modes, allowSupport})`
 is an optional Y-up capsule solver. It uses the same support, signed
 clearance, and medium queries as the rest of the world. A host can supply

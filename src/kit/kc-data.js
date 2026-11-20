@@ -516,6 +516,11 @@
       bad('finish.look.detailBudgets', error.message);
     }
     try {
+      ContributionRules.coverageMode(look?.splatCoverage);
+    } catch (error) {
+      bad('finish.look.splatCoverage', error.message);
+    }
+    try {
       ShadowArt.prepare(look?.shadowArt);
     } catch (error) {
       bad('finish.look.shadowArt', error.message);

@@ -1,5 +1,7 @@
 # Tone and stipple
 
+Use [continuous splat coverage](continuous-splat-coverage.md) to reduce gaps in opaque surfaces and choose which materials keep soft edges.
+
 The stipple look maps the lit frame to a small palette on a fixed screen grid.
 Try it with the [polished seal](../examples/stipple.json).
 
