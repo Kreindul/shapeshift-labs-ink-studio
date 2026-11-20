@@ -114,6 +114,7 @@ module.exports = {
   reviewSubjectReadability: require('./cli/readability-review.js').reviewSubjectReadability,
   reviewPaletteWeather: require('./cli/palette-weather.js').reviewPaletteWeather,
   reviewPaletteStages: require('./cli/palette-stages.js').reviewPaletteStages,
+  compareShotPalettes: require('./cli/palette-compare.js').compareShotPalettes,
   exportLayers: require('./cli/export-layers.js').exportLayers,
   exportScene: require('./cli/scene-export.js').exportScene,
   readSceneReplay: require('./cli/scene-replay.js').readSceneReplay,

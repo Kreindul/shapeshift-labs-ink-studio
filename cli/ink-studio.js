@@ -897,6 +897,7 @@ const CMD = {
         '  palette readability <scene> [--select JSON | --plan file.json] [--directions N --times t1,t2] [--out directory]',
         '  palette weather <scene> [--plan file.json | --select JSON --times t1,t2] [--out directory]',
         '  palette stages <scene> [--select JSON] [--allowed JSON] [--out directory]   review paint, lighting, grade and resolve',
+        '  palette compare <scene|checkpoint> <palettes.json> [--out directory]   apply alternatives to one captured shot',
         '  palette chart <chart.json> [--type chart] [--format png|data]   export an indexed swatch, bar or pair chart',
         '  palette lighting <source-or-draft.json> [--approve] [--out file.json]   suggest or save named lighting ramps',
         '  palette field <field.json> [--t seconds] [--w width --h height] [--format png|data]   render a palette field or report grayscale bands',
@@ -1085,6 +1086,43 @@ const CMD = {
     if (pos[0] === 'plot') return require('./palette-plot.js')(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'fit') return require('./palette-fit.js').fit(pos.slice(1), opt, lib(), outputFile);
     if (pos[0] === 'dither-review') return require('./palette-fit.js').review(pos.slice(1),opt,lib(),outputFile);
+    if (pos[0] === 'compare') {
+      if (pos.length !== 3 || ['out','t','cols','threshold','heatmap-max','region-limit'].some(key=>opt[key]===true))
+        die('Use palette compare <scene|checkpoint> <palettes.json> [--out directory]');
+      const [,scene,plan] = pos;
+      const palettes = JSON.parse(fs.readFileSync(path.resolve(plan),'utf8'));
+      const requested = num('t',0);
+      if (!Number.isFinite(requested)) die('Palette comparison time must be finite');
+      const snapshot = worldCLI().lookSnapshot(scene);
+      const world = snapshot ? require('./look-preview.js').override(snapshot,opt,lib()) : buildPreview(scene);
+      const t = snapshot?.lookSnapshot?.time ?? requested;
+      if (!snapshot) pose(world,t);
+      const {reference,alternatives,report,image} = require('./palette-compare.js').compareShotPalettes(world,view({
+        w:num('w',280),h:num('h',160),t,transparent:onOffOption('transparent'),palettes,columns:num('cols',3),
+        threshold:num('threshold'),heatmapMax:num('heatmap-max'),regionLimit:num('region-limit')
+      }));
+      const directory = outputFile('palette-comparison');
+      const files = {'comparison.png':image,'reference.png':reference};
+      for (const [i,{id,image,heatmap}] of alternatives.entries()) {
+        const prefix = String(i+1).padStart(2,'0')+'-'+id;
+        const artwork = prefix+'.png', error = prefix+'-error.png';
+        files[artwork] = image;
+        files[error] = heatmap;
+        report.alternatives[i].files = {artwork,error};
+      }
+      report.files = {comparison:'comparison.png',reference:'reference.png'};
+      const inputs = [scene,plan].map(file=>fs.statSync(path.resolve(file),{throwIfNoEntry:false})).filter(Boolean);
+      for (const name of [...Object.keys(files),'comparison.json']) {
+        const existing = fs.statSync(path.join(directory,name),{throwIfNoEntry:false});
+        if (existing && inputs.some(input=>input.dev===existing.dev && input.ino===existing.ino))
+          die('Choose palette comparison outputs separate from the inputs');
+      }
+      fs.mkdirSync(directory,{recursive:true});
+      for (const [name,{w,h,rgb,alpha}] of Object.entries(files)) PNG.write(path.join(directory,name),w,h,rgb,alpha);
+      fs.writeFileSync(path.join(directory,'comparison.json'),JSON.stringify(report,null,2)+'\n');
+      console.log('wrote matched palette comparison to',directory);
+      return;
+    }
     if (pos[0] === 'stages') {
       if (pos.length!==2 || ['select','allowed','hue-threshold','min-chroma','limit','t','out'].some(key=>opt[key]===true))
         die('Use palette stages <scene> [--select JSON] [--allowed JSON] [--out directory]');

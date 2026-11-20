@@ -926,3 +926,41 @@ ink-studio render examples/authored-lighting-ramps.js --w 368 --h 158 --px 1 --t
 Approval validates the draft and saves the chosen indices as written. It returns the original packed `palette`, updated `roles`, and `ramps` ready for `lightingRamp` bindings. For example, `roles.cloth` contains the five diffuse indices, `roles['cloth.bounce']` contains the selected bounce swatch, and `roles['cloth.neutralizer']` contains the companion neutralizer. The output also includes a one-swatch role for each of the other named tones. Existing roles are carried forward, with matching names updated by approval.
 
 Use `paletteRoles: approved.roles` in `B.finish()`. In a JSON diorama, use the approved `palette` and `roles` and copy the matching `ramps` entry to the finish's `lightingRamp`. The [lighting bench](../examples/authored-lighting-ramps.js) shows cloth, iron, stone, and skin, with an artist-edited stone highlight. [Material lighting ramps](surface-materials.md#material-lighting-ramps)
+## Compare candidate palettes on one shot
+
+Pass a JSON array of alternatives with distinct IDs and swatches.
+
+```json
+[
+  {"id":"cobalt","palette":["#131d33","#38537d","#77a6c6","#a6ced4"],"match":"perceptual"},
+  {"id":"amber","palette":["#191725","#5e3a33","#b67a4d","#f3d59f"],"match":"brightness"}
+]
+```
+
+```sh
+ink-studio palette compare examples/render-stages.js palettes.json \
+  --params '{"stage":"review"}' --w 296 --h 158 --px 1 --out matched-palettes
+```
+
+Ink renders one native reference using the selected camera, time and
+art-pixel size. Every candidate resolves the same RGB8 pixels and alpha
+with its own swatches, matching mode and optional reserved swatches or
+screen-space dither. Candidate palettes apply to the whole captured
+frame. The reference includes frame grading with frame and final palette
+rules bypassed. Earlier material and atmosphere colour operations are
+already baked into the reference. For legacy indexed looks, the
+reference is the input to indexed grading and swatch selection.
+Screen overlays and render-graph passes are outside this comparison.
+
+The output directory contains a contact sheet, the source reference,
+artwork and an OKLab-distance heatmap per candidate, and a JSON report
+with swatch counts, unused swatches (zero pixels), and error by material
+and region. All heatmaps use the same scale and threshold. Set
+`--heatmap-max` (default 0.20), `--threshold` (default 0.06), and
+`--region-limit` (default 20) to tune the diagnostics.
+
+A world manifest, simulation checkpoint, or recording can supply the
+shot. Use `--ticks` or `--t` to select a simulation snapshot, or omit
+both to use the saved tick on a checkpoint or recording. In Node, use
+`ink.compareShotPalettes(world, { palettes, w, h, px, t })` with a
+world already posed or sampled at the desired simulation state.
