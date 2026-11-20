@@ -141,4 +141,8 @@ test('CLI produces and applies separate JSON region updates', t => {
   const expected = JSON.parse(invoke('regions', scene, '--stream', 'cli-reaches', '--regions', 'west', '--ticks', '4'));
   assert.deepEqual(state.state, expected.state);
   assert.equal(state.cursor.revision, 4);
+  invoke('run', scene, '--ticks', '4', '--record', 'timeline.json');
+  const replayed = JSON.parse(invoke('regions', 'timeline.json', '--stream', 'cli-reaches', '--regions', 'west',
+    '--since', 'snapshot.json'));
+  assert.deepEqual(replayed, JSON.parse(fs.readFileSync(path.join(dir, 'delta.json'), 'utf8')));
 });

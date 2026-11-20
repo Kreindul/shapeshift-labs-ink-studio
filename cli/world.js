@@ -306,6 +306,8 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
     schedule(run);
     const tick=input.log&&opt.ticks===undefined&&opt.steps===undefined&&opt.t===undefined?input.log.end.tick:to(run);
     run.advance(tick);
+    if(input.log&&!opt.actions&&tick===input.log.end.tick)
+      ensure(W.data.equal(run.checkpoint(),input.log.end),'Replay diverged at tick '+tick);
     const selected={
       ...(opt.regions!==undefined&&{regions:opt.regions===''?[]:opt.regions.split(',')}),
       ...(opt.near!==undefined&&{at:numbers(opt.near)}),...(opt.place!==undefined&&{place:opt.place}),
