@@ -295,6 +295,11 @@
       }
     }
     try {
+      SceneOptics.shapedVolumes(st.finish.shapedAtmosphere);
+    } catch (error) {
+      bad('finish.shapedAtmosphere', error.message);
+    }
+    try {
       SceneExposure.settings(st.finish.sceneExposure);
     } catch (error) {
       bad('finish.sceneExposure', error.message);

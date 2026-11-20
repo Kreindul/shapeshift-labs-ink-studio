@@ -5,6 +5,7 @@ const SceneOptics = (() => {
   const ripples = typeof RippleField === 'undefined' ? require('./ripple-field.js') : RippleField;
   const { field: ripple, ringSampler } = ripples;
   const densities = typeof VolumeField === 'undefined' ? require('./volume-field.js') : VolumeField;
+  const geometry = typeof GeometryDensity === 'undefined' ? require('./geometry-density.js') : GeometryDensity;
   const volumeLight = typeof VolumeLight === 'undefined' ? require('./volume-light.js') : VolumeLight;
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const sub = (a, b) => a.map((v, i) => v - b[i]);
@@ -100,6 +101,17 @@ const SceneOptics = (() => {
         (ramp !== undefined && (!Array.isArray(ramp) || !ramp.length || ramp.length > 32)))
       throw new RangeError('Invalid density march or optical settings');
     return { type: 'field', ...common(options), field, min, max, step, lit, anisotropy, ramp, emissive, emissiveGain };
+  }
+
+  function shaped(options) {
+    const { source, ...optics } = options ?? {};
+    return field({ ...optics, field:geometry.resolve(source) });
+  }
+  function shapedVolumes(authored, override) {
+    const source=override===true ? authored : override??authored;
+    if (source===false || source===undefined) return [];
+    if (!Array.isArray(source)) throw new TypeError('Shaped atmosphere must be a list of volumes');
+    return source.map(v=>v?.type==='field' ? field(v) : shaped(v));
   }
 
   const volumeKinds = { fog, sphere, box, shaft, field };
@@ -207,7 +219,7 @@ const SceneOptics = (() => {
     return result;
   }
 
-  return { plane, planeDistance, reflectedView, captureView, fog, sphere, box, shaft, field, prepareVolumes,
+  return { plane, planeDistance, reflectedView, captureView, fog, sphere, box, shaft, field, shaped, shapedVolumes, prepareVolumes,
     trace, slab, lighting: (settings, palette, options) => volumeLight.lighting(settings, volumeColor, palette, options),
     addLocalLight: volumeLight.addLocal, occluder: volumeLight.occluder, volumeHistory: volumeLight.history, ripple, ringSampler };
 })();

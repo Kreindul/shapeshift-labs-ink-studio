@@ -28,5 +28,6 @@
       bounds, radius, mask: accept });
   }
 
-  P.density = Object.freeze({ bounded, fromSdf, sparse, toMesh, scatter });
+  P.density = Object.freeze({ bounded, fromSdf, fromPath: GeometryDensity.fromPath,
+    fromTerrain: GeometryDensity.fromTerrain, sparse, toMesh, scatter });
 })(KIT);

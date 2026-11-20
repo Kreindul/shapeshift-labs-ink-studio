@@ -296,8 +296,11 @@ function render(world, o, preparedPalettes) {
   const airAt = (x,y,z) => localWind ? Airflow.frame(localWind(skyTime,x,z,wind.velocity,y)) : wind;
   const windAt = flow ? flow.open : weatherWindAt;
   const mediumLook = medium => optics?.transform(medium) ?? PixelLook.mediumTransform(paletteRules, medium);
-  const volumes = o.atmosphere !== false && world.atmosphere?.length ?
-    SceneOptics.prepareVolumes(world.atmosphere, world.pal, volume =>
+  const atmosphereSources = o.atmosphere === false ? [] : [
+    ...(world.atmosphere||[]), ...SceneOptics.shapedVolumes(world.shapedAtmosphere,o.shapedAtmosphere)
+  ];
+  const volumes = atmosphereSources.length ?
+    SceneOptics.prepareVolumes(atmosphereSources, world.pal, volume =>
       mediumLook(TargetSelectors.medium(volume.id, volume.mediumKind ?? volume.type, volume.tags)), weather?.fogGain) : [];
   const sourceWater = o.water !== false && world.water?.count && world.water.raySegments ? world.water : null;
   const water = sourceWater && (optics || paletteRules) ?

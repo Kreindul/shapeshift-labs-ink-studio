@@ -24,7 +24,7 @@ const cloudField = K.clouds.asset({
 return B.finish({ ...sceneSettings, cloudField });
 ```
 
-The asset needs finite XZ bounds, positive thickness, and `repeat: false`. Fit the bounds to the cloud so the baked views use the available texture resolution. A hand-authored coverage function or grid works with the same settings. In JSON, put a `lod` object beside the recipe or coverage inside `finish.cloudField`. Use `lod: true` for the defaults.
+A [bounded 3D density](geometry-shaped-atmosphere.md) can directly supply the asset field. Coverage-based assets use finite XZ bounds, positive thickness, and `repeat: false`. Fit the bounds to the cloud so the baked views use the available texture resolution. A hand-authored coverage function or grid works with the same settings. In JSON, put a `lod` object beside the recipe or coverage inside `finish.cloudField`. Use `lod: true` for the defaults.
 
 The `volume` and `card` pairs set blend ranges in multiples of the cloud's bounding sphere radius. The camera uses the volume at and below the first near threshold, blends to the impostor across the near range, and blends to the card across the far range. The volume remains active when the camera is inside the bounds. Selection is deterministic when scrubbing forwards or backwards. `resolution` sets the width and height of each baked projection from 16 to 128 pixels and `directions` sets 4 to 16 headings. `cardYaw` is the fixed viewing angle for the distant texture in radians, measured from +Z towards +X. The renderer bakes views as needed and reuses them as the asset drifts or its light changes.
 

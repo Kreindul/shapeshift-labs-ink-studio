@@ -83,6 +83,8 @@ Hosts can use `K.atmosphere.prepare(world.atmosphere, world.pal)` and `K.atmosph
 
 ## Bounded density and lit volumes
 
+Use [geometry-shaped atmosphere](geometry-shaped-atmosphere.md) to fit clouds and fog to paths, signed-distance shapes, or terrain.
+
 ```js
 const D = K.procedural.density;
 const shape = D.fromSdf({

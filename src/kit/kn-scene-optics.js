@@ -16,6 +16,7 @@
     box: SceneOptics.box,
     shaft: SceneOptics.shaft,
     field: SceneOptics.field,
+    shaped: SceneOptics.shaped,
     lighting: SceneOptics.lighting,
     occluder: SceneOptics.occluder,
     history: SceneOptics.volumeHistory,

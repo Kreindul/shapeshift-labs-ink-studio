@@ -213,7 +213,7 @@ function pose(w, t) {
 const artPixelSize = cmd === 'compare' || cmd === 'review' ? undefined : num('px', undefined);
 if (artPixelSize !== undefined && (!Number.isSafeInteger(artPixelSize) || artPixelSize < 1))
   die('--px needs a positive integer');
-let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride;
+let lutOverride, stackOverride, constraintsOverride, skyOverride, skyProfiles, cloudOverride, weatherOverride, precipitationOverride, rainImpactOverride, windFieldOverride, lightningOverride, sceneExposureOverride, shapedAtmosphereOverride;
 function skyProfileOverrides(value) {
   if (typeof value !== 'string') die('--sky-profile expects track=profile pairs');
   const pairs = value.split(',').map(entry => entry.split('=').map(part => part.trim()));
@@ -290,6 +290,15 @@ function sceneExposureOption() {
   if (value === 'off') return false;
   if (value === true || value === 'on') return true;
   return sceneExposureOverride ??= require('../src/scene-exposure.js').compile(
+    JSON.parse(fs.readFileSync(path.resolve(value), 'utf8')));
+}
+
+function shapedAtmosphereOption() {
+  const value=opt['shaped-atmosphere'];
+  if (value===undefined) return undefined;
+  if (value==='off') return false;
+  if (value==='on' || value===true) return true;
+  return shapedAtmosphereOverride ??= require('../src/scene-optics.js').shapedVolumes(
     JSON.parse(fs.readFileSync(path.resolve(value), 'utf8')));
 }
 
@@ -391,6 +400,7 @@ const view = extra =>
       skyProfiles: opt['sky-profile'] === undefined ? undefined : (skyProfiles ??= skyProfileOverrides(opt['sky-profile'])),
       liveSun: liveSunOption(),
       atmosphere: opt.atmosphere === 'off' ? false : undefined,
+      shapedAtmosphere: shapedAtmosphereOption(),
       aerialPerspective: aerialOption(),
       volumeLocalLights: onOffOption('volume-local-lights'),
       volumeLocalShadows: onOffOption('volume-local-shadows'),
@@ -537,6 +547,7 @@ const CMD = {
         'exposure options: --scene-exposure on|off|file.json',
         'aerial options: --aerial-perspective on|off --aerial-start units --aerial-density per-unit --aerial-contrast 0..1',
         'view options: --surface off (no finish layers) --water off --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --px1 (native art pixels) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (remove lone pixels) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n',
+        'shaped fog options: --shaped-atmosphere on|off|file.json',
         'fog lighting options: --volume-local-lights on|off --volume-local-shadows on|off',
         'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable off --snap --dither-space screen|world|object --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
       ].join('\n')
