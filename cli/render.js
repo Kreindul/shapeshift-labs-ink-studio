@@ -320,7 +320,9 @@ function render(world, o, preparedPalettes) {
     const quality = atmosphereQuality({ ...world.volumeQuality, ...o.volumeQuality });
     quality.wind = world.volumeWind && !o.wind && !an.wind ? Airflow.frame(world.volumeWind).velocity : wind.velocity;
     const lighting = volumes.some(volume => volume.type === 'field') && (o.volumeLighting ?? world.volumeLighting);
-    return { ...quality, time: t, cloudShadow, media: lighting ? SceneOptics.lighting(lighting, world.pal) : undefined };
+    const media = lighting ? SceneOptics.lighting(lighting, world.pal,
+      { time: t, localLights: o.volumeLocalLights, localShadows: o.volumeLocalShadows }) : undefined;
+    return { ...quality, time: t, cloudShadow, media };
   };
   const geometrySample = probe || sortedSurfaces || aerial || cloudShadow ? sampleFrames(world, t) : null;
   const captured = o.captureCoverage || transparent ? new Float32Array(W * H) : null;
@@ -1337,7 +1339,7 @@ function render(world, o, preparedPalettes) {
     const quality = atmosphereOptions();
     atmosphere = applyAtmosphere(volumes, col, axialDepth, rayAt, W, H, horizon, quality, t, quality.media,
       ink?.ramps.has('fog') || o.captureFog || transparent, o.volumeHistory,
-      o.volumeHistory && [W, H, focal, ortho, ...V].join('/'));
+      o.volumeHistory && [W, H, focal, ortho, o.volumeLocalLights, o.volumeLocalShadows, ...V].join('/'));
     if (quality.stats) volumeStats = atmosphere.stats;
   }
   let passes = art?.finalize(world, t, { x: X, y: Y, z: Z, rayAt, span: R,

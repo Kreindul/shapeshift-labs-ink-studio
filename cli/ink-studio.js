@@ -268,6 +268,14 @@ function cloudShadowOption() {
   return Object.fromEntries(supplied.map(([flag, setting]) => [setting, opt[flag] === true ? NaN : num(flag)]));
 }
 
+function volumeToggle(flag) {
+  const value = opt[flag];
+  if (value === undefined) return undefined;
+  if (value === true || value === 'on') return true;
+  if (value === 'off') return false;
+  die('--' + flag + ' expects on or off');
+}
+
 const view = extra =>
   Object.assign(
     {
@@ -318,6 +326,8 @@ const view = extra =>
       liveSun: liveSunOption(),
       atmosphere: opt.atmosphere === 'off' ? false : undefined,
       aerialPerspective: aerialOption(),
+      volumeLocalLights: volumeToggle('volume-local-lights'),
+      volumeLocalShadows: volumeToggle('volume-local-shadows'),
       volumeQuality: opt['volume-scale'] || opt['volume-steps'] || opt['volume-jitter'] ? {
         ...(opt['volume-scale'] && { scale: num('volume-scale') }),
         ...(opt['volume-steps'] && { steps: num('volume-steps') }),
@@ -457,6 +467,7 @@ const CMD = {
         'sky options: --sky-environment file.json|off --sky-time seconds --sky-profile track=profile --sky-reflections scene|material',
         'aerial options: --aerial-perspective on|off --aerial-start units --aerial-density per-unit --aerial-contrast 0..1',
         'view options: --surface off (no finish layers) --water off --reflections off --atmosphere off --edges off (no edge sprites) --yaw --pitch --zoom 2 --target x,y,z --w 900 --h 620 --px 2 (screen pixels per art pixel) --px1 (native art pixels) --tone stipple|off --raw (no palette) --colored (smooth body-colored contours) --fine (inked detail: colours looked up per pixel) --bounce (bounce light baked in) --focus x,y,z[,near,far,coarse] (uneven detail) --follow [stretch,broad] (dabs along the form) --clean (remove lone pixels) --ortho (orthographic: no perspective) --cols 4 --out file.png --seed n',
+        'fog lighting options: --volume-local-lights on|off --volume-local-shadows on|off',
         'art options: --palette-remap off --color-curves off --lut <file.cube|file.json|off> --color-stack <file.json|off> --ink off --effects off --stable off --snap --dither-space screen|world|object --resolve native|coverage|clusters --splat-order center|surface --volume-scale 2 --volume-steps 8 --volume-jitter off|blue-noise|spatiotemporal'
       ].join('\n')
     );

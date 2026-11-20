@@ -111,7 +111,7 @@ Put `volume` in `finish.atmosphere`, and pass `volumeLighting` and optional `vol
 
 Use `--atmosphere off` to disable the pass. `volumeQuality` controls `scale` (1–4), `depthTolerance`, `steps`, `stepScale`, `skip`, `samples`, `seed`, and `jitter`. The coarser pass only reuses nearby samples with compatible depth. Set `stats: true` to inspect `frame.volumeStats` ray and fallback counts. Set `jitter: 'blue-noise'` for stable spatial offsets, or `jitter: 'spatiotemporal'` with an explicit `volumeHistory: K.atmosphere.history()` for frame-varying offsets and filtered accumulation. The history resets across a changed camera, a time discontinuity, or incompatible opaque depth. CLI options include `--volume-scale`, `--volume-steps`, and `--volume-jitter`.
 
-Render `examples/art-pipeline.js` to see sculpted pool mist, a local light, and emission coloring at art resolution.
+Render `examples/art-pipeline.js` to see sculpted pool mist, a local light, and emission coloring at art resolution. For aimable beams and multiple lamps, see [Local lights in fog](fog-lighting.md).
 
 ## Pixel budgets and upload profiling
 

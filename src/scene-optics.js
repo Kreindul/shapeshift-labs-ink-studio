@@ -202,7 +202,7 @@ const SceneOptics = (() => {
   }
 
   return { plane, planeDistance, reflectedView, captureView, fog, sphere, box, shaft, field, prepareVolumes,
-    trace, slab, lighting: (settings, palette) => volumeLight.lighting(settings, volumeColor, palette),
+    trace, slab, lighting: (settings, palette, options) => volumeLight.lighting(settings, volumeColor, palette, options),
     occluder: volumeLight.occluder, volumeHistory: volumeLight.history, ripple, ringSampler };
 })();
 if (typeof module !== 'undefined') module.exports = SceneOptics;

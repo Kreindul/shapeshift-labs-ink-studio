@@ -4,7 +4,7 @@ const VolumeLight = (() => {
   const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const vector = (value, name) => {
-    if (!Array.isArray(value) || value.length !== 3 || !value.every(Number.isFinite))
+    if (!Array.isArray(value) || value.length !== 3 || !Array.from(value).every(Number.isFinite))
       throw new RangeError(name + ' expects a finite XYZ vector');
     return value.slice();
   };
@@ -13,21 +13,52 @@ const VolumeLight = (() => {
     return value;
   };
 
-  function lighting(settings, color, palette) {
-    const { ambient = .35, sun, point, shadow } = settings || {};
+  function unit(value, name) {
+    const direction = vector(value, name), length = Math.hypot(...direction);
+    if (!length || !Number.isFinite(length)) throw new RangeError(name + ' must be nonzero with finite length');
+    return direction.map(v => v / length);
+  }
+
+  function lighting(settings, color, palette, { time = 0, localLights = true, localShadows = true } = {}) {
+    const { ambient = .35, sun, point, points = [], spots = [], shadow } = settings || {};
     if (shadow !== undefined && typeof shadow !== 'function') throw new TypeError('Atmosphere shadow must be a ray query');
-    let directional = null, local = null;
+    if (!Array.isArray(points) || !Array.isArray(spots)) throw new TypeError('Volume points and spots must be arrays');
+    let directional = null, animatedLocals = false;
     if (sun) {
-      const direction = vector(sun.direction, 'Sun direction'), length = Math.hypot(...direction);
-      if (!length) throw new RangeError('Sun direction must be nonzero');
-      directional = { direction: direction.map(v => v / length), rgb: color(sun.color ?? '#fff3dc', palette),
+      directional = { direction: unit(sun.direction, 'Sun direction'), rgb: color(sun.color ?? '#fff3dc', palette),
         intensity: number(sun.intensity ?? .7, 0, 64, 'Sun intensity'),
         distance: number(sun.distance ?? 20, .001, 1000, 'Sun shadow distance') };
     }
-    if (point) local = { at: vector(point.at, 'Point light position'), rgb: color(point.color ?? '#ffd095', palette),
-      intensity: number(point.intensity ?? 1, 0, 64, 'Point light intensity'),
-      radius: number(point.radius ?? 3, .001, 1000, 'Point light radius') };
-    return { ambient: number(ambient, 0, 64, 'Ambient light'), sun: directional, point: local, shadow };
+
+    const atTime = value => {
+      if (typeof value !== 'function') return value;
+      animatedLocals = true;
+      return value(time);
+    };
+    function local(light, name) {
+      if (!light || typeof light !== 'object' || Array.isArray(light)) throw new TypeError(name + ' needs an object');
+      const { castsShadow = true } = light;
+      if (typeof castsShadow !== 'boolean') throw new TypeError(name + ' castsShadow must be boolean');
+      return {
+        at: vector(atTime(light.at), name + ' position'),
+        rgb: color(light.color ?? '#ffd095', palette),
+        intensity: number(atTime(light.intensity ?? 1), 0, 64, name + ' intensity'),
+        radius: number(light.radius ?? 3, .001, 1000, name + ' radius'),
+        castsShadow
+      };
+    }
+    function spot(light) {
+      const source = local(light, 'Spot light');
+      const outer = number(light.outerAngle ?? 24, .01, 90, 'Spot outer angle');
+      const inner = number(light.innerAngle ?? outer * .65, 0, outer, 'Spot inner angle');
+      const radians = Math.PI / 180;
+      return { ...source, direction: unit(atTime(light.direction), 'Spot direction'),
+        innerCos: Math.cos(inner * radians), outerCos: Math.cos(outer * radians) };
+    }
+    const single = localLights && point ? local(point, 'Point light') : null;
+    const locals = localLights ? [...Array.from(points, light => local(light, 'Point light')), ...Array.from(spots, spot)] : [];
+    return { ambient: number(ambient, 0, 64, 'Ambient light'), sun: directional, point: single,
+      locals, shadow, localShadows, animatedLocals };
   }
 
   function occluder(field, { bias = .025, step = .035, steps = 24, safety = .75 } = {}) {
@@ -52,24 +83,38 @@ const VolumeLight = (() => {
   }
 
   const phase = (g, cosine) => (1 - g * g) / Math.pow(1 + g * g - 2 * g * cosine, 1.5);
+  function illuminateLocal(light, output, x, y, z, direction, anisotropy, shadow) {
+    if (!light.intensity) return;
+    const dx = light.at[0] - x, dy = light.at[1] - y, dz = light.at[2] - z;
+    const range = Math.hypot(dx, dy, dz);
+    if (range >= light.radius || range <= 1e-6) return;
+    const toLight = [dx / range, dy / range, dz / range];
+    let weight = 1;
+    if (light.direction) {
+      const cosine = -dot(toLight, light.direction);
+      if (cosine < light.outerCos) return;
+      if (cosine < light.innerCos) {
+        const u = (cosine - light.outerCos) / (light.innerCos - light.outerCos);
+        weight = u * u * (3 - 2 * u);
+      }
+    }
+    if (!weight) return;
+    if (shadow && light.castsShadow !== false && shadow(x, y, z, toLight, range)) return;
+    const amount = light.intensity * weight * (1 - range / light.radius) ** 2 * phase(anisotropy, dot(direction, toLight));
+    for (let i = 0; i < 3; i++) output[i] += light.rgb[i] * amount;
+  }
+
   function illuminate(volume, output, x, y, z, direction, media, visibility) {
-    const { ambient, sun, point, shadow } = media;
+    const { ambient, sun, point, locals, shadow, localShadows } = media;
     output.fill(ambient);
     if (sun && sun.intensity && visibility && (!shadow || !shadow(x, y, z, sun.direction, sun.distance))) {
       const amount = sun.intensity * visibility * phase(volume.anisotropy, dot(direction, sun.direction));
       for (let i = 0; i < 3; i++) output[i] += sun.rgb[i] * amount;
     }
-    if (point?.intensity) {
-      const dx = point.at[0] - x, dy = point.at[1] - y, dz = point.at[2] - z;
-      const range = Math.hypot(dx, dy, dz);
-      if (range < point.radius && range > 1e-6) {
-        const toLight = [dx / range, dy / range, dz / range];
-        if (!shadow || !shadow(x, y, z, toLight, range)) {
-          const amount = point.intensity * (1 - range / point.radius) ** 2 * phase(volume.anisotropy, dot(direction, toLight));
-          for (let i = 0; i < 3; i++) output[i] += point.rgb[i] * amount;
-        }
-      }
-    }
+    const localShadow = localShadows === false ? null : shadow;
+    if (point) illuminateLocal(point, output, x, y, z, direction, volume.anisotropy, localShadow);
+    if (locals) for (const light of locals)
+      illuminateLocal(light, output, x, y, z, direction, volume.anisotropy, localShadow);
   }
 
   function integrate(segments, origin, direction, stop, result, options = {}) {
