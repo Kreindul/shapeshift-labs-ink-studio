@@ -49,7 +49,7 @@
   function profile(entry,wetness=0) {
     check(number(wetness,0,1),'Material wetness must be between 0 and 1');
     const {material,pack,revision}=entry, {id,label,sounds,appearance}=material;
-    const blend=value=>typeof value==='number'?value:value.dry+(value.wet-value.dry)*wetness;
+    const blend=value=>typeof value==='number'?value:value.dry*(1-wetness)+value.wet*wetness;
     const result={id,label,pack,revision,wetness,...(sounds&&{sounds}),...(appearance&&{appearance})};
     for(const [key,range] of Object.entries(rules)) {
       if(!Object.hasOwn(material,key))continue;

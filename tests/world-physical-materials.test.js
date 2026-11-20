@@ -25,6 +25,7 @@ test('physical materials round-trip in versioned packs and resolve wet coefficie
   assert.equal(material.value.thermal.heatCapacity,1050);
   assert.equal(material.value.fracture.energy,5.5);
   assert(Math.abs(material.value.friction-.46)<1e-12);
+  assert.equal(run.query().probe('world/material',{},{id:clay,wetness:1}).value.friction,.10);
   assert.deepEqual(run.query().inspect().physicalMaterials.map(item=>item.id),[clay,gravel]);
   assert.throws(()=>W.runtime.validate({...world,entities:{missing:{materialAsset:'earthworks/unavailable'}}}),/Unknown physical material/);
   assert.throws(()=>W.runtime.validate({...world,visual:{fields:{surface:'soil/moisture'}}}),/physical surface field/);
