@@ -344,6 +344,10 @@ const CMD = {
         '  animation-timeline <id> [--state context.json] [--stage block|spline|polish] [--at seconds] [--part name]',
         '    [--loop start,end|off] [--finding kind-or-id|off] [--direction index] [--fix accept|mute|enable|remove]',
         '    [--preview directory] [--frames count --w width --h height] [--before] [--out report.json]',
+        '  retarget <source> <target> [--clip name|--motion clip.json] [--profile name|file.json]',
+        '    [--source-map file.json --target-map file.json] [--travel scaled|unscaled|in-place] [--fps rate]',
+        '    [--bake clip.json] [--preview directory] [--at seconds|--frames count] [--direction index] [--out report.json]',
+        '  retarget --profiles  show built-in role templates',
         '  passes <id> [--channels coverage,depth,normal,objectId,materialId,emission]  save art-pixel render pass previews',
         '  shimmer <id> [--mode orbit|zoom|pan|still --frames 24]  how many pixels flicker over a move, and a GIF of it',
         '  crisp <id ...|all> [--t 2 --map]   how crisp at its own pixel size: stray pixels, specks, flat area, finest frequencies,',
@@ -771,6 +775,9 @@ const CMD = {
       }
     }
     if (!reportFile) process.stdout.write(json);
+  },
+  retarget() {
+    require('./retarget.js').run({ K: lib().KIT, build, pos, options: opt, view: view() });
   },
   passes() {
     const w = build(pos[0]), t = num('t', 0);

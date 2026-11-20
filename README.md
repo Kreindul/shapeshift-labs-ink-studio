@@ -370,6 +370,8 @@ Use [Cloth Review](docs/cloth-review.md) to paint pin, free, and protected regio
 
 Use the [headless animation timeline](docs/animation-timeline.md) to put these tools on one shot clock. Switch between Block, Spline, and Polish, inspect all lanes, and preview a Motion Review beat at the current sprite direction.
 
+Use [motion retargeting](docs/motion-retarget.md) to adapt a clip to another puppet's rest axes and proportions. Start with a biped, quadruped, avian, or serpentine profile, or define your own and bake editable Ink keys.
+
 `K.character(B, spec, lane)` creates an input-driven character with movement, running, jumping, dashing, attacks, casting and crouching. Its specification supplies geometry and rig points; it is a toolkit for authoring a character, rather than a bundled cast of character assets. The API is documented at the top of [kk-character.js](src/kit/kk-character.js).
 
 ## Particles and interaction
@@ -665,6 +667,7 @@ The CLI and Node `render()` use the CPU renderer. Use the [browser renderer](doc
 | `motion-fx <scene> [--at seconds]` | Report Motion FX timing, part masks, and sampled splat or deformation counts. |
 | `cloth-review <scene> [--pose seconds] [--bake take.json]` | Run a captured cloth pose and optionally bake the settled simulation. |
 | `animation-timeline <scene> [--stage stage] [--finding id] [--preview dir]` | Inspect and preview a shared shot timeline with saved transport context. |
+| `retarget <source> <target> [--profile name] [--bake clip.json] [--preview dir]` | Transfer a clip using semantic puppet roles and inspect both directional sprite previews. |
 | `variants <scene> --seeds 3,7,12` | Render a ranked seed contact sheet for a scene with variant metrics. |
 | `sheet <scene> --from 0 --to 3 --n 12` | Make a labeled sheet of animation frames. |
 | `turn <scene> --n 8` | Make a sheet from multiple viewing angles. |
