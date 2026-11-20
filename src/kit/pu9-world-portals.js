@@ -67,7 +67,9 @@
     return result;
   }
 
-  function create({ places, links = [], templates = [], saved = {} } = {}) {
+  function create({ places, links = [], templates = [], saved = {}, carry } = {}) {
+    if (carry !== undefined && !['mapActor', 'planTravel', 'checkpoint', 'planRestore'].every(key =>
+      typeof carry?.[key] === 'function')) throw new TypeError('Expected a carry registry');
     const catalog = unique(places, 'Places'), graph = unique(links, 'Links');
     const recipes = unique(templates, 'Place templates');
     const exits = new Map(), away = new Map(), observers = new Set();
@@ -300,14 +302,15 @@
       return freeze({ ...camera, eye: V.add(point(camera.eye), delta),
         ...(camera.target == null ? {} : { target: V.add(point(camera.target), delta) }) });
     }
-    function evaluateArrival(job, actor, camera, crossing) {
+    function evaluateArrival(job, actor, camera, crossing, previous) {
       const link = job.link;
       const opening = link.opening, drop = link.mode === 'drop', at = link.to.at;
       let arrival = freeze({ ...actor,
         position: opening ? opening.point(actor.position) : at.origin.slice(),
         ...(actor.velocity ? { velocity: opening ? opening.direction(actor.velocity) : drop ? point(actor.velocity) : [0, 0, 0] } : {}),
         ...(actor.forward && opening ? { forward: opening.direction(actor.forward) } : {}),
-        ...(actor.up && opening ? { up: opening.direction(actor.up) } : {})
+        ...(actor.up && opening ? { up: opening.direction(actor.up) } : {}),
+        ...carry?.mapActor(link.from.place, actor, opening)
       });
       let mappedCamera = opening?.camera(camera) ?? null;
       if (drop && camera) mappedCamera = shiftCamera(camera, V.sub(arrival.position, actor.position));
@@ -320,7 +323,11 @@
         arrival = freeze(clone(next));
       }
       const clear = !job.asset.canArrive || synchronous(job.asset.canArrive(arrival, link), 'Arrival clearance');
-      return { status: clear ? 'ready' : 'blocked', link, actor: arrival, camera: mappedCamera, crossing };
+      const result = { status: clear ? 'ready' : 'blocked', link, actor: arrival, camera: mappedCamera, crossing };
+      if (!clear || !carry) return result;
+      const plan = carry.planTravel({ actor, arrival, link, crossing, previous, destination: job.asset });
+      return plan.status === 'ready' ? { ...result, cargo: plan.cargo, commitCarry: plan.commit }
+        : { ...result, status: 'blocked', cargoBlocker: plan };
     }
     function checkArrival(id, options) {
       guard();
@@ -330,26 +337,31 @@
         const contact = options === undefined ? null : encounter(link, options);
         const status = contact?.status ?? (job?.asset ? 'prepared' : job ? 'loading' : 'unprepared');
         if (!contact || status !== 'prepared') return Object.freeze({ status, link });
-        return Object.freeze(evaluateArrival(job, freeze(clone(options.actor)),
-          options.camera == null ? null : clone(options.camera), contact.crossing));
+        const { commitCarry, ...result } = evaluateArrival(job, freeze(clone(options.actor)),
+          options.camera == null ? null : clone(options.camera), contact.crossing, options.previous);
+        return Object.freeze(result);
       } finally {
         handoff = false;
       }
     }
-    function activate(job, actor, camera, crossing) {
+    function activate(job, actor, camera, crossing, previous) {
       if (pending !== job || job.from !== active || !job.asset) return null;
       handoff = true;
       try {
         const link = job.link;
         let arrival = { link, actor: null, camera: null, crossing: null };
+        let commit;
         if (link) {
           if (!permits(link, actor)) return null;
-          const { status, ...candidate } = evaluateArrival(job, actor, camera, crossing);
+          const { status, commitCarry, ...candidate } = evaluateArrival(job, actor, camera, crossing, previous);
           if (status !== 'ready') return null;
+          commit = commitCarry;
           arrival = candidate;
         }
         const source = active, state = source?.asset.checkpoint?.();
-        if (state !== undefined) memory.set(source.id, freeze(clone(state)));
+        const savedSource = state === undefined ? undefined : freeze(clone(state));
+        commit?.();
+        if (state !== undefined) memory.set(source.id, savedSource);
         away.delete(job.place.id);
         if (source && source.id !== job.place.id && catalog.get(source.id).tickPolicy === 'continue')
           away.set(source.id, source.asset);
@@ -437,12 +449,12 @@
       if (!link.sweep) return null;
       const { crossing } = encounter(link, { actor, previous, radius });
       if (!crossing) return null;
-      const traveler = freeze(clone(actor)), view = camera == null ? null : clone(camera);
+      const traveler = freeze(clone(actor)), view = camera == null ? null : clone(camera), segmentStart = point(previous);
       const loaded = prepare(id), job = pending;
       walking = true;
       try {
         if (!await loaded) return null;
-        return activate(job, traveler, view, crossing);
+        return activate(job, traveler, view, crossing, segmentStart);
       } finally {
         walking = false;
       }
@@ -531,6 +543,7 @@
         if (state !== undefined) states.set(id, state);
       }
       return freeze({ place: active?.id ?? null, saved: clone(Object.fromEntries(states)),
+        ...(carry && { carry: carry.checkpoint() }),
         ...(clocks.size ? { clocks: Object.fromEntries(clocks) } : {}),
         ...(away.size ? { away: [...away.keys()].sort() } : {}),
         ...(instances.size ? { portable: { version: 1, instances: [...instances.values()],
@@ -558,6 +571,8 @@
       if (active || pending) throw new Error('Restore needs an empty place session');
       if (!W.data.record(data)) throw new TypeError('Invalid place session checkpoint');
       const { places: restoredPlaces, known, entries, returns } = restorePortable(data.portable);
+      if (data.carry !== undefined && !carry) throw new TypeError('This checkpoint needs a carry registry');
+      const restoreCarry = data.carry === undefined ? null : carry.planRestore(data.carry, id => restoredPlaces.has(id));
       if (data.place !== null && !restoredPlaces.has(data.place) || data.place === null && entries.size)
         throw new TypeError('Checkpoint needs a declared active place or null');
       const states = savedStates(data.saved);
@@ -582,6 +597,7 @@
           if (controller.signal.aborted) return null;
           validateAsset(asset);
         }
+        restoreCarry?.();
         memory = states;
         clocks = nextClocks;
         for (const [id, definition] of restoredPlaces) catalog.set(id, definition);
