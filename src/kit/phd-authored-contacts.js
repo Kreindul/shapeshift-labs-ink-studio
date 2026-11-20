@@ -1,6 +1,7 @@
 /* Time-ranged puppet contacts and scrub-safe rigid socket transfers. */
 (function (K) {
   const { anim: A, deform: D, V, M, clamp } = K;
+  const S = A.contactSurfaces;
   const zero = [0, 0, 0];
   const xyz = v => Array.isArray(v) && v.length === 3 && Array.from(v).every(Number.isFinite);
   const name = id => typeof id === 'string' && !!id.trim() && !(id in Object.prototype);
@@ -89,28 +90,59 @@
       const linear = owner.D ? M.mul(owner.A, D.jac(owner.D, slot.point)) : owner.A;
       return { position, rotation: M.mul(basis(linear), slot.rotation) };
     }
-    function chain(upper, lower) {
+    function chain(upper, lower, effector) {
       if (part(lower).parent !== part(upper).name) throw new Error('An IK contact needs a connected two-part chain');
+      if (effector !== lower && part(effector).parent !== lower)
+        throw new Error('A separate contact effector must be a child of the lower part');
+    }
+    function supports(list, upper) {
+      if (list === undefined) return [];
+      if (!upper || !Array.isArray(list) || list.length > 8) throw new TypeError('Reach assistance needs a chain and up to eight supports');
+      const seen = new Set();
+      const mapped = Array.from(list, spec => {
+        const { part: id, maxDegrees = 12, weight = 1 } = spec ?? {};
+        part(id);
+        if (id === upper || !under(upper, id) || seen.has(id) || !Number.isFinite(maxDegrees) ||
+            maxDegrees <= 0 || maxDegrees > 90 || !unit(weight))
+          throw new TypeError('A reach support must be a unique ancestor above the upper limb with a bounded turn: ' + id);
+        seen.add(id);
+        return { part: id, limit: maxDegrees * Math.PI / 180, weight };
+      });
+      return mapped.sort((a, b) => under(b.part, a.part) ? -1 : +under(a.part, b.part));
     }
     const contactIds = new Set();
     const holds = Array.from(contacts, contact => {
-      const { id, upper, part: lower, point, target, start, end,
+      const { id, upper, part: effector, lower = effector, point, target, align, assist, start, end,
         fadeIn = 0, fadeOut = 0, weight = 1, pole, enabled = true } = contact || {};
       if (!name(id) || contactIds.has(id) || !xyz(point) || ![start, end, fadeIn, fadeOut].every(Number.isFinite) ||
           start < 0 || end > duration || end <= start || fadeIn < 0 || fadeOut < 0 ||
           fadeIn + fadeOut > end - start + 1e-10 || !unit(weight) ||
           (pole !== undefined && !xyz(pole)) || typeof enabled !== 'boolean')
         throw new TypeError('Invalid contact range, fade or point: ' + id);
-      part(lower);
-      if (upper !== undefined) chain(upper, lower);
-      if (prop && under(lower, prop.part)) throw new Error('Author contacts on the puppet, or attach the prop at a socket');
-      if (!xyz(target)) {
+      part(effector);
+      if (upper !== undefined) chain(upper, lower, effector);
+      else if (lower !== effector) throw new Error('A lower part requires an upper IK part');
+      if (prop && under(effector, prop.part)) throw new Error('Author contacts on the puppet, or attach the prop at a socket');
+      const surface = target?.kind === 'surface';
+      if (surface) {
+        if (typeof target.hit !== 'boolean' || (target.hit && (!xyz(target.point) || !S.direction(target.normal))))
+          throw new TypeError('Invalid captured surface on ' + id);
+      } else if (!xyz(target)) {
         const slot = socket(target);
-        if (under(slot.part, upper ?? lower)) throw new Error('A contact cannot target its own moving chain');
+        if (under(slot.part, upper ?? effector)) throw new Error('A contact cannot target its own moving chain');
+      }
+      let alignment;
+      if (align !== undefined && align !== false) {
+        const { normal = [0, 1, 0], weight = 1 } = align === true ? {} : align ?? {};
+        if ((align !== true && (!align || typeof align !== 'object' || Array.isArray(align))) ||
+            xyz(target) || !S.direction(normal) || !unit(weight))
+          throw new TypeError('Normal alignment needs a surface or socket and a valid rest normal: ' + id);
+        alignment = { normal: V.norm(normal), weight };
       }
       contactIds.add(id);
-      return { id, upper, part: lower, point: point.slice(), target: xyz(target) ? target.slice() : target,
-        start, end, fadeIn, fadeOut, weight, pole: pole?.slice(), enabled };
+      return { id, upper, lower, part: effector, point: point.slice(),
+        target: surface ? K.procedural.data.freeze(structuredClone(target)) : xyz(target) ? target.slice() : target,
+        align: alignment, assist: supports(assist, upper), start, end, fadeIn, fadeOut, weight, pole: pole?.slice(), enabled };
     });
     function contactStrength(t, contact) {
       if (!contact.enabled || t < contact.start || t > contact.end) return 0;
@@ -118,16 +150,43 @@
       const exit = contact.fadeOut ? smooth((contact.end - t) / contact.fadeOut) : 1;
       return contact.weight * enter * exit;
     }
-    function applyContacts(t) {
+    function locked(other, extra) {
+      const protectedParts = extra.filter(Boolean);
+      for (const hold of other) {
+        protectedParts.push(hold.part);
+        if (typeof hold.target === 'string') protectedParts.push(socket(hold.target).part);
+      }
+      return id => protectedParts.some(owner => under(owner, id));
+    }
+    function solveGoal(request, target, strength, budget, protectedPart, normal) {
+      const { part, point, upper, lower, pole, align } = request;
+      const goal = V.lerp(puppet.point(part, point), target, strength);
+      const assist = S.assist(puppet, request, target, strength, budget, protectedPart);
+      if (align?.weight && normal) S.seat(puppet, request, goal, normal, strength, basis);
+      else if (upper !== undefined) puppet.reach(upper, lower, point, goal, { pole, effector: part });
+      else puppet.pin(part, point, goal);
+      return { goal, assist, normal, align };
+    }
+    function applyContacts(t, budget) {
       const active = [];
       puppet.solve();
-      for (const hold of holds) {
-        const strength = contactStrength(t, hold);
-        if (!strength) continue;
-        const target = Array.isArray(hold.target) ? hold.target.slice() : socketPoint(socket(hold.target));
-        if (hold.upper !== undefined) puppet.reach(hold.upper, hold.part, hold.point, target, { pole: hold.pole, w: strength });
-        else puppet.pin(hold.part, hold.point, target, strength);
-        active.push({ id: hold.id, part: hold.part, strength, target, point: hold.point });
+      const engaged = holds.filter(hold => contactStrength(t, hold) > 0);
+      for (const hold of engaged) {
+        const strength = contactStrength(t, hold), spec = hold.target;
+        const record = { id: hold.id, part: hold.part, strength, point: hold.point };
+        const surface = spec?.kind === 'surface' ? spec : undefined;
+        if (surface && !surface.hit) {
+          active.push({ ...record, surface, target: null });
+          continue;
+        }
+        const slot = typeof spec === 'string' ? socket(spec) : null;
+        const target = surface ? surface.point.slice() : slot ? socketPoint(slot) : spec.slice();
+        const normal = surface ? V.norm(surface.normal) : slot && hold.align
+          ? M.app(socketFrame(spec).rotation, [0, 1, 0]) : undefined;
+        const protectedPart = hold.assist.length
+          ? locked(engaged.filter(other => other !== hold && other.target?.hit !== false), [slot?.part]) : undefined;
+        active.push({ ...record, target, ...(surface && { surface }),
+          ...solveGoal(hold, target, strength, budget, protectedPart, normal) });
       }
       return active;
     }
@@ -145,10 +204,13 @@
       return compose(incoming, { position: V.lerp(key.offset.position, key.mount.position, u),
         rotation: u === 0 ? key.offset.rotation : M.mul(M.rot(key.delta.axis, key.delta.angle * (1 - u)), key.mount.rotation) });
     }
-    function solveReach(key, target, strength) {
-      const hand = socket(key.socket);
-      return puppet.reach(key.reach.upper, hand.part, hand.point, target, { pole: key.reach.pole, w: strength });
+    function solveReach(key, target, strength, budget, outgoing, t) {
+      const protectedPart = key.reach.assist.length
+        ? locked(holds.filter(hold => contactStrength(t, hold) > 0 && hold.target?.hit !== false), [outgoing.part]) : undefined;
+      return solveGoal(key.reach, target, strength, budget, protectedPart);
     }
+    const reachTolerance = Math.max(1e-6, height * 0.002);
+    const reachStatus = miss => miss > reachTolerance ? 'out-of-range' : 'reached';
     if (prop) {
       if (!Array.isArray(prop.keys)) throw new TypeError('An animated prop needs an array of transfer keys');
       socket(initial.socket);
@@ -165,10 +227,11 @@
               (reach.pole !== undefined && !xyz(reach.pole)) ||
               (reach.lead !== undefined && (!Number.isFinite(reach.lead) || reach.lead < 0)) ||
               V.len(targetMount.position) > 1e-8) throw new TypeError('A reach needs a receiving limb and a grip-centered mount');
-          chain(reach.upper, hand.part);
+          chain(reach.upper, reach.lower ?? hand.part, hand.part);
         }
         return { id, time, socket: to, mount: targetMount, settle,
-          reach: reach && { upper: reach.upper, pole: reach.pole?.slice(), lead: reach.lead } };
+          reach: reach && { upper: reach.upper, lower: reach.lower ?? hand.part, part: hand.part, point: hand.point,
+            pole: reach.pole?.slice(), lead: reach.lead, assist: supports(reach.assist, reach.upper) } };
       }).sort((a, b) => a.time - b.time);
       D.inspectPoses(puppet, solve => {
         for (const [index, key] of drafts.entries()) {
@@ -178,27 +241,32 @@
               (key.reach && under(outgoing.part, key.reach.upper)))
             throw new Error('A transfer needs a new socket, unique time and independent receiving limb');
           solve(basePose(key.time));
-          applyContacts(key.time);
+          const budget = new Map();
+          applyContacts(key.time, budget);
           const world = propFrame(key.time);
           const reachDistance = key.reach ? V.dist(socketPoint(hand), world.position) : 0;
           const lead = key.reach ? key.reach.lead ?? clamp(0.12 + reachDistance / (height * 1.6), 0.16, 0.68) : 0;
           const reachStart = Math.max(previous.settleEnd ?? 0, key.time - lead);
           const settleEnd = Math.min(duration, drafts[index + 1]?.time ?? duration,
             key.time + (key.settle ?? clamp((key.time - reachStart) * 0.5, 0.1, 0.28)));
-          const reachMiss = key.reach ? solveReach(key, world.position, 1) : null;
+          const assist = key.reach ? solveReach(key, world.position, 1, budget, outgoing, key.time).assist : [];
+          const reachMiss = key.reach ? V.dist(socketPoint(hand), world.position) : null;
           const offset = relative(socketFrame(key.socket), world);
           const delta = M.axisAngle(M.mul(offset.rotation, M.tr(key.mount.rotation)));
           keys.push({ ...key, from: previous.socket, reachStart, settleEnd, offset, delta,
-            anchor: world.position, reachDistance, reachMiss });
+            anchor: world.position, reachDistance, reachMiss, assist });
         }
       });
     }
     const handoffs = Object.freeze(keys.map(key => Object.freeze({ id: key.id, from: key.from, to: key.socket,
       reachStart: key.reachStart, time: key.time, settleEnd: key.settleEnd,
-      reachDistance: key.reachDistance, reachMiss: key.reachMiss })));
+      reachDistance: key.reachDistance, reachMiss: key.reachMiss,
+      ...(key.reach && { reachStatus: reachStatus(key.reachMiss), assist: K.procedural.data.freeze(key.assist) }) })));
     const ranges = Object.freeze(holds.map(hold => Object.freeze({
       id: hold.id, part: hold.part, start: hold.start, end: hold.end, enabled: hold.enabled,
-      fadeIn: hold.fadeIn, fadeOut: hold.fadeOut, weight: hold.weight
+      fadeIn: hold.fadeIn, fadeOut: hold.fadeOut, weight: hold.weight,
+      ...(hold.target?.kind === 'surface' && { surface: hold.target }),
+      ...(hold.align && { align: K.procedural.data.freeze(hold.align) })
     })));
     function phase(t, key) {
       if (t < key.reachStart) return 'before';
@@ -208,7 +276,7 @@
     }
     function apply(time) {
       if (!Number.isFinite(time)) throw new TypeError('Contact time must be finite');
-      const t = clamp(time, 0, duration), active = applyContacts(t), reaches = [];
+      const t = clamp(time, 0, duration), budget = new Map(), active = applyContacts(t, budget), reaches = [];
       for (const [index, key] of keys.entries()) {
         if (!key.reach || t < key.reachStart || t > key.settleEnd) continue;
         const strength = t === key.time ? 1 : t < key.time
@@ -216,9 +284,9 @@
           : 1 - smooth((t - key.time) / (key.settleEnd - key.time));
         if (!strength) continue;
         const target = t <= key.time ? propFrame(t, index).position : key.anchor;
-        solveReach(key, target, strength);
         const hand = socket(key.socket);
-        reaches.push({ id: key.id, part: hand.part, strength, target: target.slice(), point: hand.point });
+        reaches.push({ id: key.id, part: hand.part, strength, target: target.slice(), point: hand.point,
+          ...solveReach(key, target, strength, budget, socket(before(t, index).socket), t) });
       }
       let attachment = null;
       if (prop) {
@@ -229,9 +297,14 @@
         puppet.solve();
         attachment = { part: prop.part, owner, ...transform };
       }
-      function evidence({ point, ...record }) {
+      function evidence({ point, align, normal, ...record }) {
         const position = puppet.point(record.part, point);
-        return { ...record, position, miss: V.dist(position, record.target) };
+        if (!record.target) return { ...record, position, miss: null, status: 'no-surface' };
+        const miss = V.dist(position, record.target), goalMiss = V.dist(position, record.goal);
+        const actualNormal = align && normal && S.normalAt(puppet, record.part, point, align.normal);
+        return { ...record, position, miss, goalMiss, status: reachStatus(goalMiss),
+          ...(normal && { normal }),
+          ...(actualNormal && { actualNormal, normalMiss: Math.acos(clamp(V.dot(actualNormal, normal), -1, 1)) * 180 / Math.PI }) };
       }
       return { time: t, contacts: active.map(evidence), reaches: reaches.map(evidence), attachment };
     }
@@ -255,5 +328,5 @@
       inspect: time => D.inspectPoses(puppet, () => pose(time)) });
   }
 
-  A.contacts = Object.freeze({ create });
+  A.contacts = Object.freeze({ create, project: S.project });
 })(KIT);

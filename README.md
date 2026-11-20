@@ -362,7 +362,7 @@ Use [Motion Review](docs/motion-review.md) to inspect loop pops, spacing spikes,
 
 Use [clip sequencing](docs/clip-sequence.md) to trim and retime instances, inspect handoffs, and audition Once, Loop, or Travel loop playback. Keys and cues follow their clip instances through timing changes.
 
-Use [authored contacts and prop handoffs](docs/authored-contacts.md) to pin a hand or foot over an interval, key a prop between sockets, and audition the reach, switch, and settle.
+Use [authored contacts and prop handoffs](docs/authored-contacts.md) to pin a hand or foot, seat it on a captured scene surface, or key a prop between sockets. Bounded reach assistance and grip residuals are available on the headless timeline.
 
 Use [Motion FX](docs/motion-fx.md) to time stretch, smear, trails, and solid splat sweeps independently. Each effect has its own intensity keys and part mask.
 

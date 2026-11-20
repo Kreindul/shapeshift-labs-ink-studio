@@ -1148,6 +1148,11 @@
       po.turn = po.turn ? M.mul(loc, po.turn) : loc;
       pup.solve();
     };
+    pup.rotate = (name, worldTurn) => {
+      pup.solve();
+      turnWorld(name, worldTurn);
+      return pup;
+    };
     const moveWorld = (name, dw) => {
       const p = parts[name],
         dl = M.app(M.inv(p.P), dw),
@@ -1194,9 +1199,10 @@
       o = o || {};
       pup.solve();
       const w = o.w === undefined ? 1 : o.w,
+        effector = o.effector ?? lower,
         a = pup.point(upper, parts[upper].pivot),
         b = pup.point(lower, parts[lower].pivot),
-        e = pup.point(lower, tip),
+        e = pup.point(effector, tip),
         goal = V.lerp(e, target, w),
         l1 = V.dist(a, b),
         l2 = V.dist(b, e),
@@ -1205,10 +1211,10 @@
       const Q1 = limited(V.norm(V.sub(b, a)), V.norm(V.sub(elbow, a)), Math.PI, 1);
       if (Q1) turnWorld(upper, Q1);
       const b2 = pup.point(lower, parts[lower].pivot),
-        e2 = pup.point(lower, tip),
+        e2 = pup.point(effector, tip),
         Q2 = limited(V.norm(V.sub(e2, b2)), V.norm(V.sub(ik.tip, b2)), Math.PI, 1);
       if (Q2) turnWorld(lower, Q2);
-      return V.dist(pup.point(lower, tip), goal);
+      return V.dist(pup.point(effector, tip), goal);
     };
     pup.distance = (name, target, dist, o) => {
       o = o || {};

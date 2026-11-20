@@ -35,9 +35,9 @@ timeline = K.anim.contacts.create({
 ## Pin a range
 
 `point` is a point on the hand or foot in puppet rest coordinates.
-`target` is either a fixed world point or a socket ID. With an `upper`
-part, Ink drives the connected two-part chain through the puppet's
-two-bone IK solver. A contact without `upper` translates the specified
+`target` accepts a fixed world point, a socket ID, or a captured scene
+surface. With an `upper` part, Ink drives the connected two-part chain
+through the puppet's two-bone IK solver. A contact without `upper` translates the specified
 part using the puppet's pin operation. Optional `weight`, `enabled`,
 `fadeIn`, and `fadeOut` control the contact independently of the
 source keys. Overlapping contacts are solved in authored order.
@@ -46,6 +46,74 @@ source keys. Overlapping contacts are solved in authored order.
 actual position, and residual distance. It restores the live puppet pose
 after resolving the sample. A target outside the limb's reach reports a
 residual rather than stretching the chain.
+
+## Seat on a scene surface
+
+Capture a real point and normal on a terrain, step, or railing mesh
+with Ink's contact raycaster. The result is a fixed world-space anchor
+that can be serialized with the rest of the shot.
+
+```js
+const index = K.procedural.contacts.index(sceneMesh, { surfaces: ['sloped-step'] });
+const step = K.anim.contacts.project(index, {
+  origin: [-0.25, 0.8, 0.22],
+  direction: [0, -1, 0],
+  distance: 1,
+  label: 'Top of the step'
+});
+const solePlant = {
+  id: 'sole-plant',
+  upper: 'thigh',
+  lower: 'shin',
+  part: 'boot',
+  point: [-0.25, 0, 0.12],
+  target: step,
+  align: { normal: [0, 1, 0] },
+  start: 0.14, end: 3.06, fadeIn: 0.33, fadeOut: 0.25
+};
+```
+
+The mesh index uses world-space triangles. Filter it by surface name to
+choose a particular face. A missed ray reports `no-surface` and keeps the
+authored pose for that range. A captured anchor stays in place while the
+puppet moves. Use a socket when the target needs to follow another part.
+
+`align.normal` is the effector's rest normal pointing from the surface
+toward the limb. `align: true` uses +Y. For a palm, choose the rest axis
+that should face away from the rail. `align.weight` scales the shortest
+tilt. A separate boot or palm can be a direct child of `lower` and tilt
+about its own ankle or wrist. If the lower limb doubles as the effector,
+its available tilt is limited to the rotation that preserves the contact
+point and limb lengths. The frame reports both the actual normal and
+`normalMiss` in degrees.
+
+## Assist a long reach
+
+Use an `assist` list on a ranged IK contact or in a prop key's `reach`
+object. Every support is a named ancestor above the upper limb.
+
+```js
+const reach = {
+  upper: 'rightArm',
+  lower: 'rightForearm',
+  pole: [0, -1, 0],
+  assist: [
+    { part: 'chest', maxDegrees: 13 },
+    { part: 'rightShoulder', maxDegrees: 23 }
+  ]
+};
+```
+
+Support turns grow as the hand approaches the limit of its reach.
+Each support can set a `weight` from zero to one. The solver shares each
+joint's turn budget across the frame and skips assistance that would
+move another active plant or the outgoing grip. It then solves the
+existing two-bone chain at its current lengths.
+
+Frame evidence reports the turns actually applied and the distance to
+the grip. `goalMiss` measures the remaining gap after taking the fade
+into account. `out-of-range` is advisory. Explicit ownership keys still
+play and preserve the prop transform at the switch.
 
 ## Key a transfer
 
@@ -78,6 +146,12 @@ are captured against the edited animation.
 
 ```sh
 node cli/ink-studio.js authored-contacts examples/authored-contacts.js --at 1.22
+
+node cli/ink-studio.js animation-timeline examples/scene-contacts.js \
+  --at 1.10 --direction 6 --preview seated
+
+node cli/ink-studio.js animation-timeline examples/scene-contacts.js \
+  --at 2.42 --preview long-reach
 ```
 
 For the interactive demo, [build and serve the browser bundle](pose-blocking.md#try-the-browser-example)
