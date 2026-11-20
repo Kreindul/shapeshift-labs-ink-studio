@@ -1,12 +1,14 @@
 /* Ordered color operations for palette resolve and lit surface samples. */
 const ColorStack = (() => {
-  let curves, luts;
+  let curves, luts, spaces;
   try {
     curves = ColorCurves;
     luts = ColorLUT;
+    spaces = ColorSpace;
   } catch {
     curves = require('./color-curves.js');
     luts = require('./color-lut.js');
+    spaces = require('./color-space.js');
   }
   const record = value => value && Object.getPrototypeOf(value) === Object.prototype;
   const unit = n => Number.isFinite(n) && n >= 0 && n <= 1;
@@ -28,7 +30,7 @@ const ColorStack = (() => {
       if (!record(step) || typeof step.type !== 'string' || !Object.hasOwn(fields, step.type))
         throw new TypeError('Unknown color stack operation: ' + step?.type);
       const allowed = fields[step.type];
-      if (Object.keys(step).some(key => !allowed.includes(key) && !['type', 'id', 'amount', 'enabled'].includes(key)))
+      if (Object.keys(step).some(key => !allowed.includes(key) && !['type', 'id', 'amount', 'enabled', 'color'].includes(key)))
         throw new TypeError('Unknown property on a ' + step.type + ' color step');
       if (step.id !== undefined) {
         if (typeof step.id !== 'string' || !step.id.trim() || ids.has(step.id))
@@ -99,11 +101,14 @@ const ColorStack = (() => {
       case 'hue': return hue(step);
       case 'channelMix': return channelMix(step);
       case 'curves': {
-        const plan = curves.prepare(step.curves, resolveColor);
+        const plan = curves.prepare(step.curves, resolveColor, step.color);
         if (!plan) throw new TypeError('A curves step needs a color transfer');
         return plan;
       }
-      case 'lut': return luts.prepare(step.lut).sample;
+      case 'lut': {
+        const plan = luts.prepare(step.lut);
+        return step.color === undefined ? plan.apply : spaces.wrap(plan.sample, step.color);
+      }
     }
   }
 
@@ -116,15 +121,16 @@ const ColorStack = (() => {
       const amount = step.amount ?? 1, active = step.enabled !== false && amount !== 0;
       if (step.type === 'paletteRemap') {
         if (!paletteRemap) throw new TypeError('Palette remap steps require a scene palette');
-        const plan = paletteRemap(step.remap);
+        const plan = paletteRemap(step.remap, step.color);
         if (!plan) throw new TypeError('A palette remap step needs a remap definition');
         if (active) {
           indexed = true;
           locks.push(plan);
-          steps.push({ amount, run(rgb, out, index) { copy(plan.target(index) ?? rgb, out); } });
+          steps.push({ amount, run(rgb, out, index) { copy(plan.target(index, rgb) ?? rgb, out); } });
         }
       } else {
-        const run = transfer(step, resolveColor);
+        const op = transfer(step, resolveColor);
+        const run = step.type === 'curves' || step.type === 'lut' ? op : spaces.wrap(op, step.color, { normalized: true });
         if (active) steps.push({ amount, run: (rgb, out) => run(rgb, out) });
       }
     }

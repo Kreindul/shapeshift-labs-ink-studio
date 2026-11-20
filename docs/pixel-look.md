@@ -258,3 +258,60 @@ node cli/ink-studio.js render lab/data-shrine.json --t 4 --pitch .31 --yaw .55 -
 
 The same `--color-stack` option works with `sim render`. A JSON file
 overrides the authored scene stack. `off` bypasses scene and surface stacks.
+
+## Color spaces and numeric ranges
+
+Add `color` to a LUT, curves definition, palette remap, or stack step to
+declare how that operation reads and writes RGB. Ink Studio converts its
+working sRGB values into the declared input and converts the result from the
+declared output back to working sRGB.
+
+```json
+{
+  "color": {
+    "input": { "space": "srgb-linear", "range": [16, 235], "outOfRange": "clamp" },
+    "output": { "space": "srgb-linear", "range": [16, 235], "outOfRange": "preserve" }
+  }
+}
+```
+
+Each endpoint accepts `srgb`, `srgb-linear`, `display-p3`, or
+`display-p3-linear`. Use a shared `[min, max]` or give each channel its
+own bounds with `{ "min": [r, g, b], "max": [r, g, b] }`. The bounds
+map to normalized zero and one in the declared space. `preserve` keeps
+finite values beyond the bounds, `clamp` limits them to the bounds,
+and `error` rejects them. Omitted endpoint settings default to `srgb`,
+`[0, 1]`, and `preserve`. Definitions without `color` keep their
+existing behavior. RGB conversions use the D65 matrices and extended
+sRGB transfer functions in the [CSS Color 4 conversion reference](https://www.w3.org/TR/css-color-4/#color-conversion-code).
+
+LUT entries, numeric ramp colors, RGB channel curves, and numeric remap
+targets use the declared code values. A luminance ramp derives its scalar
+from the input RGB. A material ramp driven by a scene field reads the
+field in its own units. Hex colors and palette swatches are authored in
+sRGB and converted as needed. The parametric stack steps use normalized
+values in the declared spaces, so a contrast pivot of 0.5 stays at the
+middle of the input range. A step's own `color` replaces the nested
+definition's declaration for that step.
+
+A LUT's table domain defines where the grid is sampled, independently of
+the input encoding's numeric range. The sampler uses `domainPolicy` to
+`clamp` to the grid by default, report an `error`, or `extrapolate`
+with the nearest edge cell. Use `ColorLUT.prepare(lut).sample(rgb, out)`
+to work directly in table values or `.apply(rgb, out)` to work in renderer
+sRGB. Use `ColorSpace.convert(rgb, from, to)` to convert between descriptors
+in JavaScript.
+
+When importing `.cube`, supply the spaces and ranges the table was
+authored for. The import stores them in the native JSON. Use
+`--input-out-of-range` and `--output-out-of-range` to set the endpoint
+policies. The CLI and standard WebGL scene renderer use the same
+declarations.
+
+```sh
+node cli/ink-studio.js lut import examples/half-gain-legal.cube \
+  --input-space srgb-linear --output-space srgb-linear \
+  --input-range 16,235 --output-range 16,235 --domain-policy error \
+  --out half-linear.json
+node cli/ink-studio.js render examples/rgb-lut.js --ortho --lut half-linear.json --out linear.png
+```

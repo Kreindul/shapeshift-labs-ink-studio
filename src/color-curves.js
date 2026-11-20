@@ -1,5 +1,7 @@
 /* Numeric transfer curves and RGB ramps shared by scene and surface looks. */
 const ColorCurves = (() => {
+  let spaces;
+  try { spaces = ColorSpace; } catch { spaces = require('./color-space.js'); }
   const modes = ['step', 'linear', 'smooth'];
   const channels = ['red', 'green', 'blue'];
   const unit = n => Number.isFinite(n) && n >= 0 && n <= 1;
@@ -60,11 +62,11 @@ const ColorCurves = (() => {
     return [packed >> 16, packed >> 8 & 255, packed & 255].map(n => n / 255);
   }
 
-  function ramp(definition, resolveColor = color) {
+  function ramp(definition, resolveColor = color, extended = false) {
     return sampler(definition, value => {
       const rgb = value === undefined ? null : resolveColor(value);
-      if (!rgb || rgb.length !== 3 || !Array.from(rgb).every(unit))
-        throw new RangeError('Ramp stops need finite RGB colors in [0, 1]');
+      if (!rgb || rgb.length !== 3 || !Array.from(rgb).every(extended ? Number.isFinite : unit))
+        throw new RangeError(extended ? 'Ramp stops need finite RGB colors' : 'Ramp stops need finite RGB colors in [0, 1]');
       return Array.from(rgb);
     }, (a, b, t, out = [0, 0, 0]) => {
       for (let i = 0; i < 3; i++) out[i] = mix(a[i], b[i], t);
@@ -72,22 +74,29 @@ const ColorCurves = (() => {
     });
   }
 
-  function prepare(definition, resolveColor) {
+  function prepare(definition, resolveColor = color, override) {
     if (definition === undefined || definition === false) return null;
-    if (!object(definition) || Object.keys(definition).some(key => !['ramp', 'channels'].includes(key)))
+    if (!object(definition) || Object.keys(definition).some(key => !['ramp', 'channels', 'color'].includes(key)))
       throw new TypeError('A color transfer needs a ramp or RGB channel curves');
-    const tone = definition.ramp === undefined ? null : ramp(definition.ramp, resolveColor);
+    const contract = spaces.settings(override === undefined ? definition.color : override);
+    const declaredOutput = contract && { ...contract.output, outOfRange: 'preserve' };
+    const encodeStop = contract && spaces.prepare(undefined, declaredOutput);
+    const passthrough = contract && spaces.prepare(contract.input, declaredOutput);
+    const resolveStop = contract ? value => Array.isArray(value) ? value : encodeStop(resolveColor(value)) : resolveColor;
+    const tone = definition.ramp === undefined ? null : ramp(definition.ramp, resolveStop, Boolean(contract));
     const settings = definition.channels ?? {};
     if (!object(settings) || Object.keys(settings).some(key => !channels.includes(key)))
       throw new TypeError('Use red, green or blue RGB curves');
-    const rgb = channels.map(name => Object.hasOwn(settings, name) ? scalar(settings[name], true) : null);
+    const rgb = channels.map(name => Object.hasOwn(settings, name) ? scalar(settings[name], !contract) : null);
     if (!tone && !rgb.some(Boolean)) throw new TypeError('A color transfer needs a ramp or RGB channel curves');
-    return (input, out = [0, 0, 0], value = luminance(input)) => {
+    const transfer = (input, out = [0, 0, 0], value = luminance(input)) => {
       if (tone) tone(value, out);
+      else if (passthrough) passthrough(input, out);
       else for (let i = 0; i < 3; i++) out[i] = clamp(input[i]);
-      for (let i = 0; i < 3; i++) if (rgb[i]) out[i] = rgb[i](out[i]);
+      for (let i = 0; i < 3; i++) if (rgb[i]) out[i] = rgb[i](contract && !tone ? input[i] : out[i]);
       return out;
     };
+    return spaces.wrap(transfer, contract);
   }
 
   return Object.freeze({ scalar, ramp, prepare, segmentIndex, weight, modes: Object.freeze(modes) });

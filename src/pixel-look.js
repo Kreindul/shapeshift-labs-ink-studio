@@ -1,15 +1,17 @@
 /* Fixed-grid, palette-aware resolve using coverage and cluster voting.
    No per-frame palette fitting, camera movement or black ink. */
 const PixelLook = (() => {
-  let curves, luts, stacks;
+  let curves, luts, stacks, spaces;
   try {
     curves = ColorCurves;
     luts = ColorLUT;
     stacks = ColorStack;
+    spaces = ColorSpace;
   } catch {
     curves = require('./color-curves.js');
     luts = require('./color-lut.js');
     stacks = require('./color-stack.js');
+    spaces = require('./color-space.js');
   }
   const weights = [0.30, 0.55, 0.15];
   const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
@@ -31,16 +33,22 @@ const PixelLook = (() => {
   const isColor = n => Number.isSafeInteger(n) && n >= 0 && n <= 0xffffff;
   const isSwatch = value => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
   const unpack = color => [color >> 16, (color >> 8) & 255, color & 255].map(n => n / 255);
+  const clamp = n => Math.max(0, Math.min(1, n));
 
-  function prepareRemap(definition, palette, roles = {}) {
+  function prepareRemap(definition, palette, roles = {}, override) {
     if (definition === undefined || definition === false) return null;
     if (!definition || Object.getPrototypeOf(definition) !== Object.prototype ||
-        Object.keys(definition).some(key => key !== 'rules' && key !== 'protect'))
+        Object.keys(definition).some(key => !['rules', 'protect', 'color'].includes(key)))
       throw new TypeError('Palette remap needs a settings object with rules and optional protect');
     const colors = Array.isArray(palette) || ArrayBuffer.isView(palette) ? Array.from(palette) : [];
     if (!colors.length || !colors.every(isColor))
       throw new TypeError('Palette remap needs a palette of packed RGB colors');
     const { rules, protect = [] } = definition;
+    const contract = spaces.settings(override === undefined ? definition.color : override);
+    const encodeTarget = contract && spaces.prepare(undefined, { ...contract.output, outOfRange: 'preserve' });
+    const applyTarget = contract && spaces.wrap((rgb, out, target) => {
+      for (let i = 0; i < 3; i++) out[i] = target[i];
+    }, contract);
     if (!Array.isArray(rules) || rules.length > 1024 || !Array.isArray(protect) || protect.length > 1024)
       throw new TypeError('Palette remap rules and protect must be lists of at most 1024 entries');
     const index = value => {
@@ -73,27 +81,35 @@ const PixelLook = (() => {
           Object.keys(rule).some(key => key !== 'from' && key !== 'to'))
         throw new TypeError('Expected a palette remap rule with from and to');
       const color = isSwatch(rule.to) ? parseInt(rule.to.slice(1), 16) : rule.to;
-      if (!isColor(color)) throw new TypeError('Palette remap output needs a #rrggbb or packed RGB color');
-      for (const i of select(rule.from)) overrides.set(i, color);
+      let output;
+      if (isColor(color)) output = encodeTarget ? encodeTarget(unpack(color)) : unpack(color);
+      else if (contract && Array.isArray(color) && color.length === 3 && Array.from(color).every(Number.isFinite)) output = color.slice();
+      else throw new TypeError('Palette remap output needs a hex swatch, packed RGB or a declared numeric RGB triple');
+      for (const i of select(rule.from)) overrides.set(i, Object.freeze(output));
     }
     const locked = new Set();
     for (const from of protect) for (const i of select(from)) {
       locked.add(i);
-      overrides.set(i, colors[i]);
+      overrides.set(i, Object.freeze(unpack(colors[i])));
     }
     const base = Float32Array.from(colors.flatMap(unpack));
-    const targets = new Map(Array.from(overrides, ([i, color]) => [i, Object.freeze(unpack(color))]));
+    function target(index, rgb) {
+      const value = overrides.get(index);
+      return value && applyTarget && !locked.has(index) ? applyTarget(rgb ?? unpack(colors[index]), undefined, value) : value;
+    }
     return Object.freeze({
-      target: index => targets.get(index),
+      target,
       protects: index => locked.has(index),
       grade(prior, amount = 1) {
         if (!fraction(amount)) throw new RangeError('Palette remap strength must be in [0, 1]');
         const output = base.slice();
         if (prior) output.set(prior.subarray ? prior.subarray(0, output.length) : prior.slice(0, output.length));
-        for (const [i, rgb] of targets) {
+        for (const i of overrides.keys()) {
+          const input = applyTarget && prior?.length >= i * 3 + 3 ? prior.slice(i * 3, i * 3 + 3) : undefined;
+          const rgb = target(i, input);
           for (let channel = 0; channel < 3; channel++) {
             const key = i * 3 + channel;
-            output[key] = base[key] + (rgb[channel] - base[key]) * amount;
+            output[key] = clamp(base[key] + (rgb[channel] - base[key]) * amount);
           }
         }
         return output;
@@ -108,7 +124,7 @@ const PixelLook = (() => {
   }
 
   function prepareColorStack(stack, palette, roles) {
-    return stacks.prepare(stack, { paletteRemap: definition => prepareRemap(definition, palette, roles) });
+    return stacks.prepare(stack, { paletteRemap: (definition, color) => prepareRemap(definition, palette, roles, color) });
   }
 
   function colorGrade(palette, roles, prior, remap, definition, lut, stack) {
@@ -126,16 +142,13 @@ const PixelLook = (() => {
       }
       const base = prior?.length >= offset + 3 ? prior.slice(offset, offset + 3) : unpack(palette[i]);
       let shaped = transfer ? transfer(base, result) : base;
-      if (lookup) shaped = lookup.sample(shaped, result);
+      if (lookup) shaped = lookup.apply(shaped, result);
       if (ordered) shaped = ordered.sample(shaped, result, i);
-      if (lookup || ordered) {
-        for (let channel = 0; channel < 3; channel++)
-          grade[offset + channel] = Math.max(0, Math.min(1, shaped[channel]));
-      } else grade.set(shaped, offset);
+      grade.set(shaped, offset);
     }
-    if (!plan) return grade;
-    const resolved = plan.grade(grade);
-    for (const i of protectedSlots) resolved.set(grade.subarray(i * 3, i * 3 + 3), i * 3);
+    const resolved = plan ? plan.grade(grade) : grade;
+    if (plan) for (const i of protectedSlots) resolved.set(grade.subarray(i * 3, i * 3 + 3), i * 3);
+    for (let i = 0; i < resolved.length; i++) resolved[i] = clamp(resolved[i]);
     return resolved;
   }
 

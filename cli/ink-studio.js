@@ -292,6 +292,8 @@ const CMD = {
         '  scene apply|stamp|remix|capture|history|promote <world> ...  edit or derive a world manifest',
         '  sim run|resume|fork|reset|replay|diff|sweep|render ...  run or compare fixed-tick simulations',
         '  lut import <file.cube|file.json> [--out file.json]  load a 3D color table as native JSON',
+        '    --input-space space --output-space space --input-range min,max --output-range min,max',
+        '    --input-out-of-range preserve|clamp|error --output-out-of-range preserve|clamp|error --domain-policy clamp|error|extrapolate',
         '',
         '  scenes                      list every diorama',
         '  catalog [words]             what the toolkit can do, searchable',
@@ -343,7 +345,7 @@ const CMD = {
     const [mode, file] = pos;
     if (mode !== 'import' || !file || (opt.out !== undefined && typeof opt.out !== 'string'))
       die('Usage: ink-studio lut import <file.cube|file.json> [--out file.json]');
-    const lut = require('./lut.js'), definition = lut.read(file);
+    const lut = require('./lut.js'), definition = lut.read(file, lut.importOptions(opt));
     if (opt.out) lut.write(opt.out, definition);
     else process.stdout.write(JSON.stringify(definition) + '\n');
   },

@@ -188,10 +188,10 @@ const SplatEffects = (() => {
     };
   }
 
-  function colorCurve({ ramp, channels, source = 'luminance', outputPalette }, context, resolveColor) {
+  function colorCurve({ ramp, channels, color, source = 'luminance', outputPalette }, context, resolveColor) {
     if (ramp === undefined && source !== 'luminance')
       throw new TypeError('A color curve source requires a ramp');
-    const transfer = curves.prepare({ ramp, channels }, resolveColor);
+    const transfer = curves.prepare({ ramp, channels, color }, resolveColor);
     const lookup = ramp === undefined ? null : curveSource(source, context);
     const result = [0, 0, 0, 0, 1, 0];
     return {
@@ -215,7 +215,7 @@ const SplatEffects = (() => {
   }
 
   function colorLut({ lut, outputPalette }, resolveColor) {
-    return rgbEffect(luts.prepare(lut).sample, outputPalette, resolveColor);
+    return rgbEffect(luts.prepare(lut).apply, outputPalette, resolveColor);
   }
 
   function colorStack({ stack, outputPalette }, resolveColor) {

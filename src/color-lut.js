@@ -1,18 +1,23 @@
 /* 3D RGB lookup tables in red-fastest .cube order. */
 const ColorLUT = (() => {
+  let spaces;
+  try { spaces = ColorSpace; } catch { spaces = require('./color-space.js'); }
   const format = 'ink-studio/lut', version = 1;
   const canonical = new WeakMap(), compiled = new WeakMap();
-  const keys = ['format', 'version', 'size', 'title', 'domainMin', 'domainMax', 'interpolation', 'data'];
+  const keys = ['format', 'version', 'size', 'title', 'domainMin', 'domainMax', 'domainPolicy', 'interpolation', 'color', 'data'];
   const triples = value => Array.isArray(value) && value.length === 3 && Array.from(value).every(Number.isFinite);
   const sizeOK = n => Number.isSafeInteger(n) && n >= 2 && n <= 256;
   const lerp = (a, b, t) => a * (1 - t) + b * t;
+  const immutable = value => !value || typeof value !== 'object' ||
+    Object.isFrozen(value) && Object.values(value).every(immutable);
 
   function normalize(definition, owned = false) {
     if (canonical.has(definition)) return canonical.get(definition);
     if (!definition || Object.getPrototypeOf(definition) !== Object.prototype ||
         Object.keys(definition).some(key => !keys.includes(key)))
       throw new TypeError('Expected an Ink Studio 3D LUT object');
-    const { size, title, domainMin = [0, 0, 0], domainMax = [1, 1, 1], interpolation = 'tetrahedral', data } = definition;
+    const { size, title, domainMin = [0, 0, 0], domainMax = [1, 1, 1],
+      domainPolicy, interpolation = 'tetrahedral', data } = definition;
     if ((definition.format !== undefined && definition.format !== format) ||
         (definition.version !== undefined && definition.version !== version))
       throw new TypeError('Unsupported Ink Studio LUT format or version');
@@ -20,6 +25,9 @@ const ColorLUT = (() => {
     if (title !== undefined && typeof title !== 'string') throw new TypeError('A LUT title must be text');
     if (!['tetrahedral', 'trilinear'].includes(interpolation))
       throw new RangeError('LUT interpolation must be tetrahedral or trilinear');
+    if (domainPolicy !== undefined && !['clamp', 'error', 'extrapolate'].includes(domainPolicy))
+      throw new RangeError('LUT domain policy needs clamp, error or extrapolate');
+    const color = spaces.settings(definition.color);
     if (!triples(domainMin) || !triples(domainMax) ||
         domainMax.some((hi, i) => hi <= domainMin[i] || !Number.isFinite(hi - domainMin[i])))
       throw new RangeError('LUT domains need three finite, increasing input ranges');
@@ -29,9 +37,10 @@ const ColorLUT = (() => {
     const immutableData = Array.isArray(data) && Object.isFrozen(data);
     const saved = Object.freeze({ format, version, size, ...(title !== undefined && { title }), interpolation,
       domainMin: Object.freeze(domainMin.slice()), domainMax: Object.freeze(domainMax.slice()),
+      ...(domainPolicy !== undefined && { domainPolicy }), ...(color && { color }),
       data: Object.freeze(owned || immutableData ? data : Array.from(data)) });
     canonical.set(saved, saved);
-    if (immutableData && Object.isFrozen(definition) &&
+    if (immutableData && Object.isFrozen(definition) && immutable(definition.color) &&
         (definition.domainMin === undefined || Object.isFrozen(domainMin)) &&
         (definition.domainMax === undefined || Object.isFrozen(domainMax)))
       canonical.set(definition, saved);
@@ -39,9 +48,9 @@ const ColorLUT = (() => {
   }
 
   const decimal = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
-  function parseCube(text) {
+  function parseCube(text, { color, domainPolicy } = {}) {
     if (typeof text !== 'string') throw new TypeError('Expected .cube text');
-    const seen = new Set(), data = [], definition = { data };
+    const seen = new Set(), data = [], definition = { data, color, domainPolicy };
     const lines = /([^\r\n]*)(?:\r\n|\r|\n|$)/g;
     let row, lineNo = 0;
     function fail(message) { throw new Error('.cube line ' + lineNo + ' — ' + message); }
@@ -102,19 +111,28 @@ const ColorLUT = (() => {
   function prepare(input) {
     const definition = normalize(input);
     if (compiled.has(definition)) return compiled.get(definition);
-    const { size, domainMin, domainMax, data, interpolation } = definition;
+    const { size, domainMin, domainMax, domainPolicy = 'clamp', data, interpolation } = definition;
     const sr = 3, sg = size * sr, sb = size * sg, corner = sr + sg + sb;
     const extent = size - 1, span = domainMax.map((hi, i) => hi - domainMin[i]);
+    const cell = value => Math.max(0, Math.min(extent - 1, Math.floor(value)));
     function axis(value, i) {
       if (!Number.isFinite(value)) throw new RangeError('LUT input must have three finite RGB components');
-      if (value <= domainMin[i]) return 0;
-      if (value >= domainMax[i]) return extent;
-      return (value - domainMin[i]) / span[i] * extent;
+      const lo = domainMin[i], hi = domainMax[i];
+      if (domainPolicy !== 'extrapolate') {
+        const tolerance = 16 * Number.EPSILON * Math.max(Math.abs(lo), Math.abs(hi));
+        if (domainPolicy === 'error' && (value < lo - tolerance || value > hi + tolerance))
+          throw new RangeError('RGB component is outside the LUT domain on channel ' + i);
+        if (value <= lo) return 0;
+        if (value >= hi) return extent;
+      }
+      const cell = (value - lo) / span[i] * extent;
+      if (!Number.isFinite(cell)) throw new RangeError('LUT input overflows its numeric domain on channel ' + i);
+      return cell;
     }
 
     function sample(rgb, out = [0, 0, 0]) {
       const x = axis(rgb?.[0], 0), y = axis(rgb?.[1], 1), z = axis(rgb?.[2], 2);
-      const r = Math.min(extent - 1, Math.floor(x)), g = Math.min(extent - 1, Math.floor(y)), b = Math.min(extent - 1, Math.floor(z));
+      const r = cell(x), g = cell(y), b = cell(z);
       const start = r * sr + g * sg + b * sb;
       let fx = x - r, fy = y - g, fz = z - b;
       if (interpolation === 'trilinear') {
@@ -139,7 +157,7 @@ const ColorLUT = (() => {
       return out;
     }
 
-    const plan = Object.freeze({ definition, sample });
+    const plan = Object.freeze({ definition, sample, apply: spaces.wrap(sample, definition.color) });
     compiled.set(definition, plan);
     return plan;
   }

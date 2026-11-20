@@ -110,6 +110,14 @@ function testWebGL(createRenderer, spec) {
   const expected = PixelLook.gradePalette(PixelLook.colorGrade(world.pal, world.paletteRoles, null, false, false, false, stack));
   if (!stacked.every((color, i) => color === expected[world.pal.indexOf(before[i])]))
     throw new Error('WebGL did not apply the same ordered stack and protected entries');
+  const legal = { space: 'srgb-linear', range: [16, 235] };
+  const managed = ColorLUT.normalize({ size: 2, domainMin: [16, 16, 16], domainMax: [235, 235, 235], domainPolicy: 'error',
+    color: { input: legal, output: legal },
+    data: Array.from({ length: 8 }, (_, i) => [i & 1, i >> 1 & 1, i >> 2 & 1].map(x => 16 + x * 109.5)).flat() });
+  const wire = pixels(false, false, managed, false);
+  const calibrated = PixelLook.gradePalette(PixelLook.colorGrade(world.pal, world.paletteRoles, null, false, false, managed, false));
+  if (!wire.every((color, i) => color === calibrated[world.pal.indexOf(before[i])]))
+    throw new Error('WebGL did not use the same linear-light LUT and numeric range as the CPU');
   renderer.dispose();
 }
 
