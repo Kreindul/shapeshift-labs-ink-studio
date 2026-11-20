@@ -583,5 +583,12 @@
     return result;
   }
 
-  P.waterBodies = Object.freeze({ create, fromShallowWater, fromSpans, scene, sceneFromSpans });
+  function combine(...scenes) {
+    const present=scenes.filter(Boolean);
+    if(present.length<2)return present[0];
+    const inputs=present.map(value=>sceneStates.get(value));
+    if(inputs.some(value=>!value))throw new TypeError('Expected water scenes');
+    return scene(inputs.flatMap(value=>value.physical),{airPockets:inputs.flatMap(value=>value.pockets)});
+  }
+  P.waterBodies = Object.freeze({ create, fromShallowWater, fromSpans, scene, sceneFromSpans, combine, optics });
 })(KIT);

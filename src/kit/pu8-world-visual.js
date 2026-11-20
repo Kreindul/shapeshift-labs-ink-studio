@@ -70,7 +70,8 @@
 
   function visual({makeBuilder,makeSculpt},view,query) {
     const config=view.world.visual ?? {}, volume=config.volume&&query.renderVolume(config.volume);
-    const region=W.fields.bounds(config.bounds ?? volume?.bounds ?? {min:[-5,-1,-5],max:[5,5,5]});
+    const enclosed=config.enclosedWater&&query.renderWater(config.enclosedWater);
+    const region=W.fields.bounds(config.bounds ?? volume?.bounds ?? enclosed?.bounds ?? {min:[-5,-1,-5],max:[5,5,5]});
     const {min,max}=region, span=Math.max(max[0]-min[0],max[2]-min[2],1), resolution=config.resolution??Math.max(.08,span/100);
     W.data.check(Number.isFinite(resolution)&&resolution>=.02&&resolution<=10&&span/resolution<=256,'Render grid exceeds its sample budget');
     const B=makeBuilder(view.world.seed,config.palette??palette), S=K.sculpt(makeSculpt(B));
@@ -269,7 +270,7 @@
     const waterTarget = TargetSelectors.medium(water, 'water');
     const nativeWater = water && (config.waterOptics || looks.look?.optics?.some(rule => TargetSelectors.matches(rule.select, waterTarget)));
     const waterBodies = K.procedural.waterBodies;
-    const waterScene = volume?.water ?? (nativeWater ? waterBodies.scene([waterBodies.create({
+    const surfaceWater = volume?.water ?? (nativeWater ? waterBodies.scene([waterBodies.create({
       id: water, bounds: { min: [min[0], min[2]], max: [max[0], max[2]] }, optics: config.waterOptics,
       resolution: [0, 2].map(axis => Math.min(64, Math.ceil((max[axis] - min[axis]) / resolution))),
       sample(x, z) {
@@ -279,6 +280,7 @@
         return { bed: surface - depth, surface, current: velocity };
       }
     })]) : undefined);
+    const waterScene=waterBodies.combine(surfaceWater,enclosed?.water);
     if (water && !nativeWater && !volume?.water) {
       const first=B.count();
       const wobble=(x,z)=>((Math.sin(x*9.1+z*13.7)*43758.58)%1+1)%1;

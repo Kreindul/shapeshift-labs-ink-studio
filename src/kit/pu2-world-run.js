@@ -51,6 +51,9 @@
     if (world.visual?.volume!==undefined) check(typeof world.visual.volume==='string'&&
       own(systems,world.visual.volume)&&typeof systems[world.visual.volume].volumeFrame==='function',
     'Visual volume must name a live volume system');
+    if(world.visual?.enclosedWater!==undefined)check(typeof world.visual.enclosedWater==='string'&&
+      own(systems,world.visual.enclosedWater)&&typeof systems[world.visual.enclosedWater].waterFrame==='function',
+    'Visual enclosed water must name an enclosed water system');
     const consumers = Object.values(systems).filter(system => system.checkFields);
     const visualFabric=world.visual?.fields?.deformables;
     const visualLinks=world.visual?.fields?.routedLinks;

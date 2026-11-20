@@ -1021,6 +1021,63 @@ ink-studio sim replay yard.run.json
 ink-studio sim render yard.run.json --colored --out hydraulic-yard.png
 ```
 
+## Stacked and enclosed water
+
+Use an `enclosed-water` system for chambers, tunnels, shafts, and
+reservoirs that can overlap in XZ at different elevations. Each named
+`chamber` has XYZ `bounds`, an optional initial water volume `initial`,
+and optional absolute `airPressure` at the start. Chambers have
+axis-aligned footprints and level surfaces. Their interiors must be
+disjoint in XYZ. Split a stepped space into adjoining chambers and
+connect them with openings.
+
+| Table | Configuration |
+| --- | --- |
+| `openings` | Bind `from` and `to` chambers. `sill` and `crown` describe the vertical aperture. For a shaft or drop, set `fromSill`, `fromCrown`, `toSill`, and `toCrown` independently. The default aperture spans the chamber height. |
+| `vents` | Bind a `chamber` to the atmosphere at `height`, which defaults to the ceiling. `open` defaults to true. A submerged vent below the ceiling stops breathing. A roof vent can admit air as a full chamber drains. |
+| `boundaries` | Bind a `chamber` to an external water `account`. Use `head` or a numeric `headField` sampled at an XYZ `at`, plus `sill`, `crown`, and `direction` of `in`, `out`, or `both`. Use a shallow-water account with `surface-height` sampled at the account's cell for a pond or canal. |
+
+Openings and boundaries use `conductance` to scale liquid flow by the head
+difference and wetted aperture. Optional `opening` scales the exchange from
+zero to one and defaults to one. `maxFlow` caps volume per second. An
+optional `gate` samples a world-space clearance `field` at its `points`.
+Exchange occurs when every sample exceeds `radius` (default zero). Bind this
+to a live solid's `clearance` field to let a cut or fill open or close a
+passage at the authored location. The same chamber volume is carried forward
+through the edit.
+
+Air shares pressure across openings with headspace on both sides. A connected
+vent holds that air at ambient pressure. In sealed chambers the trapped air
+amount is conserved and its pressure rises as the headspace shrinks. The
+simulation uses isothermal air and hydrostatic water. The default constants
+are `ambientPressure: 101325` and `specificWeight: 9810` in metre-based worlds.
+Pressure is absolute in pascals. Capped liquid transfers preserve volume.
+Chambers expose `water` transfer accounts in cubic world units, including
+for exchange with [pressurized pipes](#pressurized-pipe-networks).
+
+Drive `opening.<id>`, `vent.<id>`, and `boundary.<id>` with typed signals
+or `world/input` commands. Read `level.<chamber>`, `volume.<chamber>`,
+`pressure.<chamber>`, and `vented.<chamber>` or follow signed
+`flow.<opening>` and `effective-opening.<opening>`. Probe `chambers`,
+`openings`, `vents`, and `boundaries` by name. XYZ probes expose `phase`,
+`depth` (water above the probe point), `pressure` (including the water
+column above a submerged point), `head`, `medium`, and `water`.
+`mass` reports the water balance and air exchange, with air amount
+expressed as equivalent volume at ambient pressure.
+
+Set `visual.enclosedWater` to the system ID to render its stacked spans.
+It can share a splat view with a solid `visual.volume`. Use distinct
+interiors when combining layered water with another rendered water source.
+
+```sh
+ink-studio sim run examples/world-cellar-flood.json --ticks 160 --record cellar.run.json
+ink-studio probe examples/world-cellar-flood.json --ticks 77 --field flood/chambers --args '{"chamber":"cellar"}'
+ink-studio probe cellar.run.json --field flood/phase --at 1.6,0.8,0.5
+ink-studio probe cellar.run.json --field flood/mass
+ink-studio sim replay cellar.run.json
+ink-studio sim render cellar.run.json --colored --out cellar.png
+```
+
 ## Extend the runtime in JavaScript
 
 ```js
