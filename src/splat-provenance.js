@@ -85,6 +85,8 @@ const SplatProvenance = (() => {
     const footprintAPI = typeof SplatFootprints === 'undefined' ? require('./splat-footprints.js') : SplatFootprints;
     const footprints = footprintAPI.join(parts);
     if (footprints) result.splatFootprints = footprints;
+    const engravingAPI=typeof Engraving==='undefined'?require('./engraving.js'):Engraving;
+    const engraving=engravingAPI.join(parts);if(engraving)result.engraving=engraving;
     for (const [key, stride, Type] of perSplat) {
       if (key !== 'data' && !parts.some(part => part[key])) continue;
       const out = result[key] = new Type(count * stride);
@@ -150,6 +152,7 @@ const SplatProvenance = (() => {
       const api = typeof SplatFootprints === 'undefined' ? require('./splat-footprints.js') : SplatFootprints;
       result.splatFootprints = api.subset(world,indices);
     }
+    if(world.engraving){const api=typeof Engraving==='undefined'?require('./engraving.js'):Engraving;result.engraving=api.subset(world,indices);}
     if (result.renderSdfs && (indices.length !== world.count || indices.some((index,i)=>index !== i)))
       delete result.renderSdfs;
     const remap = new Map(indices.map((source, i) => [source, i]));

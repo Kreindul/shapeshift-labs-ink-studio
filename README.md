@@ -1114,3 +1114,5 @@ Use [tessellated render grids](docs/render-grids.md) to resolve SDF/splat scenes
 Use [custom splat footprints](docs/splat-footprints.md) for square, wedge, star, cross, chipped, polygonal or painted marks on individual materials. Explore the [Mark Foundry](examples/splat-footprints.html), including a live silhouette editor.
 
 Use [surface-aligned brush strokes](docs/surface-brush.md) for gouache, bristle, wash and ink marks following curvature, contours or authored vector fields. Their retained axes follow animated bones and CPU deformation. Try the [Pigment Coast / Painted Koi demos](examples/surface-brush.html).
+
+Use [engraving and tonal art maps](docs/engraving.md) for light-responsive hatching, cross engraving, white-cut woodcut and stippled native surfaces. Explore the [Copperplate Cabinet](examples/engraving.html), with an animated moth and etched observatory.

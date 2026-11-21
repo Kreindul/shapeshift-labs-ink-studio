@@ -86,6 +86,12 @@ function joinFootprints(parts){
   }offset+=p.count;}
   return Object.freeze({version:1,styles:Object.freeze(styles),indices,...(frames&&{frames})});
 }
+export function expandedEngraving(base,plan){
+ const parts=[base,...plan.rows.map(r=>r.asset)];if(!parts.some(p=>p.engraving))return undefined;
+ const count=parts.reduce((n,p)=>n+p.count,0),styles=[],keys=new Map(),indices=new Uint16Array(count),anchors=new Float32Array(count*3),restFrames=new Float32Array(count*6);let offset=0;
+ for(const p of parts){const b=p.engraving;if(b){const remap=b.styles.map(s=>{const key=JSON.stringify(s);if(!keys.has(key)){if(styles.length>=16)throw new RangeError('Instances exceed 16 engraving styles');keys.set(key,styles.push(s));}return keys.get(key);});b.indices.forEach((id,i)=>indices[offset+i]=id?remap[id-1]:0);anchors.set(b.anchors,offset*3);restFrames.set(b.restFrames,offset*6);}offset+=p.count;}
+ return {version:1,styles,indices,anchors,restFrames};
+}
 export function instancePlan(group) {
   const plan = plans.get(group);
   if (!plan) throw new TypeError('Expected instances from createSplatInstances');
@@ -114,6 +120,7 @@ export function createSplatInstances(prototypes, instances) {
           world.opticalSplats.length !== world.count * 12))
         throw new TypeError('Instance optical materials must match the prototype splat count');
       asset = { offset:sharedCount, count:world.count, data,
+        engraving:world.engraving&&{...world.engraving,indices:world.engraving.indices.slice(),anchors:world.engraving.anchors.slice(),restFrames:world.engraving.restFrames.slice()},
         opticalSplats: world.opticalSplats?.slice(0, world.count * 12),
         splatFootprints: world.splatFootprints && {version:1,styles:world.splatFootprints.styles.map(v=>JSON.parse(JSON.stringify(v))),indices:world.splatFootprints.indices.slice(),...(world.splatFootprints.frames&&{frames:world.splatFootprints.frames.slice()})},
         normals: world.renderMetadata?.normals?.slice(0, world.count * 3),
@@ -283,6 +290,7 @@ function flattened(base, plan) {
     for (const row of plan.rows) stampInstanceNormals(normals, row, base.count + row.start);
   }
   const result = { ...base, count, data, renderMetadata };
+  const engraving=expandedEngraving(base,plan);if(engraving)result.engraving=engraving;
   const footprints=expandedFootprints(base,plan);
   if(footprints)result.splatFootprints=footprints;
   if (base.opticalSplats || plan.hasOpticalSplats) {
