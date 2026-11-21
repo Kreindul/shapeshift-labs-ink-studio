@@ -171,7 +171,22 @@ const DrawingPrimitives = (() => {
           label: label(raw.label ?? (length + (lengthUnits === 'px' ? ' PX' : ' WU'))),
           labelSize: positive(raw.labelSize ?? 10, 'Label size') };
       }
-      default: throw new TypeError('Drawing commands support text, rect, path, arrow, polygon, grid, axes and scaleBar');
+      case 'rayFan': {
+        keys(raw, [...baseKeys, 'origin', 'u', 'v', 'angles', 'radii', 'count'], 'ray fan command');
+        const { origin, u = axes[0], v = axes[1], angles, radii, count = 48 } = raw;
+        const U = unit(u,n,'Ray fan U axis'), V = unit(v,n,'Ray fan V axis');
+        const [start,end] = vector(angles,2,'Ray fan angles');
+        const [inner,outer] = vector(radii,2,'Ray fan radii');
+        const span = end-start, turn = Math.PI*2;
+        check(Math.abs(U.reduce((sum,x,i) => sum+x*V[i],0)) <= 1e-6 &&
+          span !== 0 && Math.abs(span) <= turn+1e-10 && inner >= 0 && outer > inner &&
+          Number.isInteger(count) && bounded(count,2,256),
+          'Ray fan needs perpendicular axes, a sweep of up to one turn, increasing radii and 2 to 256 rays');
+        const full = Math.abs(span) >= turn-1e-10;
+        return { ...draw, origin: vector(origin,n,'Ray fan origin'), u: U, v: V, inner, outer, start,
+          count, interval: (full ? Math.sign(span)*turn : span)/(full ? count : count-1) };
+      }
+      default: throw new TypeError('Unknown drawing command type');
     }
   }
 
@@ -348,6 +363,13 @@ const DrawingPrimitives = (() => {
           const gap = scaled(draw.ticks.length,draw.ticks.units,center,side)*.5 + draw.labelSize*.8;
           out.labels.push({ text: draw.label, at: step(xy(center),side,gap), size: draw.labelSize });
         }
+      }
+    }
+    if (draw.type === 'rayFan') {
+      for (let i = 0; i < draw.count; i++) {
+        const angle = draw.start+i*draw.interval, c = Math.cos(angle), s = Math.sin(angle);
+        const axis = draw.u.map((x,j) => x*c+draw.v[j]*s);
+        stroke(out,view(step(draw.origin,axis,draw.inner)),view(step(draw.origin,axis,draw.outer)));
       }
     }
     if (!['polygon','grid','axes'].includes(draw.type)) result.push(out);

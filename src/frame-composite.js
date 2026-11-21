@@ -248,7 +248,7 @@ const FrameComposite = (() => {
       for (const draw of strokes) {
         if (draw?.type === 'text' && typeof bitmap === 'function') yield bitmap(draw);
         else {
-          if (!['rect','polygon','path','arrow','grid'].includes(draw?.type) ||
+          if (!['rect','polygon','path','arrow','grid','rayFan'].includes(draw?.type) ||
               draw.space !== undefined && draw.space !== 'screen')
             throw new TypeError('Standalone drawing commands use screen-space shapes and bitmap text');
           yield command(draw);
