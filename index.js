@@ -187,6 +187,7 @@ module.exports = {
   writeProjectBundle: require('./cli/project-bundle.js').writeProjectBundle,
   unpackProject: require('./cli/project-bundle.js').unpackProject,
   describeRenderFrame: (world, frame) => require('./src/render-contract.js').describe(world, frame),
+  capturePixelScan: require('./cli/pixel-scan.js').capturePixelScan,
   createCameraAtlas(options) {
     return module.exports.load().KIT.cameraAtlas.raster(options, (world, frame) => {
       const { width: w, height: h, time: t, camera, cameraSnapshot, ...settings } = frame;
