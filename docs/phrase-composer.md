@@ -3,6 +3,8 @@
 Use Ink's phrase tools to develop a motif, arrange parts, audition alternatives,
 and carry an idea from one take into another. `KIT.music.composer` is available
 in Node and the browser. Its graph operations appear in `ink-studio graph nodes`.
+Use [music production](music-production.md) when a cue needs a sampler,
+arranged groove, polyphonic accompaniment, mixing, or adaptive playback.
 
 ## Motifs and variation
 

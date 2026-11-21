@@ -130,11 +130,14 @@
           const step = part.mode[mod(index,part.mode.length)]+12*Math.floor(index/part.mode.length)+part.register;
           const fixed = part.pitch === 'key' || part.role === 'percussion';
           const task = part.role === 'percussion' ? 36 : H.midi(score.key?.root ?? 'C4')+step;
-          sequence.push({beat,duration,level:event.velocity,...(fixed ? {midi:task} : {offset:step})});
+          const pitch=event.midi!==undefined && part.role!=='percussion' ? {midi:event.midi} :
+            fixed ? {midi:task} : {offset:step};
+          sequence.push({beat,duration,level:event.velocity,...pitch});
           const section = sections.findLast(row=>row.beat <= beat);
           cues.push({id:key+'-'+sequence.length,part:key,role:part.role,section:section.id,
             motif:name,event:event.id,beat,time:clock.timeAt({beat}),duration,
-            endTime:clock.timeAt({beat:roundBeat(beat+duration)}),degree:event.degree,velocity:event.velocity});
+            endTime:clock.timeAt({beat:roundBeat(beat+duration)}),degree:event.degree,velocity:event.velocity,
+            ...(event.midi!==undefined && {midi:event.midi}),...(event.play && {play:event.play})});
         }
       }
       require(sequence.length <= 4096,'Part exceeds its score note budget');
@@ -288,6 +291,10 @@
     return { takes,report:{start,end,sampleRate,variants:takes.map(take=>({id:take.id,edits:take.edits,delta:take.report.delta}))} };
   }
 
-  P.musicComposer = Object.freeze({compose,revise,reference,audition,motif:M});
+  P.musicComposer = Object.freeze({compose,revise,reference,audition,motif:M,
+    locks(source,unpin=[]) {
+      const plan=unpack(source);
+      return Object.fromEntries(partLocks(plan.definition,plan.pins.filter(pin=>!unpin.includes(pin))));
+    }});
   Object.assign(P.composerSupport,{partLocks,unpack});
 })(KIT.procedural);

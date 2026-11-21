@@ -61,7 +61,9 @@
       const buckets = Array.from({length:plan.report.bars},()=>[]);
       for (const note of notes) buckets[Math.floor(note.beat/beatsPerBar)].push(note);
       const signatures = buckets.map((row,i)=>row.length<2 ? null : JSON.stringify(row.map(note=>[
-        round(note.beat-i*beatsPerBar),role==='percussion' ? 0 : note.degree-row[0].degree
+        round(note.beat-i*beatsPerBar),role==='percussion' ? 0 :
+          note.midi!==undefined && row[0].midi!==undefined ? note.midi-row[0].midi :
+            note.degree-row[0].degree
       ])));
       for (let bar=0;bar<signatures.length;) {
         let next=bar+1;
@@ -133,8 +135,9 @@
   }
 
   const editableNotes = (plan,part,section) => plan.cues.filter(note=>note.part===part && note.section===section.id)
-    .map(({beat,duration,degree,velocity})=>({beat:beat-section.beat,
-      duration:Math.min(duration,section.end-beat),degree,velocity}));
+    .map(({beat,duration,degree,velocity,midi,play})=>({beat:beat-section.beat,
+      duration:Math.min(duration,section.end-beat),degree,velocity,
+      ...(midi!==undefined && {midi}),...(play && {play})}));
 
   function shape(eligible,start,end,kind,rng) {
     const range = end-start;
@@ -155,22 +158,23 @@
         {beat:answer,duration:range*.048,degree:1,velocity:.79}
       ];
     }
+    const pitch=note=>({degree:note.degree,...(note.midi!==undefined && {midi:note.midi})});
     if (kind==='bass-anticipation') return [
       {...first,beat:Math.min(first.beat,start+range*.5),duration:Math.min(first.duration,range*.25)},
-      {beat:start+range*.875,duration:range*.09,degree:first.degree,velocity:.63}
+      {beat:start+range*.875,duration:range*.09,...pitch(first),velocity:.63}
     ];
-    const landing=last.degree;
-    const high = eligible.reduce((best,note)=>Math.abs(note.degree-landing)>Math.abs(best.degree-landing) ? note : best,first);
+    const contrast=note=>Math.abs(note.midi!==undefined && last.midi!==undefined ? note.midi-last.midi : note.degree-last.degree);
+    const high = eligible.reduce((best,note)=>contrast(note)>contrast(best) ? note : best,first);
     const pickup=start+range*choose(kind==='held-response' ? [.5,.5625] : [.4375,.5625],rng);
     const resolution=start+range*.75;
     if (kind==='held-response') return [
-      {beat:pickup,duration:resolution-pickup,degree:high.degree,velocity:.87},
-      {beat:resolution,duration:range*.21,degree:landing,velocity:.69}
+      {beat:pickup,duration:resolution-pickup,...pitch(high),velocity:.87},
+      {beat:resolution,duration:range*.21,...pitch(last),velocity:.69}
     ];
     return [
-      {beat:pickup,duration:range*.055,degree:high.degree,velocity:.88},
-      {beat:start+range*.625,duration:range*.08,degree:eligible[1].degree,velocity:.67},
-      {beat:resolution,duration:range*.21,degree:landing,velocity:.78}
+      {beat:pickup,duration:range*.055,...pitch(high),velocity:.88},
+      {beat:start+range*.625,duration:range*.08,...pitch(eligible[1]),velocity:.67},
+      {beat:resolution,duration:range*.21,...pitch(last),velocity:.78}
     ];
   }
 
