@@ -118,6 +118,7 @@ const options = {
   'paper.stack': {gap:property('number',{unit:'world units',constraints:{min:0}},.15),thickness:property('number',{unit:'world units',constraints:{min:0}},.035)},
   'paper.relief': {levels:property('array<number>',{constraints:{increasing:true,minItems:1,maxItems:64}},[.1,.3,.5]),cell:property('number',{unit:'world units',constraints:{exclusiveMin:0}},.06)},
   'paper.world': {draw:property('record',{}),camera:property('record',{})},
+  'sdf.voxels': {mode:property('string',oneOf('cubes','columns','slabs','relief'),'cubes'),size:property('number|vec3',{unit:'world units',constraints:{exclusiveMin:0}},.2),axis:property('number',limit(0,2,true),1),closed:property('boolean',{},false),gap:property('number',limit(0,.8),0),maxCells:property('number',limit(1,2000000,true),200000)},
   'sdf.facets': {size:property('number|vec3',{unit:'world units',constraints:{exclusiveMin:0}},.3),orientation:property('vec3',{unit:'radians'},[0,0,0]),method:property('string',oneOf('dualContour','surfaceNets'),'dualContour'),maxCells:property('number',limit(1,1000000,true),150000),maxFacets:property('number',limit(1,500000,true),50000)},
   'raster.channel': { channel: property('number|string', {}, 0) },
   'raster.crop': { x: property('number', pixelOffset), y: property('number', pixelOffset), ...size },

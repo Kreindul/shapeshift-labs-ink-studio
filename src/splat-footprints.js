@@ -318,6 +318,21 @@ const SplatFootprints = (() => {
             matrix[a * 3 + 1] * source[at + k + 1] +
             matrix[a * 3 + 2] * source[at + k + 2]);
   }
+  // Keep one frame slot per requested ID, including rows outside the footprint layout.
+  function captureFrames(world, ids) {
+    const frames = world?.splatFootprints?.frames;
+    if (!frames) return;
+    let captured;
+    ids.forEach((id, index) => {
+      const at = id * 6;
+      if (at + 6 > frames.length) return;
+      const frame = frames.subarray(at, at + 6);
+      if (!frame.some(Boolean)) return;
+      captured ??= new Float32Array(ids.length * 6);
+      captured.set(frame, index * 6);
+    });
+    return captured;
+  }
   function posedFrame(world, i, time = 0, scaleOverride) {
     const frames = world.splatFootprints?.frames,
       k = i * 6;
@@ -743,6 +758,7 @@ float footprintCoverage(float d,float softness){return softness>0.0?1.0-smoothst
     transform,
     frameTransform,
     carryFrame,
+    captureFrames,
     posedFrame,
     setFrames,
     sample,

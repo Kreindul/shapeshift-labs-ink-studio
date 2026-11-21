@@ -71,6 +71,14 @@
       inputs: { source: 'field', options }, time: true,
       ...value('mesh', ({ source, options }, ctx) => A.sdfMesh(source, clock(options, ctx)))
     },
+    'sdf.voxels': {
+      inputs:{source:'field',options}, time:true, ...value('record',({source,options},ctx)=>{
+        const {bounds,time=ctx.time,...rest}=options;
+        return K.voxelSurface.fromSdf(sdfSampler(source,time),{...rest,bounds:bounds??sdfExtent(source)});
+      })
+    },
+    'voxels.world': {inputs:{source:'record',options},...value('world',({source,options})=>K.voxelSurface.world(source,options))},
+    'voxels.mesh': {inputs:{source:'record',options},...value('mesh',({source,options})=>K.voxelSurface.toMesh(source,options))},
     'sdf.facets': {
       inputs:{source:'field',options},outputs:{value:'record',mesh:'mesh'},time:true,
       run:({source,options},ctx)=>A.facetedSDF(source,clock(options,ctx))
