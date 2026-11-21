@@ -2,7 +2,8 @@
 (function (K) {
   const { V, M } = K,
     freeze = K.procedural.data.freeze,
-    known = new WeakSet();
+    known = new WeakSet(),
+    faceLimit = 250000;
   const fail = message => {
     throw new RangeError('Voxel surface: ' + message);
   };
@@ -34,7 +35,7 @@
       }
   }
   function compile(grid, input, { mode = 'cubes', closed = false, gap = 0, maxFaces = 180000, samples = 0 } = {}) {
-    budget(maxFaces, 250000, 'face');
+    budget(maxFaces, faceLimit, 'face');
     if (
       !grid ||
       !vec(grid.origin) ||
@@ -167,7 +168,13 @@
   function validate(plan) {
     if (known.has(plan)) return plan;
     if (!plan || plan.format !== 'ink-studio/voxel-surface' || plan.version !== 1) fail('expected a voxel surface');
-    return compile(plan.grid, plan.blocks, { ...plan, samples: plan.stats?.samples });
+    return compile(plan.grid, plan.blocks, {
+      mode: plan.mode,
+      closed: plan.closed,
+      gap: plan.gap,
+      maxFaces: faceLimit,
+      samples: plan.stats?.samples
+    });
   }
   function fromSdf(
     source,
@@ -192,7 +199,7 @@
     budget(maxCells, 2000000, 'cell');
     budget(maxSamples, 2000000, 'sample');
     budget(maxBlocks, 100000, 'block');
-    budget(maxFaces, 250000, 'face');
+    budget(maxFaces, faceLimit, 'face');
     if (typeof source !== 'function' && typeof source?.sd !== 'function')
       fail('expected a distance function or held SDF');
     const sample = typeof source === 'function' ? source : (x, y, z) => source.sd(x, y, z);
@@ -346,7 +353,7 @@
       vertices.push(...f.points);
       triangles.push([n, n + 1, n + 2], [n, n + 2, n + 3]);
     }
-    return K.facets.fromMesh({ points: vertices, faces: triangles }, { maxFacets: 500000, maxVertices: 1000000 });
+    return K.facets.fromMesh({ points: vertices, faces: triangles }, { maxFacets: faceLimit * 2, maxVertices: faceLimit * 4 });
   }
   function paint(plan, options) {
     const { color, grouping, ...rest } = options;
