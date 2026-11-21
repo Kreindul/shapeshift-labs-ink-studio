@@ -200,6 +200,7 @@ In Node, pass `renderStats: true` to `render(world, options)` and read `frame.re
 
 - `fragments` counts blended splat and sprite contributions. `translucentFragments` counts contributions with opacity below one that leave the surface depth buffer unchanged.
 - `volume.raySamples` counts optical solves at pixel ray depths. `densitySamples` and `cloudSamples` count primary optical density lookups during the frame. Light and shadow probes and asset baking are outside those lookup counts. Analytic bounds, cached fog, and empty march steps have separate counters.
+- `volume.cloudShadowRays` counts secondary sun rays for [cloud self-shadows](cloud-representations.md#internal-shadows-for-hero-clouds). `volume.cloudShadowSamples` counts their density lookups across primary and reflected views.
 - `volumeQuality.cacheBounds: false` bypasses the per-ray volume bounds and full-fog caches for comparison. `volumeQuality.skip: false` bypasses conservative field skipping and evaluates the same march grid densely.
 
 ## Planar reflections

@@ -236,7 +236,8 @@ function render(world, o, preparedPalettes) {
     rasterPasses:0, reflectionProbeFaces:0, fragments:0, translucentFragments:0, peakDeferredFragments:0, deferredFlushes:0,
     planarCaptures:0, planarPixels:0, reflectionProbePixels:0, splatRows:0, omittedBackgroundRows:0, omittedParticleRows:0,
     volume:{ traces:0, boundsTests:0, boundsCacheHits:0, mediaQueries:0, mediaCacheHits:0, fullFogCacheHits:0, emptyFogIntervals:0, raySamples:0,
-      analyticSegments:0, marchSteps:0, densitySamples:0, skipTests:0, skippedSteps:0, cloudTraces:0, cloudSamples:0 }
+      analyticSegments:0, marchSteps:0, densitySamples:0, skipTests:0, skippedSteps:0,
+      cloudTraces:0, cloudSamples:0, cloudShadowRays:0, cloudShadowSamples:0 }
   };
   const frame = renderFrame(world, { ...o, renderStats:false, counters }, preparedPalettes);
   frame.renderStats = { ...counters, frameMs:performance.now()-start };
