@@ -264,6 +264,13 @@ const specifications = {
     options:{left:'attack',right:'tail',before:12,after:12}}},
   'audio.warp': {nodes:{edited:{op:'audio.renderSampleEdit',inputs:{source:audio,edit:slicedAudio}}},
     inputs:{source:link('edited'),options:{mode:'repitch',speed:.8}}},
+  'music.renderSampleKit': {nodes:{
+    hit:{op:'audio.renderSampleEdit',inputs:{source:audio,edit:slicedAudio,options:{slice:'middle'}}},
+    bank:{op:'data.record',inputs:{hit:link('hit')}}
+  },inputs:{source:{id:'bench',pads:{metal:{notes:[36,36],articulations:{default:[{id:'main',takes:[{asset:'hit'}]}]}}}},
+    assets:link('bank'),events:[{time:0,note:36},{time:{beat:.5},pad:'metal',velocity:.6}],options:{sampleRate:8000}}},
+  'music.routeSampleKit': {nodes:{played:{op:'music.inspectProduction',inputs:{source:production}}},
+    inputs:{tracks:link('played','events'),routes:{lead:{pad:'reed'}}}},
   'audio.stemControls': { inputs: {
     stems: { drums: transientAudio, synth: audio },
     settings: { drums: { envelope: { measure: 'peak', attack: 0, threshold: .4 } },
