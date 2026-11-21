@@ -1549,6 +1549,17 @@
       ]
     },
     {
+      "id": "render.spriteReconstruction",
+      "kind": "api",
+      "status": "ready",
+      "title": "Sprite-based object reconstruction",
+      "what": "Reuse a depth and normal atlas across named native objects and hand off coverage as the camera approaches. Supports animated cels, headless rendering, WebGL depth and ray picking.",
+      "use": "K.sprite.reconstruction.bind(world, placements)",
+      "where": "src/sprite-reconstruction.js",
+      "example": "examples/sprite-reconstruction.html",
+      "tags": ["sprites", "impostor", "lod", "reconstruction"]
+    },
+    {
       "id": "render.textile",
       "kind": "api",
       "status": "ready",
