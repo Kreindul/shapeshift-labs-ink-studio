@@ -279,7 +279,8 @@ function renderFrame(world, o, preparedPalettes) {
   const useSdf = sdfSettings && world.renderSdfs?.length && !o.reflectionPlane?.select && !probeView?.allow;
   const transparency = SplatOrder.transparency(o.stableTransparency ?? look.stableTransparency);
   const blendDepth = transparency?.mode === 'blend' ? transparency.depthTolerance : 0;
-  const sortedSurfaces = orderMode === 'surface' || blendDepth > 0;
+  const planarFootprints=(o.splatFootprints??look.splatFootprints)!==false&&world.splatFootprints?.styles?.some(p=>p.depth==='plane');
+  const sortedSurfaces = orderMode === 'surface' || blendDepth > 0 || planarFootprints;
   const fragmentBudget = o.fragmentBudget ?? 500000;
   if (!['center', 'surface'].includes(orderMode) ||
       ((sortedSurfaces || useSdf || areaLights.length) && (!Number.isSafeInteger(fragmentBudget) || fragmentBudget < 1 || fragmentBudget > 2e6)))
@@ -1574,6 +1575,7 @@ function renderFrame(world, o, preparedPalettes) {
       StableDetail.geometryPixels(projectedA,Bq,projectedC,artScale)) : 1;
     if (!geometryWeight) continue;
     const frame=shaped&&SplatFootprints.posedFrame(world,i,t,SC[i]);
+    const planeFrame=shaped?.depth==='plane'&&frame;
     const projectedFrame=frame&&[a0*frame[0]+a1*frame[1]+a2*frame[2],b0*frame[0]+b1*frame[1]+b2*frame[2],a0*frame[3]+a1*frame[4]+a2*frame[5],b0*frame[3]+b1*frame[4]+b2*frame[5]];
     // Scale has already been applied in posedFrame for native particle kinds.
     const shapeMap = shaped && (projectedFrame?SplatFootprints.frameTransform(shaped,...projectedFrame):SplatFootprints.transform(shaped,A,Bq,C));
@@ -1607,6 +1609,16 @@ function renderFrame(world, o, preparedPalettes) {
     }
     let sx = ortho ? ((cx / (oh * asp)) * 0.5 + 0.5) * W : ((((tp / asp) * cx) / -cz) * 0.5 + 0.5) * W,
       sy = ortho ? ((cy / oh) * 0.5 + 0.5) * H : (((tp * cy) / -cz) * 0.5 + 0.5) * H;
+    if(planeFrame&&!ortho){
+      const reach=shaped.reach/SplatFootprints.half;
+      for(const a of [-1,1])for(const b of [-1,1]){
+        const p=[x,y,z].map((v,k)=>v+(frame[k]*a+frame[k+3]*b)*reach);
+        const q=[0,1,2].map(k=>V[k]*p[0]+V[k+4]*p[1]+V[k+8]*p[2]+V[k+12]);
+        if(q[2]>=-near){ex=ey=2048;continue;}
+        ex=Math.min(2048,Math.max(ex,Math.abs(W*.5+focal*q[0]/-q[2]-sx)));
+        ey=Math.min(2048,Math.max(ey,Math.abs(H*.5+focal*q[1]/-q[2]-sy)));
+      }
+    }
     if (kind === 1) {
       sx = Math.floor(sx) + 0.5;
       sy = Math.floor(sy) + 0.5;
@@ -1716,7 +1728,13 @@ function renderFrame(world, o, preparedPalettes) {
       for (let ix = x0; ix <= x1; ix++) {
         const dx = ix + 0.5 - sx,
           pw = -0.5 * (k0 * dx * dx + k2 * dy * dy) - k1 * dx * dy;
-        const centerAlpha = shaped ? Math.min(.99,al*SplatFootprints.sample(shaped,shapeMap,dx,dy)) : ContributionRules.alpha(pw, al, solid && !softCoverage, edgeStyle, continuousCoverage);
+        const planeRay=planeFrame&&rayAt(ix+.5,iy+.5);
+        const planeHit=planeRay&&SplatFootprints.planeSample([x,y,z],frame,planeRay.origin,planeRay.direction);
+        if(planeFrame&&!planeHit)continue;
+        const planeDepth=planeHit?planeHit.t*planeRay.axial:undefined;
+        if(planeHit&&planeDepth<near)continue;
+        const planeCoverage=planeHit&&SplatFootprints.coverage(shaped,shaped.matrix[0]*planeHit.uv[0]+shaped.matrix[1]*planeHit.uv[1],shaped.matrix[2]*planeHit.uv[0]+shaped.matrix[3]*planeHit.uv[1]);
+        const centerAlpha = shaped ? Math.min(.99,al*(planeHit?planeCoverage:SplatFootprints.sample(shaped,shapeMap,dx,dy))) : ContributionRules.alpha(pw, al, solid && !softCoverage, edgeStyle, continuousCoverage);
         let a = centerAlpha;
         if (!shaped && integrateFootprint) a = footprint(dx, dy, k0, k1, k2, al, solid && !softCoverage, edgeStyle, continuousCoverage);
         else if (!shaped && edgeStrength > 0) {
@@ -1732,7 +1750,7 @@ function renderFrame(world, o, preparedPalettes) {
         if (exact === false || exact && pixelSurface && PIX[exact.row.i*8]) continue;
         let sectionZ, sectionTint = 0;
         if (cutaway) {
-          sectionZ = exact?.z ?? -cz+clamp(cutDx*dx+cutDy*dy,-cutReach,cutReach);
+          sectionZ = exact?.z ?? planeDepth ?? -cz+clamp(cutDx*dx+cutDy*dy,-cutReach,cutReach);
           if (sectionZ < near) continue;
           let margin;
           if (exact) margin = Cutaway.margin(cutaway,...exact.position,sectionZ-cutoffDepth);
@@ -1879,7 +1897,7 @@ function renderFrame(world, o, preparedPalettes) {
         a *= alpha;
         if (a < 0.004) continue;
         const wd = writesDepth && alpha === 1 && !exact;
-        const surfaceZ = sectionZ ?? exact?.z ?? (wantsDepth ?
+        const surfaceZ = sectionZ ?? exact?.z ?? planeDepth ?? (wantsDepth ?
           sampledDepth(rayAt(ix + .5, iy + .5), probeNormal, probeCenter, -cz, probeReach) : -cz);
         if (preciseDepth && surfaceDepth && surfaceZ>surfaceDepth[p]+1e-5) continue;
         if (probe) probe(p, i, -cz, surfaceZ, pr, pg, pb, a);
@@ -1887,7 +1905,7 @@ function renderFrame(world, o, preparedPalettes) {
           playFragments(false,-cz);
           orderFallback = true;
         }
-        const opticalDepth = cutaway || blendDepth || aerial || cloudView || preciseDepth ? surfaceZ : undefined;
+        const opticalDepth = planeHit || cutaway || blendDepth || aerial || cloudView || preciseDepth ? surfaceZ : undefined;
         if (deferred && (sortedSurfaces || preciseDepth)) {
           const entry = { sort: (flags & 4 || blendDepth && backRows?.has(i)) ? Infinity : surfaceZ, index: n, center: exact?.z ?? -cz,
             transparent: !wd && !exact && !(flags & 4) && !(blendDepth && backRows?.has(i)), opacity: a,
@@ -1899,7 +1917,7 @@ function renderFrame(world, o, preparedPalettes) {
           countDeferred();
           if (!deferred.has(p)) deferred.set(p, []);
           deferred.get(p).push(entry);
-        } else composite(p, i, sectionZ ?? exact?.z ?? -cz, sectionZ !== undefined || exact ? normalizedDepth(surfaceZ) : dn,
+        } else composite(p, i, sectionZ ?? exact?.z ?? planeDepth ?? -cz, sectionZ !== undefined || exact || planeHit ? normalizedDepth(surfaceZ) : dn,
           a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, lookPass?.mark, opticalDepth,
           undefined, fogMix, rule, reflected, filteredEdge, 1, sectionTint>0, claim, paintStage && paintColor(samplePaint));
       }

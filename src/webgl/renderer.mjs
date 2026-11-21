@@ -532,7 +532,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       }
       const surfaces = options.surfaces, previews = options.scaleSurfaces;
       const hasSurfaces = Boolean(surfaces || previews?.some(Boolean));
-      if (hasSurfaces || options.surfaceFrame?.lighting?.display) {
+      const hasPlanes = !!shader.footprints && footprintBinding.hasPlanes && options.u_idx!==3;
+      if (hasSurfaces || hasPlanes || options.surfaceFrame?.lighting?.display) {
         const surfaceOptions = { geometryUpdatesSince: toolkit.SpriteSurface?.geometryUpdatesSince,
           updatesSince: toolkit.SpriteSurface?.updatesSince ?? toolkit.KIT?.ecology?.atlasUpdates, cutaway: cutawayAPI?.glsl };
         buffer.ensureDepth();
@@ -558,13 +559,20 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       if (shader.footprints) footprintBinding.rebind();
       gl.useProgram(shader.p);
       shader.set({
-        ...options,u_geometryDepth:+hasSurfaces,
+        ...options,u_geometryDepth:+(hasSurfaces||hasPlanes),
         u_paintPass: !!options.u_paintPass,
         u_materialGridScale: options.u_materialGridScale ?? 1,
         u_viewport: [width, height], u_lookViewport: [width,height],
         ...(options.lookGrid && { u_lookViewportScale: [options.lookGrid[0]/width,options.lookGrid[1]/height] }),
         u_focal: height / 2 / options.tangent
       });
+      if(hasPlanes){
+        // Only opaque retained planes enter the depth prepass. Ordinary soft
+        // splats and glass keep their established contribution blending.
+        gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(true);
+        gl.colorMask(false,false,false,false);shader.set({u_idx:4});pipeline.draw();
+        gl.colorMask(true,true,true,true);gl.depthMask(false);shader.set({u_idx:options.u_idx??0});
+      }
       if(options.u_idx===3){
         pipeline.drawSubset(options.indices);
         gl.disable(gl.DEPTH_TEST);

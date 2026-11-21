@@ -78,7 +78,7 @@ uniform vec4 u_fogp;   // haze start, haze max, depth range near, depth range fa
 layout(location=0) in vec2 a_corner;
 layout(location=1) in int a_index;
 ${instances ? 'layout(location=2) in int a_instance; uniform highp sampler2D u_instances;' : ''}
-${footprints ? 'uniform highp sampler2D u_footprintRows,u_footprintParams; flat out vec4 v_footprintMap; flat out vec2 v_footprintStyle;' : ''}
+${footprints ? 'uniform highp sampler2D u_footprintRows,u_footprintParams; flat out vec4 v_footprintMap; flat out vec2 v_footprintStyle, v_footprintZ; flat out vec4 v_footprintPlane;' : ''}
 out vec2 v_d; out vec3 v_conic; out vec4 v_color; out float v_depth;
 ${portal ? 'flat out vec3 v_portalDepth;' : 'flat out float v_ownerDepth;'}
 ${cutaway ? 'flat out vec4 v_sectionSample;' : ''}
@@ -328,8 +328,14 @@ ${environment ? '  v_envAxial = -cam.z;' : ''}
   if (det <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   v_conic = vec3(C, -B, A) / det;
   ${footprints ? `
+  v_footprintZ=vec2(cam.z,0.0);v_footprintPlane=vec4(0.0);
   if(hasFootprint){
     if(surfaceBrush){
+      if(footprintSettings.z>0.5){
+        vec3 frameU=mat3(u_view)*FM*brush0.yzw*sc,frameV=mat3(u_view)*FM*brush1.xyz*sc;
+        vec3 normal=normalize(cross(frameU,frameV));
+        v_footprintPlane=vec4(normal,dot(normal,cam.xyz));v_footprintZ.y=1.0;
+      }
       brushU=(T*FM*brush0.yzw*sc).xy;brushV=(T*FM*brush1.xyz*sc).xy;
       float area=brushU.x*brushV.y-brushU.y*brushV.x;
       if(abs(area)<1e-10){gl_Position=vec4(2.0,2.0,2.0,1.0);return;}
@@ -360,6 +366,17 @@ ${environment ? '  v_envAxial = -cam.z;' : ''}
   ` : ''}
   vec2 ext = min(${footprints ? '(hasFootprint?footprintSettings.y:3.0)' : '3.0'} * sqrt(vec2(A, C)), vec2(2048.0));
   ${footprints ? `if(hasFootprint&&surfaceBrush)ext=min(vec2(2048.0),max(ext,(abs(brushU)+abs(brushV))*footprintSettings.y/1.1774100225154747));` : ''}
+  ${footprints ? `if(hasFootprint&&surfaceBrush&&footprintSettings.z>0.5&&u_ortho<0.5){
+    // Bound the perspective-projected physical chart, not its center Jacobian.
+    vec2 middle=clip.xy/clip.w*u_viewport*0.5;
+    float reach=footprintSettings.y/1.1774100225154747;
+    for(int k=0;k<4;k++){
+      float a=(k==0||k==3)?-1.0:1.0,b=k<2?-1.0:1.0;
+      vec3 corner=cam.xyz+mat3(u_view)*FM*(brush0.yzw*a+brush1.xyz*b)*sc*reach;
+      vec4 projected=u_proj*vec4(corner,1.0);
+      ext=max(ext,corner.z>=-0.0001?vec2(2048.0):min(vec2(2048.0),abs(projected.xy/projected.w*u_viewport*0.5-middle)));
+    }
+  }` : ''}
   vec2 ndc = clip.xy / clip.w;
   if (snap) { vec2 px = floor((ndc * 0.5 + 0.5) * u_viewport) + 0.5; ndc = px / u_viewport * 2.0 - 1.0; }
   vec2 extN = ext * 2.0 / u_viewport;
@@ -389,11 +406,12 @@ ${ascii ? ascii.vsMain : ''}  gl_Position = vec4(ndc + a_corner * extN, u_geomet
 }`;
   const SPLAT_FS = `#version 300 es
 precision highp float; precision highp int;
-${footprints ? 'uniform highp sampler2D u_footprintAtlas; uniform float u_footprintColumns; flat in vec4 v_footprintMap; flat in vec2 v_footprintStyle;' : ''}
+${footprints ? 'uniform highp sampler2D u_footprintAtlas; uniform float u_footprintColumns; flat in vec4 v_footprintMap; flat in vec2 v_footprintStyle, v_footprintZ; flat in vec4 v_footprintPlane;' : ''}
 in vec2 v_d; in vec3 v_conic; in vec4 v_color; in float v_depth; flat in int v_coverage;
 ${stableDetail ? 'flat in float v_detailGeometry, v_detailTexture;' : ''}
 ${portal ? 'flat in vec3 v_portalDepth; uniform vec4 u_splatPlane;' : 'flat in float v_ownerDepth;'}
-${portal || cutaway ? 'uniform mat4 u_proj; uniform float u_ortho;' : ''}
+${portal || cutaway || footprints ? 'uniform mat4 u_proj; uniform float u_ortho;' : ''}
+${footprints ? 'uniform float u_focal;' + (!cutaway ? 'uniform bool u_geometryDepth;' : '') : ''}
 ${cutaway ? cutaway + `
 flat in vec4 v_sectionSample;
 uniform mat4 u_view;
@@ -419,7 +437,7 @@ flat in float v_glassNearDepth;
 float glassDepth(vec4 sampleDepth) {
   return dot(floor(sampleDepth.rgb*255.0+0.5),vec3(1.0,256.0,65536.0)) / 16777215.0;
 }` : ''}
-${water || portal || environment || cutaway ? 'uniform vec2 u_viewport;' : ''}
+${water || portal || environment || cutaway || footprints ? 'uniform vec2 u_viewport;' : ''}
 ${environment ? environmentMediaSource(emitterFog) + 'flat in float v_envAxial;' : ''}
 ${portal || cutaway ? axialPosition : ''}
 ${footprints ? footprintGLSL : ''}
@@ -436,9 +454,27 @@ void main(){
 ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + v_conic.z * v_d.y * v_d.y) - v_conic.y * v_d.x * v_d.y;
   ${footprints ? `
   bool shaped=v_footprintStyle.x>0.0;
+  bool footprintPlane=v_footprintZ.y>0.5;
+  float footprintAxial=0.0,footprintDepth=gl_FragCoord.z;
+  gl_FragDepth=gl_FragCoord.z;
+  if(footprintPlane){
+    vec2 pixel=(gl_FragCoord.xy-u_viewport*0.5)/u_focal;
+    vec3 rayOrigin=u_ortho>0.5?vec3(pixel,0.0):vec3(0.0);
+    vec3 rayDirection=u_ortho>0.5?vec3(0.0,0.0,-1.0):vec3(pixel,-1.0);
+    float denominator=dot(v_footprintPlane.xyz,rayDirection);
+    if(abs(denominator)<1e-10)discard;
+    float distance=(v_footprintPlane.w-dot(v_footprintPlane.xyz,rayOrigin))/denominator;
+    footprintAxial=distance;
+    if(distance<=0.0)discard;
+    vec4 projected=u_proj*vec4(0.0,0.0,-distance,1.0);
+    footprintDepth=projected.z/projected.w*0.5+0.5;
+    if(footprintDepth<0.0||footprintDepth>1.0)discard;
+    if(u_geometryDepth)gl_FragDepth=footprintDepth;
+  }
   float profile;
   if(shaped){
     vec2 point=vec2(dot(v_footprintMap.xy,v_d),dot(v_footprintMap.zw,v_d));
+    if(footprintPlane&&u_ortho<0.5)point*=footprintAxial/-v_footprintZ.x;
     float distance=footprintDistance(u_footprintAtlas,v_footprintStyle.x,u_footprintColumns,point);
     profile=footprintCoverage(distance,v_footprintStyle.y);
   }else {if(power>0.0||power < -4.5)discard;profile=exp(power);}
@@ -449,7 +485,7 @@ ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + 
   float surfaceAlpha = continuous ? smoothstep(${continuousLow}, ${continuousHigh.toFixed(2)}, g) : 0.0;
   ${optical ? 'bool hasOptical = v_optical.w > 0.5; if (hasOptical && v_optical.x == 0.0) discard;' : ''}
   ${cutaway ? `
-  float sectionAxial = v_sectionSample.x + clamp(dot(v_sectionSample.yz, v_d), -v_sectionSample.w, v_sectionSample.w);
+  float sectionAxial = ${footprints ? 'footprintPlane?footprintAxial:' : ''}v_sectionSample.x + clamp(dot(v_sectionSample.yz, v_d), -v_sectionSample.w, v_sectionSample.w);
   if (sectionAxial < u_near) discard;
   vec3 inView = axialPosition(gl_FragCoord.xy, sectionAxial, u_viewport);
   vec3 inWorld = transpose(mat3(u_view)) * (inView - u_view[3].xyz);
@@ -461,11 +497,15 @@ ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + 
   gl_FragDepth = u_geometryDepth ? clamp(sectionZ,0.0,1.0) : gl_FragCoord.z;
   float sectionDepth = clamp((sectionAxial - u_fogp.z) / (u_fogp.w - u_fogp.z), 0.0, 1.0);
   ` : ''}
+  ${footprints ? `if(u_idx>3.5){
+    if(!footprintPlane||v_coverage==${softMode}||v_color.a<1.0||g<0.5${optical?'||hasOptical':''})discard;
+    o=vec4(0.0);od=vec4(0.0);oa=vec4(0.0);return;
+  }` : ''}
   ${layeredGlass ? `
-  ${cutaway ? '' : 'gl_FragDepth = gl_FragCoord.z;'}
+  ${cutaway || footprints ? '' : 'gl_FragDepth = gl_FragCoord.z;'}
   if (u_idx > 2.5) {
     if (v_gl < 0.5 || g ${optical ? '* (hasOptical ? v_optical.x : 1.0)' : ''} < 0.004) discard;
-    float depth = ${cutaway ? 'sectionZ' : 'v_ownerDepth'};
+    float depth = ${cutaway ? 'sectionZ' : footprints ? '(footprintPlane?footprintDepth:v_ownerDepth)' : 'v_ownerDepth'};
     float z = round(clamp(depth,0.0,1.0)*16777215.0);
     gl_FragDepth = clamp(depth,0.000001,1.0);
     o = vec4(mod(z,256.0),mod(floor(z/256.0),256.0),floor(z/65536.0),255.0)/255.0;
@@ -485,7 +525,7 @@ ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + 
   ` : `
   if (u_idx > 1.5) {
     if (v_coverage == ${softMode} || v_color.a < 0.5 || (continuous ? surfaceAlpha <= 0.5 : g < 0.38)${optical ? ' || hasOptical' : ''}) discard;
-    float k = v_ix + 1.0, z = round(clamp(${cutaway ? 'sectionZ' : 'v_ownerDepth'}, 0.0, 1.0) * 16777215.0);
+    float k = v_ix + 1.0, z = round(clamp(${cutaway ? 'sectionZ' : footprints ? '(footprintPlane?footprintDepth:v_ownerDepth)' : 'v_ownerDepth'}, 0.0, 1.0) * 16777215.0);
     o = vec4(mod(k, 256.0), mod(floor(k / 256.0), 256.0), floor(k / 65536.0), 255.0) / 255.0;
     od = vec4(mod(z, 256.0), mod(floor(z / 256.0), 256.0), floor(z / 65536.0), 255.0) / 255.0;
     oa = vec4(0);
@@ -562,7 +602,7 @@ ${water ? `  vec3 mark; rgb = waterPaint(rgb, gl_FragCoord.xy, u_viewport,
   o = vec4(rgb * a, a);
   ${layeredGlass ? `vec4 pane = texelFetch(u_glassBoundary,ivec2(gl_FragCoord.xy),0);
   // Keep near-coplanar transparent contributions together through crossings.
-  float splitDepth = v_depth < 0.0 || v_color.a < 1.0 ? v_glassNearDepth : ${cutaway ? 'sectionZ' : 'v_ownerDepth'};
+  float splitDepth = v_depth < 0.0 || v_color.a < 1.0 ? v_glassNearDepth : ${cutaway ? 'sectionZ' : footprints ? '(footprintPlane?footprintDepth:v_ownerDepth)' : 'v_ownerDepth'};
   bool behind = pane.a > 0.0 && splitDepth > glassDepth(pane)+0.0000001;
   o_back = behind ? o : vec4(0.0);
   o_through = pane.a > 0.0 && !behind ? vec4(0.0,0.0,0.0,a) : vec4(0.0);` : ''}

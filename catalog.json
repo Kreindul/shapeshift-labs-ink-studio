@@ -1438,6 +1438,25 @@
         "render",
         "animation"
       ]
+    },
+    {
+      "id": "kit.mosaic",
+      "kind": "api",
+      "status": "ready",
+      "title": "Fitted polygon mosaics and stained-glass surfaces",
+      "what": "Authored, Voronoi and existing tiling cells become native triangle splats with real seams, bevels, thickness, shared material controls and optical transmission. Curved carriers, exact sampled attachment queries, provenance and native animation share one footprint profile.",
+      "use": "K.mosaic.emit(B, K.mosaic.mesh(cells, {gap:.02, bevel:.01, controls:{transmission:.6}}))",
+      "where": "src/kit/p47-mosaic-surfaces.js",
+      "example": "docs/mosaic-surfaces.md, examples/mosaic-surfaces.html",
+      "tags": [
+        "mosaic",
+        "stained-glass",
+        "splat",
+        "surface",
+        "tiling",
+        "optics",
+        "animation"
+      ]
     }
   ]
 }
