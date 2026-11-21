@@ -52,6 +52,6 @@ test('hybrid and native authoring keep splat metadata, plane depth and software 
 });
 test('hardware paper has matching holes and remains stable when orbiting',{skip:!process.env.INK_TEST_CHROME},()=>{
  const result=require('../cli/look-webgl')({chrome:process.env.INK_TEST_CHROME,hardware:true},fixture,(kit,build,backend)=>{
-   const w=build(kit),b=backend(120,100,{raw:true,damp:false});b.draw(w);const a=b.image();b.draw(w,{camera:{...w.cam,yaw:.75,pitch:.3}});const c=b.image();const thin=kit.KIT.paper.world(kit.KIT.paper.stack([{profile:[[-1,-1],[1,-1],[1,1],[-1,1]],thickness:0,color:'#ffcc88'}]),{camera:{dist:4},draw:{shadowSamples:1,texture:false}});b.draw(thin);const d=b.image();b.close();return {a,c,d};
- });assert.notEqual(result.a,result.c);assert.notEqual(result.a,result.d);
+   const w=build(kit),b=backend(120,100,{raw:true,damp:false});b.draw(w);const holeCenter=b.sample({center:[60,50]}).center,a=b.image();b.draw(w,{camera:{...w.cam,yaw:.75,pitch:.3}});const c=b.image();const thin=kit.KIT.paper.world(kit.KIT.paper.stack([{profile:[[-1,-1],[1,-1],[1,1],[-1,1]],thickness:0,color:'#ffcc88'}]),{camera:{dist:4},draw:{shadowSamples:1,texture:false}});b.draw(thin);const d=b.image(),thinCenter=b.sample({center:[60,50]}).center;b.close();return {a,c,d,holeCenter,thinCenter};
+ });assert.notEqual(result.a,result.c);assert.notEqual(result.a,result.d);assert(result.holeCenter[2]>result.holeCenter[0]);assert(result.thinCenter[0]>result.thinCenter[1]&&result.thinCenter[1]>result.thinCenter[2]);
 });
