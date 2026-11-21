@@ -28,6 +28,29 @@
         return { value, items:value.items };
       }
     },
+    'audio.proposeSampleSlices': {
+      description: 'Detect transient markers and create a nondestructive sample project.',
+      inputs: {source:'audio',options}, outputs: {value:'record'},
+      run({source,options}) {return {value:A.sampleEdit.create(source,{detect:{},...options})};}
+    },
+    'audio.editSample': {
+      description: 'Move source markers and assemble, trim, reverse, slip and crossfade sample clips.',
+      inputs: {source:'record',edits:scoreRequests}, outputs: {value:'record'},
+      run({source,edits}) {return {value:A.sampleEdit.edit(source,edits)};}
+    },
+    'audio.renderSampleEdit': {
+      description: 'Render the edited timeline or a source slice with exact frame and join information.',
+      inputs: {source:'audio',edit:'record',options}, outputs: {value:'audio',report:'record'},
+      run({source,edit,options}) {return A.sampleEdit.render(source,edit,options);}
+    },
+    'audio.auditionSampleEdit': {
+      description: 'Listen around a sample marker or compare a crossfade with its hard cut.',
+      inputs: {source:'audio',edit:'record',options}, outputs: {value:'audio',alternatives:'record',report:'record'},
+      run({source,edit,options}) {
+        const {value,report,hardCut}=A.sampleEdit.audition(source,edit,options);
+        return {value,report,alternatives:hardCut ? {hardCut} : {}};
+      }
+    },
     'audio.window': media({ value: 'audio', report: 'record' }, A.audioWindow),
     'audio.analyze': media({ value: 'record', rms: 'number', peak: 'number' }, A.analyze),
     'audio.fft': media({ value: 'record', spectrum: 'raster', bands: 'record' }, A.fft),
