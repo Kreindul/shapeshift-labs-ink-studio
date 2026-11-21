@@ -85,7 +85,8 @@
       });
       stack.delete(name);
       const run = planOnly ? undefined : operation.instantiate ? operation.instantiate() : operation.run;
-      configs.set(name, { name, op: spec.op, group:spec.group, type:spec.type, run, outputs, bindings, clock: !!operation.time });
+      configs.set(name, { name, op: spec.op, group:spec.group, type:spec.type, run, outputs, bindings,
+        clock: !!operation.time, seed: operation.seed, asset: operation.asset });
       order.push(name);
     }
     for (const name of Object.keys(specs)) visit(name);
@@ -158,18 +159,20 @@
       }, inspectGroup(name) { return snapshot.get(name)?.subgraph || null; } };
     }
 
-    function plan() {
+    function plan({ bindings: detailed = false } = {}) {
       function describe(link) {
         const { kind, id, port, type } = link;
-        if (kind === 'track') return { kind, type, mode:link.mode, keyCount:link.track.keys.length };
-        if (kind === 'value') return { kind, type };
+        if (kind === 'track') return { kind, type, mode:link.mode, keyCount:link.track.keys.length,
+          ...(detailed && { keys:link.track.keys }) };
+        if (kind === 'value') return { kind, type, ...(detailed && { value:link.value }) };
         return { kind, type, id, ...(port !== undefined && {port}) };
       }
       return P.data.clone({
         inputs: specInputs,
         nodes: order.map(name => {
-          const {op,group,type,outputs,bindings,clock} = configs.get(name);
+          const {op,group,type,outputs,bindings,clock,seed,asset} = configs.get(name);
           return {id:name,op,...(group!==undefined && {group}),...(type!==undefined && {type}),time:clock,outputs,
+            ...(detailed && seed !== undefined && {seed}), ...(detailed && asset !== undefined && {asset}),
             inputs:Object.fromEntries(bindings.map(([key,socket,link]) => [key,{type:socket.type,source:describe(link)}]))};
         }),
         outputs: Object.fromEntries(results.map(([name,link]) => [name,describe(link)]))

@@ -5,7 +5,7 @@
 //   load()    the prebuilt Node toolkit and demos, or a source build in a development checkout
 const fs = require('fs'),
   path = require('path'),
-  { randomUUID } = require('crypto');
+  { createHash, randomUUID } = require('crypto');
 const KIT_DIR = path.join(__dirname, 'src', 'kit'),
   read = f => fs.readFileSync(f, 'utf8').replace(/\nif \(typeof module[^\n]*\n?$/, '\n');
 const files = () =>
@@ -142,6 +142,7 @@ module.exports = {
   createGraphProject: require('./cli/graph-project.js').createGraphProject,
   readGraphProject: require('./cli/graph-project.js').readGraphProject,
   findGraphGroupUsers: require('./cli/graph-groups.js').findGraphGroupUsers,
+  diffGraphs: require('./cli/graph-diff.js').diffGraphs,
   listGraphNodes: require('./cli/graph-catalog.js').listGraphNodes,
   describeGraphNode: require('./cli/graph-catalog.js').describeGraphNode,
   createTake: require('./cli/take.js').createTake,
@@ -214,5 +215,9 @@ module.exports = {
   createSimulationWorkers: require('./src/simulation-worker-pool.js'),
   openCheckpointStore: require('./src/simulation-checkpoint-store.js').openCheckpointStore,
   nodeBundlePath,
+  toolkitBuildHash(kit) {
+    const file = nodeBundlePath();
+    if (require.cache[file]?.exports === kit) return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  },
   load() { return require(nodeBundlePath()); }
 };

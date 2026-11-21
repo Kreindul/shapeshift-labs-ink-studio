@@ -228,6 +228,41 @@ In Node, use `readGraphProject(file).dependencies()` and
 `findGraphGroupUsers(file, { root })`. [Packing a take](project-bundles.md#bundle-a-whole-take)
 keeps the exact group files, including nested references.
 
+### Explain changes between graphs
+
+```sh
+ink-studio graph diff previous/project.json next/project.json
+```
+
+The report compares nodes by ID and follows changes to their input bindings,
+output ports, named parameters, and keyframes. It includes asset hashes,
+nested group edits, and changes to named outputs. Each affected output lists
+JSON Pointer paths back to the changes that can reach it. A change inside
+a group follows the affected group output, so an unrelated port can remain
+outside the report.
+
+To compare an in-place edit, save the old graph's bindings and asset hashes
+before changing its files. A snapshot can also capture input overrides and
+a specific seed or sample time.
+
+```sh
+ink-studio graph snapshot project.json --seed 11 > before.json
+# Edit the project, source image, or a referenced group, then compare.
+ink-studio graph snapshot project.json --seed 12 --inputs new-look.json > after.json
+ink-studio graph diff before.json after.json --json
+```
+
+Both sides of `graph diff` can be graph projects, packed takes with graphs,
+or saved snapshots. In Node, use `diffGraphs(before, after)` with projects
+from `readGraphProject` or snapshots from `project.snapshot({ inputs, seed, time })`.
+
+The report traces potential changes through the compiled graph without
+rendering. A seed change follows operations that consume the graph seed.
+Camera and palette edits follow the ports that use them. An asset reader
+whose filename is chosen at runtime can depend on any changed asset.
+For a built-in or host operation, its inputs can affect each of its outputs.
+A host operation can declare `seed: false` when it ignores the seed.
+
 ### Discover registered nodes
 
 ```sh
@@ -318,6 +353,40 @@ an exact frame rate with warm-up and cuts.
 See [connecting procedural rasters](render-graph.md#connect-procedural-rasters)
 for binding graph outputs to the renderer and reading image, mask, and native
 scene passes back into procedural nodes.
+
+### Reuse artifacts across CLI processes
+
+```sh
+ink-studio graph run project.json --cache .ink-cache --out review-a
+ink-studio graph run project.json --cache .ink-cache --out review-b
+```
+
+Pass the same `--cache` directory to reuse a completed `run`, `inspect`,
+`batch`, or `clip` invocation. Each entry holds its report and encoded
+artifacts. A hit publishes those artifacts into the requested output
+directory and preserves assertion results and exit status. A cached clip
+replays the whole sequence, including its warm-up and cuts.
+
+The SHA-256 request key covers the graph and group definitions, source
+asset hashes, input overrides, seed, time, command settings, and operation
+implementations. Built-in operations and encoders use the loaded toolkit
+and runner build fingerprints. Custom operations opt in with a
+`cacheVersion` string or positive integer on their registration. Use it
+for deterministic operations whose inputs account for everything they read,
+and bump it when their implementation or dependencies change. Projects
+using unversioned custom operations, hosted codecs, or a custom toolkit
+build execute normally and report a cache bypass.
+
+The directory owns an `ink-graph-artifacts-v1` subdirectory, with a default
+budget of 256 MiB and 128 entries. Override the limits with
+`--cache-bytes N` and `--cache-entries N`. The cache evicts least recently
+used entries, publishes complete entries atomically, and verifies checksums
+before replay. Results larger than the configured byte budget or the
+256 MiB per-entry limit are still exported normally.
+
+The report adds `artifactCache.status` (`hit`, `miss`, or `bypass`).
+On a hit, the `cache` counters describe the original graph evaluation.
+Persistent sessions continue to serve their own in-process evaluator cache.
 
 ### Persistent sessions
 

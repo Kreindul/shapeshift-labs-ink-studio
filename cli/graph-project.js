@@ -7,7 +7,9 @@ const WAV = require('./wav.js');
 const { createGraphHost } = require('./graph-host.js');
 const { clip } = require('./graph-clip.js');
 const { resolveCheckpoint } = require('./checkpoint-file.js');
-const { loadGraphGroups, groupFor, groupDependencies } = require('./graph-groups.js');
+const { loadGraphGroups, groupFor, groupUsage, groupDependencies } = require('./graph-groups.js');
+const { snapshotFormat } = require('./graph-diff.js');
+const { fingerprint } = require('./graph-artifact-cache.js');
 
 const format = 'ink-studio/graph-project';
 const reportFormat = 'ink-studio/graph-report';
@@ -161,7 +163,7 @@ function prepareAssertions(rows, plan) {
 function nativeOperations(kit, assets) {
   const binary = (fn, type='number') => ({inputs:{a:'number',b:'number'},outputs:{value:type},run(args){return {value:fn(args)};}});
   function asset(type, accepts) {
-    return {inputs:{name:'string'},outputs:{value:type},run({name}){
+    return {inputs:{name:'string'},outputs:{value:type},asset:'name',run({name}){
       const entry=assets.get(name);
       if (!entry || !accepts(entry)) throw new RangeError('Unknown '+type+' graph asset '+name);
       return {value:entry.value};
@@ -172,11 +174,11 @@ function nativeOperations(kit, assets) {
     multiply:binary(({a,b})=>a*b),
     lessThan:binary(({a,b})=>a<b,'boolean'),
     time:{time:true,outputs:{value:'number'},run(_,ctx){return {value:ctx.time};}},
-    random:{outputs:{value:'number'},run(_,ctx){return {value:kit.KIT.grow.dice(ctx.seed)()};}},
+    random:{outputs:{value:'number'},seed:true,run(_,ctx){return {value:kit.KIT.grow.dice(ctx.seed)()};}},
     ...require('./graph-render.js').graph3DOperations(kit),
     pngAsset:asset('image', entry => entry.format==='png'),
     indexedPngAsset:{
-      inputs:{name:'string'},outputs:{value:'raster',palette:'palette',alpha:'raster'},
+      inputs:{name:'string'},outputs:{value:'raster',palette:'palette',alpha:'raster'},asset:'name',
       run({name}) {
         const entry=assets.get(name);
         if (entry?.format!=='indexed-png') throw new RangeError('Unknown indexed PNG graph asset '+name);
@@ -320,17 +322,17 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
 
   function compileGroup(group) {
     const {name,alias,owner,scope}=group;
-    if (preparedGroups.has(alias)) return preparedGroups.get(alias);
+    if (preparedGroups.has(alias)) return preparedGroups.get(alias).plan;
     if (visiting.has(group)) throw new Error('Graph group cycle at '+alias);
     if (Object.hasOwn(ops,name) || Object.hasOwn(graph.operations??{},name))
       throw new Error('Graph group name conflicts with an operation: '+alias);
     visiting.add(group);
-    const spec=groupSpecs.get(group), {plan}=compile(spec,scope);
+    const spec=groupSpecs.get(group), {plan,compiled}=compile(spec,scope);
     visiting.delete(group);
     const outputs=Object.fromEntries(Object.entries(plan.outputs).map(([key,link])=>[key,link.type]));
     operationsIn(owner)[name]={...graph.group(spec,{operations:ops,groups:operationsIn(scope),outputs}),
       expandedNodes:plan.expandedNodes};
-    preparedGroups.set(alias,plan);
+    preparedGroups.set(alias,{plan,scope,compiled});
     return plan;
   }
 
@@ -377,7 +379,53 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
   }
   clock(time,seed);
   const projectPlan={...header,kind:'plan',...rootPlan,time,seed,assets:assetInfo,exports,assertions:assertionSpecs,
-    groups:Object.fromEntries(preparedGroups),groupDependencies:dependencyRows,hostOperations:Object.keys(operations).sort()};
+    groups:Object.fromEntries([...preparedGroups].map(([name,{plan}])=>[name,plan])),
+    groupDependencies:dependencyRows,hostOperations:Object.keys(operations).sort()};
+
+  function artifactIdentity() {
+    if ([...assets.values()].some(asset=>asset.format==='codec') || exports.some(entry=>entry.format==='codec'))
+      return {reason:'host-codec'};
+    const used=groupUsage(groupTree.scope,spec.nodes);
+    const names=new Set();
+    for (const body of [spec,...[...used].map(group=>groupSpecs.get(group))])
+      for (const {op} of Object.values(body.nodes)) if (Object.hasOwn(operations,op)) names.add(op);
+    const versions=[...names].sort().map(name=>[name,operations[name].cacheVersion]);
+    const unversioned=versions.filter(([,id])=>!(typeof id==='string' && id.trim()) &&
+      !(Number.isSafeInteger(id) && id>0)).map(([name])=>name);
+    if (unversioned.length) return {reason:'unversioned-operation',operations:unversioned};
+    const registered=versions.map(([name,id])=>[name,id,...['run','instantiate','specialize'].map(method=>{
+      const implementation=operations[name][method];
+      return typeof implementation==='function' ? Function.prototype.toString.call(implementation) : null;
+    })]);
+    // Include declaration order and exact numbers alongside the existing project hash.
+    return {fingerprint:fingerprint([projectHash,project,[...groupSpecs].map(([group,body])=>[group.alias,body]),
+      dependencyRows,registered])};
+  }
+
+  function snapshot(options={}) {
+    const {inputs={},time:at=time,seed:sampleSeed=seed}=fields(options,['inputs','time','seed'],'graph snapshot options');
+    clock(at,sampleSeed);
+    const values=Object.fromEntries(named(inputs,'input values').map(([name,value])=>{
+      if (!Object.hasOwn(rootPlan.inputs,name)) throw new RangeError('Unknown graph input '+name);
+      if (!kit.KIT.procedural.graphTypes.validator(rootPlan.inputs[name].type)(value))
+        throw new TypeError('Wrong input value for graph socket '+name);
+      return [name,value];
+    }));
+    function describeScope(compiled,scope,overrides={}) {
+      const {inputs,nodes,outputs}=compiled.plan({bindings:true});
+      for (const [name,value] of Object.entries(overrides)) inputs[name].default=value;
+      return {inputs,nodes:Object.fromEntries(nodes.map(({id,...node})=>{
+        const group=groupFor(scope,node);
+        return [id,{...node,...(group && {groupPath:group.alias}),
+          ...(node.seed===undefined && Object.hasOwn(operations,node.op) && {seed:true})}];
+      })),outputs,order:nodes.map(node=>node.id)};
+    }
+    return JSON.parse(jsonBytes({format:snapshotFormat,version,projectHash,settings:{seed:sampleSeed,time:at},
+      graph:describeScope(compiled,groupTree.scope,values),
+      groups:Object.fromEntries([...preparedGroups].map(([name,{compiled,scope}])=>[name,describeScope(compiled,scope)])),
+      assets:assetInfo, references:Object.fromEntries(dependencyRows.map(({group,used,...reference})=>[group,reference])),
+      exports:exportsSpec,assertions:assertionSpecs}));
+  }
 
   function request(options={}) {
     const {inputs={},take,time:t=take?.start ?? time,seed:s=seed}=fields(options,['inputs','time','seed','take'],'graph run options');
@@ -495,6 +543,8 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
       return {...header,kind:'validate',valid:true,nodes:rootPlan.expandedNodes,groups:preparedGroups.size};
     },
     dependencies:()=>({...header,kind:'dependencies',groups:data.clone(dependencyRows)}),
+    artifactIdentity,
+    snapshot,
     run:options=>run(request(options)),
     clip(options) {
       const { inputs, seed, ...settings } = fields(options,

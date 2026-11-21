@@ -29,6 +29,7 @@
       ...value('mesh', ({ source, planes, options }) => A.clip(source, planes, options))
     },
     'geo.scrambleIndices': {
+      seed: 'options',
       inputs: { source: 'mesh', options },
       outputs: { value: 'mesh', changes: 'array<record>', report: 'record' },
       run: ({ source, options }, { seed }) => A.scrambleIndices(source, { seed, ...options })
@@ -86,10 +87,12 @@
       ...value('record', ({ source, options }, { node }) => A.object(source, { id: node, ...options }))
     },
     'scene.world': {
+      seed: 'options',
       inputs: { objects: 'array<record>', options },
       ...value('world', ({ objects, options }, { seed }) => A.world(objects, { seed, ...options }))
     },
     'scene.diorama': {
+      seed: 'definition',
       inputs: { definition: 'record', parameters: options }, time: true,
       ...value('world', ({ definition, parameters }, { time, seed }) => K.diorama.build(
         { seed, ...definition }, { parameterInputs: { ...parameters, time } }))
