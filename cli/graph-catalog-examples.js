@@ -225,6 +225,14 @@ const specifications = {
   'music.suggest': { inputs:{source:{...arrangement,sections:[{id:'opening',bars:4,harmony:'home'}]},options:{limit:2}} },
   'music.renderProduction': { inputs:{source:production,options:{end:.25,sampleRate:8000,stems:true}} },
   'music.inspectProduction': { inputs:{source:production} },
+  'music.noteClip': {inputs:{source:{id:'lines',beat:0,length:2,voices:[
+    {id:'alto',notes:[{id:'held',beat:0,duration:2,midi:64}]},
+    {id:'tenor',notes:[{id:'answer',beat:.5,duration:1,midi:55}]}]}}},
+  'music.voiceLead': {inputs:{source:{
+    ...production,arrangement:{...arrangement,parts:{...arrangement.parts,
+      bass:{role:'bass',material:'melody'},inner:{role:'pad'}}},
+    tracks:{...production.tracks,bass:{patch:'pluck'},inner:{patch:'pluck'}}
+  },settings:{track:'inner',melody:'lead',bass:'bass',voices:[{id:'alto',low:53,high:60}]}}},
   'music.cueMap': {inputs:{source:production,map:{groups:[{id:'opening',from:0,to:4}],
     landmarks:[{id:'statement',beat:2,kind:'return'}],register:[{from:2,to:4,parts:['lead'],semitones:12}]}}},
   'music.planPerformances': { inputs:{

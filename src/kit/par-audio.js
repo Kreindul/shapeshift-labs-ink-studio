@@ -279,6 +279,20 @@
         return {value:production,report};
       }
     },
+    'music.noteClip': {
+      description: 'Validate a polyphonic clip with named voices, editable pitches and ties.',
+      inputs:{source:'record'},outputs:{value:'record'},
+      run({source}) {return {value:P.musicNoteClips.clip(source)};}
+    },
+    'music.voiceLead': {
+      description: 'Search distinct inner lines around a locked melody and bass, with editable dissonance and note constraints.',
+      inputs:{source:'record',settings:'record',assets:options},
+      outputs:{value:'record',variants:'array<record>',report:'record'},
+      run({source,settings,assets}) {
+        const value=P.musicProduction.voiceLead(source,settings,assets);
+        return {value,...value};
+      }
+    },
     'music.analyzeProduction': {
       description: 'Measure performed accent overlaps, orchestration and harmonic transitions across parts.',
       inputs:{source:'record',assets:options,options},outputs:{value:'record'},

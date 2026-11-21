@@ -100,6 +100,7 @@ module.exports=function command([mode,file,config],opt,kit) {
     value={...P.developThemes(production,read(config),assets),...(recipe.assets && {assets:paths})};
   else if (mode==='cue-map')
     value={...P.mapCue(production,config ? read(config) : production.cueMap,assets),...(recipe.assets && {assets:paths})};
+  else if (mode==='voice-lead' && config) value=P.voiceLead(production,read(config),assets);
   else if (mode==='analyze') value=P.analyze(production,assets,config ? read(config) : recipe.options);
   else if (mode==='suggest') value=P.suggest(production,config ? read(config) : recipe.options,assets);
   else if (mode==='plan-audition') value=P.planProducer(production,config ? read(config) : recipe.brief,assets);

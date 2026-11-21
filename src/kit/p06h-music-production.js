@@ -1,6 +1,7 @@
 /* An arranged cue with independent performance, instrumentation and mix. */
 (function (P) {
   const C=P.musicComposer, H=P.musicHarmony, T=P.takeTime, I=P.musicInstruments, G=P.musicGestures,Q=P.musicCueMap;
+  const N=P.musicNoteClips;
   const {record,fields,finite,integer,id,check,clamp,db,hash}=I;
   const epsilon=1e-8;
   const number=(raw,key,fallback,low,high)=>{
@@ -182,8 +183,9 @@
       decay:number(roomSpec,'decay',.42,.05,2),damping:number(roomSpec,'damping',.65,0,1)};
     const tracks=Object.fromEntries(table(source.tracks,8,'production track').map(([name,raw])=>{
       check(name!=='room' && Object.hasOwn(plan.parts,name) &&
-        fields(raw,['patch','gain','pan','highpass','lowpass','send','groove','pad','choke','duck','gestures']) &&
+        fields(raw,['patch','gain','pan','highpass','lowpass','send','groove','pad','choke','duck','gestures','clips']) &&
         Object.hasOwn(patches,raw.patch) && (raw.choke===undefined || id(raw.choke)), 'Track needs a score part and an instrument patch');
+      check(raw.clips===undefined || plan.parts[name].role!=='percussion','Note clips need a pitched production track');
       check(raw.duck===undefined || fields(raw.duck,['from','depth','release']),'Invalid ducking settings');
       const duck=raw.duck && {from:raw.duck.from,depth:number(raw.duck,'depth',4,0,18),
         release:number(raw.duck,'release',.1,.015,1)};
@@ -194,13 +196,14 @@
       const patch=patches[raw.patch];
       return [name,{patch:raw.patch,play:patch.player,mix,echo:patch.echo,color:patch.color,
         gestures:G.score(raw.gestures,patch,plan,clock),
+        clips:raw.clips===undefined ? null : N.rows(raw.clips,clock,program,plan.sections.at(-1).end),
         groove:groove(raw.groove),pad:raw.pad===undefined ? null : pad(raw.pad,plan.sections)}];
     }));
     check(Object.keys(tracks).length>0,'A production needs at least one track');
     const events={}, end=program.duration;
     let eventCount=0;
     for (const [name,track] of Object.entries(tracks)) {
-      const scoreNotes=scoreRows(plan,program,clock,name,track.pad), g=track.groove;
+      const scoreNotes=N.overlay(scoreRows(plan,program,clock,name,track.pad),track.clips,clock), g=track.groove;
       const rows=cue ? Q.shape(cue,name,scoreNotes) : scoreNotes;
       const silence=cue?.perTrack[name].silence ?? [], cuts=cue?.perTrack[name].cuts ?? [];
       const silent=time=>silence.some(window=>time>=window.startTime-epsilon && time<window.endTime-epsilon);
@@ -214,8 +217,8 @@
         const connection=round(time);
         if (silent(connection)) continue;
         const velocity=clamp(row.velocity*beatStyle.accent*style.accent);
-        const gate=Math.max(.001,(row.end-row.time)*(play.gate ?? 1));
-        const voice=row.voice ?? 0, retrigger=play.retrigger ?? 1, fromFrequency=last.get(voice);
+        const gate=Math.max(.001,(row.end-row.time)*(row.ties ? 1 : play.gate ?? 1));
+        const voice=row.voice ?? 0, retrigger=row.ties ? 1 : play.retrigger ?? 1, fromFrequency=last.get(voice);
         const previous=lastNotes.get(voice);
         const connected=style.legato && velocity>0 && plan.parts[name].role!=='percussion' &&
           !track.pad && previous?.velocity>0 && connection<end && connection>previous.time+.005 &&
@@ -235,6 +238,7 @@
           const stop=next(silence,onset)?.startTime ?? Infinity;
           const note={part:name,beat:round(row.beat),time:onset,gate:Math.min(gate/retrigger,stop-onset),midi:row.midi,
             frequency:row.frequency,velocity,play,fromFrequency,salt,roundRobin:notes.length,
+            ...(row.clip && {clip:row.clip,voice:row.voice,note:row.note,...(row.ties && {ties:row.ties})}),
             ...(style.gesture && {gesture:style.gesture}),...(connected && r===0 && {connected:true})};
           const cut=next(cuts,onset)?.startTime;
           if (cut!==undefined && onset+track.play.prepare(note,48000,note.gate).duration>cut)

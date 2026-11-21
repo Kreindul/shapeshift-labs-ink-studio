@@ -10,6 +10,8 @@ Use [theme development](music-themes.md) to carry a motif between roles
 and make adaptive returns depend on what has already played.
 Use a [cue map](music-cue-map.md) to shape density, register, chord pace,
 silence, and room across the whole production.
+Use [note clips and voice-leading search](music-voice-leading.md) to
+try independent inner lines around a locked melody and bass.
 Use [patch gestures](music-gestures.md) to rehearse different performances
 of the written notes.
 
