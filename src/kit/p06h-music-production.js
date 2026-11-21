@@ -1,6 +1,6 @@
 /* An arranged cue with independent performance, instrumentation and mix. */
 (function (P) {
-  const C=P.musicComposer, H=P.musicHarmony, T=P.takeTime, I=P.musicInstruments, G=P.musicGestures;
+  const C=P.musicComposer, H=P.musicHarmony, T=P.takeTime, I=P.musicInstruments, G=P.musicGestures,Q=P.musicCueMap;
   const {record,fields,finite,integer,id,check,clamp,db,hash}=I;
   const epsilon=1e-8;
   const number=(raw,key,fallback,low,high)=>{
@@ -158,11 +158,15 @@
   }
 
   function compile(source,assets={}) {
-    check(fields(source,['arrangement','patches','tracks','room','gain','seed']) &&
+    check(fields(source,['arrangement','patches','tracks','room','gain','seed','cueMap']) &&
       Number.isSafeInteger(source.seed ?? 0), 'A production needs an arrangement, patches and tracks');
-    const plan=source.arrangement?.format==='ink-studio/phrase-arrangement' ?
+    const written=source.arrangement?.format==='ink-studio/phrase-arrangement' ?
       C.compose(source.arrangement.definition) : C.compose(source.arrangement);
-    const program=P.musicScore.compile(plan.score), clock=P.musicTiming.compile(plan.score.tempoMap);
+    const clock=P.musicTiming.compile(written.score.tempoMap);
+    const cue=source.cueMap===undefined ? null : Q.compile(source.cueMap,written,source.tracks,clock,source.seed ?? 0);
+    const score=cue ? Q.harmonize(cue,written.score) : written.score;
+    const plan=score===written.score ? written : P.data.freeze({...written,score});
+    const program=P.musicScore.compile(plan.score);
     const assetMap=Object.fromEntries(table(assets,128,'instrument asset').map(([name,asset])=>{
       const audio=P.mediaGraph.audio(asset);
       check(audio.channels<=2 && audio.samples.length>0 && audio.samples.length/audio.channels/audio.sampleRate<=60,
@@ -196,7 +200,11 @@
     const events={}, end=program.duration;
     let eventCount=0;
     for (const [name,track] of Object.entries(tracks)) {
-      const rows=scoreRows(plan,program,clock,name,track.pad), g=track.groove;
+      const scoreNotes=scoreRows(plan,program,clock,name,track.pad), g=track.groove;
+      const rows=cue ? Q.shape(cue,name,scoreNotes) : scoreNotes;
+      const silence=cue?.perTrack[name].silence ?? [], cuts=cue?.perTrack[name].cuts ?? [];
+      const silent=time=>silence.some(window=>time>=window.startTime-epsilon && time<window.endTime-epsilon);
+      const next=(rows,time)=>rows.find(window=>window.startTime>time+epsilon);
       const notes=[], last=new Map(), lastNotes=new Map();
       for (const row of rows) {
         if (row.midi===null || !row.frequency || !row.velocity) continue;
@@ -204,26 +212,33 @@
         let play=style.play;
         const time=Math.max(0,row.time+beatStyle.delay+(play.delay ?? 0));
         const connection=round(time);
+        if (silent(connection)) continue;
         const velocity=clamp(row.velocity*beatStyle.accent*style.accent);
         const gate=Math.max(.001,(row.end-row.time)*(play.gate ?? 1));
         const voice=row.voice ?? 0, retrigger=play.retrigger ?? 1, fromFrequency=last.get(voice);
         const previous=lastNotes.get(voice);
         const connected=style.legato && velocity>0 && plan.parts[name].role!=='percussion' &&
           !track.pad && previous?.velocity>0 && connection<end && connection>previous.time+.005 &&
-          connection-previous.time-previous.gate<=.14;
+          connection-previous.time-previous.gate<=.14 &&
+          (next(silence,previous.time)?.startTime ?? Infinity)>connection;
         if (connected) {
           previous.gate=connection-previous.time;
-          previous.choke=connection+.012;
+          previous.choke=Math.min(previous.choke ?? Infinity,connection+.012);
           if (play.glide===undefined) play={...play,glide:.05};
         }
         last.set(voice,row.frequency);
         for (let r=0;r<retrigger;r++) {
           const onset=round(time+r*gate/retrigger);
-          if (onset>=end) continue;
+          if (onset>=end || silent(onset) ||
+              (next(silence,connection)?.startTime ?? Infinity)<=onset) continue;
           const salt=hash([source.seed ?? 0,name,round(row.beat),voice,r]);
-          const note={part:name,beat:round(row.beat),time:onset,gate:gate/retrigger,midi:row.midi,
+          const stop=next(silence,onset)?.startTime ?? Infinity;
+          const note={part:name,beat:round(row.beat),time:onset,gate:Math.min(gate/retrigger,stop-onset),midi:row.midi,
             frequency:row.frequency,velocity,play,fromFrequency,salt,roundRobin:notes.length,
             ...(style.gesture && {gesture:style.gesture}),...(connected && r===0 && {connected:true})};
+          const cut=next(cuts,onset)?.startTime;
+          if (cut!==undefined && onset+track.play.prepare(note,48000,note.gate).duration>cut)
+            note.choke=cut;
           notes.push(note);
           lastNotes.set(voice,note);
           check(++eventCount<=32768,'Production exceeds its event budget');
@@ -233,7 +248,19 @@
       events[name]=notes;
     }
     applyChokes(tracks,events);
-    return {arrangement:plan,events,end,program,clock,tracks,room,gain};
+    const locks=cue ? Object.keys(C.locks(written)) : [];
+    if (locks.length) {
+      const {cueMap,...plain}=source, base=compile(plain,assets);
+      for (const name of locks) {
+        const moments=[...base.program.events,...program.events,...written.cues.filter(row=>row.part===name)];
+        check(tracks[name] ? JSON.stringify(base.events[name])===JSON.stringify(events[name]) &&
+          cue.perTrack[name].room.every(row=>row.send.every(value=>value===tracks[name].mix.send)) &&
+          !cue.perTrack[name].cuts.length :
+          moments.every(row=>JSON.stringify(base.program.pitch(name,row.time))===JSON.stringify(program.pitch(name,row.time))),
+        'Cue map changes pinned part '+name);
+      }
+    }
+    return {arrangement:plan,events,end,program,clock,tracks,room,gain,cue};
   }
 
   function applyChokes(tracks,events) {
@@ -289,7 +316,9 @@
       }
       const desk=track.mix, panL=Math.sqrt((1-desk.pan)/2), panR=Math.sqrt((1+desk.pan)/2);
       const automation=G.automate(track.gestures,{gain:0,pan:desk.pan,cutoff:desk.lowpass,echo:track.echo?.send ?? 0},sampleRate);
-      const echo=G.tapeEcho(track.echo,sampleRate);
+      let echo=G.tapeEcho(track.echo,sampleRate), cutting=false;
+      const cut=Q.cursor(music.cue?.perTrack[name].cuts ?? []);
+      const roomSend=Q.cursor(music.cue?.perTrack[name].room ?? []);
       const coefficient=frequency=>1-Math.exp(-2*Math.PI*Math.min(sampleRate*.49,frequency)/sampleRate);
       const high=coefficient(desk.highpass), low=coefficient(desk.lowpass);
       const dry=stems ? new Float32Array(n*2) : null;
@@ -298,6 +327,15 @@
       const gain=desk.gain*music.gain*(layers[name] ?? 1);
       for (let i=0;i<stop;i++) {
         const index=2*i, time=i/sampleRate;
+        if (cut?.(time)) {
+          if (!cutting) {
+            cutting=true;
+            lowL=lowR=highL=highR=0;
+            echo=G.tapeEcho(track.echo,sampleRate);
+          }
+          continue;
+        }
+        cutting=false;
         const settings=automation?.(time), cutoff=settings ? coefficient(settings.cutoff) : low;
         let l=data[index],r=data[index+1], volume=gain;
         highL+=(l-highL)*high; highR+=(r-highR)*high;
@@ -319,7 +357,10 @@
           const wet=echo(i,l,r,settings?.echo ?? track.echo.send);
           l+=wet[0]; r+=wet[1];
         }
-        feed[index]+=l*desk.send; feed[index+1]+=r*desk.send;
+        const span=roomSend?.(time);
+        const send=span ? span.send[0]+(span.send[1]-span.send[0])*
+          clamp((time-span.startTime)/(span.endTime-span.startTime)) : desk.send;
+        feed[index]+=l*send; feed[index+1]+=r*send;
         if (i<begin) continue;
         const at=2*(i-begin);
         if (dry) { dry[at]=l; dry[at+1]=r; }
@@ -336,12 +377,18 @@
     });
     const smoothing=.06+.39*(1-music.room.damping);
     const fadeDuration=tail ? 0 : music.arrangement.score.endFade ?? .09;
+    const cutRoom=Q.cursor(music.cue?.roomCuts ?? []);
+    let history=0;
     let peak=0,power=0,clipped=0;
     for (let i=0;i<stop;i++) {
       let l=0,r=0;
+      if (cutRoom?.(i/sampleRate)) {
+        history=i+1;
+        left=right=0;
+      }
       for (const tap of taps) {
         const at=(i-tap.samples)*2;
-        if (at<0) continue;
+        if (at<history*2) continue;
         l+=feed[at+Number(tap.cross)]*tap.gain;
         r+=feed[at+Number(!tap.cross)]*tap.gain;
       }
@@ -365,11 +412,16 @@
   }
 
   function render(source,assets,options) {return renderCompiled(compile(source,assets),options);}
+  function mapCue(source,map,assets) {
+    const production={...source,cueMap:P.data.clone(map)}, music=compile(production,assets);
+    return {production:P.data.freeze(P.data.clone(production)),report:Q.report(music)};
+  }
   function inspect(source,assets) {
-    const {arrangement,events,end,tracks}=compile(source,assets);
+    const compiled=compile(source,assets),{arrangement,events,end,tracks,cue}=compiled;
     const gestures=Object.fromEntries(Object.entries(tracks).filter(([,track])=>track.gestures.length).map(([name,track])=>
       [name,track.gestures.map(({curves,mixers,...placement})=>placement)]));
-    return P.data.freeze({arrangement,events:json(events),duration:end,...(Object.keys(gestures).length && {gestures})});
+    return P.data.freeze({arrangement,events:json(events),duration:end,
+      ...(Object.keys(gestures).length && {gestures}),...(cue && {cueMap:Q.report(compiled)})});
   }
-  P.musicProduction=Object.freeze({compile,renderCompiled,render,inspect,grooveAt,applyChokes});
+  P.musicProduction=Object.freeze({compile,renderCompiled,render,inspect,mapCue,grooveAt,applyChokes});
 })(KIT.procedural);
