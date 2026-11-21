@@ -110,6 +110,10 @@ choices with a reusable listening rationale.
 [Transfer groove from a performance](performance-groove.md) to borrow
 timing, accents and note lengths from an audio break or MIDI take.
 
+[Route and automate a mix](audio-mixer.md) using rendered stems, sample
+clips, or audio from graph nodes. The mixer supplies groups, returns,
+parallel inserts, and sidechain compression on the same sample grid.
+
 ## Assemble adaptive transitions
 
 Pass the `music-transition` and `music-cue` intents from Ink's

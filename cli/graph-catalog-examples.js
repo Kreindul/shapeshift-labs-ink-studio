@@ -312,6 +312,12 @@ const specifications = {
     options: { time: .02 }
   } },
   'audio.detectTransients': { inputs: { source: transientAudio } },
+  'audio.renderMixer': {nodes:{source:{op:'audio.buffer',inputs:audio},
+    bank:{op:'data.record',inputs:{tone:link('source')}}},
+    inputs:{assets:link('bank'),source:{id:'session',sampleRate:8000,output:'master',
+      strips:{tone:{clips:[{id:'take',source:'tone'}],sends:{room:{tap:'pre',level:.3}}},
+        room:{inserts:['echo']},master:{}},
+      processors:{echo:{type:'delay',seconds:.02,feedback:.18}},taps:{room:{strip:'room'}}}}},
   'audio.extractGroove': {inputs:{sources:{tap:transientAudio},options:{
     detect:{size:32,hop:8,sensitivity:1,minStrength:.01}}}},
   'music.fitGroove': {inputs:{events:[{lane:'hat',beat:.52,velocity:.8,durationBeats:.13}]}},
