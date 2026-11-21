@@ -179,6 +179,14 @@
       outputs:{value:'audio',stems:'record',report:'record'},
       run({source,assets,options}) {return P.musicProduction.render(source,assets,options);}
     },
+    'music.inspectProduction': {
+      description: 'Expose performed note times, pitches, articulations and gates for scene bindings.',
+      inputs:{source:'record',assets:options},outputs:{value:'record',events:'record'},
+      run({source,assets}) {
+        const value=P.musicProduction.inspect(source,assets);
+        return {value,events:value.events};
+      }
+    },
     'music.analyzeProduction': {
       description: 'Measure performed accent overlaps, orchestration and harmonic transitions across parts.',
       inputs:{source:'record',assets:options,options},outputs:{value:'record'},

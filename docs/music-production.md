@@ -63,9 +63,11 @@ ink-studio music production audition examples/music-production/relay-glass.json 
 ```
 
 The JavaScript API is `KIT.music.production`. The graph exposes
-`music.renderProduction`, `music.analyzeProduction`,
+`music.renderProduction`, `music.inspectProduction`, `music.analyzeProduction`,
 `music.suggestProduction`, `music.reviseProduction`,
 `music.auditionProduction`, and `music.renderTransitions`.
+`music.inspectProduction` returns performed note events with their audio
+times and pitches so that visual tracks can follow the performed groove.
 
 Analysis reports accent overlaps, active harmony, and pitched notes held
 across a section boundary. Suggestions can target `lead`, `pocket`, or

@@ -186,6 +186,7 @@ const specifications = {
   'music.analyzeArrangement': { inputs:{source:arrangement,options:{audio:{end:2,sampleRate:8000}}} },
   'music.suggest': { inputs:{source:{...arrangement,sections:[{id:'opening',bars:4,harmony:'home'}]},options:{limit:2}} },
   'music.renderProduction': { inputs:{source:production,options:{end:.25,sampleRate:8000,stems:true}} },
+  'music.inspectProduction': { inputs:{source:production} },
   'music.analyzeProduction': { inputs:{source:production} },
   'music.suggestProduction': { inputs:{source:production,options:{section:'opening'}} },
   'music.reviseProduction': { inputs:{source:production,revision:{tracks:{lead:{pan:.28}}}} },
