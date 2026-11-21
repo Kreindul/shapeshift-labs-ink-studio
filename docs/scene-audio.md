@@ -26,6 +26,9 @@ Feed the aligned WAV files into [per-stem control signals](graph-media.md#per-st
 Use [audio editorial](audio-editorial.md) to spot a transient inside a take,
 comp alternate performances, and audition the same edits against a recut.
 
+See [Foley and perspective](foley-perspective.md) for editorial assets and
+post buses for dialogue, Foley, effects, ambience, and music.
+
 ## Soundtrack file
 
 Use `proceduralScore` for a [shared audiovisual score](procedural-score.md).

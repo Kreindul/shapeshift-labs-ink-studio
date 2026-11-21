@@ -7,7 +7,7 @@
     check(record(value) && Object.keys(value).length<=max && Object.keys(value).every(id),'Invalid mixer '+label);
     return Object.entries(value);
   }
-  function compile(source,assets,host) {
+  function compile(source,assets,host,premix) {
     check(fields(source,['id','sampleRate','map','end','tail','output','strips','processors','taps','peakPolicy','meter']) &&
       id(source.id) && id(source.output) && record(assets) &&
       (source.meter===undefined || typeof source.meter==='boolean') &&
@@ -21,9 +21,12 @@
     const audio=new Map(), strips=new Map(), routes=[];
     let assetSamples=0, clipCount=0, sourceEnd=0;
     function asset(name) {
-      check(id(name) && Object.hasOwn(assets,name),'Unknown mixer audio source '+name);
+      const bus=premix?.get(name);
+      check(id(name) && (bus || Object.hasOwn(assets,name)),'Unknown mixer audio source '+name);
       if (!audio.has(name)) {
-        const pcm=A.audio(assets[name]);
+        // Internal bus sums can sit above unity until their inserts and fader.
+        if (bus) check(bus instanceof Float32Array && bus.length%2===0 && bus.every(Number.isFinite),'Invalid mixer bus input');
+        const pcm=bus ? {samples:bus,channels:2,sampleRate:rate} : A.audio(assets[name]);
         assetSamples+=pcm.samples.length;
         check(pcm.channels<=2 && assetSamples<=32e6,'Mixer input exceeds its mono/stereo PCM budget');
         audio.set(name,pcm);
@@ -143,8 +146,8 @@
     return {rate,sourceEnd,frames,order,routes,master,exports};
   }
   const read=(data,index)=>data[index] ?? 0;
-  function render(source,assets,host) {
-    const {rate,sourceEnd,frames,order,routes,master,exports}=compile(source,assets,host);
+  function render(source,assets,host,premix) {
+    const {rate,sourceEnd,frames,order,routes,master,exports}=compile(source,assets,host,premix);
     const buffers=new Map();
     const buffer=(name,tap)=>buffers.get(name)[tap];
     const allocate=({latency,end})=>new Float64Array(end ? 2*(Math.min(end,frames)+latency) : 0);
@@ -244,5 +247,6 @@
     if (source.meter) report.meter=A.mixerMonitor.meter(value);
     return {value,taps:printed,report};
   }
-  A.mixer=Object.freeze({render});
+  A.mixer=Object.freeze({render:(source,assets,host)=>render(source,assets,host),
+    renderPremix:(source,assets,buses)=>render(source,assets,undefined,buses)});
 })(KIT.procedural);

@@ -26,12 +26,12 @@ function placement({ asset, first, end, offset = 0, rate = 1, gain = 1, loop = f
   return { asset, first, end, sourceStep, sourceStart, gain, loop, fade, points };
 }
 
-function mix(voices, resolve, { start, end, sampleRate, gain = 1, capture = false }) {
+function sumVoices(voices, resolve, { start, end, sampleRate, gain = 1 }, buses = stereo) {
   const count = end - start;
   if (!Number.isSafeInteger(count) || count < 1 || count * 2 > WAV.maxSamples)
     throw new RangeError('Scene soundtrack exceeds its WAV sample budget');
-  const stems = new Map(stereo.map(name => [name, new Float32Array(count * 2)]));
-  const statistics = Object.fromEntries(stereo.map(name => [name, { voices: 0, peak: 0 }]));
+  const stems = new Map(buses.map(name => [name, new Float32Array(count * 2)]));
+  const statistics = Object.fromEntries(buses.map(name => [name, { voices: 0, peak: 0 }]));
   let work = 0;
   for (const { stem, ...voice } of voices) {
     if (voice.end !== undefined && voice.end <= start) continue;
@@ -71,6 +71,12 @@ function mix(voices, resolve, { start, end, sampleRate, gain = 1, capture = fals
       }
     }
   }
+  return {stems,statistics};
+}
+
+function mix(voices, resolve, options) {
+  const {start,end,sampleRate,capture=false}=options, count=end-start;
+  const {stems,statistics}=sumVoices(voices,resolve,options);
   const sum = new Float32Array(count * 2);
   let peak = 0;
   for (const [name, bus] of stems) {
@@ -94,4 +100,4 @@ function mix(voices, resolve, { start, end, sampleRate, gain = 1, capture = fals
   return { waves, report };
 }
 
-module.exports = { mix };
+module.exports = { mix, sumVoices };
