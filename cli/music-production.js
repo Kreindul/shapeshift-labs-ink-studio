@@ -14,17 +14,23 @@ function assetPaths(recipe,file) {
 }
 function timelineBank(recipe,file) {
   const paths=assetPaths(recipe,file);
+  const maps={};
   const sources=Object.fromEntries(Object.entries(recipe.sources ?? {}).map(([name,spec])=>{
-    if (typeof spec!=='string') return [name,spec];
-    const at=path.resolve(path.dirname(file),spec), source=read(at);
+    if (!nameValid(name)) throw new TypeError('Use a named production source');
+    const at=typeof spec==='string' ? path.resolve(path.dirname(file),spec) : file;
+    const source=typeof spec==='string' ? read(at) : spec;
     for (const [key,value] of Object.entries(assetPaths(source,at))) {
       if (Object.hasOwn(paths,key) && paths[key]!==value)
         throw new RangeError('Production sources disagree on asset '+key);
       paths[key]=value;
     }
+    if (source.themeMap!==undefined) maps[name]=source.themeMap;
     return [name,source.production ?? source];
   }));
-  return {sources,paths};
+  const thematic=recipe.timeline?.thematic;
+  const timeline=thematic!==undefined || Object.keys(maps).length ? {...recipe.timeline,
+    thematic:{...thematic,maps:{...maps,...thematic?.maps}}} : recipe.timeline;
+  return {sources,paths,timeline};
 }
 function adaptiveIntents(K,recipe) {
   if (recipe.adaptive===undefined) return recipe.intents;
@@ -55,14 +61,16 @@ function writeTake(folder,value,stems,report,production,paths) {
 }
 
 module.exports=function command([mode,file,config],opt,kit) {
-  if (!file) throw new TypeError('Use music production analyze, suggest, revise, render, audition or timeline with a recipe');
+  if (!file) throw new TypeError('Use music production themes, analyze, suggest, revise, render, audition or timeline with a recipe');
   const recipe=read(file);
-  const {sources,paths}=mode==='timeline' ? timelineBank(recipe,file) : {paths:assetPaths(recipe,file)};
+  const {sources,paths,timeline}=mode==='timeline' ? timelineBank(recipe,file) : {paths:assetPaths(recipe,file)};
   const assets=Object.fromEntries(Object.entries(paths).map(([name,file])=>[name,WAV.read(file)]));
   const production=recipe.production ?? recipe;
   const P=kit.KIT.music.production;
   let value;
   if (mode==='inspect') value=P.inspect(production,assets);
+  else if (mode==='themes' && config)
+    value={...P.developThemes(production,read(config),assets),...(recipe.assets && {assets:paths})};
   else if (mode==='analyze') value=P.analyze(production,assets,config ? read(config) : recipe.options);
   else if (mode==='suggest') value=P.suggest(production,config ? read(config) : recipe.options,assets);
   else if (mode==='revise' && config) {
@@ -88,7 +96,7 @@ module.exports=function command([mode,file,config],opt,kit) {
       value={manifest:path.join(folder,'manifest.json'),takes:result.takes.map(take=>take.id)};
     } else {
       const result=mode==='timeline' ?
-        P.renderTimeline(sources,recipe.timeline,adaptiveIntents(kit.KIT,recipe),assets,{...recipe.options,stems:true}) :
+        P.renderTimeline(sources,timeline,adaptiveIntents(kit.KIT,recipe),assets,{...recipe.options,stems:true}) :
         P.render(production,assets,{...recipe.options,stems:true});
       writeTake(folder,result.value,result.stems,result.report,mode==='render'?production:undefined,paths);
       value={mix:path.join(folder,'mix.wav'),report:path.join(folder,'report.json')};

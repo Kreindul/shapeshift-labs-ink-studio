@@ -216,6 +216,15 @@
           stems:Object.fromEntries(result.takes.map(take=>[take.id,take.stems])),report:result.report};
       }
     },
+    'music.developThemes': {
+      description: 'Place related theme fragments, developments and statements across a production and report their performed events.',
+      inputs:{source:'record',plan:'record',assets:options},
+      outputs:{value:'record',themeMap:'record',report:'record'},
+      run({source,plan,assets}) {
+        const {production,themeMap,report}=P.musicProduction.developThemes(source,plan,assets);
+        return {value:production,themeMap,report};
+      }
+    },
     'music.renderTransitions': {
       description: 'Render timed adaptive music intents with entry and exit markers, layered cues, bridges and stingers.',
       inputs:{sources:'record',timeline:'record',intents:scoreRequests,assets:options,options},

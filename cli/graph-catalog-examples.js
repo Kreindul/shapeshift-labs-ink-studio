@@ -192,6 +192,10 @@ const specifications = {
   'music.suggest': { inputs:{source:{...arrangement,sections:[{id:'opening',bars:4,harmony:'home'}]},options:{limit:2}} },
   'music.renderProduction': { inputs:{source:production,options:{end:.25,sampleRate:8000,stems:true}} },
   'music.inspectProduction': { inputs:{source:production} },
+  'music.developThemes': { inputs:{source:production,plan:{
+    themes:{signal:{motif:'melody'}},
+    appearances:[{id:'opening',theme:'signal',section:'opening',stage:'statement',targets:[{part:'lead'}]}]
+  }} },
   'music.analyzeProduction': { inputs:{source:production} },
   'music.suggestProduction': { inputs:{source:production,options:{section:'opening'}} },
   'music.reviseProduction': { inputs:{source:production,revision:{tracks:{lead:{pan:.28}}}} },
