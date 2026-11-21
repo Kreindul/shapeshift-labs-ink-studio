@@ -994,6 +994,8 @@ const CMD = {
         '  splat-footprints <shape|profile.json> [--rotation n --stretch x,y --softness n --point x,y --preview file.png --out report.json]  inspect native splat silhouettes',
         '  render-grid <hex|triangle|diamond|settings.json> [--size 8 --point x,y --bounds x,y,w,h --out report.json]  inspect tessellating cells',
         '  render-graph <graph.json> [--w 900 --h 620 --out report.json]  inspect effect resolution and memory/work budgets',
+        '  graph nodes [--json]   list registered graph operations and their ports',
+        '  graph describe <op> [--json | --example]   show schema, units, limits and a runnable example',
         '  graph validate|plan <project.json> [--inputs values.json]   validate and describe a headless graph',
         '  graph inspect <project.json> [--output NAME | --node PATH --port NAME] [--out directory]',
         '  graph run <project.json> [--inputs values.json --at seconds --seed N --out directory]',

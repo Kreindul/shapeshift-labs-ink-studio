@@ -189,6 +189,12 @@ function nativeOperations(kit, assets) {
   };
 }
 
+function operationRegistry(kit, operations = {}, assets = new Map()) {
+  const stock = nativeOperations(kit, assets);
+  const extensions = Object.fromEntries(named(operations, 'host operations'));
+  return { stock, extensions, overrides: { ...stock, ...extensions }, toolkit: kit.KIT.procedural.graph.operations };
+}
+
 function snapshotInputs(inputs, clone) {
   const active=new Set();
   function copy(value) {
@@ -294,8 +300,7 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     }
     return [name,{format,file,sha256:sha256(bytes),value,...(kind && {type:kind}),...(codec && {codec})}];
   }));
-  const stock=nativeOperations(kit,assets);
-  const ops={...stock,...Object.fromEntries(named(operations,'host operations'))};
+  const {stock,overrides:ops}=operationRegistry(kit,operations,assets);
   const groups=Object.create(null), preparedGroups=new Map(), visiting=new Set();
 
   function compile(spec) {
@@ -471,6 +476,7 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
   }
 
   return Object.freeze({
+    sockets: compiled.sockets,
     plan:inputs=>({
       ...data.clone(projectPlan),
       ...(inputs!==undefined && {resolvedInputs:Object.fromEntries(Object.entries(request({inputs}).inputs)
@@ -529,4 +535,4 @@ function readGraphProject(file, options={}) {
   return createGraphProject(document,{...options,baseDir:path.dirname(sourceFile),sourceFile});
 }
 
-module.exports = { createGraphProject, readGraphProject };
+module.exports = { createGraphProject, readGraphProject, operationRegistry };

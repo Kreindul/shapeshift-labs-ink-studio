@@ -165,6 +165,51 @@ including duplicate swatches. The node returns the one-channel slot
 raster as `value`, the ordered swatches as `palette`, and per-pixel
 opacity bytes as `alpha`.
 
+### Discover registered nodes
+
+```sh
+ink-studio graph nodes
+ink-studio graph nodes --json
+ink-studio graph describe raster.resize
+ink-studio graph describe array.map --json
+ink-studio graph describe raster.resize --example > resize.json
+ink-studio graph run resize.json
+```
+
+The catalog lists the same toolkit, headless, and configured host
+operations that the runner resolves. `graph describe` reports named
+inputs and outputs, required inputs, defaults, units, constraints, and
+a runnable example. Its versioned JSON records also include the clock
+dependency and operation origin. A null unit means the port has no named
+unit in the registry or catalog. Structured properties document common
+settings inside the `options` records, and each operation enforces its
+full settings rules when evaluated.
+
+Dynamic nodes show a representative signature resolved by the compiler.
+For example, an `array.map` group supplies the item type, result type,
+and any extra inputs. The description identifies which field controls
+specialization. Catalog discovery plans the example as needed and leaves
+operation execution and instantiation to the runner.
+
+`--example` prints the versioned project by itself. Asset examples point
+to the small fixtures shipped with Ink. Operations that require JavaScript
+handles, such as `materialSample`, print a runnable Node script instead.
+
+```sh
+ink-studio graph describe materialSample --example > sample-material.cjs
+node sample-material.cjs
+```
+
+Use `ink.listGraphNodes({ operations })` and
+`ink.describeGraphNode(op, { operations })` for the same JSON structures
+in Node. A custom operation in `graphOperations` can attach a
+`description`, `constraints` (an array of strings), and an `example` with
+`{ kind: 'graph', project }` or `{ kind: 'node', source }`. A socket
+definition can also include a `unit`, a `description`, a `constraints`
+object, or named `properties`. These fields document the host operation's
+own validation. A host operation without an example still shows its
+declared ports.
+
 ### Outputs and CI
 
 Declare `exports` as a map of artifact names to `{ "output": "name", "format": "json" }`,
