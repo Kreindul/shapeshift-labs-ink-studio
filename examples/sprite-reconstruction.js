@@ -296,15 +296,20 @@ function makeSpriteReconstructionStudies({ KIT: K, makeBuilder, makeSculpt, Spri
             (i + j) % 2 ? [34, 44, 61] : [29, 39, 53]
           );
         }
+      artAtlas.face([-2.19, 0.14, 2.19], [4.38, 0, 0], [0, 0, -4.38], 144, 144, (u, v) => {
+        const x = (u + 0.5 - 72) / 72,
+          y = (v + 0.5 - 72) / 72,
+          r = Math.hypot(x, y);
+        if (r >= 1) return;
+        if (r > 0.958) return 0x4d7074;
+        if (r > 0.921) return 0x1c323a;
+        if (r > 0.76 && Math.abs(x - y) < 0.014) return 0x598480;
+        if (Math.abs(x) < 0.021 || Math.abs(y) < 0.021) return r > 0.67 ? 0x52777a : 0x344f57;
+        return (Math.floor(u / 12) + Math.floor(v / 12)) % 2 ? 0x314d52 : 0x354f56;
+      });
       for (let i = 0; i < 36; i++) {
         const at = (n, y, r) => [r * Math.sin((n * Math.PI) / 18), y, r * Math.cos((n * Math.PI) / 18)];
-        const a = at(i, 0.14, 2.19),
-          b = at(i + 1, 0.14, 2.19);
-        K.surfacePatches.triangle(B, [[0, 0.14, 0], a, b], {
-          color: i % 3 ? [50, 77, 82] : [53, 81, 85],
-          object: 'deck'
-        });
-        panel(at(i, -0.14, 2.28), at(i + 1, -0.14, 2.28), b, a, [39, 62, 72]);
+        panel(at(i, -0.14, 2.28), at(i + 1, -0.14, 2.28), at(i + 1, 0.14, 2.19), at(i, 0.14, 2.19), [39, 62, 72]);
       }
       for (let n = 0; n < 28; n++) {
         const a = (n * Math.PI * 2) / 28,

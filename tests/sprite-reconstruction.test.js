@@ -198,11 +198,13 @@ test(
           gold = draw(world, { ...sprite, time: 0.55 });
         const spritePick = b.pick(world, ray, sprite).solid,
           geoPick = b.pick(world, ray, geo).solid;
+        const shaded = draw(world, { ...sprite, liveSun: { direction: [0, 0, -1], ambient: 0.26, intensity: 1 } });
         let stats;
         b.draw(clean, { spriteReconstructionFrame: s => (stats = s) });
         const samples = Object.values(b.sample(screen));
         b.close();
         return {
+          shaded,
           green,
           blue,
           flatBlue,
@@ -217,6 +219,7 @@ test(
     assert(out.green[1] > out.green[2] * 2, JSON.stringify(out.green));
     assert(out.blue[2] > out.blue[1] * 2 && out.flatBlue[2] > out.flatBlue[1] * 2);
     assert(out.gold[0] > out.gold[2] * 2, JSON.stringify(out.gold));
+    assert(out.shaded[1] < out.green[1] * 0.4, JSON.stringify(out.shaded));
     assert.equal(out.coverage, 0.5);
     assert(out.samples.filter(([r, g]) => r > g * 2).length >= 30);
     assert(out.samples.filter(([r, g]) => g > r * 2).length >= 30);
