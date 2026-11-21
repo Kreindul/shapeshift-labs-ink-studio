@@ -150,6 +150,24 @@ const specifications = {
     options: { time: 2.4 } } },
   'music.resolve': { inputs: { map: { tempo: 120, barsPerPhrase: 2, swing: .625 },
     items: [{ time: { phrase: 1 }, value: { glow: 1 } }, { time: { bar: 2, beat: .5, offset: .05 }, value: { glow: 0 } }] } },
+  'music.score': { inputs: { score: {
+    tempoMap: { tempo: 120 }, duration: .5,
+    voices: [{id:'lead'},{id:'shadow'}],
+    harmonies: { home: { root:'C4',quality:'fifth',tuning:'just' } },
+    changes: [{harmony:'home',time:0}],
+    bindings: { angle: {voice:'lead',from:'signal',range:[-.3,.3]} }
+  }, options: { time:.25 } } },
+  'music.scoreAudio': { inputs: { score: {
+    duration: .25, voices: [{id:'tone',waveform:'triangle'}], harmonies: {home:{root:'C3',quality:'unison'}},
+    changes: [{harmony:'home',time:0}]
+  }, options:{sampleRate:8000} } },
+  'music.fifths': { inputs: { from:'C',to:'A' } },
+  'music.scale': { inputs: {root:'C4',options:{mode:'dorian'}} },
+  'music.scaleChord': { inputs: {root:'C4',degree:5,options:{mode:'major',size:4}} },
+  'music.scaleMap': { inputs: {value:.61,options:{mode:'majorPentatonic'}} },
+  'music.quantizePitch': { inputs: {value:61.6,root:'C4',options:{mode:'dorian'}} },
+  'music.interval': { inputs: {a:220,b:330} },
+  'music.roughness': { inputs: {spectra:[[[220,1],[440,.5]],[[228,1],[456,.5]]]} },
   'audio.buffer': { inputs: audio },
   'audio.stemControls': { inputs: {
     stems: { drums: transientAudio, synth: audio },
@@ -211,7 +229,11 @@ function exampleFor(id, operation, kit) {
   }
   if (operation.specialize) return;
   const { inputs: specified = {}, nodes: earlier, output = Object.keys(operation.outputs ?? { value: 'any' })[0] } =
-    id === 'color.look' ? { inputs: { pack: kit.KIT.authoring.assetPacks.savePaletteLook({ id: 'catalog/ink', label: 'Catalog ink', palette }),
+    id === 'anim.visualSample' ? (() => {
+      const capture = kit.KIT.procedural.visualResampling.create();
+      capture.append(rgba, { motion });
+      return { inputs: { source: capture.snapshot() } };
+    })() : id === 'color.look' ? { inputs: { pack: kit.KIT.authoring.assetPacks.savePaletteLook({ id: 'catalog/ink', label: 'Catalog ink', palette }),
       binding: { asset: 'catalog/ink' } } } : specifications[id] ?? {};
   const nodes = { ...earlier };
   const field = { op: 'sdf.shape' }, world = { op: 'scene.diorama', inputs: { definition: diorama } };

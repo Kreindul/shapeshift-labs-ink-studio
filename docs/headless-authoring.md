@@ -4,6 +4,14 @@ These APIs are available through `KIT.procedural` in Node and the browser bundle
 
 For image review and export, pass the finished world to Node's CPU `render()`. For interactive review, pass the world and authoring toolkit to the [WebGL canvas renderer](browser-renderer.md).
 
+## Start from an editable recipe
+
+The [starter recipes](../examples/starter-recipes/README.md) ship five small
+projects for a relightable sprite, an audio-driven sign, a weathered tile
+set, a looping spell, and a layered 3D vista. Copy a recipe folder, run
+its graph, and edit its named inputs or nodes. Each recipe includes a
+take clock and can be archived with the existing project bundler.
+
 ## Edit generated parts from the CLI
 
 From the checkout, inspect the [editable passage](../examples/editable-passage.js)
@@ -1539,6 +1547,7 @@ port to hide a layer during that hold.
 | `anim.clock` | Map the project clock to `options.range`, with `delay`, `rate`, `reverse`, and a `mode` of `hold`, `loop` or `pingpong`. Add `phase` and `cues` for authored layer clocks. Returns mapped time, progress, playback direction and activity. |
 | `anim.stagger` | Sample several clocks with `count`, `options.interval` and `offset`. `reverseOrder` switches which item starts first. Returns mapped times and per-item clock records. |
 | `anim.frame` | Select from raster `frames` with `fps` and a half-open interval from `first` to `end` in frame indices. Accepts the same delay, rate, reverse and looping controls. |
+| `anim.visualSample` | Replay a [captured visual span](graph-clips.md#capture-a-reusable-visual-span) with independent timing, alpha, raw data, depth and motion. |
 | `anim.spriteDesync` | Composite a layered raster `source` with independent frame holds or offsets on named parts and pixel rectangles. Returns RGBA `value` and the sampled `frames`. |
 | `anim.captureTransforms` | Snapshot the pose channels of a `source` array of instance records with stable IDs. |
 | `anim.staleTransforms` | Patch independent pose channels on a `source` array using `edits` and optional named `snapshots`. Returns the edited array and an applied/skipped count. |
