@@ -11,7 +11,7 @@ const brass = K.highlightCels.preset('brass', {
 });
 const highlightCels = [{
   id: 'medallion-rim', family: brass, light: 'swing-lamp',
-  at: [-2.6, 2.27, .276], normal: [0, 0, 1], tangent: [1, 0, 0],
+  at: [-2.6, 2.27, .464], normal: [0, 0, 1], tangent: [1, 0, 0],
   span: 1.02, bias: .018
 }];
 const world = B.finish({ ...scene, areaLights, highlightCels });

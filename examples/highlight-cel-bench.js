@@ -63,7 +63,7 @@ module.exports = ({ KIT: K, SpriteSurface, makeBuilder, makeSculpt }) => ({
     const B = makeBuilder(seed,palette), S = K.sculpt(makeSculpt(B));
     Object.assign(S,{ pixel:true, amb:.49,sky:.17,sun:V.norm([-.48,.66,.44]),sunK:.37,shLen:0 });
     const wood = {r:[7,8,9,10,11,12]}, frame = {r:[8,9,13,14,15]}, dark = {r:[0,1,2,3]};
-    const velvet = [{r:[1,2,3,4]}, {r:[18,2,3,4]}, {r:[7,8,9,10]}];
+    const velvet = [[0x273644,0x324552,0x3c515a],[0x203638,0x2d4947,0x3f5853],[0x382b42,0x45334a,0x543d52]];
     const box = (at, half, material, res=.12, rd=.04) => S.box(at,half,material,{res,rd});
     box([0,.27,.14],[4.42,.24,1.65],wood,.14,.06);
     box([0,.49,.14],[4.37,.07,1.61],frame,.12,.025);
@@ -83,12 +83,16 @@ module.exports = ({ KIT: K, SpriteSurface, makeBuilder, makeSculpt }) => ({
     const cards = [['brass',-2.60,brass],['enamel',0,enamel],['glass',2.60,glass]];
     for (const [i, [key,x,design]] of cards.entries()) {
       box([x,1.52,-.14],[1.17,1.12,.30],frame,.105,.09);
-      box([x,1.52,.191],[1.08,1.04,.055],velvet[i],.09,.075);
+      atlas.face([x-1.08,.48,.255],[2.16,0,0],[0,2.08,0],64,64,(u,v)=>{
+        if (u===0 || v===63) return velvet[i][0];
+        if (u===63 || v===0) return velvet[i][2];
+        return velvet[i][(u*17+v*19+u*v)%31===0 ? 0 : 1];
+      });
       for (const s of [-1,1]) for (const y of [.68,2.38])
         S.ball([x+s*.95,y,.258],.033,{r:[13,15,16]},{res:.032});
       const paint = drawing.render({width:64,height:66,edges:'hard',commands:design()});
       const region = atlas.reserve(paint.width,paint.height);
-      atlas.faceRegion([x-.88,.81,.272],[1.76,0,0],[0,1.82,0],region,{id:key+'-face'});
+      atlas.faceRegion([x-.88,.81,.460],[1.76,0,0],[0,1.82,0],region,{id:key+'-face'});
       const plaque = drawing.render({width:60,height:14,edges:'hard',commands:[
         rect(0,0,60,14,'#4f3842'),rect(1,1,58,12,'#292535'),rect(1,1,58,1,'#79594f'),
         text([11,8,11][i],4,key.toUpperCase(),'#c29c7c')
@@ -98,7 +102,7 @@ module.exports = ({ KIT: K, SpriteSurface, makeBuilder, makeSculpt }) => ({
         return plaque.data[p]*65536+plaque.data[p+1]*256+plaque.data[p+2];
       });
       sites.push({ id:key, family:key, light:'swing-lamp', span:1.02,
-        at:[x+[0,.19,.27][i], [2.27,2.14,2.16][i], .276], bias:.018 });
+        at:[x+[0,.19,.27][i], [2.27,2.14,2.16][i], .464], bias:.018 });
       sites[i].region = region;
       sites[i].paint = paint;
     }
