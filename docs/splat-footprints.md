@@ -90,3 +90,7 @@ node cli/ink-studio.js render my-scene.js --splat-footprints off --out original.
 ```
 
 The inspection command accepts built-in names or full JSON profiles, reports signed distance/coverage and support, and optionally renders a preview. `--w` and `--h` set a preview size from 16–2048 per axis. The same native render option works for stills and clips.
+
+### Retained surface depth
+
+Use `depth: 'plane'` with a retained physical U/V frame to evaluate the silhouette and depth at the exact ray/plane intersection. Perspective footprint coordinates, opaque depth tests, software compositing and picking use the same plane. The WebGL renderer runs an opaque-plane depth prepass only for scenes with this opt-in; translucent contributions retain alpha blending. Ordinary marks keep the default center-depth behavior. `K.mosaic.emit` selects plane depth automatically.

@@ -145,9 +145,11 @@
           let alpha=R.alpha(-.5*(C*x*x-2*B*x*y+A*y*y)/det,density,!soft&&!softCoverage&&density>=1,
             R.materialEdge(packedEdge),!soft&&R.continuous(mode,density,raw,optical));
           const styleId=footprintPlan?(world.splatFootprints?.indices[i]??0):0;
+          let planeHit;
           if(styleId){
             const style=footprintPlan.styles[styleId-1],frame=SplatFootprints.posedFrame(world,i,time);
-            const shape=footprintView?SplatFootprints.rayCoverage(style,cov,[rows[o],rows[o+1],rows[o+2]],origin,d,footprintView,frame):
+            if(style.depth==='plane'&&frame)planeHit=SplatFootprints.planeSample([rows[o],rows[o+1],rows[o+2]],frame,origin,d);
+            const shape=style.depth==='plane'&&frame?(planeHit?SplatFootprints.coverage(style,style.matrix[0]*planeHit.uv[0]+style.matrix[1]*planeHit.uv[1],style.matrix[2]*planeHit.uv[0]+style.matrix[3]*planeHit.uv[1]):0):footprintView?SplatFootprints.rayCoverage(style,cov,[rows[o],rows[o+1],rows[o+2]],origin,d,footprintView,frame):
               SplatFootprints.sample(style,frame?SplatFootprints.frameTransform(style,V.dot(u,frame.slice(0,3)),V.dot(v,frame.slice(0,3)),V.dot(u,frame.slice(3)),V.dot(v,frame.slice(3))):SplatFootprints.transform(style,A,B,C),-x,-y);
             alpha=Math.min(.99,density*shape);
           }
@@ -156,11 +158,12 @@
           const target=(provenance??=TargetSelectors.index(world)).row(i);
           const at=Math.abs(f)>1e-7?V.dot(normal,delta)/f:t;
           let distance=at>0&&at<=maxDistance&&Math.abs(at-t)<=3*Math.sqrt(cov[0]+cov[3]+cov[5])?at:t;
+          if(planeHit){distance=planeHit.t;if(distance<=0||distance>maxDistance)continue;}
           let point;
           if(section){
             const shift=(tensor(cov,d,u)*(C*x-B*y)+tensor(cov,d,v)*(A*y-B*x))/det;
             const reach=3*Math.sqrt(Math.max(0,tensor(cov,d,d)));
-            distance=t-K.clamp(shift,-reach,reach);
+            distance=planeHit?.t??t-K.clamp(shift,-reach,reach);
             if(distance<=0||distance>maxDistance)continue;
             point=V.mad(origin,d,distance);
             const depth=back ? V.dot(V.sub(sectionCamera.eye,point),back)-(sectionCamera.setback??0) : distance;

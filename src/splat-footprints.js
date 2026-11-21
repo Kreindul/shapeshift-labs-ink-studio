@@ -26,10 +26,11 @@ const SplatFootprints = (() => {
     if (typeof spec === 'string') spec = { shape: spec };
     record(
       spec,
-      ['shape', 'rotation', 'stretch', 'softness', 'tips', 'innerRadius', 'width', 'seed', 'vertices', 'mask'],
+      ['shape', 'rotation', 'stretch', 'softness', 'tips', 'innerRadius', 'width', 'seed', 'vertices', 'mask', 'depth'],
       'settings'
     );
-    const { shape = 'square', rotation = 0, stretch = [1, 1], softness = 0.08 } = spec;
+    const { shape = 'square', rotation = 0, stretch = [1, 1], softness = 0.08, depth = 'center' } = spec;
+    if (!['center', 'plane'].includes(depth)) throw new TypeError('Splat footprint: invalid depth mode');
     if (!types.includes(shape)) throw new TypeError('Splat footprint: unknown shape ' + shape);
     num(rotation, -Math.PI * 2, Math.PI * 2, 'rotation');
     num(softness, 0, 0.5, 'softness');
@@ -40,9 +41,9 @@ const SplatFootprints = (() => {
       { star: ['tips', 'innerRadius'], cross: ['width'], chip: ['seed'], polygon: ['vertices'], mask: ['mask'] }[
         shape
       ] ?? [];
-    if (Object.keys(spec).some(k => !['shape', 'rotation', 'stretch', 'softness', ...own].includes(k)))
+    if (Object.keys(spec).some(k => !['shape', 'rotation', 'stretch', 'softness', 'depth', ...own].includes(k)))
       throw new TypeError('Splat footprint: setting does not belong to ' + shape);
-    const p = { shape, rotation, stretch: scale, softness };
+    const p = { shape, rotation, stretch: scale, softness, ...(depth === 'plane' && { depth }) };
     let vertices;
     if (shape === 'circle') vertices = null;
     if (shape === 'square')
@@ -440,7 +441,7 @@ const SplatFootprints = (() => {
         y = Math.floor(i / cols) * n;
       if (!shared) for (let j = 0; j < n; j++) atlas.set(f.subarray(j * n, (j + 1) * n), (y + j) * cols * n + x);
       params.set(p.matrix, i * 4);
-      params.set([p.softness, p.reach, 0, 0], maxStyles * 4 + i * 4);
+      params.set([p.softness, p.reach, p.depth === 'plane' ? 1 : 0, 0], maxStyles * 4 + i * 4);
       reach = Math.max(reach, p.reach);
     });
     if (indices !== previous?.indices)
@@ -630,6 +631,31 @@ const SplatFootprints = (() => {
     }
     return r.finish(start);
   }
+  // Exact intersection with the retained footprint plane, independent of camera
+  // projection. Signed, nonorthogonal axes retain authored polygon coordinates.
+  function planeSample(center, frame, origin, direction) {
+    const U = frame.slice(0, 3),
+      V = frame.slice(3),
+      dot = (a, b) => a.reduce((n, v, i) => n + v * b[i], 0),
+      N = [U[1] * V[2] - U[2] * V[1], U[2] * V[0] - U[0] * V[2], U[0] * V[1] - U[1] * V[0]],
+      denominator = dot(N, direction),
+      A = dot(U, U),
+      B = dot(U, V),
+      C = dot(V, V),
+      det = A * C - B * B;
+    if (Math.abs(denominator) < 1e-12 || det <= 1e-20) return null;
+    const t =
+      dot(
+        N,
+        center.map((v, i) => v - origin[i])
+      ) / denominator;
+    if (t < 0) return null;
+    const position = origin.map((v, i) => v + direction[i] * t),
+      delta = position.map((v, i) => v - center[i]),
+      du = dot(delta, U),
+      dv = dot(delta, V);
+    return { t, position, uv: [(C * du - B * dv) / det, (A * dv - B * du) / det] };
+  }
   function rayCoverage(style, cov, center, origin, direction, view, frame) {
     if (
       !view ||
@@ -640,6 +666,16 @@ const SplatFootprints = (() => {
       (view.variance !== undefined && (!Number.isFinite(view.variance) || view.variance < 0))
     )
       throw new TypeError('Splat footprint: invalid projected ray view');
+    if (style.depth === 'plane' && frame) {
+      const hit = planeSample(center, frame, origin, direction);
+      return hit
+        ? coverage(
+            style,
+            style.matrix[0] * hit.uv[0] + style.matrix[1] * hit.uv[1],
+            style.matrix[2] * hit.uv[0] + style.matrix[3] * hit.uv[1]
+          )
+        : 0;
+    }
     const m = view.view,
       project = p => [0, 1, 2].map(k => m[k] * p[0] + m[k + 4] * p[1] + m[k + 8] * p[2] + m[k + 12]);
     const c = project(center),
@@ -720,6 +756,7 @@ float footprintCoverage(float d,float softness){return softness>0.0?1.0-smoothst
     subset,
     join,
     rayCoverage,
+    planeSample,
     glsl
   });
 })();

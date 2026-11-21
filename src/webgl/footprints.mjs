@@ -17,6 +17,7 @@ export function createFootprintBinding(gl, api, resources, targets, maxSize) {
     if (previous !== world.splatFootprints || previousCount !== world.count) {
       const prior = plan;
       plan = api.plan(world);
+      hasPlanes=plan.styles.some(p=>p.depth==='plane');
       if (plan.width > maxSize || plan.height > maxSize)
         throw new RangeError('Footprint atlas exceeds the texture limit');
       if (plan.indices !== prior?.indices) rows.upload(plan.indices);
@@ -33,6 +34,8 @@ export function createFootprintBinding(gl, api, resources, targets, maxSize) {
     targets.textureUnit(6, atlas);
     return { u_footprintRows: 2, u_footprintParams: 1, u_footprintAtlas: 6, u_footprintColumns: plan.columns };
   };
+  let hasPlanes=false;
+  Object.defineProperty(bind,'hasPlanes',{get:()=>hasPlanes});
   bind.rebind = rebind;
   return bind;
 }
