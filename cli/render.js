@@ -1541,12 +1541,17 @@ function renderFrame(world, o, preparedPalettes) {
     const geometryWeight = geometryDetail ? StableDetail.weight(stableDetail.geometry,
       StableDetail.geometryPixels(projectedA,Bq,projectedC,artScale)) : 1;
     if (!geometryWeight) continue;
+    const frame=shaped&&SplatFootprints.posedFrame(world,i,t,SC[i]);
+    const projectedFrame=frame&&[a0*frame[0]+a1*frame[1]+a2*frame[2],b0*frame[0]+b1*frame[1]+b2*frame[2],a0*frame[3]+a1*frame[4]+a2*frame[5],b0*frame[3]+b1*frame[4]+b2*frame[5]];
+    // Scale has already been applied in posedFrame for native particle kinds.
+    const shapeMap = shaped && (projectedFrame?SplatFootprints.frameTransform(shaped,...projectedFrame):SplatFootprints.transform(shaped,A,Bq,C));
+    if(shaped&&!shapeMap)continue;
     const k0 = C / det,
       k1 = -Bq / det,
-      k2 = A / det,
-      ex = Math.min((shaped ? shaped.reach : 3) * Math.sqrt(A) + footprintMargin, 2048),
+      k2 = A / det;
+    let ex = Math.min((shaped ? shaped.reach : 3) * Math.sqrt(A) + footprintMargin, 2048),
       ey = Math.min((shaped ? shaped.reach : 3) * Math.sqrt(C) + footprintMargin, 2048);
-    const shapeMap = shaped && SplatFootprints.transform(shaped,A,Bq,C);
+    if(projectedFrame){const reach=shaped.reach/SplatFootprints.half;ex=Math.min(2048,Math.max(ex,(Math.abs(projectedFrame[0])+Math.abs(projectedFrame[2]))*reach));ey=Math.min(2048,Math.max(ey,(Math.abs(projectedFrame[1])+Math.abs(projectedFrame[3]))*reach));}
     let cutDx, cutDy, cutReach;
     if (cutaway) {
       // Condition the splat's axial depth on its screen position before testing the world-space boundary.

@@ -172,10 +172,10 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     }
     materialAlbedo.fill(rgb + 1, first, end);
   }
-  function describeFootprint(first, end, definition) {
+  function describeFootprint(first, end, definition, frame) {
     if (first >= end || definition === undefined) return;
     footprintRecorder ??= SplatFootprints.recorder();
-    footprintRecorder.record(first,end,definition);
+    footprintRecorder.record(first,end,definition,frame);
   }
   function describePixelStyle(first, end, style, pair) {
     if (first === end || !style.edge && !style.mode && !style.steps) return;

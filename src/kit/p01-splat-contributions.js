@@ -146,9 +146,9 @@
             R.materialEdge(packedEdge),!soft&&R.continuous(mode,density,raw,optical));
           const styleId=footprintPlan?(world.splatFootprints?.indices[i]??0):0;
           if(styleId){
-            const style=footprintPlan.styles[styleId-1];
-            const shape=footprintView?SplatFootprints.rayCoverage(style,cov,[rows[o],rows[o+1],rows[o+2]],origin,d,footprintView):
-              SplatFootprints.sample(style,SplatFootprints.transform(style,A,B,C),-x,-y);
+            const style=footprintPlan.styles[styleId-1],frame=SplatFootprints.posedFrame(world,i,time);
+            const shape=footprintView?SplatFootprints.rayCoverage(style,cov,[rows[o],rows[o+1],rows[o+2]],origin,d,footprintView,frame):
+              SplatFootprints.sample(style,frame?SplatFootprints.frameTransform(style,V.dot(u,frame.slice(0,3)),V.dot(v,frame.slice(0,3)),V.dot(u,frame.slice(3)),V.dot(v,frame.slice(3))):SplatFootprints.transform(style,A,B,C),-x,-y);
             alpha=Math.min(.99,density*shape);
           }
           if(optical)alpha*=OpticalMaterials.slabOpacity(opticalSplats,opt,normal?f:1);

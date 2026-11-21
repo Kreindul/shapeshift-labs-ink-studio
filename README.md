@@ -1112,3 +1112,5 @@ Camera rigs support dependency-free dolly zoom, tracked orbit, keyed crane moves
 Use [tessellated render grids](docs/render-grids.md) to resolve SDF/splat scenes into connected hexagons, alternating triangles or isometric diamonds. See the interactive [Prism Harbour demo](examples/render-grid.html).
 
 Use [custom splat footprints](docs/splat-footprints.md) for square, wedge, star, cross, chipped, polygonal or painted marks on individual materials. Explore the [Mark Foundry](examples/splat-footprints.html), including a live silhouette editor.
+
+Use [surface-aligned brush strokes](docs/surface-brush.md) for gouache, bristle, wash and ink marks following curvature, contours or authored vector fields. Their retained axes follow animated bones and CPU deformation. Try the [Pigment Coast / Painted Koi demos](examples/surface-brush.html).

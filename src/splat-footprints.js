@@ -297,10 +297,68 @@ const SplatFootprints = (() => {
       m = p.matrix;
     return [m[0] * a + m[1] * b, m[0] * b + m[1] * c, m[2] * a + m[3] * b, m[2] * b + m[3] * c];
   }
-  function sample(p, map, x, y) {
-    return coverage(p, map[0] * x + map[1] * y, map[2] * x + map[3] * y);
+  // Inverse of the projected, signed surface axes (not an ellipse square root).
+  function frameTransform(p, ux, uy, vx, vy) {
+    const det = ux * vy - uy * vx;
+    if (!Number.isFinite(det) || Math.abs(det) < 1e-10) return null;
+    const a = vy / det,
+      b = -vx / det,
+      c = -uy / det,
+      d = ux / det,
+      m = p.matrix;
+    return [m[0] * a + m[1] * c, m[0] * b + m[1] * d, m[2] * a + m[3] * c, m[2] * b + m[3] * d];
   }
-  function layout(count, styles = [], indices) {
+  function carryFrame(out, offset, source, at, matrix, scale = 1) {
+    for (let k = 0; k < 6; k += 3)
+      for (let a = 0; a < 3; a++)
+        out[offset + k + a] =
+          scale *
+          (matrix[a * 3] * source[at + k] +
+            matrix[a * 3 + 1] * source[at + k + 1] +
+            matrix[a * 3 + 2] * source[at + k + 2]);
+  }
+  function posedFrame(world, i, time = 0, scaleOverride) {
+    const frames = world.splatFootprints?.frames,
+      k = i * 6;
+    if (!frames || k + 6 > frames.length || !frames.subarray(k, k + 6).some(Boolean)) return null;
+    const out = Array.from(frames.subarray(k, k + 6)),
+      d = world.data,
+      q = i * 16,
+      kind = Math.round(d[q + 11]) % 16;
+    const rest = world.rest ?? d,
+      rk = Math.round(rest[q + 11]) % 16;
+    const skin =
+      kind === 12 || kind === 13 ? d : !(Math.round(d[q + 11]) & 32768) && (rk === 12 || rk === 13) ? rest : null;
+    let matrix,
+      scale = 1;
+    if (kind === 5) {
+      const a = time * d[q + 13],
+        c = Math.cos(a),
+        s = Math.sin(a);
+      matrix = [c, 0, s, 0, 1, 0, -s, 0, c];
+    } else if (skin && world.anim?.bones) matrix = world.anim.bones.subarray(skin[q + 12] * 12, skin[q + 12] * 12 + 9);
+    if ((kind === 2 || kind === 3) && d[q + 14]) {
+      const a = (time * d[q + 13]) / d[q + 14] + d[q + 12],
+        f = a - Math.floor(a);
+      scale = kind === 3 ? 0.6 + f * d[q + 15] : 1 + f * d[q + 15];
+    }
+    if (scaleOverride !== undefined) scale = scaleOverride;
+    if (matrix) carryFrame(out, 0, frames, k, matrix, scale);
+    else if (scale !== 1) for (let k = 0; k < 6; k++) out[k] *= scale;
+    return out;
+  }
+  function setFrames(world, frames) {
+    const b = validate(world);
+    if (!b) throw new TypeError('Splat footprint: frames need a layout');
+    const checked = layout(b.indices.length, b.styles, b.indices, frames);
+    world.splatFootprints = Object.freeze({ ...b, frames: checked.frames });
+    validLayouts.add(world.splatFootprints);
+    return world.splatFootprints;
+  }
+  function sample(p, map, x, y) {
+    return map ? coverage(p, map[0] * x + map[1] * y, map[2] * x + map[3] * y) : 0;
+  }
+  function layout(count, styles = [], indices, frames) {
     if (!Number.isSafeInteger(count) || count < 0 || count > 0xffffff)
       throw new RangeError('Splat footprint: invalid count');
     indices ??= new Uint16Array(count);
@@ -320,7 +378,19 @@ const SplatFootprints = (() => {
       return p;
     });
     if (indices.some(i => i > settings.length)) throw new RangeError('Splat footprint: undefined style index');
-    const result = Object.freeze({ version: 1, styles: Object.freeze(settings), indices: indices.slice() });
+    if (
+      frames !== undefined &&
+      (!(frames instanceof Float32Array) ||
+        frames.length !== count * 6 ||
+        !frames.every(n => Number.isFinite(n) && Math.abs(n) <= 1e6))
+    )
+      throw new RangeError('Splat footprint: frames need six finite world-space axis components per row');
+    const result = Object.freeze({
+      version: 1,
+      styles: Object.freeze(settings),
+      indices: indices.slice(),
+      ...(frames && { frames: frames.slice() })
+    });
     validLayouts.add(result);
     return result;
   }
@@ -334,7 +404,7 @@ const SplatFootprints = (() => {
     if (b.version !== 1) throw new TypeError('Splat footprint: unsupported layout version');
     if (!(b.indices instanceof Uint16Array) || b.indices.length > world.count)
       throw new RangeError('Splat footprint: layout exceeds the world');
-    layout(b.indices.length, b.styles, b.indices);
+    layout(b.indices.length, b.styles, b.indices, b.frames);
     validLayouts.add(b);
     return b;
   }
@@ -359,7 +429,10 @@ const SplatFootprints = (() => {
       tiles.every((f, i) => f === previous.tiles[i]);
     const atlas = shared ? previous.atlas : new Float32Array(cols * n * rows * n),
       params = new Float32Array(maxStyles * 2 * 4);
-    const indices = previous && previous.count === world.count ? previous.indices : new Float32Array(world.count * 4);
+    const indices =
+      previous && previous.count === world.count && previous.frames === b.frames
+        ? previous.indices
+        : new Float32Array(world.count * 8);
     let reach = 3;
     styles.forEach((p, i) => {
       const f = tiles[i],
@@ -370,9 +443,17 @@ const SplatFootprints = (() => {
       params.set([p.softness, p.reach, 0, 0], maxStyles * 4 + i * 4);
       reach = Math.max(reach, p.reach);
     });
-    if (indices !== previous?.indices) for (let i = 0; i < world.count; i++) indices[i * 4] = b.indices[i] ?? 0;
+    if (indices !== previous?.indices)
+      for (let i = 0; i < world.count; i++) {
+        indices[i * 8] = b.indices[i] ?? 0;
+        if (b.frames && i * 6 + 6 <= b.frames.length) {
+          indices.set(b.frames.subarray(i * 6, i * 6 + 6), i * 8 + 1);
+          indices[i * 8 + 7] = +b.frames.subarray(i * 6, i * 6 + 6).some(Boolean);
+        }
+      }
     const out = {
       count: world.count,
+      frames: b.frames,
       styles,
       tiles,
       atlas,
@@ -403,23 +484,32 @@ const SplatFootprints = (() => {
       return id;
     }
     return {
-      record(first, end, spec) {
+      record(first, end, spec, frame) {
+        if (
+          frame !== undefined &&
+          (!(Array.isArray(frame) || ArrayBuffer.isView(frame)) ||
+            frame.length !== 6 ||
+            !Array.from(frame).every(n => Number.isFinite(n) && Math.abs(n) <= 1e6))
+        )
+          throw new RangeError('Splat footprint: invalid surface frame');
         const id = slot(spec),
           last = ranges.at(-1);
-        if (last && last[1] === first && last[2] === id) last[1] = end;
-        else ranges.push([first, end, id]);
+        if (!frame && last && !last[3] && last[1] === first && last[2] === id) last[1] = end;
+        else ranges.push([first, end, id, frame && Array.from(frame)]);
         return id;
       },
       finish(count) {
         if (!Number.isSafeInteger(count) || count < 0 || count > 0xffffff)
           throw new RangeError('Splat footprint: invalid count');
-        const ids = new Uint16Array(count);
-        for (const [first, end, id] of ranges) {
+        const ids = new Uint16Array(count),
+          frames = ranges.some(r => r[3]) ? new Float32Array(count * 6) : undefined;
+        for (const [first, end, id, frame] of ranges) {
           if (!Number.isInteger(first) || !Number.isInteger(end) || first < 0 || end < first || end > count)
             throw new RangeError('Splat footprint: invalid recorded range');
           ids.fill(id, first, end);
+          if (frame) for (let i = first; i < end; i++) frames.set(frame, i * 6);
         }
-        return layout(count, styles, ids);
+        return layout(count, styles, ids, frames);
       }
     };
   }
@@ -447,7 +537,9 @@ const SplatFootprints = (() => {
       delete world.splatFootprints;
       return 0;
     }
-    const next = layout(world.count, styles, ids);
+    const frames = old?.frames && new Float32Array(world.count * 6);
+    if (frames) frames.set(old.frames);
+    const next = layout(world.count, styles, ids, frames);
     world.splatFootprints = next;
     return id;
   }
@@ -458,7 +550,7 @@ const SplatFootprints = (() => {
     const styles = b.styles.slice();
     styles[slot - 1] = prepare(spec);
     if (!styles[slot - 1]) throw new TypeError('Splat footprint: update needs a shape');
-    world.splatFootprints = Object.freeze({ version: 1, styles: Object.freeze(styles), indices: b.indices });
+    world.splatFootprints = Object.freeze({ ...b, styles: Object.freeze(styles) });
     validLayouts.add(world.splatFootprints);
     return slot;
   }
@@ -489,7 +581,7 @@ const SplatFootprints = (() => {
     fields.set(p, field(base));
     const styles = b.styles.slice();
     styles[slot - 1] = p;
-    world.splatFootprints = Object.freeze({ version: 1, styles: Object.freeze(styles), indices: b.indices });
+    world.splatFootprints = Object.freeze({ ...b, styles: Object.freeze(styles) });
     validLayouts.add(world.splatFootprints);
     return slot;
   }
@@ -503,7 +595,13 @@ const SplatFootprints = (() => {
       layout(
         selection.length,
         b.styles,
-        Uint16Array.from(selection, i => b.indices[i] ?? 0)
+        Uint16Array.from(selection, i => b.indices[i] ?? 0),
+        b.frames &&
+          Float32Array.from(
+            selection.flatMap(i =>
+              i * 6 + 6 <= b.frames.length ? Array.from(b.frames.subarray(i * 6, i * 6 + 6)) : [0, 0, 0, 0, 0, 0]
+            )
+          )
       )
     );
   }
@@ -518,8 +616,13 @@ const SplatFootprints = (() => {
         while (first < part.count) {
           const id = b.indices[first] ?? 0;
           let end = first + 1;
-          while (end < part.count && (b.indices[end] ?? 0) === id) end++;
-          r.record(start + first, start + end, id ? b.styles[id - 1] : false);
+          while (!b.frames && end < part.count && (b.indices[end] ?? 0) === id) end++;
+          r.record(
+            start + first,
+            start + end,
+            id ? b.styles[id - 1] : false,
+            b.frames && first * 6 + 6 <= b.frames.length ? b.frames.subarray(first * 6, first * 6 + 6) : undefined
+          );
           first = end;
         }
       }
@@ -527,7 +630,7 @@ const SplatFootprints = (() => {
     }
     return r.finish(start);
   }
-  function rayCoverage(style, cov, center, origin, direction, view) {
+  function rayCoverage(style, cov, center, origin, direction, view, frame) {
     if (
       !view ||
       !view.view ||
@@ -568,7 +671,15 @@ const SplatFootprints = (() => {
     }
     return sample(
       style,
-      transform(style, A, B, C),
+      frame
+        ? frameTransform(
+            style,
+            u[0] * frame[0] + u[1] * frame[1] + u[2] * frame[2],
+            v[0] * frame[0] + v[1] * frame[1] + v[2] * frame[2],
+            u[0] * frame[3] + u[1] * frame[4] + u[2] * frame[5],
+            v[0] * frame[3] + v[1] * frame[4] + v[2] * frame[5]
+          )
+        : transform(style, A, B, C),
       view.width * 0.5 + f * (o[0] + t * d[0]) * iz - cx,
       view.height * 0.5 + f * (o[1] + t * d[1]) * iz - cy
     );
@@ -594,6 +705,10 @@ float footprintCoverage(float d,float softness){return softness>0.0?1.0-smoothst
     distance,
     coverage,
     transform,
+    frameTransform,
+    carryFrame,
+    posedFrame,
+    setFrames,
     sample,
     layout,
     plan,

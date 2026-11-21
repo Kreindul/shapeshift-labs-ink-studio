@@ -46,6 +46,12 @@ function makeSculpt(B, rest) {
     if (!cached.has(material)) cached.set(material, ShadowArt.allows(shadowArt.receive, shadowTarget(owner, material)));
     return cached.get(material);
   }
+  const brushCache = new WeakMap();
+  function brushSettings(value) {
+    if (!value || typeof value !== 'object') return SurfaceBrush.prepare(value);
+    if (!brushCache.has(value)) brushCache.set(value, SurfaceBrush.prepare(value));
+    return brushCache.get(value);
+  }
   const pixelStyles = new WeakMap();
   function materialStyle(value) {
     if (value === undefined || value === false) return null;
@@ -1370,6 +1376,25 @@ function makeSculpt(B, rest) {
     // (a: how solid it is, 1 and over is solid, under 1 lets what is behind show through; glass also bends what is behind it)
     if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, undefined, bevel);
     if (alternate) B.shadowNext(ci, alternate);
+    const brushDefinition = m.brush === undefined ? (m0.brush ?? S.brush) : m.brush;
+    if (brushDefinition !== undefined && brushDefinition !== false && !m.glass && Math.hypot(nx, ny, nz) > 1e-8) {
+      const brush = brushSettings(brushDefinition), saved = [g3[0], g3[1], g3[2], gm, own, ownNeg];
+      let frame;
+      try {
+        frame = SurfaceBrush.direction(brush, [x, y, z], [nx, ny, nz], {
+          spacing: res,
+          normalAt: (a, b, c) => {
+            const d = field(a, b, c);
+            grad(a, b, c, d);
+            return [g3[0], g3[1], g3[2]];
+          }
+        });
+      } finally {
+        [g3[0], g3[1], g3[2], gm, own, ownNeg] = saved;
+      }
+      SurfaceBrush.stamp(B, frame, P[ci], brush, { opacity: m.a === undefined || glint ? 3 : m.a, animation: fl });
+      return;
+    }
     if (S.follow && !m.glass) {
       formDab(res, x, y, z, nx, ny, nz, P[ci], m.a === undefined || glint ? 3 : m.a, fl);
       return;

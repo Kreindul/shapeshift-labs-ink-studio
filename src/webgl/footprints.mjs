@@ -2,7 +2,7 @@
 export function createFootprintBinding(gl, api, resources, targets, maxSize) {
   const active = gl.getParameter(gl.ACTIVE_TEXTURE),
     bound = gl.getParameter(gl.TEXTURE_BINDING_2D);
-  const rows = targets.table(512, 2, maxSize),
+  const rows = targets.table(1024, 2, maxSize),
     params = resources.texture(),
     atlas = resources.texture();
   gl.activeTexture(active);

@@ -111,7 +111,11 @@ void main(){
     u_afterimageStart > 0 && a_index >= u_afterimageStart) ? 1 : 0;
   ${materialStyles ? 'v_pixelStyle = texelFetch(u_materialStyles, ivec2(record & 511, row), 0);' : ''}
   ${footprints ? `
-  float footprintId=texelFetch(u_footprintRows,ivec2(record & 511,row),0).x;
+  vec4 brush0=texelFetch(u_footprintRows,ivec2((record & 511)*2,row),0);
+  vec4 brush1=texelFetch(u_footprintRows,ivec2((record & 511)*2+1,row),0);
+  float footprintId=brush0.x;
+  bool surfaceBrush=brush1.w>0.5;
+  vec2 brushU=vec2(0.0),brushV=vec2(0.0);
   bool hasFootprint=footprintId>0.0;
   vec4 footprintMap=hasFootprint?texelFetch(u_footprintParams,ivec2(int(footprintId)-1,0),0):vec4(0.0);
   vec4 footprintSettings=hasFootprint?texelFetch(u_footprintParams,ivec2(int(footprintId)-1,1),0):vec4(0.0);
@@ -322,10 +326,19 @@ ${environment ? '  v_envAxial = -cam.z;' : ''}
   v_conic = vec3(C, -B, A) / det;
   ${footprints ? `
   if(hasFootprint){
-    float root=sqrt(det),den=1.1774100225154747*root*sqrt(A+C+2.0*root);
-    vec3 inv=vec3(C+root,-B,A+root)/den;
-    v_footprintMap=vec4(footprintMap.x*inv.x+footprintMap.y*inv.y,footprintMap.x*inv.y+footprintMap.y*inv.z,
-      footprintMap.z*inv.x+footprintMap.w*inv.y,footprintMap.z*inv.y+footprintMap.w*inv.z);
+    if(surfaceBrush){
+      brushU=(T*FM*brush0.yzw*sc).xy;brushV=(T*FM*brush1.xyz*sc).xy;
+      float area=brushU.x*brushV.y-brushU.y*brushV.x;
+      if(abs(area)<1e-10){gl_Position=vec4(2.0,2.0,2.0,1.0);return;}
+      vec4 inv=vec4(brushV.y,-brushV.x,-brushU.y,brushU.x)/area;
+      v_footprintMap=vec4(footprintMap.x*inv.x+footprintMap.y*inv.z,footprintMap.x*inv.y+footprintMap.y*inv.w,
+        footprintMap.z*inv.x+footprintMap.w*inv.z,footprintMap.z*inv.y+footprintMap.w*inv.w);
+    }else{
+      float root=sqrt(det),den=1.1774100225154747*root*sqrt(A+C+2.0*root);
+      vec3 inv=vec3(C+root,-B,A+root)/den;
+      v_footprintMap=vec4(footprintMap.x*inv.x+footprintMap.y*inv.y,footprintMap.x*inv.y+footprintMap.y*inv.z,
+        footprintMap.z*inv.x+footprintMap.w*inv.y,footprintMap.z*inv.y+footprintMap.w*inv.z);
+    }
   }else v_footprintMap=vec4(0.0);
   ` : ''}
   ${portal || cutaway ? `
@@ -343,6 +356,7 @@ ${environment ? '  v_envAxial = -cam.z;' : ''}
   v_sectionSample = vec4(-cam.z, sectionSlope, 3.0 * sqrt(max(0.0, dot(back, crossDepth))));
   ` : ''}
   vec2 ext = min(${footprints ? '(hasFootprint?footprintSettings.y:3.0)' : '3.0'} * sqrt(vec2(A, C)), vec2(2048.0));
+  ${footprints ? `if(hasFootprint&&surfaceBrush)ext=min(vec2(2048.0),max(ext,(abs(brushU)+abs(brushV))*footprintSettings.y/1.1774100225154747));` : ''}
   vec2 ndc = clip.xy / clip.w;
   if (snap) { vec2 px = floor((ndc * 0.5 + 0.5) * u_viewport) + 0.5; ndc = px / u_viewport * 2.0 - 1.0; }
   vec2 extN = ext * 2.0 / u_viewport;
