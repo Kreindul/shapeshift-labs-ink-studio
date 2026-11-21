@@ -26,7 +26,7 @@
       run({sources,settings},{seed,time}) {return A.audioPrint.prepare(sources,settings,{seed,time});}
     },
     'audio.renderMixer': {
-      description: 'Render clips through latency-compensated strips, sends, sidechains and automated inserts.',
+      description: 'Render clips through compensated strips, sends, sidechains, and creative inserts such as convolution, granular playback, and freeze.',
       inputs:{source:'record',assets:'record'},outputs:{value:'audio',taps:'record',report:'record'},
       run({source,assets}) {return A.mixer.render(source,assets);}
     },

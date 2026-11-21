@@ -18,20 +18,24 @@
     const time=S.mixerTime(rate,source.map), maximum=rate*3600;
     const bounds=source.end===undefined ? null : time.frame(time.position(source.end));
     check(bounds===null || integer(bounds,1,maximum),'Mixer end must be positive and within one hour');
-    const processors=new Map(named(source.processors ?? {},64,'processors').map(([key,row])=>
-      [key,S.mixerProcessor(row,rate,time)]));
     const audio=new Map(), strips=new Map(), routes=[];
     let assetSamples=0, clipCount=0, sourceEnd=0;
-    function clip(raw) {
-      check(fields(raw,['id','source','at','fromSample','toSample','gainDb']) && id(raw.id) &&
-        id(raw.source) && Object.hasOwn(assets,raw.source),'Mixer clip needs an ID and a known audio source');
-      if (!audio.has(raw.source)) {
-        const pcm=A.audio(assets[raw.source]);
+    function asset(name) {
+      check(id(name) && Object.hasOwn(assets,name),'Unknown mixer audio source '+name);
+      if (!audio.has(name)) {
+        const pcm=A.audio(assets[name]);
         assetSamples+=pcm.samples.length;
         check(pcm.channels<=2 && assetSamples<=32e6,'Mixer input exceeds its mono/stereo PCM budget');
-        audio.set(raw.source,pcm);
+        audio.set(name,pcm);
       }
-      const pcm=audio.get(raw.source), frames=pcm.samples.length/pcm.channels;
+      return audio.get(name);
+    }
+    const processors=new Map(named(source.processors ?? {},64,'processors').map(([key,row])=>
+      [key,S.mixerProcessor(row,rate,time,asset)]));
+    function clip(raw) {
+      check(fields(raw,['id','source','at','fromSample','toSample','gainDb']) && id(raw.id),
+        'Mixer clip needs an ID and an audio source');
+      const pcm=asset(raw.source), frames=pcm.samples.length/pcm.channels;
       const {fromSample=0,toSample=frames}=raw, step=pcm.sampleRate/rate;
       check(integer(fromSample,0,frames-1) && integer(toSample,fromSample+1,frames) &&
         finite(step,1/128,16),'Invalid clip source sample range or resampling ratio');
@@ -110,7 +114,8 @@
         insert.keyDelay=key ? aligned-key.latency : 0;
         insert.aligned=aligned;
         insert.latency=aligned+insert.processor.latency;
-        insert.end=next.end ? next.end+insert.processor.tail : 0;
+        const {planEnd,tail}=insert.processor;
+        insert.end=next.end ? (planEnd ? planEnd(next.end) : next.end+tail) : 0;
         next=insert;
       }
       row.timing.pre=row.timing.post=next;
@@ -165,7 +170,15 @@
       for (const insert of row.inserts) {
         const next=allocate(insert), {processor}=insert;
         if (processor.block) {
-          insert.details=processor.block(processed.subarray(2*insert.aligned),next.subarray(2*insert.latency));
+          const input=processed.subarray(2*insert.aligned), out=next.subarray(2*insert.latency);
+          if (out.length) insert.details=processor.block(input,out);
+          if (processor.wet.min<1) {
+            const wet=processor.wet.reader();
+            for (let at=0;at<out.length;at+=2) {
+              const blend=wet(at/2), l=read(input,at), r=read(input,at+1);
+              out[at]=l+(out[at]-l)*blend; out[at+1]=r+(out[at+1]-r)*blend;
+            }
+          }
           processed=next;
           continue;
         }

@@ -12,9 +12,14 @@
     compressor:{thresholdDb:[-24,-80,0],ratio:[4,1,40],attack:[.007,.0001,1,true],
       release:[.11,.001,4,true],lookahead:[0,0,.15,true],makeupDb:[0,-24,24]}
   };
-  function compile(raw,rate,time) {
+  function compile(raw,rate,time,asset) {
     const type=raw?.type, wet=time.lane(raw?.wet,1,0,1,type+' wet');
     if (type==='limiter') return S.mixerPeak.limiter(raw,rate,time,wet);
+    const design=S.soundDesign(raw,rate,time,asset);
+    if (design) {
+      if (wet.max===0) return {type,latency:design.latency ?? 0,wet,tail:0,cost:1,block() {}};
+      return {type,latency:0,wet,...design};
+    }
     const tool=S.mixerTool(raw,rate,time);
     if (tool) return {type,latency:0,wet,...tool,tail:wet.max===0 ? 0 : tool.tail};
     const controls=Object.hasOwn(schema,type) && schema[type];

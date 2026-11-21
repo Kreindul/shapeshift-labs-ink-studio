@@ -20,6 +20,43 @@
         'A mixer position needs samples, seconds, or a musical address');
       return raw.samples===undefined ? seconds(raw.seconds) : samples(raw.samples);
     }
+    function offset(origin,raw,count=1) {
+      check(fields(raw,['beats','seconds','samples']) && Object.keys(raw).length===1,
+        'A mixer duration needs beats, seconds or samples');
+      const scale=T.read(count);
+      if (raw.beats!==undefined) {
+        const [numerator,denominator]=T.mul(T.read(raw.beats),scale);
+        return clock.offsetBeats(origin,{numerator:T.index(numerator),denominator:T.index(denominator)});
+      }
+      return T.add(origin,T.mul(raw.seconds===undefined ? samples(raw.samples) : seconds(raw.seconds),scale));
+    }
+    function beatClock() {
+      const keys=[...new Set([0,...(map?.changes ?? []).map(row=>row.beat)])];
+      const segments=keys.map(beat=>{
+        const {time,tempo,swing}=clock.forPosition({beat});
+        return {beat,at:time*rate,length:60*rate/tempo,swing};
+      });
+      function segment(value,key) {
+        let lo=1,hi=segments.length;
+        while (lo<hi) {
+          const mid=(lo+hi)>>>1;
+          if (segments[mid][key]<=value) lo=mid+1;
+          else hi=mid;
+        }
+        return segments[lo-1];
+      }
+      function sampleAt(beat) {
+        const row=segment(beat,'beat'), whole=Math.floor(beat), frac=beat-whole;
+        const played=frac<=.5 ? 2*frac*row.swing : row.swing+2*(frac-.5)*(1-row.swing);
+        return row.at+(whole-row.beat+played)*row.length;
+      }
+      function beatAt(sample) {
+        const row=segment(sample,'at'), steps=(sample-row.at)/row.length, whole=Math.floor(steps), frac=steps-whole;
+        return row.beat+whole+(frac<=row.swing ? frac/(2*row.swing) : .5+(frac-row.swing)/(2*(1-row.swing)));
+      }
+      const stretched=Math.max(...segments.map(row=>2*row.length*Math.max(row.swing,1-row.swing)));
+      return {beatAt,sampleAt,maxFrames:beats=>Math.ceil(beats*stretched)+2};
+    }
     function lane(raw,fallback,low,high,label,origin) {
       if (raw===undefined || finite(raw,low,high)) {
         const value=raw ?? fallback;
@@ -55,7 +92,7 @@
         };
       }};
     }
-    return {frame,position,lane};
+    return {frame,position,offset,beatClock,lane};
   }
   P.mediaGraphSupport.mixerTime=mixerTime;
 })(KIT.procedural);
