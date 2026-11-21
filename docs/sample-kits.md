@@ -71,9 +71,10 @@ crossfades between two dynamics. Add another overlapping layer to
 combine a stick click or different instrument with those recordings.
 Layers and takes can each have `gain` in dB.
 
-Each pad and articulation has its own round-robin counter. It advances
-once per audible trigger in playback order, with input order breaking
-ties. Each active layer selects its own `takes` index modulo its length.
+Round robins advance independently per pad, articulation, and layer,
+in playback order with input order breaking ties. A ghost hit leaves
+the stick layer's sequence alone when it contributes zero weight.
+Each active layer selects its `takes` index modulo its length.
 Each render starts with the first take. An event without an articulation
 uses `default`. Name other articulations to author separate stacks.
 

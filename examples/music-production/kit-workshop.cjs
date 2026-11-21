@@ -63,7 +63,7 @@ const snare={
   notes:[38,38],pan:.07,gain:-3,attack:0,inserts:[{type:'highpass',hz:105},{type:'drive',amount:1.35,mix:.28}],
   sends:{chamber:.16},articulations:{
     default:[{...layer('ghost','snare-ghost'),velocity:[0,0,.42,.78],gain:2},
-      {...layer('stick','snare-main','snare-alt'),velocity:[.42,.78,1,1]},
+      {...layer('stick','snare-alt','snare-main'),velocity:[.42,.78,1,1]},
       {...layer('rim-overlay','snare-rim'),velocity:[.8,.98,1,1],gain:-10}],
     rim:[layer('rim','snare-rim','snare-ghost')]
   }

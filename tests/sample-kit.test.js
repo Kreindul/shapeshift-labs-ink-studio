@@ -22,11 +22,14 @@ test('note and pad mappings layer crossfaded velocities and advance round robins
     rim:[layer('edge','rim')]
   }}}};
   const sequence=[play('snare',.08),{note:38,time:{beat:.04},velocity:.5},
-    play('snare',0),play('snare',.06,{articulation:'rim'}),play('snare',.04,{velocity:0})];
+    play('snare',0),play('snare',.06,{articulation:'rim'}),play('snare',.04,{velocity:0}),
+    play('snare',.07,{velocity:.2})];
   const {value,report}=render(kit,assets,sequence,options);
   assert.deepEqual(report.events.map(row=>[row.at,row.roundRobin,row.layers.map(p=>p.take)]),[
-    [0,0,['a','accent']],[160,1,['soft','b','accent']],[480,0,['rim']],[640,2,['a','accent']]
+    [0,0,['a','accent']],[160,1,['soft','b','accent']],[480,0,['rim']],
+    [560,2,['soft','accent']],[640,3,['a','accent']]
   ]);
+  assert.equal(report.events[4].layers[0].roundRobin,2);
   assert(Math.abs(report.events[1].layers[0].weight-.5)<1e-12);
   assert(Math.abs(report.events[1].layers[1].weight-.5)<1e-12);
   assert(Math.abs(at(value,160)-.25*.5**.65)<1e-12);

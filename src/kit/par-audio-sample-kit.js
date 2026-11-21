@@ -193,7 +193,8 @@
     for (const row of schedule(kit,events,rate,stop,clock)) {
       const {pad,name,articulation,index,at,off,choke,pitch,velocity}=row;
       const key=name+':'+articulation, layers=[];
-      const turn=counters.get(key) ?? 0;
+      if (!counters.has(key)) counters.set(key,{triggers:0,layers:new Map()});
+      const counter=counters.get(key);
       const stopChoke=choke+Math.max(1,Math.round(rate*.004));
       function add(sound) {
         if (sound.last<=sound.start || sound.start>=stop) return;
@@ -203,6 +204,9 @@
         end=Math.max(end,Math.min(stop,sound.last));
       }
       for (const {layer,weight} of row.layers) {
+        // Ghost notes must not advance a velocity layer they did not play.
+        const turn=counter.layers.get(layer.id) ?? 0;
+        counter.layers.set(layer.id,turn+1);
         const gain=weight*layer.gain*velocity**.65;
         const hit=layer.takes[turn%layer.takes.length];
         const release=layer.releases.length && off<choke && off<stop ?
@@ -210,10 +214,9 @@
         const bodyEnd=Math.min(stopChoke,pad.gated ? off+Math.ceil(pad.release*rate) : Infinity);
         add(voice(hit,row,rate,at,bodyEnd,gain,false));
         if (release) add(voice(release,row,rate,off,stopChoke,gain,true));
-        layers.push({id:layer.id,weight,take:hit.name,...(release && {release:release.name})});
+        layers.push({id:layer.id,weight,roundRobin:turn,take:hit.name,...(release && {release:release.name})});
       }
-      counters.set(key,turn+1);
-      report.push({index,pad:name,articulation,pitch,at,velocity,roundRobin:turn,layers,
+      report.push({index,pad:name,articulation,pitch,at,velocity,roundRobin:counter.triggers++,layers,
         ...(pad.gated && {noteOff:off}),...(choke<stop && {chokeAt:choke})});
     }
     return {voices:result,end,events:report};
