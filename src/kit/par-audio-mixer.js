@@ -7,7 +7,7 @@
     check(record(value) && Object.keys(value).length<=max && Object.keys(value).every(id),'Invalid mixer '+label);
     return Object.entries(value);
   }
-  function compile(source,assets) {
+  function compile(source,assets,host) {
     check(fields(source,['id','sampleRate','map','end','tail','output','strips','processors','taps','peakPolicy','meter']) &&
       id(source.id) && id(source.output) && record(assets) &&
       (source.meter===undefined || typeof source.meter==='boolean') &&
@@ -31,7 +31,7 @@
       return audio.get(name);
     }
     const processors=new Map(named(source.processors ?? {},64,'processors').map(([key,row])=>
-      [key,S.mixerProcessor(row,rate,time,asset)]));
+      [key,S.mixerProcessor(row,rate,time,asset,host)]));
     function clip(raw) {
       check(fields(raw,['id','source','at','fromSample','toSample','gainDb']) && id(raw.id),
         'Mixer clip needs an ID and an audio source');
@@ -143,8 +143,8 @@
     return {rate,sourceEnd,frames,order,routes,master,exports};
   }
   const read=(data,index)=>data[index] ?? 0;
-  function render(source,assets) {
-    const {rate,sourceEnd,frames,order,routes,master,exports}=compile(source,assets);
+  function render(source,assets,host) {
+    const {rate,sourceEnd,frames,order,routes,master,exports}=compile(source,assets,host);
     const buffers=new Map();
     const buffer=(name,tap)=>buffers.get(name)[tap];
     const allocate=({latency,end})=>new Float64Array(end ? 2*(Math.min(end,frames)+latency) : 0);
@@ -170,8 +170,10 @@
       for (const insert of row.inserts) {
         const next=allocate(insert), {processor}=insert;
         if (processor.block) {
-          const input=processed.subarray(2*insert.aligned), out=next.subarray(2*insert.latency);
-          if (out.length) insert.details=processor.block(input,out);
+          const input=processed.subarray(2*(insert.aligned-insert.mainDelay)), out=next.subarray(2*insert.latency);
+          const feed=insert.key && buffer(insert.key.strip,insert.key.tap);
+          const key=feed ? feed.samples.subarray(2*feed.latency) : undefined;
+          if (out.length) insert.details=processor.block(input,out,key);
           if (processor.wet.min<1) {
             const wet=processor.wet.reader();
             for (let at=0;at<out.length;at+=2) {

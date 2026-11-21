@@ -12,9 +12,10 @@
     compressor:{thresholdDb:[-24,-80,0],ratio:[4,1,40],attack:[.007,.0001,1,true],
       release:[.11,.001,4,true],lookahead:[0,0,.15,true],makeupDb:[0,-24,24]}
   };
-  function compile(raw,rate,time,asset) {
+  function compile(raw,rate,time,asset,host) {
     const type=raw?.type, wet=time.lane(raw?.wet,1,0,1,type+' wet');
     if (type==='limiter') return S.mixerPeak.limiter(raw,rate,time,wet);
+    if (type==='external') return S.externalMixerInsert(raw,rate,time,wet,host);
     const design=S.soundDesign(raw,rate,time,asset);
     if (design) {
       if (wet.max===0) return {type,latency:design.latency ?? 0,wet,tail:0,cost:1,block() {}};

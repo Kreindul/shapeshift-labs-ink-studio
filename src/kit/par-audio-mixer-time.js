@@ -60,7 +60,7 @@
     function lane(raw,fallback,low,high,label,origin) {
       if (raw===undefined || finite(raw,low,high)) {
         const value=raw ?? fallback;
-        return {min:value,max:value,reader:()=>()=>value};
+        return {min:value,max:value,points:[{sample:0,value}],curve:'hold',reader:()=>()=>value};
       }
       check(fields(raw,['unit','curve','points']) && units.includes(raw.unit) &&
         ['linear','hold'].includes(raw.curve ?? 'linear') && Array.isArray(raw.points) &&
@@ -82,7 +82,7 @@
         max=Math.max(max,knot.value);
         prior=at;
       }
-      return {min,max,reader() {
+      return {min,max,points:knots,curve:raw.curve ?? 'linear',reader() {
         let index=0;
         return sample=>{
           while (index+1<knots.length && knots[index+1].sample<=sample) index++;

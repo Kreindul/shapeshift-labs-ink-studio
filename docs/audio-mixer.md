@@ -136,6 +136,8 @@ loudness and peak metering, and mono and small-speaker checks.
 See [sound design inserts](sound-design-effects.md) for tempo echoes,
 imported impulse responses, modulation, tape drift, granular playback,
 spectral freeze, and retro sampling.
+See [audio racks](audio-racks.md) for reusable routing, saved controls,
+matched bypass, and the optional offline CLAP worker.
 
 Run [After the Cut](../examples/music-production/mixer-routing-workshop.cjs)
 with `node examples/music-production/mixer-routing-workshop.cjs output`

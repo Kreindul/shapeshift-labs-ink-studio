@@ -26,18 +26,12 @@ function measure(mode,file,opt,monitor) {
   return result;
 }
 
-module.exports=function mixCommand([mode,file],opt,kit) {
-  const P=kit.KIT.procedural;
-  if (file && (mode==='meter' || mode==='monitor')) return measure(mode,file,opt,P.mediaGraph.mixerMonitor);
-  if (mode!=='render' || !file || typeof opt.out!=='string')
-    throw new TypeError('Use music mix render, meter or monitor with a recipe or WAV');
-  const {fields,record,id,check}=P.musicInstruments;
-  const recipe=JSON.parse(fs.readFileSync(file,'utf8'));
-  check(fields(recipe,['mixer','assets']) && record(recipe.assets) && Object.keys(recipe.assets).length<=128,
-    'Expected a mixer and a table of WAV assets');
+function readAssets(entries,file,P) {
+  const {record,id,check}=P.musicInstruments;
+  check(record(entries) && Object.keys(entries).length<=128,'Expected a table of WAV assets');
   const folder=path.dirname(path.resolve(file)), cache=new Map();
   let samples=0;
-  const assets=Object.fromEntries(Object.entries(recipe.assets).map(([name,relative])=>{
+  return Object.fromEntries(Object.entries(entries).map(([name,relative])=>{
     check(id(name) && typeof relative==='string' && relative.trim(),'Invalid mixer WAV asset');
     const file=path.resolve(folder,relative);
     if (!cache.has(file)) {
@@ -48,7 +42,19 @@ module.exports=function mixCommand([mode,file],opt,kit) {
     }
     return [name,cache.get(file)];
   }));
-  const result=P.mediaGraph.mixer.render(recipe.mixer,assets), target=path.resolve(opt.out);
+}
+
+module.exports=function mixCommand([mode,file],opt,kit) {
+  const P=kit.KIT.procedural;
+  if (file && (mode==='meter' || mode==='monitor')) return measure(mode,file,opt,P.mediaGraph.mixerMonitor);
+  if (mode!=='render' || !file || typeof opt.out!=='string')
+    throw new TypeError('Use music mix render, meter or monitor with a recipe or WAV');
+  const {fields,check}=P.musicInstruments;
+  const recipe=JSON.parse(fs.readFileSync(file,'utf8'));
+  check(fields(recipe,['mixer','assets']),'Expected a mixer and a table of WAV assets');
+  const assets=readAssets(recipe.assets,file,P);
+  const host=opt['clap-host']===undefined ? undefined : require('./clap-adapter').load(opt['clap-host']);
+  const result=P.mediaGraph.mixer.render(recipe.mixer,assets,host), target=path.resolve(opt.out);
   const mix=path.join(target,'mix.wav'), report=path.join(target,'report.json');
   const taps=Object.fromEntries(Object.entries(result.taps).map(([name,pcm])=>{
     const file=path.join(target,'taps',name+'.wav');
@@ -61,3 +67,4 @@ module.exports=function mixCommand([mode,file],opt,kit) {
   process.stdout.write(JSON.stringify(manifest)+'\n');
   return manifest;
 };
+module.exports.readAssets=readAssets;
