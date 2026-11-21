@@ -60,8 +60,9 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
   const inline = proceduralScore?.score === undefined ? null : K.music.score.compile(proceduralScore.score);
   const scoreSystem = proceduralScore?.system, synthAsset = Symbol('procedural score'), productionAsset=Symbol('music production');
 
-  function render(sequence, { timeline, runtime: sceneRuntime } = {}) {
+  function render(sequence, { timeline, runtime: sceneRuntime } = {}, selection) {
     const start = sampleOf(sequence.startPoint), end = sampleOf(sequence.endPoint);
+    const musicSelected = !selection || selection.kind==='stem' && ['mix','music'].includes(selection.name);
     const factory = runtime ?? sceneRuntime;
     const run = mixer || music || scoreSystem || !timeline ? factory?.() : undefined;
     if (music && !run) throw new Error('Adaptive music export needs a native sound world with its score system');
@@ -73,7 +74,8 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
     const looping = new Map(), resolved = new Map(), positional = [];
     let next = 0, score = [], knots = 0, generated, produced, entry, worldReport;
     const productionIntents=[], worldEvents=[];
-    const cueLimit=captureWorld ? Math.max(end,Math.ceil((production.timeline.end+captureWorld.lookAhead)*sampleRate)) : end;
+    const cueLimit=musicSelected && captureWorld ?
+      Math.max(end,Math.ceil((production.timeline.end+captureWorld.lookAhead)*sampleRate)) : end;
     function resolve(name) {
       if (name === synthAsset) return generated;
       if (name === productionAsset) return produced;
@@ -102,6 +104,7 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
       target.push(row);
     }
     function capture(cue, row, level = 1) {
+      if (!musicSelected) return;
       const rule=captureWorld?.cues.get(cue), time=row.first/sampleRate;
       if (!rule || level<=0 || time-rule.attack>=production.timeline.end) return;
       if (worldEvents.length>=8192) throw new RangeError('World score exceeds its cue budget');
@@ -118,7 +121,7 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
     function shot(voice, ear, sample, stem) {
       const time = sample + Math.round(voice.delay * sampleRate);
       if (voice.gain<=0) return;
-      const row={stem,asset:voice.asset,first:time,offset:voice.offset,rate:voice.rate};
+      const row={stem,asset:voice.asset,cue:voice.cue,first:time,offset:voice.offset,rate:voice.rate};
       if (stem!=='music') capture(voice.cue,row,voice.gain);
       if (time<end) push({...row,points:[point(voice,ear,time,true)]});
     }
@@ -166,7 +169,9 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
         for (const voice of state.active) {
           let track = looping.get(voice.id);
           if (!track) {
-            track = push({ stem: 'spatial', asset: voice.asset, first: sample, end: Number.MAX_SAFE_INTEGER,
+            track = push({ stem: 'spatial', asset: voice.asset,
+              ...(voice.id.startsWith('emitter:') && {emitter:voice.id.slice('emitter:'.length)}),
+              first: sample, end: Number.MAX_SAFE_INTEGER,
               loop: true, offset: voice.offset, rate: voice.rate, points: [] });
             looping.set(voice.id, track);
           }
@@ -174,7 +179,7 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
         }
       }
       for (const voice of state?.cues ?? []) shot(voice,state.listener,sample,'spatial');
-      for (const event of events) if (music && event.system === music.system) {
+      for (const event of events) if (musicSelected && music && event.system === music.system) {
         if (production && (event.kind==='music-transition' || event.kind==='music-cue')) {
           if ((event.time ?? time)<production.timeline.end) productionIntents.push({...event,time:event.time ?? time});
           continue;
@@ -193,11 +198,11 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
       const period = initial.world.takeClock?.simulationRate === undefined ? T.period(dt) :
         T.div(T.read(1), T.read(initial.world.takeClock.simulationRate));
       const at = tick => sampleOf(T.mul(T.read(tick), period));
-      const scoreEnd=production && production.timeline.end+(captureWorld?.lookAhead ?? 0);
+      const scoreEnd=musicSelected && production && production.timeline.end+(captureWorld?.lookAhead ?? 0);
       const replayEnd=scoreEnd>T.seconds(sequence.endPoint) ? T.read(scoreEnd) : sequence.endPoint;
       const limit = -T.index(T.roundDown(T.div(T.sub(T.read(0), replayEnd), period)));
       if (initial.tick !== 0 || limit > 120000) throw new RangeError('Sound world needs tick zero and a bounded replay range');
-      if (music) {
+      if (musicSelected && music) {
         const state = run.query().probe(music.system + '/state');
         if (state.status !== 'ok') throw new Error('Unknown soundtrack score ' + music.system);
         if (production) entry=state.value;
@@ -208,17 +213,17 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
         observe(view.time, at(view.tick), at(view.tick + 1), query, run.events);
       } });
     } else observe(0, 0, end, run?.query());
-    const live = scoreSystem && run.query().probe(scoreSystem+'/schedule');
+    const live = musicSelected && scoreSystem && run.query().probe(scoreSystem+'/schedule');
     if (live && live.status !== 'ok') throw new Error('Procedural score schedule is unavailable');
     const program = live ? K.music.score.compile(live.value.score,{requests:live.value.requests}) : inline;
-    if (program) {
+    if (musicSelected && program) {
       if (end <= start || (end-start)*2 > WAV.maxSamples)
         throw new RangeError('Scene soundtrack exceeds its WAV sample budget');
       generated = program.audio({ sampleRate, start: {numerator:start,denominator:sampleRate},
         end: {numerator:end,denominator:sampleRate}, gain: proceduralScore.gain ?? 1 }).value;
       push({ stem: 'music', asset: synthAsset, first: start, end });
     }
-    if (production) {
+    if (musicSelected && production) {
       const {timeline,sources}=production;
       const initial=timeline.segments?.[timeline.entry];
       if (entry.section!==timeline.entry || !initial)
@@ -238,11 +243,25 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
         push({stem:'music',asset:productionAsset,first:start,end:stop,gain:music.gain});
       }
     }
-    const result=mix(voices.filter(row => row.first < end), resolve, { start, end, sampleRate, gain });
+    const active=voices.filter(row => row.first < end && (!selection ||
+      (selection.kind==='stem' ? selection.name==='mix' || row.stem===selection.name :
+        row.stem==='spatial' && row[selection.by]===selection.name)));
+    const result=mix(active,resolve,{start,end,sampleRate,gain,capture:selection!==undefined});
+    if (selection?.kind==='world' && !result.report.stems.spatial.voices)
+      throw new RangeError('No audible world source in the selected capture range');
     if (worldReport) result.report.worldScore=worldReport;
     return result;
   }
-  return Object.freeze({ render });
+  return Object.freeze({
+    render: (sequence, options) => render(sequence, options),
+    capture(sequence, {source, ...options} = {}) {
+      if (!fields(source,['kind','name','by']) || !token(source.name) ||
+          !(source.kind==='stem' ? ['mix','timeline','spatial','music','tracks'].includes(source.name) &&
+              source.by===undefined : source.kind==='world' && ['emitter','cue'].includes(source.by)))
+        throw new TypeError('Select a soundtrack stem, named world emitter, or world cue');
+      return render(sequence,options,source);
+    }
+  });
 }
 
 function readSceneAudio(file, { kit = require('../index.js').load(), ...graphOptions } = {}) {

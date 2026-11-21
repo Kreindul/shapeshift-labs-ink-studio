@@ -26,7 +26,7 @@ function placement({ asset, first, end, offset = 0, rate = 1, gain = 1, loop = f
   return { asset, first, end, sourceStep, sourceStart, gain, loop, fade, points };
 }
 
-function mix(voices, resolve, { start, end, sampleRate, gain = 1 }) {
+function mix(voices, resolve, { start, end, sampleRate, gain = 1, capture = false }) {
   const count = end - start;
   if (!Number.isSafeInteger(count) || count < 1 || count * 2 > WAV.maxSamples)
     throw new RangeError('Scene soundtrack exceeds its WAV sample budget');
@@ -82,12 +82,16 @@ function mix(voices, resolve, { start, end, sampleRate, gain = 1 }) {
   for (const value of sum) peak = Math.max(peak, Math.abs(value));
   const maximum = Math.max(peak, ...Object.values(statistics).map(row => row.peak));
   const headroom = maximum > 1 ? 1 / maximum : 1;
+  const report = {sampleRate,channels:2,firstSample:start,endSample:end,frames:count,headroom,peak,stems:statistics};
+  if (capture) {
+    if (headroom < 1) for (let i = 0; i < sum.length; i++) sum[i] *= headroom;
+    return {value:{samples:sum,channels:2,sampleRate},report};
+  }
   const waves = Object.fromEntries([...stems, ['mix', sum]].map(([name, samples]) => {
     if (headroom < 1) for (let i = 0; i < samples.length; i++) samples[i] *= headroom;
     return [name, WAV.encode({ samples, channels: 2, sampleRate }, { encoding: 'pcm24' })];
   }));
-  return { waves, report: { sampleRate, channels: 2, firstSample: start, endSample: end,
-    frames: count, headroom, peak, stems: statistics } };
+  return { waves, report };
 }
 
 module.exports = { mix };

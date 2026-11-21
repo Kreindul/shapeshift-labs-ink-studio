@@ -179,6 +179,7 @@ module.exports = {
   captureLightGroups: require('./cli/light-groups.js').captureLightGroups,
   exportScene: require('./cli/scene-export.js').exportScene,
   ...require('./cli/scene-audio.js'),
+  openSampleLibrary: require('./cli/sample-library.js').openSampleLibrary,
   readSceneReplay: require('./cli/scene-replay.js').readSceneReplay,
   sampleSceneReplay: require('./cli/scene-replay.js').sampleSceneReplay,
   writeSceneEmbed: require('./cli/scene-replay.js').writeSceneEmbed,

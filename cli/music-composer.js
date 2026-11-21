@@ -147,6 +147,7 @@ function audition(file,opt,kit) {
 module.exports=function musicCommand(pos,opt,kit) {
   const [mode,file,editFile]=pos;
   if (mode==='production') return require('./music-production.js')(pos.slice(1),opt,kit);
+  if (mode==='samples') return require('./music-samples.js')(pos.slice(1),opt,kit);
   if (mode==='soundfont') return require('./music-soundfont.js')(file,editFile,opt);
   if (!file) throw new TypeError('Use music with a JSON file for arrange, revise, reference, audition, analyze, suggest, or phrase');
   if (mode==='audition') return audition(file,opt,kit);
