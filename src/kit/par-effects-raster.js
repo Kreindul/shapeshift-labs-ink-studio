@@ -46,6 +46,11 @@
     return value;
   };
 
+  E.compositeVideo = function compositeVideo(source, { time = 0, ...options } = {}) {
+    const value = image(source), { width: w, height: h, data } = value;
+    return { ...value, data: CompositeVideo.filter({ w, h, rgba: data }, CompositeVideo.prepare(options), time).rgba };
+  };
+
   E.operations=Object.freeze({
     'fx.kernelBlur':raster((source,options)=>({value:E.kernelBlur(source,options)})),
     'fx.pathBlur':{
@@ -62,6 +67,11 @@
       seed: 'options',
       inputs:{source:'raster',options},outputs:{value:'raster'},time:true,
       run({source,options},{seed,time}){return {value:E.tvStatic(source,{seed,time,...options})};}
+    },
+    'fx.compositeVideo': {
+      description: 'Decode horizontal luma and chroma bands with phase-driven composite color fringes.',
+      inputs: { source: 'raster', options }, outputs: { value: 'raster' }, time: true,
+      run({ source, options }, { time }) { return { value: E.compositeVideo(source, { time, ...options }) }; }
     },
     'fx.tileScramble':{
       seed: 'options',

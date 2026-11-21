@@ -86,6 +86,48 @@ For a custom WebGL consumer, `atlas.texture` exposes the shared texture and
 `uv: [left, top, right, bottom]`. Convert top-down Y to WebGL V when
 sampling it in your own shader.
 
+## Decode a composite video feed
+
+Set `compositeVideo` on a view to treat that feed like an analog composite
+input. Use `true` for the defaults or tune the following controls.
+
+```js
+const view = { id: 'relay', rect: [0, 0, 160, 110], fps: 12,
+  compositeVideo: { lumaBandwidth: .62, chromaBandwidth: .28,
+    artifacts: .55, phase: 0, phaseRate: 1 } };
+```
+
+| Control | Default | Effect |
+| --- | --- | --- |
+| `lumaBandwidth` | `.62` | Brightness detail from 0 to 1. Lower values blend finer horizontal patterns, such as checkerboard mist. |
+| `chromaBandwidth` | `.28` | Color detail from 0 to 1. Lower values spread saturated color farther across a scanline. |
+| `artifacts` | `.55` | Luma and chroma interference from 0 to 1. Higher values accentuate dot crawl and false color at sharp edges. |
+| `phase` | `0` | Initial carrier phase in turns. |
+| `phaseRate` | `1` | Carrier turns per scene second, from −240 to 240. Use zero to hold the pattern or a negative value to reverse its motion. |
+
+The pass runs at the feed's capture resolution using the capture time.
+All routes from that tile see the same decoded frame, including an overlay,
+a render-graph layer, and a world panel. Other views and the surrounding
+scene keep their original pixels. WebGL decodes the feed on the GPU.
+Omit the option or use `false` for an untreated feed. Bandwidths of 1
+on both channels also give an exact RGB bypass.
+
+The effect uses horizontal YIQ filters and phase-driven interference for
+art direction. [Shay Green’s console filter comparisons](https://slack.net/~ant/libs/ntsc.html)
+
+The [Breakwater Relay example](../examples/composite-video.js) shows the
+same feed on adjoining RGB and composite monitors. Its calibration view
+adds one-pixel checkers, color bars, and saturated text.
+
+```sh
+node cli/ink-studio.js clip examples/composite-video.js --w 376 --h 181 \
+  --px 1 --raw --from 0 --to 4 --fps 12 --out breakwater.png
+node cli/ink-studio.js clip examples/composite-video.js --params '{"study":"calibration"}' \
+  --w 376 --h 181 --px 1 --raw --from 0 --to 4 --fps 12 --out calibration.png
+node cli/ink-studio.js render examples/camera-atlas.js --params '{"compositeVideo":true}' \
+  --w 840 --h 510 --t 1.8 --out relay-yard-composite.png
+```
+
 ## Route a feed to the world
 
 ```js

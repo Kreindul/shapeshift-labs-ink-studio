@@ -911,6 +911,7 @@ outside the original image.
 | `fx.repair` | Use `method: "close"` and a Euclidean `radius` for holes and narrow gaps, or `"bridge"` and `maxGap` for breaks along rows, columns or diagonals. New pixels take the nearest selected source colour or an explicit `color`. Inspect them in the separate `added` mask. |
 | `fx.pixelSort` | Sort contiguous eligible pixels along a horizontal, vertical, diagonal, or antidiagonal `axis`. Choose a `key`, optional inclusive `range`, `order`, and `minLength`. An aligned raster `mask` can limit sorting further. |
 | `fx.tvStatic` | Blend [seekable TV static](#broadcast-patterns-and-tv-static) into the source RGB. Keeps the source's dimensions, pivot, and alpha. |
+| `fx.compositeVideo` | Decode horizontal luma and chroma with phase-driven interference. Keeps the source's dimensions, pivot, and alpha. |
 | `fx.tileScramble` | Copy, omit, or swap whole tiles on a fixed grid. Set `tileSize`, `mode`, `amount`, `seed`, `rate`, and an optional `mask`. The `addresses` output shows where each destination tile reads from. |
 | `fx.tileBleed` | Replace selected whole tiles with tiles from a separate `bank` raster. Set `tileSize`, `amount`, `seed`, `rate`, and optional `mask` and `bankMask`. The `addresses` output identifies donor tiles. |
 | `fx.tileStrideSlip` | Read successive tile rows using an authored `stride`, `offset`, and `wrapAt`. The `addresses` output shows where each whole tile reads from. |
@@ -1773,6 +1774,12 @@ defaults to 128 × 96. The effect takes its dimensions from the source.
 | `contrast`, `chroma`, `rowNoise`, `scanlines` | Grain contrast from 0 to 2, color separation, independent row brightness, and alternating-row dimming. The last three range from 0 to 1. |
 | `band` | Override `height` as a fraction of the image, `speed` in screen heights per second, and `strength` from 0 to 1. Negative speed reverses direction. |
 | `opacity`, `density` | Set the alpha of active noise cells and the fraction of cells that are active, both from 0 to 1. |
+
+Use `pixelEffects.compositeVideo(source, options)` or `fx.compositeVideo`
+to apply composite decoding to a standalone raster. The same bandwidth and
+phase controls are available per [camera atlas view](camera-atlas.md#decode-a-composite-video-feed).
+The graph node follows the graph clock. Set `time` in its options to
+sample a specific time.
 
 Run the [broadcast patterns demo](../examples/broadcast-patterns.cjs) to
 compare the test patterns, play or scrub the static presets, and see

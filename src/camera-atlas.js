@@ -1,6 +1,7 @@
 /* Named camera captures with a shared clock, resolution budget, and composition adapters. */
 const CameraAtlas = (() => {
   const composite = typeof FrameComposite === 'undefined' ? require('./frame-composite.js') : FrameComposite;
+  const video = typeof CompositeVideo === 'undefined' ? require('./composite-video.js') : CompositeVideo;
   const surfaces = typeof SpriteSurface === 'undefined' ? require('./sprite-surface.js') : SpriteSurface;
   const integer = (value, low, high) => Number.isSafeInteger(value) && value >= low && value <= high;
   const frameOptions = value => value && [Object.prototype, null].includes(Object.getPrototypeOf(value));
@@ -13,7 +14,7 @@ const CameraAtlas = (() => {
       throw new RangeError('A camera atlas needs bounded dimensions, views and budgets');
     const used = new Set(), tiles = [];
     const definitions = Array.from(views, (view, index) => {
-      const { id, rect, fps = 12, frame } = view ?? {};
+      const { id, rect, fps = 12, frame, compositeVideo = false } = view ?? {};
       if (typeof id !== 'string' || !/^[\w-]{1,64}$/.test(id) || used.has(id) ||
         !Array.isArray(rect) || rect.length !== 4 || !Array.from(rect).every(n => integer(n, 0, 4096)) ||
         !Number.isFinite(fps) || fps <= 0 || fps > 240 || frame !== undefined &&
@@ -29,7 +30,7 @@ const CameraAtlas = (() => {
         uv: Object.freeze([x / width, y / height, (x + w) / width, (y + h) / height]) });
       used.add(id);
       tiles.push(tile);
-      return Object.freeze({ tile, frame, index });
+      return Object.freeze({ tile, frame, index, signal: video.prepare(compositeVideo) });
     });
     return Object.freeze({ width, height, maxViewsPerFrame, maxPixelsPerFrame,
       tiles: Object.freeze(tiles), definitions: Object.freeze(definitions) });
@@ -76,7 +77,7 @@ const CameraAtlas = (() => {
       try {
         for (let offset = 0; offset < definitions.length; offset++) {
           const index = (start + offset) % definitions.length;
-          const { tile, frame: settings } = definitions[index];
+          const { tile, frame: settings, signal } = definitions[index];
           if (times[index] !== undefined && time - times[index] + 1e-10 < 1 / tile.fps) continue;
           const area = tile.width * tile.height;
           if (deferred.length || updated.length >= maxViewsPerFrame || pixels + area > maxPixelsPerFrame) {
@@ -92,7 +93,7 @@ const CameraAtlas = (() => {
             damp: false, resetTransparency: true, resetRenderHistory: true, changedRows: undefined,
             ...((frame.camera || view?.camera) && { camera: { ...frame.camera, ...view?.camera } }),
             width: tile.width, height: tile.height, time
-          }, tile);
+          }, tile, signal);
           times[index] = time;
           versions[index]++;
           cache.delete(tile);
@@ -161,9 +162,11 @@ const CameraAtlas = (() => {
     const pixels = new Uint8Array(width * height * 4);
     return create(plan, {
       clear() { pixels.fill(0); },
-      capture(world, frame, tile) {
-        const { w, h, rgb, rgba, alpha } = composite.image(render(world, frame));
+      capture(world, frame, tile, signal) {
+        const image = composite.image(render(world, frame));
+        const { w, h } = image;
         if (w !== tile.width || h !== tile.height) throw new RangeError('Camera capture dimensions must match the tile');
+        const { rgb, rgba, alpha } = signal ? video.filter(image, signal, frame.time) : image;
         for (let y = 0; y < h; y++) {
           const start = ((tile.y + y) * width + tile.x) * 4;
           if (rgba) pixels.set(rgba.subarray(y * w * 4, (y + 1) * w * 4), start);
@@ -187,6 +190,6 @@ const CameraAtlas = (() => {
     });
   }
 
-  return Object.freeze({ prepare, create, raster });
+  return Object.freeze({ prepare, create, raster, video });
 })();
 if (typeof module !== 'undefined') module.exports = CameraAtlas;
