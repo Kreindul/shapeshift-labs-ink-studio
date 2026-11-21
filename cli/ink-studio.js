@@ -1097,6 +1097,8 @@ const CMD = {
         '  music production voice-lead <recipe.json> <settings.json>   search inner lines around locked outer tracks',
         '  music production groove <recipe.json> [mapping.json]   transfer performance timing, accents and gates',
         '  music mix render recipe.json --out directory   render routed audio, inserts, automation and taps',
+        '  music mix meter input.wav [--out report.json]   measure loudness, true peak and mono compatibility',
+        '  music mix monitor input.wav --mode mono|small-speaker|stereo --out directory   audition the mix',
         '  music groove extract <recipe.json> [--out groove.json]   measure a WAV or MIDI performance',
         '  music samples <add|search|get> <library> [recipe or ID]   capture and find reusable samples',
         '  music samples <slice|edit|render|audition> <library> <ID or project> [settings.json]   edit sample audio',

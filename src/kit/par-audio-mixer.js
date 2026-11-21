@@ -8,8 +8,9 @@
     return Object.entries(value);
   }
   function compile(source,assets) {
-    check(fields(source,['id','sampleRate','map','end','tail','output','strips','processors','taps','peakPolicy']) &&
+    check(fields(source,['id','sampleRate','map','end','tail','output','strips','processors','taps','peakPolicy','meter']) &&
       id(source.id) && id(source.output) && record(assets) &&
+      (source.meter===undefined || typeof source.meter==='boolean') &&
       ['keep','cut'].includes(source.tail ?? 'keep') &&
       ['normalize','error'].includes(source.peakPolicy ?? 'normalize'),'Invalid mixer recipe');
     const rate=source.sampleRate ?? 48000;
@@ -126,6 +127,7 @@
       for (const [name,stage] of [...Object.entries(row.timing),...row.inserts.map(x=>['insert',x])]) {
         const count=stage.end ? Math.min(frames,stage.end)+stage.latency : 0;
         if (name!=='pre' || row.uses.has('pre')) memory+=2*count;
+        memory+=count*(stage.processor?.extra ?? 0);
         work+=count*(stage.processor?.cost ?? 3);
       }
       for (const clip of row.clips) work+=Math.max(0,Math.min(frames,clip.end)-clip.start)*clip.reader.cost;
@@ -162,6 +164,11 @@
       let processed=input;
       for (const insert of row.inserts) {
         const next=allocate(insert), {processor}=insert;
+        if (processor.block) {
+          insert.details=processor.block(processed.subarray(2*insert.aligned),next.subarray(2*insert.latency));
+          processed=next;
+          continue;
+        }
         const key=insert.key ? buffer(insert.key.strip,insert.key.tap).samples : processed;
         const process=processor.make(), wet=processor.wet.reader(), out=[0,0];
         for (let at=insert.aligned;at<next.length/2;at++) {
@@ -214,10 +221,12 @@
         inputLatency:row.timing.input.latency,latency:row.timing.post.latency,
         inputEnd:row.timing.input.end,end:row.timing.post.end,
         clips:row.clips.filter(clip=>clip.end>clip.start).map(({id,source,start,end})=>({id,source,start,end})),
-        inserts:row.inserts.map(({id,processor,mainDelay,key,keyDelay,latency})=>({id,type:processor.type,
+        inserts:row.inserts.map(({id,processor,mainDelay,key,keyDelay,latency,details})=>({id,type:processor.type,
           latency:processor.latency,tail:processor.tail,outputLatency:latency,mainDelay,
+          ...(details && {details}),
           ...(key && {sidechain:{...key,compensation:keyDelay}})}))
       }]))};
+    if (source.meter) report.meter=A.mixerMonitor.meter(value);
     return {value,taps:printed,report};
   }
   A.mixer=Object.freeze({render});

@@ -30,6 +30,19 @@
       inputs:{source:'record',assets:'record'},outputs:{value:'audio',taps:'record',report:'record'},
       run({source,assets}) {return A.mixer.render(source,assets);}
     },
+    'audio.meterMix': {
+      description: 'Measure peak, reconstructed true peak, loudness, stereo correlation and mono fold loss.',
+      inputs:{source:'audio',options},outputs:{value:'record'},
+      run({source,options}) {return {value:A.mixerMonitor.meter(source,options)};}
+    },
+    'audio.monitorMix': {
+      description: 'Audition in stereo, mono or through a small-speaker bandwidth and compare an optional focus stem.',
+      inputs:{source:'audio',options,references:{type:'record',default:{}}},outputs:{value:'audio',report:'record'},
+      run({source,options,references}) {
+        if (Object.keys(references).some(key=>key!=='focus')) throw new RangeError('Unknown monitor reference');
+        return A.mixerMonitor.preview(source,options,references.focus);
+      }
+    },
     'audio.searchSamples': {
       description: 'Filter sample metadata by material, articulation, pitch, duration, provenance and license.',
       inputs: { entries:'array<record>', options }, outputs: { value:'record', items:'array<record>' },

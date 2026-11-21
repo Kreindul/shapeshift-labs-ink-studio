@@ -13,7 +13,11 @@
       release:[.11,.001,4,true],lookahead:[0,0,.15,true],makeupDb:[0,-24,24]}
   };
   function compile(raw,rate,time) {
-    const type=raw?.type, controls=Object.hasOwn(schema,type) && schema[type];
+    const type=raw?.type, wet=time.lane(raw?.wet,1,0,1,type+' wet');
+    if (type==='limiter') return S.mixerPeak.limiter(raw,rate,time,wet);
+    const tool=S.mixerTool(raw,rate,time);
+    if (tool) return {type,latency:0,wet,...tool,tail:wet.max===0 ? 0 : tool.tail};
+    const controls=Object.hasOwn(schema,type) && schema[type];
     check(controls && fields(raw,['type','wet',...Object.keys(controls)]),'Unknown mixer processor or parameter');
     const params=Object.fromEntries(Object.entries(controls).map(([name,[fallback,min,max,fixed]])=>{
       const value=raw[name] ?? fallback;
@@ -23,7 +27,6 @@
       }
       return [name,time.lane(value,fallback,min,max,type+' '+name)];
     }));
-    const wet=time.lane(raw.wet,1,0,1,type+' wet');
     const latency=type==='compressor' ? Math.round(params.lookahead*rate) : 0;
     let tail=0, delayFrames, roomLines;
     if (type==='delay') {
