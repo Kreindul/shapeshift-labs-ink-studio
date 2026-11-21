@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const WAV = require('./wav.js');
-const {json} = require('./asset-files.js');
+const {json,write} = require('./asset-files.js');
 const {openSampleLibrary} = require('./sample-library.js');
 const {readGraphProject} = require('./graph-project.js');
 const {readSceneAudio} = require('./scene-audio.js');
@@ -54,14 +54,47 @@ function capture(file, recipe, kit) {
     firstSample:input.firstSample,endSample:input.endSample});
 }
 
-module.exports = function command([mode,directory,file],opt,kit) {
-  if (!directory) throw new TypeError('Use music samples add, search or get with a library directory');
+function editCommand(mode,file,settings,out,library,tool) {
+  if (!file) throw new TypeError('Pass a sample ID or sample edit project');
+  if (mode==='slice') {
+    const {value,entry}=library.load(file);
+    return tool.create(value,{source:{id:entry.id,asset:entry.asset},detect:settings ? read(settings) : {}});
+  }
+  const edit=tool.validate(read(file)), {id,asset}=edit.source, found=library.get(id);
+  if (found.entry.asset!==asset) throw new RangeError('Sample edit source hash does not match the library');
+  if (mode==='edit') {
+    if (!settings) throw new TypeError('Pass a JSON list of sample edits');
+    return tool.edit(edit,read(settings));
+  }
+  if (typeof out!=='string') throw new TypeError('Use --out with an audio output directory');
+  const options=settings ? read(settings) : {};
+  const result=tool[mode](library.load(id).value,edit,options);
+  const folder=path.resolve(out), audio=path.join(folder,mode==='render' ? 'edit.wav' : 'audition.wav');
+  write(audio,WAV.encode(result.value,{encoding:'float64'}));
+  let hardCut;
+  if (result.hardCut) {
+    hardCut=path.join(folder,'hard-cut.wav');
+    write(hardCut,WAV.encode(result.hardCut,{encoding:'float64'}));
+  }
+  const report=path.join(folder,'report.json');
+  json(report,{...result.report,audio,...(hardCut && {hardCut})});
+  return {audio,report,...(hardCut && {hardCut})};
+}
+
+module.exports = function command([mode,directory,file,settings],opt,kit) {
+  if (!directory) throw new TypeError('Pass a sample library directory');
   const library = openSampleLibrary(directory,{kit});
   let value;
   if (mode==='add' && file) value = library.add(capture(file,read(file),kit));
   else if (mode==='search') value = library.search(file ? read(file) : undefined);
   else if (mode==='get' && file) value = library.get(file);
-  else throw new TypeError('Sample add needs a recipe, and sample get needs an ID');
+  else if (['slice','edit','render','audition'].includes(mode))
+    value=editCommand(mode,file,settings,opt.out,library,kit.KIT.procedural.mediaGraph.sampleEdit);
+  else throw new TypeError('Use music samples add, search, get, slice, edit, render or audition');
+  if (mode==='render' || mode==='audition') {
+    process.stdout.write(JSON.stringify(value)+'\n');
+    return value;
+  }
   if (typeof opt.out==='string') json(path.resolve(opt.out),value);
   else process.stdout.write(JSON.stringify(value,null,2)+'\n');
   return value;

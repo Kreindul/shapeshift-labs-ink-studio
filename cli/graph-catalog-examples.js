@@ -17,6 +17,12 @@ const sampleCapture = {op:'audio.captureSample',inputs:{source:audio,settings:{
   sample:{id:'tone',label:'Bench tone',material:'synth',pitch:'A4',license:{id:'CC0-1.0'}},
   source:{kind:'graph',name:'oscillator'},firstSample:16,endSample:48
 }}};
+const slicedAudio = {format:'ink-studio/sample-edit',version:1,
+  source:{id:'recording',sampleRate:8000,channels:1,frames:128},
+  markers:[{id:'middle',at:64}],
+  clips:[{id:'attack',from:0,to:64},{id:'tail',from:64,to:128,reverse:true}],
+  joins:[{left:'attack',right:'tail',frames:8,curve:'linear'}]
+};
 const motif = { length: 2, events: [{beat:0,duration:.35,degree:1}, {beat:.75,duration:.25,degree:3}] };
 const arrangement = { score:{key:{root:'C4'},harmonies:{home:{root:'C4',quality:'unison'}}},
   motifs:{melody:motif},parts:{lead:{role:'lead',material:'melody'}},
@@ -251,6 +257,11 @@ const specifications = {
   'audio.searchSamples': {inputs:{entries:[{...sampleCapture.inputs.settings.sample,sampleRate:8000,
     channels:1,frames:32,duration:.004,source:{kind:'graph',name:'oscillator',firstSample:16,endSample:48,sampleRate:8000}}],
     options:{material:'synth'}}},
+  'audio.proposeSampleSlices': {inputs:{source:transientAudio}},
+  'audio.editSample': {inputs:{source:slicedAudio,edits:[{op:'move',id:'middle',at:62}]}},
+  'audio.renderSampleEdit': {inputs:{source:audio,edit:slicedAudio}},
+  'audio.auditionSampleEdit': {inputs:{source:audio,edit:slicedAudio,
+    options:{left:'attack',right:'tail',before:12,after:12}}},
   'audio.stemControls': { inputs: {
     stems: { drums: transientAudio, synth: audio },
     settings: { drums: { envelope: { measure: 'peak', attack: 0, threshold: .4 } },

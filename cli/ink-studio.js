@@ -1090,6 +1090,7 @@ const CMD = {
         '  music phrase <options.json>   generate a two- or four-bar melodic phrase',
         '  music production <mode> <recipe.json> [config.json]   arrange, mix, audition and render adaptive music',
         '  music samples <add|search|get> <library> [recipe or ID]   capture and find reusable samples',
+        '  music samples <slice|edit|render|audition> <library> <ID or project> [settings.json]   edit sample audio',
         '  music soundfont <file.sf2> <preset.json> --out directory   sample a SoundFont preset with FluidSynth',
         '  music revise <plan.json> <edits.json> [--out revised.json]   revise unpinned parts and bindings',
         '  music reference <plan.json> --part ID --section ID [--out motif.json]   recover an audition idea',
