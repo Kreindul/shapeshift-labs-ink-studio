@@ -1142,3 +1142,5 @@ Use [layered cut paper and relief](docs/paper-relief.md) for real apertures, pap
 Use [voxel and relief-pixel surfaces](docs/voxel-surface.md) to sample selected signed fields into cubes, columns, slabs or shallow relief. [Solid Signals](examples/voxel-surface.html) includes a breakable tower and a sculpt that scatters into rigid blocks.
 
 Use [thread, stitch and woven surfaces](docs/textile-rendering.md) for raised embroidery, interlocking knit loops and patterned warp and weft on curved charts. [Thread Studies](examples/thread-studies.html) includes an embroidered garden, a knitted moth and a woven harbor.
+
+Use [sprite-based object reconstruction](docs/sprite-reconstruction.md) to switch named native geometry to a shared directional atlas at distance, with depth-tested texels and a camera-driven handoff. [Signal Transit](examples/sprite-reconstruction.html) includes a fleet approach and a close inspection bay.
