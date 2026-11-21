@@ -96,9 +96,14 @@ Beat, second, and sample lanes can coexist in one mixer.
 | `delay` | Fixed `seconds`, automated `feedback` |
 | `reverb` | Fixed `size` and `decay` in seconds, automated `damping` |
 | `compressor` | Automated `thresholdDb`, `ratio`, and `makeupDb`, with fixed `attack`, `release`, and `lookahead` in seconds |
+| `eq` | Up to eight parametric bands with automated frequency, Q, and bell or shelf gain |
+| `gate`, `expander` | Below-threshold dynamics. Both can take an external key |
+| `transient` | Independent attack and sustain gain, using two envelope speeds |
+| `saturation` | Soft clipping with drive, asymmetry, tone and output trim |
+| `limiter` | Stereo-linked true-peak ceiling with lookahead and release |
 
-All inserts have a sample-accurate `wet` control between 0 and 1.
-Unmarked parameters accept automation. Every insert declares its
+Inserts have a sample-accurate `wet` control between 0 and 1, with a
+fully wet limiter. Unmarked parameters accept automation. Every insert declares its
 processing latency and tail in samples. Artistic delay or reverb
 predelay stays in the wet sound. The mixer compensates algorithmic
 latency at joins and sidechains, including the dry part of a wet/dry insert.
@@ -125,6 +130,9 @@ named taps with `data.get`, or select them by field when
 [printing audio](audio-prints.md). The JavaScript API is
 `KIT.procedural.mediaGraph.mixer.render(recipe, assets)`. The included
 processors run in Ink's offline renderer.
+
+See [mixing essentials](mixing-essentials.md) for processor parameters,
+loudness and peak metering, and mono and small-speaker checks.
 
 Run [After the Cut](../examples/music-production/mixer-routing-workshop.cjs)
 with `node examples/music-production/mixer-routing-workshop.cjs output`

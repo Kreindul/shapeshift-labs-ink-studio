@@ -312,6 +312,8 @@ const specifications = {
     options: { time: .02 }
   } },
   'audio.detectTransients': { inputs: { source: transientAudio } },
+  'audio.meterMix': {inputs:{source:audio}},
+  'audio.monitorMix': {inputs:{source:audio,options:{mode:'small-speaker'},references:{focus:audio}}},
   'audio.renderMixer': {nodes:{source:{op:'audio.buffer',inputs:audio},
     bank:{op:'data.record',inputs:{tone:link('source')}}},
     inputs:{assets:link('bank'),source:{id:'session',sampleRate:8000,output:'master',
