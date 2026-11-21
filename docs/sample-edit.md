@@ -75,6 +75,8 @@ the render, its crops, and its join comparisons.
 Use [warp and repitch](audio-warp.md) when the assembled clip needs a new
 tempo or when an attack needs to line up with a picture frame.
 
+Use [sample kits](sample-kits.md) to play named slices from pads or MIDI notes.
+
 Pass `{"left":"ring","right":"answer","before":6080,"after":6720}` to
 `audition`. The command writes the join as edited and a hard-cut
 reference with that one overlap removed. The windows have matching

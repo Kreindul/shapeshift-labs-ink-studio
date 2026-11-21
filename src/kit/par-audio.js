@@ -56,6 +56,17 @@
       inputs: {source:'audio',options}, outputs: {value:'audio',report:'record'},
       run({source,options}) {return A.warpAudio(source,options);}
     },
+    'music.renderSampleKit': {
+      description: 'Play a sample kit from timed pad or MIDI events with layers, articulation, inserts and return buses.',
+      inputs:{source:'record',assets:'record',events:'array<record>',options},
+      outputs:{value:'audio',stems:'record',report:'record'},
+      run({source,assets,events,options}) {return A.sampleKit.render(source,assets,events,options);}
+    },
+    'music.routeSampleKit': {
+      description: 'Route performed production tracks to kit pads or MIDI mappings while retaining their timing and velocity.',
+      inputs:{tracks:'record',routes:'record'},outputs:{value:'array<record>'},
+      run({tracks,routes}) {return {value:A.sampleKit.route(tracks,routes)};}
+    },
     'audio.window': media({ value: 'audio', report: 'record' }, A.audioWindow),
     'audio.analyze': media({ value: 'record', rms: 'number', peak: 'number' }, A.analyze),
     'audio.fft': media({ value: 'record', spectrum: 'raster', bands: 'record' }, A.fft),

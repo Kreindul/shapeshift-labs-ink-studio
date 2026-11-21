@@ -1092,6 +1092,7 @@ const CMD = {
         '  music samples <add|search|get> <library> [recipe or ID]   capture and find reusable samples',
         '  music samples <slice|edit|render|audition> <library> <ID or project> [settings.json]   edit sample audio',
         '  music samples warp <library> <ID or project> settings.json --out directory   warp or repitch sample audio',
+        '  music samples kit <library> kit.json performance.json --out directory   play a sample kit and export its stems',
         '  music soundfont <file.sf2> <preset.json> --out directory   sample a SoundFont preset with FluidSynth',
         '  music revise <plan.json> <edits.json> [--out revised.json]   revise unpinned parts and bindings',
         '  music reference <plan.json> --part ID --section ID [--out motif.json]   recover an audition idea',

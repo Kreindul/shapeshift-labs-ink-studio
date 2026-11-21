@@ -99,6 +99,56 @@ function warpCommand(file,config,out,library,tools) {
   return {audio,report};
 }
 
+function kitCommand(file,performance,out,library,procedural) {
+  if (!file || !performance || typeof out!=='string')
+    throw new TypeError('Pass a kit recipe, performance file and --out directory');
+  const {fields,record,id,check}=procedural.musicInstruments;
+  const {sampleEdit,sampleKit}=procedural.mediaGraph;
+  const recipe=read(file), score=read(performance);
+  check(fields(recipe,['kit','assets']) && record(recipe.assets) && Object.keys(recipe.assets).length<=512,
+    'A kit recipe needs a kit and a table of sample sources');
+  check(fields(score,['events','options']) && Array.isArray(score.events),'A kit performance needs events and optional render options');
+  const buffers=new Map(), assets={}, sources={};
+  let samples=0, originalSamples=0;
+  function readSample(name) {
+    if (!buffers.has(name)) {
+      const source=library.load(name);
+      originalSamples+=source.value.samples.length;
+      check(originalSamples<=32000000,'Kit recipe exceeds its original PCM budget');
+      buffers.set(name,source);
+    }
+    return buffers.get(name);
+  }
+  for (const [name,ref] of Object.entries(recipe.assets)) {
+    check(id(name) && (fields(ref,['sample','asset']) && id(ref.sample) ||
+      fields(ref,['edit','slice']) && text(ref.edit) && (ref.slice===undefined || id(ref.slice))),
+    'Use a catalog sample or a sample edit and optional slice for '+name);
+    if (ref.edit!==undefined) {
+      const edit=openEdit(path.resolve(path.dirname(file),ref.edit),library,sampleEdit);
+      const {value}=readSample(edit.source.id);
+      assets[name]=sampleEdit.render(value,edit,ref.slice===undefined ? {} : {slice:ref.slice}).value;
+      sources[name]={id:edit.source.id,asset:edit.source.asset,...ref};
+    } else {
+      const {value,entry}=readSample(ref.sample);
+      check(ref.asset===undefined || entry.asset===ref.asset,'Kit sample hash does not match the library');
+      assets[name]=value;
+      sources[name]={id:entry.id,asset:entry.asset};
+    }
+    samples+=assets[name].samples.length;
+    check(samples<=32000000,'Kit recipe exceeds its source PCM budget');
+  }
+  const result=sampleKit.render(recipe.kit,assets,score.events,score.options), folder=path.resolve(out);
+  const audio=path.join(folder,'kit.wav'), report=path.join(folder,'report.json');
+  write(audio,WAV.encode(result.value,{encoding:'float64'}));
+  const stems=Object.fromEntries(Object.entries(result.stems).map(([name,value])=>{
+    const output=path.join(folder,'stems',name+'.wav');
+    write(output,WAV.encode(value,{encoding:'float64'}));
+    return [name,output];
+  }));
+  json(report,{...result.report,sources,audio,stems});
+  return {audio,stems,report};
+}
+
 module.exports = function command([mode,directory,file,settings],opt,kit) {
   if (!directory) throw new TypeError('Pass a sample library directory');
   const library = openSampleLibrary(directory,{kit});
@@ -109,8 +159,9 @@ module.exports = function command([mode,directory,file,settings],opt,kit) {
   else if (['slice','edit','render','audition'].includes(mode))
     value=editCommand(mode,file,settings,opt.out,library,kit.KIT.procedural.mediaGraph.sampleEdit);
   else if (mode==='warp') value=warpCommand(file,settings,opt.out,library,kit.KIT.procedural.mediaGraph);
-  else throw new TypeError('Use music samples add, search, get, slice, edit, render, audition or warp');
-  if (['render','audition','warp'].includes(mode)) {
+  else if (mode==='kit') value=kitCommand(file,settings,opt.out,library,kit.KIT.procedural);
+  else throw new TypeError('Use music samples add, search, get, slice, edit, render, audition, warp or kit');
+  if (['render','audition','warp','kit'].includes(mode)) {
     process.stdout.write(JSON.stringify(value)+'\n');
     return value;
   }
