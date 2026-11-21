@@ -670,6 +670,11 @@
     } catch (error) {
       bad('finish.pixelStamps', error.message);
     }
+    if (st.finish.highlightCels !== undefined) try {
+      K.highlightCels.prepare(st.finish.highlightCels, { scenePalette: st.palette, paletteRoles: st.roles });
+    } catch (error) {
+      bad('finish.highlightCels', error.message);
+    }
     try {
       ArtEffects.prepare(look?.effects, st.palette);
     } catch (error) {

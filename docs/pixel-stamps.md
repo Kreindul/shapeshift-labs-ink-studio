@@ -16,6 +16,8 @@ The [animated tile library](pixel-tiles.md) uses the same editable cels
 for copper pulses and creeping frost.
 [Directional contact marks](contact-marks.md) add cels for direct hits and
 glancing skids with two authored sizes and diagonal poses.
+[Light-driven highlight cels](highlight-cels.md) add individually drawn
+pins, hooks, and arcs for brass, enamel, and glass.
 
 ## Drawing and timing
 

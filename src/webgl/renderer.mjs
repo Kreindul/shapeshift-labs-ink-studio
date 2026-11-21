@@ -4,6 +4,7 @@ import { createColorClusters } from './color-clusters.mjs';
 import { createRenderGrid } from './render-grid.mjs';
 import { createMaterialControls } from './material-controls.mjs';
 import { createLightEmitters } from './light-emitters.mjs';
+import { createHighlightCelDraw } from './highlight-cels.mjs';
 import { createInspection, inspectionDepth } from './inspection.mjs';
 import { waterReflectionPlan, selectReflectionWorld } from './reflections.mjs';
 import { createRenderGraph, graphOwner, graphCapture } from './render-graph.mjs';
@@ -129,6 +130,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     const { target, table, textureUnit } = targets;
     const environment = createEnvironment(gl,resources,targets,maxSize,toolkit);
     const emitterLighting=createLightEmitters(gl,resources,targets,maxSize,toolkit);
+    const highlightAPI = toolkit.KIT?.highlightCels;
+    let drawHighlights;
     const materialControls=createMaterialControls(gl,resources,targets,maxSize,toolkit);
     const skyPrograms = new Map();
     const dryGeometry = target(2), dryContours = target(2), plainOwner = target(), key = target(1, { integer: true });
@@ -816,7 +819,12 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const constraints = !raw && prepareConstraints(world, constraintDefinition, frame.lookMasks === false);
       const masked = Boolean(constraints?.masked);
       if (masked && !coverage) maskOwner ??= target(2);
-      const owner = frame[graphOwner]?.depth ? (graphOwnership ??= target(3)) : masked && !coverage ? maskOwner : plainOwner;
+      const highlightDefinition = !reflectionCapture && plane === zero && (frame.highlightCels ?? world.highlightCels);
+      const highlightPlan = highlightDefinition && highlightAPI?.prepare(highlightDefinition, {
+        scenePalette: world.pal, paletteRoles: world.paletteRoles
+      });
+      const packedDepth = Boolean(highlightPlan?.length || frame[graphOwner]?.depth);
+      const owner = packedDepth ? (graphOwnership ??= target(3)) : masked && !coverage ? maskOwner : plainOwner;
       const sourceWater = frame.water !== false && world.water?.count ? world.water : null;
       const drivenOptics = Array.isArray(look.optics) && look.optics.some(rule => rule.driver);
       const inputTime = drivenOptics ? frame.time ?? world.lookSnapshot?.time ?? 0 : undefined;
@@ -887,7 +895,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
           (waterScene && frame.time !== lastWaterTime)) historyValid = false;
       geometry.resize(rw, rh);
       contours.resize(colored ? width : 1, colored ? height : 1);
-      const ownsPixels = !!clusters || !!frame[graphOwner] || patterned || !!constraints && !coverage || scopedCleanup;
+      const ownsPixels = packedDepth || !!clusters || !!frame[graphOwner] || patterned || !!constraints && !coverage || scopedCleanup;
       owner.resize(ownsPixels ? width : 1, ownsPixels ? height : 1);
       if (scopedCleanup) detailTable ??= table(512, 7, maxSize);
       if (materialStyles) materialStyleTable ??= table(512, 16, maxSize);
@@ -984,6 +992,14 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         relightData.upload(lightRows);
       }
       const emitterFrame=emitterLighting.prepare(world,frame,t,reflectionCapture,camera);
+      const highlightRows = highlightPlan?.length && highlightAPI.frame(highlightPlan, world, camera, {
+        w: width, h: height, time: t, lights: emitterFrame?.areas ?? [], cutoutShadows: frame.cutoutShadows,
+        spriteSurfaces: frame.spriteSurfaces === false ? false : world.spriteSurfaces,
+        spriteAtlases: frame.spriteAtlases === true ? world.spriteAtlases : frame.spriteAtlases,
+        spriteAtlasMode: frame.spriteAtlasMode,
+        clip: cutaway && (at => cutawayAPI.margin(cutaway, ...at,
+          -(camera.view[2]*at[0] + camera.view[6]*at[1] + camera.view[10]*at[2] + camera.view[14]) - camera.setback) >= 0)
+      });
       relighting=emitterLighting.compose(emitterFrame,world,time,lightRows,relighting);
       emitterLighting.fog(emitterFrame,world,frame);
       if(emitterFrame){historyValid=false;if(env){env.emitters=emitterFrame;env.uniforms={...env.uniforms,...emitterFrame.uniforms};}}
@@ -1137,7 +1153,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
           tangent, lookGrid: coverage && [width, height] }, water, wet, env);
       }
       if (ownsPixels)
-        drawGeometry(shader, owner, width, height, { u_idx: 1, u_snap: 1, u_hard: 0, tangent,surfaces,scaleSurfaces,spriteRows,surfaceFrame:{...surfaceFrame,index:true,graphDepth:Boolean(frame[graphOwner]?.depth)} });
+        drawGeometry(shader, owner, width, height, { u_idx: 1, u_snap: 1, u_hard: 0, tangent,surfaces,scaleSurfaces,spriteRows,surfaceFrame:{...surfaceFrame,index:true,graphDepth:packedDepth} });
       frame[graphOwner]?.(world, owner.textures[0], frame[graphOwner].depth ? owner.textures[2] : undefined, camera);
       if (cover)
         drawGeometry(shader, cover.buffer, width, height,
@@ -1294,6 +1310,10 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         }
         clusterRenderer.finish(world, clusters, owner,
           cleaning ? cleaned : damping ? finished : clusterRenderer.buffer, output, width, height, continuity, frame.colorClustersFrame);
+      }
+      if (highlightRows?.length) {
+        drawHighlights ??= createHighlightCelDraw(gl, resources, textureUnit, highlightAPI);
+        drawHighlights(highlightRows, width, height, output, owner.textures[2], camera.depthRange);
       }
       gl.activeTexture(gl.TEXTURE0);
       lastWorld = world;

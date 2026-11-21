@@ -3,6 +3,7 @@ const PixelStampPresets = (() => {
   const glitter = typeof GlitterBurstCels === 'undefined' ? require('./glitter-burst-cels.js') : GlitterBurstCels;
   const tileCels = typeof PixelTileCels === 'undefined' ? require('./pixel-tile-cels.js') : PixelTileCels;
   const contactCels = typeof ContactMarkCels === 'undefined' ? require('./contact-mark-cels.js') : ContactMarkCels;
+  const highlightCels = typeof HighlightCelPresets === 'undefined' ? require('./highlight-cel-presets.js') : HighlightCelPresets;
   const record = value => value && Object.getPrototypeOf(value) === Object.prototype;
 
   function clips(){
@@ -163,7 +164,7 @@ const PixelStampPresets = (() => {
     'glyph-diamond': ['Signal diamond', 'signal', art.diamond],
     'glyph-four-dot': ['Signal four-dot', 'signal', art.fourDot],
     'glyph-brackets': ['Signal brackets', 'signal', art.brackets],
-    ...tileCels,
+    ...tileCels, ...highlightCels,
     ...Object.fromEntries(Object.entries(contactCels).map(([id, art]) => {
       const [, kind, size, angle] = id.split('-');
       return [id, ['Contact ' + kind + ' · ' + size + ' · ' + (angle === 'ne' ? 'diagonal' : 'horizontal'), 'contact', art]];
@@ -178,7 +179,8 @@ const PixelStampPresets = (() => {
     signal: ['residue', 'dim', 'lit', 'peak'],
     'tile-copper': ['shadow', 'trace', 'warm', 'lit', 'peak'],
     'tile-frost': ['shadow', 'ice', 'blue', 'lit', 'peak'],
-    contact: ['ash', 'ember', 'heat', 'edge', 'core']
+    contact: ['ash', 'ember', 'heat', 'edge', 'core'],
+    highlight: ['shade', 'edge', 'lit', 'spark', 'core']
   };
   const labels = {star:'Star twinkle', glint:'Surface glint', bubble:'Rising bubble', ember:'Ember', burst:'Glitter burst', glyph:'Signal glyph'};
   const recipes = {

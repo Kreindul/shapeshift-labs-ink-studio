@@ -64,6 +64,9 @@ For per-pixel rendering set `S.pixel = true` before baking and set `look: { pixe
 
 These are stylized reflectance models. The CLI resolves them into the scene palette and uses its existing baked direct-light visibility. Subtle tones can share the same palette entry, so include colours for any highlights you want visible in the final render.
 
+Bind an [authored highlight cel](highlight-cels.md) to a surface anchor
+when a light catch needs a specific pixel drawing at each size and angle.
+
 ## Surface detail kits
 
 Add named `detailKit` layers to a surface finish in JavaScript or diorama JSON. A finish can travel with its material definition or be shared between several solids. Layer order matters. Put plaster above brick to expose brick through chips, or put moss above stone joints to grow it in the mortar. The headless renderer samples the patterns at the visible surface in its rest frame and filters details against the native art-pixel footprint.

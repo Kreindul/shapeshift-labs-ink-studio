@@ -391,6 +391,7 @@ export function createLightEmitters(gl, resources, { table, textureUnit }, maxSi
       lastDisplayImages = lastCookies;
     }
     return {
+      areas,
       count: lamps.length,
       shadow: grid,
       cutoutRevision,

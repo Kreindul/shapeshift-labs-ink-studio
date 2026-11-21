@@ -508,6 +508,21 @@ function renderFrame(world, o, preparedPalettes) {
         if (frame.quantization) frame.quantization.resolved = rgb.slice();
       }
     }
+    if (highlightRows?.length) {
+      let painted = false;
+      highlightAPI.pixels(highlightRows, frame.w, frame.h, (x, y, depth, r, g, b) => {
+        const p = y * frame.w + x;
+        if (depth > passes.depth[p] + .0001) return;
+        const i = p * 3;
+        frame.rgb[i] = r;
+        frame.rgb[i + 1] = g;
+        frame.rgb[i + 2] = b;
+        if (frame.alpha) frame.alpha[p] = 255;
+        paletteInventory?.declared.add(r * 65536 + g * 256 + b);
+        painted = true;
+      });
+      if (painted) frame = ArtEffects.paletteUse(frame, world.pal);
+    }
     if (captureQuantization && !legacyLook) capture(graded ?? (unclustered ?? frame.rgb).slice(), 'frame');
     if (captureStages) {
       const {w,h,alpha}=frame, base={w,h,rgb:new Uint8Array(w*h*3),alpha:new Uint8Array(w*h)};
@@ -582,6 +597,24 @@ function renderFrame(world, o, preparedPalettes) {
     px = o.px || frameBudget.artScale(cw, ch, preferred, o.raw || o.samples || o.captureCoverage ? null : look.pixelBudget),
     W = Math.ceil(cw / px),
     H = Math.ceil(ch / px);
+  const highlightDefinition = !o.samples && !o.captureCoverage && !o.captureLightPlate &&
+    !o.reflectionPlane && !probeView && (o.highlightCels ?? world.highlightCels);
+  const highlightAPI = highlightDefinition && require('../index.js').load().KIT.highlightCels;
+  let highlightRows;
+  if (highlightAPI) {
+    const rows = highlightAPI.prepare(highlightDefinition, { scenePalette: world.pal, paletteRoles: world.paletteRoles });
+    const view = CameraLens.artView(camera, H, stable, undefined, o.artGridScale || 1);
+    highlightRows = highlightAPI.frame(rows, world, { ...camera, view,
+      eye: CameraLens.fromView(view).eye, tangent: ortho ? dist * tangent : tangent, aspect: W / H }, {
+      w: W, h: H, time: t, lights: areaLights, cutoutShadows: o.cutoutShadows,
+      spriteSurfaces: o.spriteSurfaces === false ? false : world.spriteSurfaces,
+      spriteAtlases: o.spriteAtlases === true ? world.spriteAtlases : o.spriteAtlases,
+      spriteAtlasMode: o.spriteAtlasMode,
+      clip: cutaway && (at => Cutaway.margin(cutaway, ...at,
+        -(view[2]*at[0] + view[6]*at[1] + view[10]*at[2] + view[14]) - depthOffset) >= 0)
+    });
+    if (highlightRows.length) passSelection.add('depth');
+  }
   if (o.captureLightPlate && !o.samples && !o.captureCoverage && W*H > 1_000_000)
     throw new RangeError('Light group plates support up to one million pixels');
   const paletteTrace = o.palettePixel && !o.raw && !o.captureCoverage && (!o.samples || o.worked) ?
