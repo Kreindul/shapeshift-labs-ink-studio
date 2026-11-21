@@ -24,6 +24,43 @@ float eShadow(vec3 p,vec3 toLight,float stop,float bias){
   return 1.0;
 }
 vec4 eCutoutRow(int i,int row){return texelFetch(u_eData,ivec2(i*6+row,1),0);}
+bool eShellSlab(inout vec2 time,float p,float d,float low,float high){
+  if(abs(d)<=1e-8)return p>=low&&p<=high;
+  float a=(low-p)/d,b=(high-p)/d;
+  time=vec2(max(time.x,min(a,b)),min(time.y,max(a,b)));
+  return time.x<=time.y;
+}
+bool eShellHit(vec3 p,vec3 dir,float stop,vec2 depth,vec4 region,vec4 map,float cutoff){
+  vec2 time=vec2(1e-5,stop);
+  if(!eShellSlab(time,p.x,dir.x,0.0,1.0)||!eShellSlab(time,p.y,dir.y,0.0,1.0)||
+     !eShellSlab(time,p.z,dir.z,depth.x,depth.y)||time.x>=stop)return false;
+  vec2 base=map.xy+p.xy*map.zw,speed=dir.xy*map.zw;
+  ivec2 stride=ivec2(sign(speed)*step(vec2(1e-8),abs(speed)));
+  vec2 grid=base+speed*time.x;
+  ivec2 size=ivec2(region.zw),cell=clamp(ivec2(
+    stride.x<0?ceil(grid.x)-1.0:floor(grid.x),stride.y<0?ceil(grid.y)-1.0:floor(grid.y)),ivec2(0),size-1);
+  int count=size.x+size.y+1;
+  for(int k=0;k<count;k++){
+    ivec2 next=cell+stride;
+    float tx=stride.x!=0&&next.x>=0&&next.x<size.x?(float(cell.x+int(stride.x>0))-base.x)/speed.x:1e30;
+    float ty=stride.y!=0&&next.y>=0&&next.y<size.y?(float(cell.y+int(stride.y>0))-base.y)/speed.y:1e30;
+    float tail=min(time.y,min(tx,ty));
+    vec4 texel=round(255.0*texelFetch(u_eCookies,ivec2(region.xy)+cell,0));
+    if(tail>=time.x&&texel.a>=cutoff){
+      ivec3 bytes=ivec3(texel.rgb);
+      int packed=bytes.r+256*bytes.g+65536*bytes.b;
+      float back=mix(depth.x,depth.y,float(packed>>12)/4095.0);
+      float front=mix(depth.x,depth.y,float(packed&4095)/4095.0);
+      vec2 cellTime=vec2(time.x,tail);
+      if(eShellSlab(cellTime,p.z,dir.z,back,front)&&cellTime.x<stop)return true;
+    }
+    if(tail>=time.y)break;
+    if(tx<=ty)cell.x=next.x;
+    if(ty<=tx)cell.y=next.y;
+    time.x=max(time.x,tail);
+  }
+  return false;
+}
 float eCutoutShadow(vec3 p,vec3 sampleAt,float endBias){
   if(u_eCutoutCount==0)return 1.0;
   vec3 ray=sampleAt-p;float stop=length(ray);
@@ -31,13 +68,21 @@ float eCutoutShadow(vec3 p,vec3 sampleAt,float endBias){
   vec3 dir=ray/stop;
   for(int i=0;i<16;i++){
     if(i>=u_eCutoutCount)break;
-    vec4 at=eCutoutRow(i,0);vec3 n=eCutoutRow(i,1).xyz,offset=at.xyz-p;
-    float facing=dot(dir,n);if(abs(facing)<=1e-8)continue;
-    float hit=dot(offset,n)/facing;if(hit<=1e-5||hit>=stop-endBias)continue;
-    vec3 local=dir*hit-offset;
-    vec2 uv=vec2(dot(local,eCutoutRow(i,2).xyz),dot(local,eCutoutRow(i,3).xyz));
-    if(any(lessThan(uv,vec2(0)))||any(greaterThan(uv,vec2(1))))continue;
+    vec4 at=eCutoutRow(i,0),n=eCutoutRow(i,1),u=eCutoutRow(i,2),v=eCutoutRow(i,3);
+    vec3 offset=at.xyz-p;
+    float facing=dot(dir,n.xyz),axial=dot(offset,n.xyz);
     vec4 region=eCutoutRow(i,4),mapping=eCutoutRow(i,5);
+    if(v.w>.5){
+      vec3 o=vec3(-dot(offset,u.xyz),-dot(offset,v.xyz),axial);
+      vec3 d=vec3(dot(dir,u.xyz),dot(dir,v.xyz),-facing);
+      if(eShellHit(o,d,stop-endBias,vec2(n.w,u.w),region,mapping,at.w))return 0.0;
+      continue;
+    }
+    if(abs(facing)<=1e-8)continue;
+    float hit=axial/facing;if(hit<=1e-5||hit>=stop-endBias)continue;
+    vec3 local=dir*hit-offset;
+    vec2 uv=vec2(dot(local,u.xyz),dot(local,v.xyz));
+    if(any(lessThan(uv,vec2(0)))||any(greaterThan(uv,vec2(1))))continue;
     ivec2 texel=ivec2(region.xy+clamp(floor(mapping.xy+uv*mapping.zw),vec2(0),region.zw-1.0));
     if(round(255.0*texelFetch(u_eCookies,texel,0).a)>=at.w)return 0.0;
   }
@@ -194,7 +239,7 @@ export function createLightEmitters(gl, resources, { table, textureUnit }, maxSi
     if (!gl.getExtension('EXT_color_buffer_float'))
       throw new Error('Native emitter lighting needs EXT_color_buffer_float');
     const cutouts = lamps.some(l => l.shadows) && Cutouts ? Cutouts.prepare(world, {
-      time, interfaceTime: frame.interfaceTime, enabled: frame.cutoutShadows !== false,
+      time, interfaceTime: frame.interfaceTime, enabled: frame.cutoutShadows !== false, shadowShells: frame.shadowShells,
       surfaces: frame.spriteSurfaces === false ? false : world.spriteSurfaces,
       sprites: frame.spriteAtlases === true ? world.spriteAtlases : frame.spriteAtlases ?? world.spriteAtlases,
       atlasMode: frame.spriteAtlasMode
@@ -226,7 +271,15 @@ export function createLightEmitters(gl, resources, { table, textureUnit }, maxSi
       for (const [image, [x, y]] of regions) for (let j = 0; j < image.height; j++) {
         const at = ((y + j) * width + x) * 4;
         if (image.alpha) {
-          for (let u = 0; u < image.width; u++) pixels[at + u * 4 + 3] = image.alpha[j * image.width + u];
+          for (let u = 0; u < image.width; u++) {
+            const p=j*image.width+u, q=at+u*4, depth=image.shell?.data;
+            if (depth) {
+              pixels[q]=depth[p*3];
+              pixels[q+1]=depth[p*3+1];
+              pixels[q+2]=depth[p*3+2];
+            }
+            pixels[q+3]=image.alpha[p];
+          }
         } else pixels.set(image.data.subarray(j * image.width * 4, (j + 1) * image.width * 4), at);
       }
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
@@ -302,8 +355,10 @@ export function createLightEmitters(gl, resources, { table, textureUnit }, maxSi
         p + 40
       );
     });
-    cutouts.forEach(({ origin, normal, u, v, image, mapping, cutoff }, i) => {
-      rows.set([...origin, cutoff, ...normal, 0, ...u, 0, ...v, 0, ...regions.get(image), ...mapping],
+    cutouts.forEach(({ origin, normal, u, v, image, mapping, cutoff, shellScale=1 }, i) => {
+      const {shell}=image;
+      rows.set([...origin, cutoff, ...normal, (shell?.min ?? 0)*shellScale, ...u, (shell?.max ?? 0)*shellScale,
+        ...v, +!!shell, ...regions.get(image), ...mapping],
         stride + i * 24);
     });
     const cutoutRows = rows.subarray(stride, stride + cutouts.length * 24);

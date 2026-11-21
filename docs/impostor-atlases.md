@@ -59,6 +59,9 @@ Depth positions each texel along its draw ray and participates in the scene's de
 
 ## Painted scenery
 
+Painted scenery can cast [thick cutout shadows](painted-cutout-shadows.md#front-and-back-depth)
+with a uniform thickness or paired depth maps.
+
 A scenery atlas splits one painting into parallel planes in world space.
 Paint named depths for things a character can pass behind or in front of.
 The normal brush marks where the scene's live sun should relight the painting.

@@ -2,6 +2,7 @@
 const AtlasSprites = (() => {
   const drawing=typeof FrameComposite==='undefined'?require('./frame-composite.js'):FrameComposite;
   const cels=typeof SpriteCels==='undefined'?require('./sprite-cels.js'):SpriteCels;
+  const shells=typeof ShadowShell==='undefined'?require('./shadow-shell.js'):ShadowShell;
   const assetBrand=Symbol.for('ink-studio.sprite-atlas'), placedBrand=Symbol.for('ink-studio.atlas-placement');
   const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
   const integer=(n,min,max)=>Number.isSafeInteger(n)&&n>=min&&n<=max;
@@ -206,13 +207,14 @@ const AtlasSprites = (() => {
     const editedDepth=edits&&Array.from(edits.edited.values()).some(edit=>edit.maps.depth||edit.extensionDepth!==undefined);
     return Object.freeze({[assetBrand]:true,select,sample,effect,playback:mode=>cels.playback(timing,fps,mode),
       snapshot:()=>({metadata:structuredClone(metadata),images:structuredClone(sourceMaps)}),
-      normalSpace,emissionMode,swatches,largestView:frames.reduce((max,{rect})=>Math.max(max,rect.width*rect.height),0),hasDepth:Boolean(maps.depth||scenery||editedDepth),sceneryPlanes:scenery?.planes});
+      width,height,normalSpace,emissionMode,swatches,largestView:frames.reduce((max,{rect})=>Math.max(max,rect.width*rect.height),0),hasDepth:Boolean(maps.depth||scenery||editedDepth),sceneryPlanes:scenery?.planes});
   }
 
   function place(value) {
     if (value?.[placedBrand]) return value;
     const { atlas,at,mode,yaw=0,scale=1,opacity=1,frame,playback,depth=true,lighting=true,emission=true,
-      nativePixels=false,pixelOffset,visibleAt,objectId,materialId,clock='animation',castsShadow=false }=value??{};
+      nativePixels=false,pixelOffset,visibleAt,objectId,materialId,clock='animation',shadowShell,
+      castsShadow=shadowShell!==undefined&&shadowShell!==false }=value??{};
     const asset=compile(atlas), placementMode=mode===undefined?(asset.sceneryPlanes?'scenery':'impostor'):mode;
     if (!['card','impostor','scenery'].includes(placementMode)||placementMode==='scenery'&&!asset.sceneryPlanes||!Number.isFinite(opacity)||opacity<0||opacity>1||
         [depth,lighting,emission,nativePixels,castsShadow].some(value=>typeof value!=='boolean')||
@@ -225,6 +227,9 @@ const AtlasSprites = (() => {
       throw new RangeError('Native-pixel placement needs a camera-facing card at scale 1');
     if (castsShadow && placementMode !== 'scenery')
       throw new RangeError('A sprite atlas shadow caster needs an oriented scenery placement');
+    if (shadowShell!==undefined&&shadowShell!==false&&!castsShadow)
+      throw new RangeError('A scenery shadow shell needs a shadow-casting placement');
+    const shell=castsShadow&&shells.prepare(shadowShell,asset.width,asset.height);
     if (objectId!==undefined || materialId!==undefined) {
       const selectors = typeof TargetSelectors === 'undefined' ? require('./target-selectors.js') : TargetSelectors;
       if (objectId!==undefined) selectors.prepare({object:objectId});
@@ -235,7 +240,7 @@ const AtlasSprites = (() => {
       yaw:finite(yaw,'Sprite placement yaw'), scale:positive(scale,'Sprite placement scale'),
       opacity,frame,depth,lighting,emission,...(nativePixels&&{nativePixels}),...(pixelOffset&&{pixelOffset}),
       ...(clock==='interface'&&{clock}),
-      ...(castsShadow&&{castsShadow}),
+      ...(castsShadow&&{castsShadow}),...(shell&&{shadowShell:shell}),
       ...(visibleAt&&{visibleAt}),...(playback!==undefined&&{frameAt:asset.playback(playback)}),
       ...(objectId!==undefined&&{objectId}),...(materialId!==undefined&&{materialId}) });
   }

@@ -86,7 +86,7 @@
 
   const atTime = (value, time) => typeof value === 'function' ? value(time) : value;
 
-  function frame(rows, world, camera, { w, h, time, lights, clip, spriteSurfaces, spriteAtlases, spriteAtlasMode, cutoutShadows } = {}) {
+  function frame(rows, world, camera, { w, h, time, lights, clip, spriteSurfaces, spriteAtlases, spriteAtlasMode, cutoutShadows, shadowShells } = {}) {
     if (!rows.length || !lights.length) return [];
     const named = new Map(lights.map(light => [light.id, light]));
     const project = DrawingPrimitives.projector(camera, w, h);
@@ -95,7 +95,7 @@
     function shadowQuery() {
       const sources = AreaLights.staticSources(world);
       const cutouts = ShadowCutouts.prepare(world, {
-        time, enabled: cutoutShadows !== false, surfaces: spriteSurfaces, sprites: spriteAtlases, atlasMode: spriteAtlasMode
+        time, enabled: cutoutShadows !== false, shadowShells, surfaces: spriteSurfaces, sprites: spriteAtlases, atlasMode: spriteAtlasMode
       });
       return (origin, dir, stop) =>
         ShadowCutouts.occludes(cutouts, origin, dir, stop) || AreaLights.occludes(sources, origin, dir, stop);

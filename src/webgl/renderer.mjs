@@ -1001,7 +1001,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       }
       const emitterFrame=emitterLighting.prepare(world,frame,t,reflectionCapture,camera);
       const highlightRows = highlightPlan?.length && highlightAPI.frame(highlightPlan, world, camera, {
-        w: width, h: height, time: t, lights: emitterFrame?.areas ?? [], cutoutShadows: frame.cutoutShadows,
+        w: width, h: height, time: t, lights: emitterFrame?.areas ?? [], cutoutShadows: frame.cutoutShadows, shadowShells: frame.shadowShells,
         spriteSurfaces: frame.spriteSurfaces === false ? false : world.spriteSurfaces,
         spriteAtlases: frame.spriteAtlases === true ? world.spriteAtlases : frame.spriteAtlases,
         spriteAtlasMode: frame.spriteAtlasMode,

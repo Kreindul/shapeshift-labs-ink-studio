@@ -613,7 +613,7 @@ function renderFrame(world, o, preparedPalettes) {
     if (highlightDefinition) {
       const rows = celKit.highlightCels.prepare(highlightDefinition, { scenePalette: world.pal, paletteRoles: world.paletteRoles });
       nativeCelRows.push(...celKit.highlightCels.frame(rows, world, drawCamera, {
-        w: W, h: H, time: t, lights: areaLights, cutoutShadows: o.cutoutShadows, clip,
+        w: W, h: H, time: t, lights: areaLights, cutoutShadows: o.cutoutShadows, shadowShells: o.shadowShells, clip,
         spriteSurfaces: o.spriteSurfaces === false ? false : world.spriteSurfaces,
         spriteAtlases: o.spriteAtlases === true ? world.spriteAtlases : o.spriteAtlases,
         spriteAtlasMode: o.spriteAtlasMode
@@ -944,7 +944,7 @@ function renderFrame(world, o, preparedPalettes) {
   const volumeLighting = o.volumeLighting ?? world.volumeLighting ?? (areaLights.length?{}:undefined);
   let localLighting;
   const cutoutsForLight = areaLights.length || volumeLighting ? ShadowCutouts.prepare(world, {
-    time: t, interfaceTime: o.interfaceTime, enabled: o.cutoutShadows !== false,
+    time: t, interfaceTime: o.interfaceTime, enabled: o.cutoutShadows !== false, shadowShells: o.shadowShells,
     surfaces: o.spriteSurfaces === false ? false : spriteSurfaces,
     sprites: spriteAtlases, atlasMode: o.spriteAtlasMode
   }) : [];
@@ -2738,7 +2738,8 @@ function renderFrame(world, o, preparedPalettes) {
     const quality = atmosphereOptions();
     atmosphere = applyAtmosphere(volumes, col, axialDepth, rayAt, W, H, horizon, quality, t, quality.media,
       captureFog || effectMedia || transparent || fogPass, o.volumeHistory,
-      o.volumeHistory && [W, H, focal, ortho, o.volumeLocalLights, o.volumeLocalShadows, o.cutoutShadows, ...V].join('/'), fogScales);
+      o.volumeHistory && [W, H, focal, ortho, o.volumeLocalLights, o.volumeLocalShadows, o.cutoutShadows, o.shadowShells,
+        ShadowCutouts.historyKey(cutoutsForLight), ...V].join('/'), fogScales);
     if (effectMedia) for (let p = 0; p < W*H; p++) {
       effectMedia[p*3] = atmosphere.fog[p];
       effectMedia[p*3+2] = 1-atmosphere.fog[p];

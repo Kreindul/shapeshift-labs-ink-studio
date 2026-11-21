@@ -2,6 +2,7 @@
 const SpriteSurface = (() => {
   const slips = Symbol.for('ink-studio.spriteSurface.uvSlip');
   const namedFaces = new WeakMap(), sampledAtlases = new WeakMap();
+  const shells = typeof ShadowShell === 'undefined' ? require('./shadow-shell.js') : ShadowShell;
   const resampling = typeof PaletteResampling === 'undefined' ? require('./palette-resampling.js') : PaletteResampling;
 
   function make(width = 1024, limit = 4096) {
@@ -35,23 +36,26 @@ const SpriteSurface = (() => {
       shelf = Math.max(nextShelf, h);
       return region;
     }
-    function faceOptions(options, planar = false) {
+    function faceOptions(options, planar) {
       if (options === undefined) return {};
-      const { id, sampling, castsShadow = false } = options ?? {};
+      const { id, sampling, shadowShell, castsShadow = shadowShell !== undefined && shadowShell !== false } = options ?? {};
       if (!options || ![Object.prototype,null].includes(Object.getPrototypeOf(options)) ||
-          Object.keys(options).some(key => !['id', 'sampling', 'castsShadow'].includes(key)) ||
+          Object.keys(options).some(key => !['id', 'sampling', 'castsShadow', 'shadowShell'].includes(key)) ||
           id !== undefined && (typeof id !== 'string' || !id.trim() || faces.has(id)))
         throw new TypeError('A named surface needs a distinct nonempty ID and optional palette sampling');
       if (typeof castsShadow !== 'boolean' || castsShadow && !planar)
         throw new TypeError('Painted shadow casters need a planar face and boolean castsShadow');
-      return { id, rule: resampling.settings(sampling), castsShadow };
+      if (shadowShell !== undefined && shadowShell !== false && !castsShadow)
+        throw new RangeError('A shadow shell needs a shadow-casting face');
+      const shell = castsShadow && shells.prepare(shadowShell,planar.width,planar.height);
+      return { id, rule: resampling.settings(sampling), castsShadow, shell };
     }
-    function writeMesh(surface, region, { id, rule, castsShadow }) {
+    function writeMesh(surface, region, { id, rule, castsShadow, shell }) {
       const { x, y, width, height } = region;
       const first = vertices.length / 5, count = surface.triangles.length;
       if (id !== undefined) faces.set(id, { first, count, from: region });
       if (rule && count) sampling.push({ first, end: first + count, region, rule });
-      if (castsShadow) shadowFaces.push(Object.freeze({ first, region }));
+      if (castsShadow) shadowFaces.push(Object.freeze({ first, region, ...(shell && {shell}) }));
       for (const index of surface.triangles) {
         vertices.push(surface.points[index * 3], surface.points[index * 3 + 1], surface.points[index * 3 + 2],
           x + .5 + (width - 1) * surface.uvs[index * 2], y + .5 + (height - 1) * surface.uvs[index * 2 + 1]);
@@ -81,14 +85,14 @@ const SpriteSurface = (() => {
       const surface = quad(origin, right, up);
       geometry.validate(surface);
       if (typeof paint !== 'function') throw new RangeError('Expected a surface paint function');
-      const settings = faceOptions(options, true);
+      const settings = faceOptions(options, {width:w,height:h});
       writeMesh(surface, reserve(w, h, paint), settings);
     }
     function faceRegion(origin, right, up, region, options) {
       if (!regions.has(region)) throw new RangeError('Reserve the surface region in this atlas first');
       const surface = quad(origin, right, up);
       geometry.validate(surface);
-      writeMesh(surface, region, faceOptions(options, true));
+      writeMesh(surface, region, faceOptions(options, region));
     }
     function finish() {
       const height = Math.max(1, y + shelf), pixels = new Uint8Array(width * height * 4);
@@ -102,6 +106,16 @@ const SpriteSurface = (() => {
       return atlas;
     }
     return { face, mesh, finish, reserve, meshRegion, faceRegion };
+  }
+  function setShadowShell(atlas, id, definition) {
+    const face = namedFaces.get(atlas)?.get(id);
+    const index = face && atlas.shadowFaces?.findIndex(row => row.first === face.first);
+    if (index === undefined || index < 0) throw new RangeError('Shadow shell edits need a named shadow-casting face');
+    const { first, region } = atlas.shadowFaces[index];
+    const shell = shells.prepare(definition,region.width,region.height);
+    const faces = atlas.shadowFaces.slice();
+    faces[index]=Object.freeze({ first, region, ...(shell && {shell}) });
+    atlas.shadowFaces=Object.freeze(faces);
   }
   const updates = new WeakMap();
   function markDirty(atlas, rect = { x: 0, y: 0, width: atlas.width, height: atlas.height }) {
@@ -251,6 +265,6 @@ const SpriteSurface = (() => {
     const rows=(geometryUpdates.get(atlas)??[]).filter(r=>r.revision>revision);
     return rows[0]?.revision===revision+1&&rows.at(-1)?.revision===atlas.geometryRevision?rows.map(r=>({...r})):null;
   }
-  return Object.freeze({ make, markDirty, updatesSince, update, markGeometryDirty, geometryUpdatesSince, uvSlip, samplingPlan, samplingGLSL: resampling.glsl });
+  return Object.freeze({ make, setShadowShell, markDirty, updatesSince, update, markGeometryDirty, geometryUpdatesSince, uvSlip, samplingPlan, samplingGLSL: resampling.glsl });
 })();
 if (typeof module !== 'undefined') module.exports = SpriteSurface;
