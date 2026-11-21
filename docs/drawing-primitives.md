@@ -37,3 +37,13 @@ ellipses, rounded rectangles and filled paths. In that tool, a command's
 `translate` offset moves the fade anchors with the shape.
 
 Use `--composite <file.json>` with the CLI render commands or `sim render` to supply a drawing definition. Scene-authored settings use `finish.look.composite` in dioramas and `visual.look.composite` in simulation worlds. [Mixed-resolution compositing](mixed-resolution.md) · [Editable render graph](render-graph.md)
+
+[Ray fans](drawing-ray-fan.md) and [registration grids](drawing-registration-grid.md)
+can use the same drawing falloff. The [drawing studies](../examples/drawing-falloff-studies.cjs)
+show the three controls independently and in one composition.
+
+```sh
+node examples/drawing-falloff-studies.cjs drawing-studies
+```
+
+Add `--frames` for 84 evenly spaced frames of the looping combined study.
