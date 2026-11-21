@@ -81,6 +81,11 @@
         return {...result,options:result.value.options};
       }
     },
+    'music.composeSlices': {
+      description: 'Compose recorded slice phrases with drifting loops, additive changes, cut-ups and pitched answers.',
+      inputs:{source:'record'},outputs:{value:'record',events:'array<record>',options:'record',report:'record'},
+      run({source}) {return A.sliceComposition.compose(source);}
+    },
     'music.capturePadPerformance': {
       description: 'Capture timestamped pad pulses with velocity and hit controls as editable sample-kit events.',
       inputs:{source:'record',routes:'record',options},

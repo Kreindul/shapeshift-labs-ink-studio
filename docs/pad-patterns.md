@@ -145,6 +145,10 @@ identifies each event's source step, cycle, and fill. In JavaScript use
 `KIT.procedural.mediaGraph.padPattern` with `perform`, `capture`, or `edit`.
 These are offline authoring and rendering tools.
 
+Use [slice composition](slice-composition.md) to build larger phrases
+from recordings with overlapping loops, additive rhythms, cut-ups, and
+pitched responses. It emits the same editable pad performance.
+
 Run [Relay Logic](../examples/music-production/pad-pattern-workshop.cjs)
 with `node examples/music-production/pad-pattern-workshop.cjs output-directory`
 to produce the pattern, captured performance, targeted edits, and both

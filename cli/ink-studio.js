@@ -1103,6 +1103,7 @@ const CMD = {
         '  music samples kit <library> kit.json performance.json --out directory   play a sample kit and export its stems',
         '  music samples print <library> recipe.json --out directory   print dry and/or wet graph taps as reusable samples',
         '  music pads program pattern.json [settings.json] --out performance.json   resolve a pad pattern',
+        '  music pads compose score.json --out performance.json [--report trace.json]   compose recorded slices',
         '  music pads capture recording.json routes.json --out performance.json   capture timestamped pad pulses',
         '  music pads edit performance.json edits.json --out revised.json   edit captured hits by ID',
         '  music soundfont <file.sf2> <preset.json> --out directory   sample a SoundFont preset with FluidSynth',
