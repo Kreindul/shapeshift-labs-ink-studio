@@ -105,6 +105,8 @@ module.exports = {
   ...require('./cli/gltf-asset.js'),
   render: require('./cli/render.js').render,
   ...require('./cli/graph-project.js'),
+  createTake: require('./cli/take.js').createTake,
+  readTake: require('./cli/take.js').readTake,
   ...require('./cli/graph-host.js'),
   readWav: require('./cli/wav.js').read,
   decodeWav: require('./cli/wav.js').decode,

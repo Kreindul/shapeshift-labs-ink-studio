@@ -11,9 +11,9 @@ const RenderContract = (() => {
   function options(world, frame = {}, bindClocks) {
     let out = { ...frame, time: frame.time ?? frame.t };
     const clocks = out.timeDomains ?? world.timeDomains;
-    if (clocks) {
+    if (clocks || out.take !== undefined) {
       if (bindClocks) out = bindClocks(world, out);
-      else if (typeof clocks.frame === 'function') out = clocks.frame(out);
+      else if (typeof clocks?.frame === 'function') out = clocks.frame(out);
       else throw new TypeError('Expected a live render clock set');
     }
     const time = out.time ?? world.lookSnapshot?.time;

@@ -51,7 +51,8 @@
     return { inputs: { ...group.inputs, timing: options }, outputs: group.outputs, time: true,
       instantiate() {
         const evaluate = group.instantiate();
-        const run = ({ timing, ...inputs }, ctx) => evaluate(inputs, { ...ctx, time: clock(timing.time ?? ctx.time, timing).value });
+        const run = ({ timing, ...inputs }, { time, take: _take, ...ctx }) =>
+          evaluate(inputs, { ...ctx, time: clock(timing.time ?? time, timing).value });
         run.clear = () => evaluate.clear?.();
         run.inspect = () => evaluate.inspect?.();
         return run;

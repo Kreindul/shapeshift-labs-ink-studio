@@ -3,7 +3,7 @@
   const A = P.mediaGraph;
   const { int, range, plain, id, floor, clock } = P.mediaGraphSupport;
   const valid = P.graphTypes.validator('audio');
-  const axes = new Map();
+  const axes = new Map(), T = P.takeTime;
 
   function audio(source) {
     if (!valid(source) || !int(source.sampleRate, 1, 768000) || !int(source.channels, 1, 64) ||
@@ -31,7 +31,10 @@
 
   function span(source, time, options) {
     const { origin = 0, offset = 0 } = options;
-    if (!range(offset, -1e9, 1e9)) throw new RangeError('Audio offset must be finite seconds');
+    const timing = options.take === undefined ? null : T.requireFrame(options.take);
+    const exact = timing && T.read(offset);
+    if (!range(timing ? T.seconds(exact) : offset, -1e9, 1e9))
+      throw new RangeError('Audio offset must be finite seconds');
     const frame = clock(time, options), fps = options.fps ?? 24;
     const factor = typeof fps === 'number' ? 1 : fps.denominator;
     const numerator = typeof fps === 'number' ? fps : fps.numerator;
@@ -50,7 +53,10 @@
       if (!Number.isSafeInteger(result)) throw new RangeError('Audio clip is outside the sample coordinate range');
       return result;
     }
-    const first = sample(frame.frame), end = sample(frame.frame + 1), total = source.samples.length / source.channels;
+    const exactSample = value => T.index(T.roundDown(T.mul(T.sub(value, exact), [BigInt(source.sampleRate), 1n])));
+    const first = timing ? exactSample(timing.start) : sample(frame.frame);
+    const end = timing ? exactSample(timing.end) : sample(frame.frame + 1);
+    const total = source.samples.length / source.channels;
     const available = Math.max(0, Math.min(end, total) - Math.max(first, 0));
     return { ...frame, firstSample: first, endSample: end, sampleCount: end - first, available, sampleRate: source.sampleRate };
   }

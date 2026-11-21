@@ -2,8 +2,12 @@
 (function (P) {
   const A = P.mediaGraph;
   const options = { type: 'record', default: {} };
+  function mediaTime(time, take, settings) {
+    const local = ['time', 'frame', 'fps', 'origin'].some(key => Object.hasOwn(settings, key));
+    return { time, ...(!local && take !== undefined && { take }), ...settings };
+  }
   const media = (outputs, sample) => ({ inputs: { source: 'audio', options }, outputs, time: true,
-    run({ source, options }, { time }) { return sample(source, { time, ...options }); }
+    run({ source, options }, { time, take }) { return sample(source, mediaTime(time, take, options)); }
   });
   A.operations = Object.freeze({
     'audio.buffer': {
@@ -25,12 +29,12 @@
       inputs: { source: 'record', options }, outputs: { value: 'record', events: 'array<record>', pulses: 'array<record>', report: 'record' },
       time: true, instantiate() {
         let prior, replay;
-        return ({ source, options }, { time }) => {
+        return ({ source, options }, { time, take }) => {
           if (source !== prior) {
             replay = A.inputReplay(source);
             prior = source;
           }
-          return replay.sample({ time, ...options });
+          return replay.sample(mediaTime(time, take, options));
         };
       }
     },

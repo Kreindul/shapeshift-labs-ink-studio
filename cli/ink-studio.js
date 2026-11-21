@@ -1040,6 +1040,7 @@ const CMD = {
         '  typography <type.json> [--font font.ttf --at seconds --out report.json]  inspect glyph layout and animation',
         '  camera-impulses <motion.json> [--at seconds --eye x,y,z --yaw radians --pitch radians --out report.json]  inspect camera motion',
         '  camera-rig <scene or world> [--at seconds --camera-shot ID --out report.json]  sample a shot and its clearance',
+        '  take sample <take.json> --frame N [--resume checkpoint.json --checkpoint file.json --out report.json]',
         '  timeline <scene> [--at seconds] [--from seconds --to seconds] [--out report.json]  sample tracks and export cues',
         '  authored-contacts <id> [--at seconds] [--out report.json]  inspect contact ranges and socket transfer timing',
         '  motion-fx <id> [--at seconds] [--out report.json]  inspect keyed FX layers and sampled effect output',
@@ -2075,6 +2076,9 @@ const CMD = {
       fs.mkdirSync(path.dirname(out), { recursive: true });
       fs.writeFileSync(out, report);
     } else process.stdout.write(report);
+  },
+  take() {
+    return require('./take.js').command(pos,opt,{kit:lib(),operations:cfg.graphOperations,adapters:cfg.graphAdapters});
   },
   timeline() {
     return worldCLI().inspectTimeline(pos[0]);

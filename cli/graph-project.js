@@ -232,7 +232,7 @@ function cacheReport(frame) {
 }
 
 function createGraphProject(source, { kit=require('../index.js').load(), baseDir=process.cwd(), operations={}, adapters={}, sourceFile }={}) {
-  const {graph,data,mediaGraph}=kit.KIT.procedural;
+  const {graph,data,mediaGraph,takeTime}=kit.KIT.procedural;
   const host=createGraphHost(adapters,{kit});
   const {broadcast}=graph.arrays;
   const groupOperators=[...graph.arrays.groupOperators,...kit.KIT.procedural.animationGraph.groupOperators];
@@ -355,11 +355,15 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
   let executable, previous=new Map();
 
   function request(options={}) {
-    const {inputs={},time:t=time,seed:s=seed}=fields(options,['inputs','time','seed'],'graph run options');
+    const {inputs={},take,time:t=take?.start ?? time,seed:s=seed}=fields(options,['inputs','time','seed','take'],'graph run options');
     const resolved=clock(t,s);
+    if (take!==undefined) {
+      takeTime.requireFrame(take);
+      if (t!==take.start) throw new RangeError('Graph seconds must match the take frame start');
+    }
     for (const [name] of named(inputs,'input values'))
       if (!Object.hasOwn(rootPlan.inputs,name)) throw new RangeError('Unknown graph input '+name);
-    return {...resolved,inputs:compiled.parameters(snapshotInputs(inputs,data.clone))};
+    return {...resolved,take,inputs:compiled.parameters(snapshotInputs(inputs,data.clone))};
   }
 
   function clear() {
@@ -370,16 +374,16 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     }
   }
 
-  function evaluate({inputs,time,seed}) {
+  function evaluate({inputs,time,seed,take}) {
     const values=Object.fromEntries(Object.entries(inputs).map(([name,value])=>{
       const prior=previous.get(name);
       return [name,sameValue(prior,value) ? prior : value];
     }));
     try {
       executable??=graph.create(spec,{operations:ops,groups});
-      const frame=executable.evaluate(values,{time,seed});
+      const frame=executable.evaluate(values,{time,seed,take});
       previous=new Map(Object.entries(values));
-      return {frame,report:{...header,time,seed,cache:cacheReport(frame),
+      return {frame,report:{...header,time,seed,...(take!==undefined && {take}),cache:cacheReport(frame),
         inputs:Object.fromEntries(Object.entries(values).map(([name,value])=>[name,describe(value)]))}};
     } catch (error) {
       try { clear(); } catch { /* Preserve the evaluation error after discarding this instance. */ }

@@ -711,6 +711,9 @@ node examples/procedural-generation.cjs procedural-review
 ink-studio graph run procedural-review/storm-relay.json --at 1.22 --out procedural-review/graph
 ```
 
+Use a [take clock](take-clock.md) to sample a graph, world, timeline, and
+recorded media against one rational picture frame.
+
 ## Audio and automation
 
 See [Audio, recorded inputs and host adapters](graph-media.md) for native

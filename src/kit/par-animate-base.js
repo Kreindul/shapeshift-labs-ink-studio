@@ -50,8 +50,12 @@
     }
 
     function seek(time) {
-      const target = Math.floor(time / recipe.dt + 1e-8);
-      if (!Number.isFinite(time) || time < 0 || !int(target, 0, recipe.maxTicks))
+      if (!Number.isFinite(time) || time < 0)
+        throw new RangeError('Raster simulation time is outside its fixed-tick range');
+      return seekTick(Math.floor(time / recipe.dt + 1e-8));
+    }
+    function seekTick(target) {
+      if (!int(target, 0, recipe.maxTicks))
         throw new RangeError('Raster simulation time is outside its fixed-tick range');
       let start = tick <= target ? tick : 0;
       for (const cached of at.keys()) if (cached <= target && cached > start) start = cached;
@@ -84,7 +88,7 @@
         throw error;
       }
     }
-    return Object.freeze({ recipe, seek });
+    return Object.freeze({ recipe, seek, seekTick });
   }
 
   function size({ width = 96, height = 64 } = {}, limit = 65536) {

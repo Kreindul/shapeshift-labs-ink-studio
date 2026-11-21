@@ -10,7 +10,11 @@
     return Math.abs(nearest - value) <= 4 * Number.EPSILON * Math.max(1, Math.abs(value)) ? nearest : Math.floor(value);
   };
 
-  function clock(time, { fps = 24, origin = 0, frame } = {}) {
+  function clock(time, { fps = 24, origin = 0, frame, take } = {}) {
+    if (take !== undefined) {
+      P.takeTime.requireFrame(take);
+      return { frame: take.frame, fps: take.fps, start: take.start, end: take.end };
+    }
     const { numerator, denominator } = typeof fps === 'number' ? { numerator: fps, denominator: 1 } : fps ?? {};
     if (!range(time, -1e9, 1e9) || !range(origin, -1e9, 1e9) || !range(numerator, .001, 1e9) ||
         !int(denominator, 1, 1e9) || typeof fps !== 'number' && !int(numerator, 1, 1e9) ||

@@ -7,7 +7,7 @@ const defaults = ['coverage', 'depth', 'normal', 'objectId', 'materialId', 'emis
 const positionPass = new Set(['position', 'objectPosition']);
 const finitePass = new Set(['depth', 'emissionDepth']);
 
-function renderGraphScene(source, { camera, lights, channels = defaults, options = {}, time = 0, kit } = {}) {
+function renderGraphScene(source, { camera, lights, channels = defaults, options = {}, take, time = take?.start ?? 0, kit } = {}) {
   const api = (kit ?? require('../index.js').load()).KIT.procedural.sceneGraph;
   const { width = 128, height = 128, time: at = time, ...settings } = options;
   if (![width, height].every(n => Number.isSafeInteger(n) && n > 0 && n <= 2048) ||
@@ -18,7 +18,7 @@ function renderGraphScene(source, { camera, lights, channels = defaults, options
   const lighting = lights?.length ? api.lightOptions(lights) : {};
   let sampledCamera;
   const renderOptions = { ...settings, ...lighting, ...(view && { camera: view }),
-    w: width, h: height, px: 1, t: at, passes: requested };
+    w: width, h: height, px: 1, t: at, passes: requested, ...(take !== undefined && { take }) };
   const frame = render(source, {
     ...renderOptions, ...cameraCapture(renderOptions, camera => { sampledCamera = camera; })
   });
@@ -83,7 +83,9 @@ function graph3DOperations(kit) {
       inputs: { source: 'world', camera: options, lights: { type: 'array<record>', default: [] },
         channels: { type: 'array<string>', default: defaults }, options },
       outputs: { value: 'raster', frame: 'renderFrame', motionReference: 'any', report: 'record' }, time: true,
-      run({ source, options, ...inputs }, { time }) { return renderGraphScene(source, { ...inputs, options, time, kit }); }
+      run({ source, options, ...inputs }, { time, take }) {
+        return renderGraphScene(source, { ...inputs, options, time, kit, ...(options.time === undefined && { take }) });
+      }
     },
     'scene.pass': {
       inputs: { frame: 'renderFrame', channel: 'string', options },
