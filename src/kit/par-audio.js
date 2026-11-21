@@ -114,6 +114,31 @@
         return {value,traits:P.musicComposer.motif.inspect(value)};
       }
     },
+    'music.makePhrase': {
+      description: 'Generate a seeded melodic call, answer and cadence with deliberate gaps and articulation.',
+      inputs: { options }, outputs: { value:'record', traits:'record' },
+      run({options}) {
+        const value=P.musicComposer.makePhrase(options);
+        return {value,traits:P.musicComposer.motif.inspect(value)};
+      }
+    },
+    'music.analyzeArrangement': {
+      description: 'Measure bar repetition, articulation, gaps, and optional rendered mix and stem dynamics.',
+      inputs: { source:'record', options }, outputs: { value:'record', findings:'array<record>' },
+      run({source,options}) {
+        const value=P.musicComposer.analyze(source,options);
+        return {value,findings:value.findings};
+      }
+    },
+    'music.suggest': {
+      description: 'Propose editable calls, answers, fills and accents with measured changes and pin awareness.',
+      inputs: { source:'record', options },
+      outputs: { value:'record', variants:'array<record>', proposals:'array<record>' },
+      run({source,options}) {
+        const value=P.musicComposer.suggest(source,options);
+        return {value,variants:value.variants,proposals:value.proposals};
+      }
+    },
     'music.arrange': {
       description: 'Build a native score and scene cues from roles, motifs and inheriting sections.',
       inputs: { source:'record' }, outputs: { value:'record', score:'record', cues:'array<record>', report:'record' },
