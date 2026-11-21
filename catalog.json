@@ -1549,6 +1549,17 @@
       ]
     },
     {
+      "id": "render.textile",
+      "kind": "api",
+      "status": "ready",
+      "title": "Thread, stitch and woven surfaces",
+      "what": "Render directional embroidery, interlaced knit loops, and over-under woven strips with native depth on curved charts.",
+      "use": "K.textile.draw(B, K.textile.weave({columns: 12, rows: 9}))",
+      "where": "src/kit/p81-textile.js",
+      "example": "examples/thread-studies.html",
+      "tags": ["thread", "stitch", "knit", "weave", "optional"]
+    },
+    {
       "id": "render.voxelSurface",
       "kind": "api",
       "status": "ready",

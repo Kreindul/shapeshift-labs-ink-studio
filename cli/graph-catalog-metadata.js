@@ -115,6 +115,14 @@ const blurTile = property('number|vec2|boolean', {unit: 'pixels', constraints: {
   integer: true, min: 1, max: 1024, allowedBoolean: false, automaticAbovePixels: 1048576, automaticSize: 256
 }});
 const options = {
+  'textile.pattern': {
+    size: property('vec2', {unit:'world units'}, [4,3]),
+    columns: property('number',limit(1,128,true),12), rows: property('number',limit(1,128,true),9),
+    radius: property('number',limit(.0001,100),.04), samples: property('number',limit(2,12,true),4),
+    length: property('number',limit(.05,8),.87), flatness: property('number',limit(.08,1),.34),
+    pattern: property('array<string>',{},['10','01'])
+  },
+  'textile.world': {appearance:property('record',{}),camera:property('record',{})},
   'paper.stack': {gap:property('number',{unit:'world units',constraints:{min:0}},.15),thickness:property('number',{unit:'world units',constraints:{min:0}},.035)},
   'paper.relief': {levels:property('array<number>',{constraints:{increasing:true,minItems:1,maxItems:64}},[.1,.3,.5]),cell:property('number',{unit:'world units',constraints:{exclusiveMin:0}},.06)},
   'paper.world': {draw:property('record',{}),camera:property('record',{})},
