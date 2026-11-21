@@ -75,6 +75,11 @@
     },
     'fx.tileStrideSlip':raster(E.tileStrideSlip,{value:'raster',addresses:'raster'}),
     'fx.scanlineRemap':raster(E.scanlineRemap,{value:'raster',addresses:'raster'}),
+    'fx.rasterSchedule':{
+      description:'Write palette slots, source offsets and pixel sizes on specified output rows.',
+      inputs:{source:'raster',options},outputs:{value:'displayRaster'},time:true,
+      run({source,options},{time}){return {value:E.rasterSchedule(source,{time,...options})};}
+    },
     'fx.blockSubstitute':{
       inputs:{source:'raster',banks:options,options},outputs:{value:'raster',mask:'raster'},
       run({source,banks,options}){return E.blockSubstitute(source,{...options,banks});}
@@ -83,6 +88,14 @@
       inputs:{source:'raster',palette:'palette',bank:{type:'any',default:null},options},
       outputs:{value:'raster',indices:'raster'},
       run({source,palette,bank,options}){return E.bitplane(source,palette,{...options,bank:bank ?? options.bank});}
+    },
+    'fx.paletteCycle':{
+      description:'Rotate independently timed palette slots while preserving the index raster.',
+      inputs:{source:'raster',palette:'palette',cycles:options,alpha:{type:'any',default:null},options},
+      outputs:{value:'displayRaster',indices:'raster',palette:'palette'},time:true,
+      run({source,palette,cycles,alpha,options},{time}){
+        return E.paletteCycle(source,palette,{time,...options,cycles,alpha:alpha ?? options.alpha});
+      }
     },
     'fx.paletteFault':{
       inputs:{source:'raster',palette:'palette',options},outputs:{value:'raster',indices:'raster'},

@@ -137,6 +137,60 @@ Use `--ink file.json` to apply a standalone ink profile through the CLI or `--in
 node cli/ink-studio.js render examples/selective-ink.js --w 318 --h 160 --px 1 --out aqueduct.png
 ```
 
+### Hold and lose edges by shot
+
+Set a line's `strength` from 0 to 1 to control how much ink it adds. Add
+`lost` to blend the edge itself into the adjacent rendered colour. Use the
+same controls on silhouettes, creases, and material boundaries.
+
+```js
+const ink = {
+  occlusionSilhouettes: true,
+  silhouette: { color: '#2b3144', strength: .8 },
+  targets: [
+    { select: { object: 'courier' }, silhouette: {
+      lost: { lightness: [.24, .42], contrast: [.055, .24] }
+    } },
+    { select: { surface: 'courier-face' }, silhouette: {
+      color: '#cc9488', strength: 1, lost: false
+    } },
+    { select: { surface: 'courier-hand' }, silhouette: {
+      color: '#f4c49a', strength: 1, lost: false
+    } },
+    { select: { tag: 'distance' }, silhouette: {
+      lost: { strength: .9, contrast: [.05, .24], distance: { near: 10, far: 17 } }
+    } }
+  ]
+};
+```
+
+- `lost.strength` controls the blend and defaults to 1. Use `lost: false`
+  on a more specific target to restore its edge. `strength: 0` on the
+  line makes the blend its only colour operation.
+- `lightness: [low, high]` limits the blend to shadows on the edge.
+  `contrast: [low, high]` limits it by the lightness difference across
+  the edge. Each gate is full through `low` and feathers to zero at
+  `high`. Lightness and contrast use the rendered colour in 0–1.
+- `lost.distance: { near, far }` introduces the blend between the
+  specified camera distances. All supplied gates multiply together.
+  The line's own `distance` range still controls its ink contribution.
+
+The headless renderer samples visible neighbours on the native art grid,
+with depth and ownership deciding which edge each neighbour belongs to.
+Merge samples use non-emissive surfaces and visible backgrounds.
+Reserved palettes retain precedence. Palette pixel inspection reports the
+neighbour's colour and blend weight as `lost-silhouette`, `lost-crease`,
+or `lost-boundary`.
+
+```sh
+node cli/ink-studio.js render examples/edge-hierarchy.js --w 320 --h 168 --px 1 --out last-signal.png
+```
+
+The [last signal scene](../examples/edge-hierarchy.js) keeps the face and
+lantern hand distinct while letting the cloak and far aqueduct soften.
+Author the profile in `finish.look.ink` or override it for a shot with
+`--ink file.json`. Use `--ink off` to bypass selective ink.
+
 See [Stable dithering and camera review](stable-dithering.md) for per-object anchors and native-resolution pan and orbit clips. Camera snapping applies to orthographic projection. World-space dithering samples at the visible surface. Object-space dithering maps the sample back to the splat's rest frame, using the rig transform where available. Screen-space dithering follows the art grid. Use `--ortho --snap`, `--dither-space screen|world|object`, and `--resolve native|coverage|clusters`. The coverage and cluster modes render four subpixels per art pixel and can protect named objects, materials, glints and small emissive details.
 
 ## Art-pixel effects
