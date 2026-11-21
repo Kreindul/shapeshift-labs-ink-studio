@@ -1136,3 +1136,5 @@ Use [contour ribbons and topographic rendering](docs/contour-ribbons.md) to trac
 Use [faceted surface reconstruction](docs/faceted-surfaces.md) for optional flat SDF patches with per-object size, lattice orientation and colour grouping. Explore [Amethyst Quarry / Copperworks](examples/faceted-surfaces.html), including a rigged native flywheel and pixel-art façade decals.
 
 Use [layered cut paper and relief](docs/paper-relief.md) for real apertures, paper thickness, parallax, native geometry and optional crisp front paint with baked soft shadows. Explore [The Quiet Orchard / Tidal Atlas](examples/paper-relief.html).
+
+Use [voxel and relief-pixel surfaces](docs/voxel-surface.md) to sample selected signed fields into cubes, columns, slabs or shallow relief. [Solid Signals](examples/voxel-surface.html) includes a breakable tower and a sculpt that scatters into rigid blocks.

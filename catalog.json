@@ -1547,6 +1547,23 @@
         "sdf",
         "splat"
       ]
+    },
+    {
+      "id": "render.voxelSurface",
+      "kind": "api",
+      "status": "ready",
+      "title": "Voxel and relief-pixel surfaces",
+      "what": "Optionally sample signed fields into cubes, continuous columns, stepped slabs or shallow relief pixels. Native hard faces, hidden-face removal, per-block GPU transforms and existing destruction bindings.",
+      "use": "K.voxelSurface.fromSdf(sdf, {bounds, mode: \"cubes\", size: .2})",
+      "where": "src/kit/p80-voxel-surface.js",
+      "example": "examples/voxel-surface.html",
+      "tags": [
+        "voxel",
+        "relief",
+        "blocks",
+        "destruction",
+        "optional"
+      ]
     }
   ]
 }

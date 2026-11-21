@@ -141,6 +141,9 @@ const specifications = {
     shape: { op: 'sdf.shape' }, fields: { op: 'data.record', inputs: { first: link('shape') } },
     sources: { op: 'data.collect', inputs: { source: link('fields'), keys: ['first'] } }
   }, inputs: { sources: link('sources') } },
+  'sdf.voxels': { inputs: { options: { size: .3 } } },
+  'voxels.world': {nodes:{shape:{op:'sdf.shape'},blocks:{op:'sdf.voxels',inputs:{source:link('shape'),options:{size:.3}}}},inputs:{source:link('blocks')}},
+  'voxels.mesh': {nodes:{shape:{op:'sdf.shape'},blocks:{op:'sdf.voxels',inputs:{source:link('shape'),options:{size:.3}}}},inputs:{source:link('blocks')}},
   'sdf.facets': { inputs: { options: { size: .3 } } },
   'sdf.render': { inputs: { options: { width: 16, height: 16 } } },
   'scene.diorama': { inputs: { definition: diorama } },
