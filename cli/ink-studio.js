@@ -642,6 +642,15 @@ function edgeFilterOption() {
   return edgeFilterOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
 }
 
+let translucentSilhouettesOverride;
+function translucentSilhouettesOption() {
+  const value = opt['translucent-silhouettes'];
+  if (value === undefined) return undefined;
+  if (value === 'off') return false;
+  if (typeof value !== 'string') die('--translucent-silhouettes needs a JSON file or off');
+  return translucentSilhouettesOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
+}
+
 let inkOverride;
 function inkOption() {
   const value = opt.ink;
@@ -745,6 +754,7 @@ const view = extra =>
       colored: !!opt.colored,
       splatOrder: opt['splat-order'],
       splatCoverage: opt['splat-coverage'],
+      translucentSilhouettes: translucentSilhouettesOption(),
       splatFootprints: onOffOption('splat-footprints'),
       brushwork: onOffOption('brushwork'),
       renderGrid: opt['render-grid'] === 'off' ? false : opt['render-grid'] === undefined ? undefined :
@@ -1109,6 +1119,7 @@ const CMD = {
         'detail-preserving relighting: --relighting on|off|file.json --sky-time seconds',
         'bounce options: --sky-bounce color|preset|off --ground-bounce color|preset|off --sky-bounce-intensity n --ground-bounce-intensity n',
         'cloud options: --cloud-field cirrus|coastal-stratus|cumulus|storm-front|file.json|off --cloud-representation auto|card|impostor|volume|off --cloud-self-shadows on|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',
+        'translucent silhouette options: --translucent-silhouettes file.json|off',
         'celestial options: --celestial-tracks on|off|file.json',
         'sky options: --sky-environment file.json|off --sky-time seconds --sky-profile track=profile --sky-transitions file.json|off --sky-reflections scene|material',
         'weather options: --weather-binding on|off|file.json --retained-weather on|off --weather-fronts on|off --weather-tracks on|off --world-precipitation on|off|file.json --rain-impacts on|off|file.json',

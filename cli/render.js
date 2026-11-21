@@ -45,6 +45,7 @@ const ArtStability = require('../src/art-stability.js');
 const { ditherFootprint } = require('./dither-footprint.js');
 const StableDetail = require('../src/stable-detail.js');
 const EdgeFilter = require('../src/edge-filter.js');
+const TranslucentSilhouettes = require('../src/translucent-silhouettes.js');
 const SdfAssist = require('../src/sdf-assist.js');
 const SdfRaster = require('./sdf-assist.js');
 const { footprint, exportOffsets, sampledDepth } = require('./splat-sampling.js');
@@ -305,6 +306,7 @@ function renderFrame(world, o, preparedPalettes) {
   const transparent = !!o.transparent && !o.captureCoverage;
   const integrateFootprint = o.splatFilter === 'footprint';
   const edgeStrengthAt = !o.captureCoverage && EdgeFilter.prepare(o.edgeFilter ?? look.edgeFilter)?.bind(world);
+  const silhouettes = TranslucentSilhouettes.prepare(o.translucentSilhouettes ?? look.translucentSilhouettes);
   const stableDetail = StableDetail.prepare(o.stableDetail ?? look.stableDetail);
   const coverageMode = ContributionRules.coverageMode(o.splatCoverage ?? look.splatCoverage);
   const contactSettings = ContactShadows.prepare(o.contactShadows ?? look.contactShadows);
@@ -1265,6 +1267,9 @@ function renderFrame(world, o, preparedPalettes) {
   if(PIX&&engraved){PIX=PIX.slice();for(let i=0;i<engraved.indices.length;i++)if(engraved.indices[i])PIX[i*8]=0;}
   const materialStyles = o.raw ? null : world.materialPixelStyles;
   const artScale = o.artGridScale || 1;
+  const silhouetteWeight = silhouettes?.weight(Math.min(W,H)/artScale) ?? 0;
+  const silhouetteAt = silhouetteWeight && silhouettes.bind(world);
+  const silhouetteBackground = silhouetteAt && world.back?.length ? new Set(world.back) : null;
   // Keep later translucent coats when the opaque receiver is recoloured per pixel.
   let surfaceOverlay = null;
   const bend = world.refract === undefined ? 6 : world.refract;
@@ -1541,15 +1546,22 @@ function renderFrame(world, o, preparedPalettes) {
       s2 = SC[i] * SC[i],
       pk = d[q + 7];
     const fieldParticle = i >= baseCount;
-    const edgeStrength = edgeStrengthAt && !fieldParticle && !kind && !(kraw & (32 | 64 | 256 | 2048 | 32768)) &&
+    const correction = paint && d[q + 14] === paint.marker;
+    const translucent = al < 1 && d[q+3] < 1 || opticalActive || (kraw & 16) && (kraw & 256);
+    const silhouette = silhouetteAt && !fieldParticle && !correction && !(kraw & (64 | 2048)) &&
+      !silhouetteBackground?.has(i) && translucent ? silhouetteAt(i) : null;
+    const silhouetteFilter = silhouette ? silhouette.filter*silhouetteWeight : 0;
+    const edgeStrength = !silhouette && edgeStrengthAt && !fieldParticle && !kind && !(kraw & (32 | 64 | 256 | 2048 | 32768)) &&
       !opticalActive && !(paint && d[q + 14] === paint.marker) ? edgeStrengthAt(i) : 0;
-    const footprintMargin = integrateFootprint ? .25 : edgeStrength > 0 ? exportOffsets.at(-1) : 0;
+    const footprintMargin = silhouetteFilter ? exportOffsets.at(-1) :
+      integrateFootprint ? .25 : edgeStrength > 0 ? exportOffsets.at(-1) : 0;
+    const shapeMargin = silhouetteFilter ? footprintMargin : 0;
     const jStyle = i * 4, packedEdge = world.materialPixelStyles?.[jStyle] || 0;
     const edgeStyle = o.raw ? 0 : ContributionRules.materialEdge(packedEdge);
     const mode = ContributionRules.materialCoverage(packedEdge, coverageMode);
     const softCoverage = o.soft || mode === ContributionRules.softCoverage;
     const shaped = footprintPlan?.styles[(world.splatFootprints.indices[i]??0)-1];
-    const continuousCoverage = !shaped && !softCoverage && !fieldParticle &&
+    const continuousCoverage = !silhouette && !shaped && !softCoverage && !fieldParticle &&
       ContributionRules.continuous(mode, al, kraw, opticalActive || surface?.reveals(i));
     const filterVariance = continuousCoverage ? ContributionRules.continuousVariance * artScale * artScale : .15;
     const styleKey = (kraw & 32768) ? 0 : materialStyles?.[jStyle + 1] || 0;
@@ -1632,11 +1644,20 @@ function renderFrame(world, o, preparedPalettes) {
     const geometryDetail = stableDetail?.geometry && !fieldParticle && !opticalActive && StableDetail.strokeEligible(kraw) &&
       !(paint && d[q + 14] === paint.marker) && !world.effectParticles?.some(({first,count}) => i>=first && i<first+count);
     const projectedA = a0 * u0 + a1 * u1 + a2 * u2, projectedC = b0 * w0 + b1 * w1 + b2 * w2;
-    const A = projectedA + filterVariance,
+    let A = projectedA + filterVariance,
       Bq = b0 * u0 + b1 * u1 + b2 * u2,
       C = projectedC + filterVariance,
       det = A * C - Bq * Bq;
     if (det <= 0) continue;
+    let opacityGain = 1;
+    if (silhouette && !shaped) {
+      const fit = TranslucentSilhouettes.fit(silhouette,A,Bq,C,artScale,silhouetteWeight);
+      A=fit.a;
+      Bq=fit.b;
+      C=fit.c;
+      det=A*C-Bq*Bq;
+      opacityGain=fit.gain;
+    }
     const geometryWeight = geometryDetail ? StableDetail.weight(stableDetail.geometry,
       StableDetail.geometryPixels(projectedA,Bq,projectedC,artScale)) : 1;
     if (!geometryWeight) continue;
@@ -1651,7 +1672,7 @@ function renderFrame(world, o, preparedPalettes) {
       k2 = A / det;
     let ex = Math.min((shaped ? shaped.reach : 3) * Math.sqrt(A) + footprintMargin, 2048),
       ey = Math.min((shaped ? shaped.reach : 3) * Math.sqrt(C) + footprintMargin, 2048);
-    if(projectedFrame){const reach=shaped.reach/SplatFootprints.half;ex=Math.min(2048,Math.max(ex,(Math.abs(projectedFrame[0])+Math.abs(projectedFrame[2]))*reach));ey=Math.min(2048,Math.max(ey,(Math.abs(projectedFrame[1])+Math.abs(projectedFrame[3]))*reach));}
+    if(projectedFrame){const reach=shaped.reach/SplatFootprints.half;ex=Math.min(2048,Math.max(ex,(Math.abs(projectedFrame[0])+Math.abs(projectedFrame[2]))*reach+shapeMargin));ey=Math.min(2048,Math.max(ey,(Math.abs(projectedFrame[1])+Math.abs(projectedFrame[3]))*reach+shapeMargin));}
     const engravingId=(kraw&(32|256|32768))?0:(engraved?.indices[i]??0),engravingStyle=engravingId&&engraved.styles[engravingId-1];
     let engrave;
     if(engravingStyle&&(!engravingStyle.screenPrint||o.screenPrint!==false)&&(!engravingStyle.brushwork||o.brushwork!==false)){
@@ -1682,8 +1703,8 @@ function renderFrame(world, o, preparedPalettes) {
         const p=[x,y,z].map((v,k)=>v+(frame[k]*a+frame[k+3]*b)*reach);
         const q=[0,1,2].map(k=>V[k]*p[0]+V[k+4]*p[1]+V[k+8]*p[2]+V[k+12]);
         if(q[2]>=-near){ex=ey=2048;continue;}
-        ex=Math.min(2048,Math.max(ex,Math.abs(W*.5+focal*q[0]/-q[2]-sx)));
-        ey=Math.min(2048,Math.max(ey,Math.abs(H*.5+focal*q[1]/-q[2]-sy)));
+        ex=Math.min(2048,Math.max(ex,Math.abs(W*.5+focal*q[0]/-q[2]-sx)+shapeMargin));
+        ey=Math.min(2048,Math.max(ey,Math.abs(H*.5+focal*q[1]/-q[2]-sy)+shapeMargin));
       }
     }
     if (kind === 1) {
@@ -1743,7 +1764,6 @@ function renderFrame(world, o, preparedPalettes) {
       if (!glassLooks.has(target)) glassLooks.set(target, optics.transform(target));
       glassLook = glassLooks.get(target);
     }
-    const correction = paint && d[q + 14] === paint.marker;
     const coat = !retainLayers && PIX && (opticalActive || correction || fieldParticle ||
       hasSurface && (!writesDepth || reflectInRaster || surface.reveals(i)));
     if (coat && !surfaceOverlay) surfaceOverlay = new Float32Array(W * H * 4);
@@ -1790,22 +1810,48 @@ function renderFrame(world, o, preparedPalettes) {
     const probeCenter = wantsDepth && [x, y, z];
     const probeReach = wantsDepth ? 3 * Math.sqrt(c00 + c11 + c22) : 0;
     const centerMark = lookPass && { ...lookPass.mark };
+    const shapeExponent = silhouette ? 1+(silhouette.falloff-1)*silhouetteWeight : 1;
+    const shapeGain = silhouette ? al*(1+(silhouette.opacity-1)*silhouetteWeight) : al;
+    const shapeCenter = planeFrame && [x,y,z];
+    const hard = solid && !softCoverage;
+    const gain = al*opacityGain;
+    function planeMask(sample) {
+      const [u,v]=sample.uv, m=shaped.matrix;
+      return SplatFootprints.coverage(shaped,m[0]*u+m[1]*v,m[2]*u+m[3]*v);
+    }
     for (let iy = y0; iy <= y1; iy++) {
       const dy = iy + 0.5 - sy;
       for (let ix = x0; ix <= x1; ix++) {
         const dx = ix + 0.5 - sx,
           pw = -0.5 * (k0 * dx * dx + k2 * dy * dy) - k1 * dx * dy;
         const planeRay=planeFrame&&rayAt(ix+.5,iy+.5);
-        const planeHit=planeRay&&SplatFootprints.planeSample([x,y,z],frame,planeRay.origin,planeRay.direction);
+        const planeHit=planeRay&&SplatFootprints.planeSample(shapeCenter,frame,planeRay.origin,planeRay.direction);
         if(planeFrame&&!planeHit)continue;
         const planeDepth=planeHit?planeHit.t*planeRay.axial:undefined;
         if(planeHit&&planeDepth<near)continue;
-        const planeCoverage=planeHit&&SplatFootprints.coverage(shaped,shaped.matrix[0]*planeHit.uv[0]+shaped.matrix[1]*planeHit.uv[1],shaped.matrix[2]*planeHit.uv[0]+shaped.matrix[3]*planeHit.uv[1]);
-        const centerAlpha = shaped ? Math.min(.99,al*(planeHit?planeCoverage:SplatFootprints.sample(shaped,shapeMap,dx,dy))) : ContributionRules.alpha(pw, al, solid && !softCoverage, edgeStyle, continuousCoverage);
+        const centerAlpha = shaped ? Math.min(.99,shapeGain*(planeHit?planeMask(planeHit):SplatFootprints.sample(shaped,shapeMap,dx,dy))**shapeExponent) :
+          ContributionRules.alpha(pw, gain, hard, edgeStyle, continuousCoverage);
         let a = centerAlpha;
-        if (!shaped && integrateFootprint) a = footprint(dx, dy, k0, k1, k2, al, solid && !softCoverage, edgeStyle, continuousCoverage);
+        if (silhouetteFilter) {
+          let average;
+          if (!shaped) average=footprint(dx,dy,k0,k1,k2,gain,hard,edgeStyle,continuousCoverage,exportOffsets);
+          else {
+            let total=0;
+            for (const v of exportOffsets) for (const u of exportOffsets) {
+              let mask;
+              if (planeFrame) {
+                const ray=rayAt(ix+.5+u,iy+.5+v);
+                const hit=SplatFootprints.planeSample(shapeCenter,frame,ray.origin,ray.direction);
+                mask=hit && hit.t*ray.axial>=near ? planeMask(hit) : 0;
+              } else mask=SplatFootprints.sample(shaped,shapeMap,dx+u,dy+v);
+              total+=Math.min(.99,shapeGain*mask**shapeExponent);
+            }
+            average=total/(exportOffsets.length**2);
+          }
+          a+=(average-a)*silhouetteFilter;
+        } else if (!shaped && !silhouette && integrateFootprint) a = footprint(dx, dy, k0, k1, k2, al, hard, edgeStyle, continuousCoverage);
         else if (!shaped && edgeStrength > 0) {
-          const average = footprint(dx, dy, k0, k1, k2, al, solid && !softCoverage, edgeStyle, continuousCoverage, exportOffsets);
+          const average = footprint(dx, dy, k0, k1, k2, al, hard, edgeStyle, continuousCoverage, exportOffsets);
           a += (average - a) * edgeStrength;
         }
         const filteredEdge = edgeStrength > 0 && Math.abs(a - centerAlpha) >= edgeCoverageThreshold;

@@ -610,6 +610,11 @@
       bad('finish.look.edgeFilter', error.message);
     }
     try {
+      TranslucentSilhouettes.prepare(look?.translucentSilhouettes);
+    } catch (error) {
+      bad('finish.look.translucentSilhouettes', error.message);
+    }
+    try {
       ContributionRules.coverageMode(look?.splatCoverage);
     } catch (error) {
       bad('finish.look.splatCoverage', error.message);
