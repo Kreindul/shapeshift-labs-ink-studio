@@ -114,6 +114,16 @@ function cameraCapture(options, receive) {
   } };
 }
 
+function sequenceHistory(kit) {
+  return {
+    artHistory: ArtEffects.history({ frames: 24 }),
+    afterimageHistory: kit.afterimages.history(),
+    renderHistory: kit.renderGraph.history(),
+    volumeHistory: kit.atmosphere.history(),
+    transparencyHistory: kit.stableTransparency.history()
+  };
+}
+
 function render(world, o, preparedPalettes) {
   o = RenderContract.options(world, o, (w, frame) => require('../index.js').load().KIT.timeDomains.frame(w, frame));
   if (o.strictContract) RenderContract.requirePortable(world, o);
@@ -467,6 +477,7 @@ function renderFrame(world, o, preparedPalettes) {
     if (o.captureScenePalette) frame.scenePalette = legacyLook && !tone ? basePalette : null;
     if (!o.captureMotion) delete frame.motionReference;
     if (requestedPasses.length) frame.passes = ArtPasses.subset(passes, requestedPasses);
+    if (readabilitySelectors && frame.readabilityMask) o.captureReadabilityFrame?.(frame);
     return frame;
   };
   if (look.pixelSize !== undefined && (!Number.isSafeInteger(look.pixelSize) || look.pixelSize < 1))
@@ -2941,4 +2952,4 @@ function grid(imgs, cols, labels) {
   });
   return out;
 }
-module.exports = { render, resize, pixelIndex, upscale, grid, label, viewMatrix, FOV, cameraCapture };
+module.exports = { render, resize, pixelIndex, upscale, grid, label, viewMatrix, FOV, cameraCapture, sequenceHistory };

@@ -124,6 +124,7 @@ module.exports = {
   reviewPaletteStages: require('./cli/palette-stages.js').reviewPaletteStages,
   compareShotPalettes: require('./cli/palette-compare.js').compareShotPalettes,
   checkPaletteShot: require('./cli/palette-checks.js').checkPaletteShot,
+  approveShot: require('./cli/shot-approval.js').approveShot,
   exportLayers: require('./cli/export-layers.js').exportLayers,
   exportScene: require('./cli/scene-export.js').exportScene,
   ...require('./cli/scene-audio.js'),

@@ -818,14 +818,7 @@ function sceneEmbedConfig() {
   return JSON.parse(fs.readFileSync(path.resolve(opt['embed-config']), 'utf8'));
 }
 function sequenceHistory() {
-  const K = lib().KIT;
-  return {
-    artHistory: require('../src/art-effects.js').history({ frames: 24 }),
-    afterimageHistory: K.afterimages.history(),
-    renderHistory: K.renderGraph.history(),
-    volumeHistory: K.atmosphere.history(),
-    transparencyHistory: K.stableTransparency.history()
-  };
+  return R.sequenceHistory(lib().KIT);
 }
 function feedbackReplay(world, start, frame) {
   const api = lib().KIT.renderGraph;
@@ -949,6 +942,7 @@ const CMD = {
         '  render <id> --look-masks off   bypass masked look bindings',
         '  render, clip, transition-review, sim render: --recipe <shot.json>   save reproducible review inputs',
         '  shot replay <shot-or-bundle.json> --out <image.png> [--root project | --shot ID]   verify the saved render',
+        '  shot approve <scene> [--plan plan.json] --out report.json [--frame N] [--report-only]',
         '  render <scene.json> --asset-pack <pack-or-bundle.json> [--environment-preset pack/preset]   install and select a reusable look',
         '  ramps <id> [--n 12]         the ramps it is shaded on, and which only get darker without turning; a turning one is offered from the same palette',
         '  values <id> [--t 1.5]       the value check: the picture sorted into dark, middle and light, and whether it reads in three tones',
@@ -1758,6 +1752,29 @@ const CMD = {
     console.log(warn.length ? 'warnings:\n  ' + warn.join('\n  ') : 'no warnings');
   },
   shot() {
+    if (pos[0] === 'approve') {
+      if (pos.length !== 2 || opt.plan === true || typeof opt.out !== 'string' || !/\.json$/i.test(opt.out) ||
+          opt.frame === true || opt['report-only'] !== undefined && opt['report-only'] !== true)
+        die('Use shot approve <scene> [--plan plan.json] --out report.json [--frame N] [--report-only]');
+      const approval = require('./shot-approval.js');
+      const document = opt.plan === undefined ? undefined : JSON.parse(fs.readFileSync(path.resolve(opt.plan), 'utf8'));
+      if (document?.format === approval.format && document.version !== 1) die('Unsupported shot approval report version');
+      const world = buildPreview(pos[1]);
+      const settings = view({ w: num('w', undefined), h: num('h', undefined), transparent: onOffOption('transparent') });
+      const result = approval.approveShot(world, { plan:document?.format === approval.format ? document.plan : document,
+        view:settings, pose, camera:clipCamera(world), kit:lib(), frame:num('frame', undefined) });
+      const findings = require('./shot-approval-output.js').write(result, {
+        file:path.resolve(opt.out), source:pos[1], options:opt, cwd:CWD, entry:__filename
+      });
+      console.log('wrote', path.resolve(opt.out));
+      if (findings) {
+        console.log('First failure at frame', findings.frame, '(' + findings.time.toFixed(6) + 's)',
+          findings.category + '/' + findings.check, 'on', findings.subject);
+        console.log(findings.reproduce.command);
+        if (!opt['report-only']) process.exitCode = 2;
+      }
+      return;
+    }
     if (pos[0] !== 'replay') die('Use shot replay <recipe.json> --out <image.png>');
     if (opt.shot !== undefined) {
       if (opt.root !== undefined) die('A bundled shot uses its packaged project root');
