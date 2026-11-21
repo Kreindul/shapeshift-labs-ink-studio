@@ -171,7 +171,7 @@ function tessellate(K,B,row,style,seed) {
 function label(K, SpriteSurface, style) {
   const atlas=SpriteSurface.make(128);
   const font=K.inspection.font({}), glyphs=[...'TIDELINE'].map(ch=>font.get(ch));
-  atlas.face([-.73,-1.727,1.028],[1.46,0,0],[0,.212,0],48,7,
+  atlas.face([-.747,-1.736,1.054],[1.494,0,0],[0,.228,0],48,7,
     (x,y)=>glyphs[Math.floor(x/6)]?.[y*6+x%6] ? parseInt(style.palette.label.slice(1),16) : undefined,{id:'title'});
   return atlas.finish();
 }
