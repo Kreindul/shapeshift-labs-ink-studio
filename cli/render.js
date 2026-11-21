@@ -6,6 +6,7 @@ const PassQuality = require('../src/pass-quality.js');
 const FOV = (38 * Math.PI) / 180;
 const RenderGrid = require('../src/render-grid.js');
 const SplatFootprints = require('../src/splat-footprints.js');
+const Engraving=require('../src/engraving.js');
 const PixelLook = require('../src/pixel-look.js');
 const RenderStages = require('../src/render-stages.js');
 const LookInputs = require('../src/look-inputs.js');
@@ -1200,6 +1201,8 @@ function renderFrame(world, o, preparedPalettes) {
   }
   const win = PIX ? new Int32Array(W * H).fill(-1) : null;
   const footprintPlan = (o.splatFootprints ?? world.look?.splatFootprints) === false ? null : SplatFootprints.plan(world);
+  const engraved=o.engraving!==false&&world.engraving?Engraving.validate(world):null;
+  if(PIX&&engraved){PIX=PIX.slice();for(let i=0;i<engraved.indices.length;i++)if(engraved.indices[i])PIX[i*8]=0;}
   const materialStyles = o.raw ? null : world.materialPixelStyles;
   const artScale = o.artGridScale || 1;
   // Keep later translucent coats when the opaque receiver is recoloured per pixel.
@@ -1578,6 +1581,16 @@ function renderFrame(world, o, preparedPalettes) {
     let ex = Math.min((shaped ? shaped.reach : 3) * Math.sqrt(A) + footprintMargin, 2048),
       ey = Math.min((shaped ? shaped.reach : 3) * Math.sqrt(C) + footprintMargin, 2048);
     if(projectedFrame){const reach=shaped.reach/SplatFootprints.half;ex=Math.min(2048,Math.max(ex,(Math.abs(projectedFrame[0])+Math.abs(projectedFrame[2]))*reach));ey=Math.min(2048,Math.max(ey,(Math.abs(projectedFrame[1])+Math.abs(projectedFrame[3]))*reach));}
+    const engravingId=engraved?.indices[i]??0,engravingStyle=engravingId&&engraved.styles[engravingId-1];
+    let engrave;
+    if(engravingStyle){
+      const f=SplatFootprints.posedFrame(world,i,t,SC[i]);
+      if(f){const map=SplatFootprints.frameTransform({matrix:[1,0,0,1]},a0*f[0]+a1*f[1]+a2*f[2],b0*f[0]+b1*f[1]+b2*f[2],a0*f[3]+a1*f[4]+a2*f[5],b0*f[3]+b1*f[4]+b2*f[5]);
+        if(map){const at=i*6,ru=engraved.restFrames.subarray(at,at+3),rv=engraved.restFrames.subarray(at+3,at+6),cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],ex=Array.from(ru,(n,j)=>n*map[0]+rv[j]*map[2]),ey=Array.from(ru,(n,j)=>n*map[1]+rv[j]*map[3]);
+          engrave={point:engraved.anchors.subarray(i*3,i*3+3),ex,ey,normal:cross(f.slice(0,3),f.slice(3)),restNormal:cross(ru,rv),footprint:Math.max(Math.hypot(...ex),Math.hypot(...ey))};
+        }
+      }
+    }
     let cutDx, cutDy, cutReach;
     if (cutaway) {
       // Condition the splat's axial depth on its screen position before testing the world-space boundary.
@@ -1627,7 +1640,7 @@ function renderFrame(world, o, preparedPalettes) {
     const fogMix = !(flags & 2) && world.fog.max > 0 && world.fog.start < 1
       ? targetFog(sstep(world.fog.start,1,dn)*world.fog.max*(exposure?.fog?.(x,y,z)??1),rule) : 0;
     const reflectInRaster = (planar || localProbeReflection || reflectedSky) && !pixelSurface;
-    const finishBeforeFog = reflectInRaster || !pixelSurface && surface?.finishBeforeFog(i);
+    const finishBeforeFog = !!engrave || reflectInRaster || !pixelSurface && surface?.finishBeforeFog(i);
     const normal = fragmentSurface ? surface.surfaceNormal(i) : null;
     const centerFog = !opticalActive && !finishBeforeFog && !staged?.lit && !liveNormal && !splatFlash && !relit && coverGain === 1;
     if (fogMix && centerFog) {
@@ -1816,6 +1829,7 @@ function renderFrame(world, o, preparedPalettes) {
           pb = (tint ? optical[opt + 6] : pb) * scatter + optical[opt + 10] * reflection;
           a *= optical[opt];
         }
+        if(engrave){const point=Array.from(engrave.point,(n,j)=>n+engrave.ex[j]*dx+engrave.ey[j]*dy);[pr,pg,pb]=Engraving.shade(engravingStyle,point,engrave.normal,[pr,pg,pb],{light:o.engravingLight??[-.45,.8,.55],footprint:engrave.footprint,restNormal:engrave.restNormal});}
         const claim = paletteClaim?.(p,i,paletteId,pr,pg,pb,materialChoices);
         if (staged?.lit || scoped || glassLook) {
           let sample;
@@ -1848,7 +1862,7 @@ function renderFrame(world, o, preparedPalettes) {
           pg = Lightning.shade(pg, splatFlash[1]);
           pb = Lightning.shade(pb, splatFlash[2]);
         }
-        if (opticalActive || staged?.lit || (fragmentSurface && finishBeforeFog) || liveNormal || splatFlash || relit || coverGain < 1) {
+        if (engrave || opticalActive || staged?.lit || (fragmentSurface && finishBeforeFog) || liveNormal || splatFlash || relit || coverGain < 1) {
           pr += (fog[0] - pr) * fogMix;
           pg += (fog[1] - pg) * fogMix;
           pb += (fog[2] - pb) * fogMix;

@@ -1,3 +1,4 @@
+import {engravingVertexUniforms,engravingVertex,engravingFragment} from './engraving-shaders.mjs';
 // Shared draw and resolve shaders extracted from Inkwell Rebirth's WebGL renderer.
 // Hosts provide the ASCII shader hooks and Ink Studio's shared PixelLook GLSL.
 import { waterGLSL } from './water-optics.mjs';
@@ -30,7 +31,7 @@ vec4 relightAt(int row) { return texelFetch(u_relight, ivec2(row & 511, row >> 9
 export function splatShaderSources(ascii, sampleCoverage, {
   water = false, airPockets = false, layered = false, atlas = false, portal = false, instances = false,
   contributions = false, masked = false, textured = false, layeredGlass = false, coverageRules, materialStyles = false,
-  environment = false, emitterFog=false, relighting = false, optical = false, stableDetail, cutaway, airflow, footprints = false, footprintGLSL
+  environment = false, emitterFog=false, relighting = false, optical = false, stableDetail, cutaway, airflow, footprints = false, footprintGLSL, engraving=false
 } = {}) {
   if (footprints && typeof footprintGLSL !== 'string') throw new Error('Footprint shaders need SplatFootprints.glsl');
   const coverageStride = coverageRules?.coverageStride ?? 4;
@@ -94,6 +95,7 @@ flat out vec4 v_fm; flat out vec4 v_ft; flat out float v_fk; flat out float v_li
 ${contributions || masked ? `${policyUniforms}flat out int v_policySlot;` : ''}
 ${masked ? maskUniforms + maskVaryings(textured).replaceAll('LOOK_IO','out') + maskVertex(textured) : ''}
 ${materialStyles ? 'uniform highp sampler2D u_materialStyles; uniform bool u_materialPatterned, u_materialStylesOn; flat out vec4 v_pixelStyle; flat out float v_pixelFog;' : ''}
+${engraving ? engravingVertexUniforms : ''}
 void main(){
   int record = a_index;
   ${instances ? `ivec2 inst = ivec2((a_instance & 15) * 16, a_instance >> 4);
@@ -310,6 +312,7 @@ ${environment ? '  v_envAxial = -cam.z;' : ''}
   mat3 J = u_ortho > 0.5 ? mat3(u_focal, 0.0, 0.0,   0.0, u_focal, 0.0,   0.0, 0.0, 0.0)   // (orthographic: u_focal is pixels to a unit)
     : mat3(u_focal * iz, 0.0, 0.0,   0.0, u_focal * iz, 0.0,   u_focal * tx * iz * iz, u_focal * ty * iz * iz, 0.0);
   mat3 T = J * mat3(u_view);
+  ${engraving ? engravingVertex : ''}
   mat3 c2 = T * cov * transpose(T);
   float variance = continuous ? ${variance} * u_materialGridScale * u_materialGridScale : u_dilate;
   float A = c2[0][0] + variance, B = c2[0][1], C = c2[1][1] + variance;
@@ -420,6 +423,7 @@ ${water || portal || environment || cutaway ? 'uniform vec2 u_viewport;' : ''}
 ${environment ? environmentMediaSource(emitterFog) + 'flat in float v_envAxial;' : ''}
 ${portal || cutaway ? axialPosition : ''}
 ${footprints ? footprintGLSL : ''}
+${engraving ? engravingFragment : ''}
 ${coverageSource(coverageRules)}
 ${contributions || masked ? `${policyUniforms}flat in int v_policySlot;` : ''}
 ${contributions ? `uniform vec3 u_pal[${scenePaletteSize}], u_out[${scenePaletteSize}]; uniform int u_n;
@@ -488,7 +492,8 @@ ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + 
     return;
   }
   `}
-  if (u_idx > 0.5) {   // the index pass (colour per pixel): which solid dab is in front here, its number in three bytes
+  if (u_idx > 0.5) {
+    ${engraving ? 'if(v_engravingSlot>0)discard;' : ''}   // the index pass (colour per pixel): which solid dab is in front here, its number in three bytes
     if (v_color.a < 1.0 || (continuous ? surfaceAlpha <= 0.5 : g < 0.5) || v_depth < 0.0) discard;
     ${cutaway ? 'if (cutInk > 0.0) { o = vec4(0.0); od = vec4(0.0); oa = vec4(0.0); return; }' : ''}
     float k = v_ix + 1.0;
@@ -529,6 +534,7 @@ ${optical ? `
     a *= v_optical.x;
     if (a < 0.004) discard;
   }` : ''}
+${engraving ? 'rgb=engravingShade(rgb,v_d);' : ''}
 ${contributions ? `  if (v_policySlot > 0) {
     ivec2 p = ivec2(floor(gl_FragCoord.xy * u_lookViewportScale));
     p.y = int(u_lookGrid.y) - 1 - p.y;

@@ -141,7 +141,12 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     back = [],
     cidx = [],
     nrms = [];
-  let footprintRecorder;
+  let footprintRecorder, engravingRanges;
+  function describeEngraving(first,end,spec) {
+    if(first>=end||spec===undefined)return;
+    const prepared=Engraving.prepare(spec);engravingRanges??=[];const last=engravingRanges.at(-1);
+    if(last&&last[1]===first&&last[2]===prepared)last[1]=end;else engravingRanges.push([first,end,prepared]);
+  }
   let ownerRows, materialRows, targetRows, muteEmission, materialAlbedo, materialPixelStyles, opticalSplats;
   let unnamedOwners = new WeakMap(), unnamedMaterials = new WeakMap();
   const ownerIds = new Map(), materialIds = new Map();
@@ -1112,6 +1117,11 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
       },
       meta
     );
+    if(engravingRanges||world.look?.engraving!==undefined&&world.look.engraving!==false){
+      const assignments=[];if(world.look?.engraving!==undefined&&world.look.engraving!==false)assignments.push(['all',world.look.engraving]);
+      if(engravingRanges)for(const [first,end,spec]of engravingRanges)assignments.push([Array.from({length:end-first},(_,i)=>first+i),spec??false]);
+      Engraving.bindMany(world,assignments);
+    }
     if (detailBudgets !== undefined)
       world.look = { ...world.look, detailBudgets: detailBudget?.rules ?? false };
     if (shadowSettings !== undefined)
@@ -1153,6 +1163,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     cidx.length = 0;
     nrms.length = 0;
     footprintRecorder = undefined;
+    engravingRanges=undefined;
     ownerRows = materialRows = muteEmission = materialAlbedo = materialPixelStyles = opticalSplats = undefined;
     unnamedOwners = new WeakMap();
     unnamedMaterials = new WeakMap();
@@ -1204,6 +1215,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     describeAlbedo,
     describePixelStyle,
     describeFootprint,
+    describeEngraving,
     describePrecipitation,
     born: v => (bornV = v === undefined || v === null || !isFinite(v) ? null : v),
     wet: v => (wetV = v === undefined || v === null || !isFinite(v) ? null : v),

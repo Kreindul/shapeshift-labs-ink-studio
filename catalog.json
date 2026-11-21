@@ -1420,6 +1420,24 @@
         "animation",
         "render"
       ]
+    },
+    {
+      "id": "kit.engraving",
+      "kind": "api",
+      "status": "ready",
+      "title": "Engrave native surfaces using nested tonal art maps",
+      "what": "Light-responsive hatching, cross engraving, woodcut and stippling over retained native-splat charts. Shared cached tone/scale maps follow bones, deformation, reconstruction, instances and afterimages in CPU and WebGL renderers.",
+      "use": "K.engraving.bind(world, 'all', {style:'engraving', projection:'triplanar'})",
+      "where": "src/engraving.js, src/webgl/engraving.mjs",
+      "example": "docs/engraving.md, examples/engraving.html",
+      "tags": [
+        "splat",
+        "engraving",
+        "hatching",
+        "tonal-map",
+        "render",
+        "animation"
+      ]
     }
   ]
 }

@@ -1,3 +1,4 @@
+import {createEngravingBinding} from './engraving.mjs';
 import { createFootprintBinding } from './footprints.mjs';
 import { createColorClusters } from './color-clusters.mjs';
 import { createRenderGrid } from './render-grid.mjs';
@@ -114,7 +115,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     // level pipeline. The canvas path specializes its own fullscreen resolve.
     const motionAPI = toolkit.ArtDirection ?? toolkit.KIT?.artDirection;
     const footprintAPI = toolkit.KIT?.splatFootprints;
-    let footprintBinding;
+    let footprintBinding,engravingBinding;
+    const engravingAPI=toolkit.KIT?.engraving;
     const airflow = toolkit.KIT?.procedural?.airflow, climateAPI = toolkit.KIT?.environmentFrame;
     pipeline = createSplatPipeline(gl, { specialize: false, sampleCoverage, coverageRules, stableDetail: stableDetailAPI, cutaway:cutawayAPI?.glsl, airflow, footprintGLSL:footprintAPI?.glsl });
     const emptyVao = resources.allocate('VertexArray');
@@ -685,6 +687,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         world = toolkit.KIT?.shadowArt?.frame(world, camera.shadowFootprint) ?? world;
       const { raw = false, outline = true, dither = 0.35, scale = 1 } = frame;
       const look = world.look ?? {};
+      let engraved=frame.engraving!==false&&!!world.engraving;
+      let engravingUniforms;
       const clusterDefinition = raw || reflectionCapture ? false : frame.colorClusters ?? look.colorClusters;
       if (clusterDefinition !== undefined && clusterDefinition !== false && !clusterAPI)
         throw new Error('Color clusters need the Ink Studio KIT');
@@ -739,7 +743,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const rules = trails ? afterimagesAPI.prepare(afterimageDefinition) : [];
       const normalCaptures = rules.length ? null : captureWater(world, frame, camera, width, height, 0, quality);
       // Per-pixel material, palette, and detail rules index the expanded world.
-      if (group && (materialControls.has(world) || canStage || quality?.rows || rules.length || clusters || frame[graphOwner] || frame.order || tolerance || wantsRelight || wantsEmitters || world.splatFootprints || instancePlan(group).hasSplatFootprints || world.opticalSplats || instancePlan(group).hasOpticalSplats || !raw && (constraintDefinition || look.pixel && world.pix ||
+      if (group && (materialControls.has(world) || canStage || quality?.rows || rules.length || clusters || frame[graphOwner] || frame.order || tolerance || wantsRelight || wantsEmitters || world.engraving || world.splatFootprints || instancePlan(group).hasSplatFootprints || world.opticalSplats || instancePlan(group).hasOpticalSplats || !raw && (constraintDefinition || look.pixel && world.pix ||
           needsDetailFlags || budget?.fineOn || budget?.fineOff))) {
         expandInstances ??= createExpandedInstances();
         const expanded = expandInstances(world,group,frame.changedRows);
@@ -895,7 +899,9 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       if (env || lastEnvironment) historyValid = false;
       lastEnvironment = !!env;
       const wet = water && wetVariant(water,!!env?.media);
-      const footprints = (frame.splatFootprints ?? look.splatFootprints) !== false && !!world.splatFootprints;
+      engraved=frame.engraving!==false&&!!world.engraving;
+      if(engraved)historyValid=false;
+      const footprints = (frame.splatFootprints ?? look.splatFootprints) !== false && !!world.splatFootprints?.styles.length;
       let footprintUniforms;
       if (footprints) {
         if (!footprintAPI) throw new Error('Splat footprints need the Ink Studio KIT');
@@ -950,7 +956,12 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       if (group) {
         instanceDraw ??= createInstanceDraw(table,data,maxSize);
         plan = instanceDraw.bind(group, world, geometryDirty, lastInstances !== group, geometryData);
-      } else data.upload(geometryData, world.count * 16, geometryDirty);
+      } else if(engraved){
+        if(!engravingAPI)throw new Error('Engraving needs the Ink Studio KIT');
+        engravingBinding??=createEngravingBinding(engravingAPI);
+        const attached=engravingBinding(world,geometryData,geometryDirty,frame.engravingLight??[-.45,.8,.55]);
+        data.upload(attached.data,attached.data.length,attached.changedRows);engravingUniforms=attached.uniforms;
+      }else data.upload(geometryData, world.count * 16, geometryDirty);
       if (materialStyles) bindMaterialStyles(world, group, plan, dirty);
       if (hasFine && (isNew || fineValues !== fineTiles)) {
         const fineDirty = incremental && !detail && fineValues === lastWorld.fine ? frame.changedFineRows : undefined;
@@ -1001,7 +1012,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const shader = pipeline.programFor({
         water: !!wet, airPockets: wet?.airPockets, layered: wet?.layered, atlas: wet?.atlas, portal: plane !== zero || !!cover,
         instances: !!plan, contributions:coverage && !!constraints, masked, textured:constraints?.textured, layeredGlass,
-        footprints, materialStyles, environment:env?.media,emitterFog:!!env?.lit, relighting, optical:opticalMaterials, cutaway:!!section
+        engraving:engraved, footprints, materialStyles, environment:env?.media,emitterFog:!!env?.lit, relighting, optical:opticalMaterials, cutaway:!!section
       });
       shader.footprints=footprints;
       gl.useProgram(shader.p);
@@ -1026,7 +1037,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         u_detailTexture: detailTexture, u_detailGeometry: detailGeometry,
         u_crisp: +!raw, u_splatCoverage: splatCoverage, u_dilate: raw ? 0.3 : 0.15, u_near: camera.clipNear,
         u_paintMarker: paint?.marker ?? 0, u_afterimageStart: trailStart,
-        ...footprintUniforms,
+        ...footprintUniforms,...engravingUniforms,
         ...(opticalMaterials && { u_optical: opticalUnit }),
         ...(relighting && { u_relight: relightUnit }),
         u_fog: rgb(world.pal[fog.c ?? 0] ?? 0),
