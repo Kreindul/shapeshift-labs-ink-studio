@@ -306,3 +306,13 @@ test(
     r.reports.forEach(row => assert.equal(row.bad, 0, JSON.stringify(row)));
   }
 );
+
+test('bake snapshots isolate surface frames and malformed stamps leave the builder intact',()=>{
+  const w=stamped(kit),cache=K.authoring.bakeCache,packed=cache.pack(w),rest=Array.from(w.splatFootprints.frames);
+  w.splatFootprints.frames[0]=99;
+  const copied=cache.unpack(packed);assert.deepEqual(Array.from(copied.splatFootprints.frames),rest);
+  const builder=kit.makeBuilder(1),f=B.direction('ink',[0,0,0],[0,0,1]);
+  assert.throws(()=>B.stamp(builder,{...f,tangent:[0,0,1]},builder.P[1],'ink'));
+  assert.throws(()=>B.stamp(builder,{...f,width:NaN},builder.P[1],'ink'));
+  assert.equal(builder.count(),0);
+});

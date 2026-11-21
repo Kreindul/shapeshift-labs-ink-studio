@@ -260,17 +260,6 @@ const SurfaceBrush = (() => {
       V.cross(f.normal, f.tangent).some((v, i) => Math.abs(v - f.bitangent[i]) > 1e-4)
     )
       throw new RangeError('Surface brush: frame must be orthogonal and right handed');
-    for (const key of ['point', 'normal', 'tangent', 'bitangent']) xyz(f[key], key);
-    for (const key of ['length', 'width', 'thickness']) finite(f[key], 1e-8, 1000, key);
-    if (
-      Math.abs(Math.hypot(...f.normal) - 1) > 1e-5 ||
-      Math.abs(Math.hypot(...f.tangent) - 1) > 1e-5 ||
-      Math.abs(V.dot(f.normal, f.tangent)) > 1e-5 ||
-      V.dot(V.cross(f.normal, f.tangent), f.bitangent) < 0.99999
-    )
-      throw new RangeError('Surface brush: stamp needs an orthonormal surface frame');
-    color.forEach(n => finite(n, 0, 255, 'color'));
-    finite(opacity, 0, 1e6, 'opacity');
     const first = builder.count(),
       at = f.point.map((x, i) => x + p.offset * f.normal[i]);
     builder.dab(
