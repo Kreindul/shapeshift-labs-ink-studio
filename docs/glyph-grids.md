@@ -13,6 +13,9 @@ inscription around locked fragments from a second memory. The bottom strip
 runs a seeded neighborhood rule through the glyph atlas. The main display
 uses the same painted pixels for a sprite surface and emissive splats.
 
+[Signal Fall](../examples/signal-fall.js) shows editable
+[pixel-stamp glyphs](pixel-stamps.md#signal-fall) pulsing down a fixed grid.
+
 ```sh
 node cli/ink-studio.js clip examples/glyph-grid.js --w 720 --h 414 --to 7 --fps 16 --out palimpsest.png
 ```

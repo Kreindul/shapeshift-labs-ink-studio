@@ -295,6 +295,8 @@ Use the [headless scene editor](docs/scene-editor.md) to select solids, edit tra
 
 Use the [Pixel Stamp Workshop](docs/pixel-stamps.md) to draw indexed surface
 paint and contour masks, or author held cels for depth-aware effects.
+[Signal Fall](examples/signal-fall.js) shows the editable signal glyphs and
+the cels that make up a falling stream.
 
 Reuse unchanged bake inputs in the editor and pass `--asset-cache DIR` to retain diorama bake results across CLI runs. [Incremental baking](docs/scene-editor.md#incremental-baking)
 
