@@ -778,6 +778,7 @@ const view = extra =>
       splatFootprints: onOffOption('splat-footprints'),
       paletteSampling: onOffOption('palette-sampling'),
       brushwork: onOffOption('brushwork'),
+      shadowBandPaint: onOffOption('shadow-band-paint'),
       renderGrid: opt['render-grid'] === 'off' ? false : opt['render-grid'] === undefined ? undefined :
         { mode: opt['render-grid'], size: num('grid-size', 8), angle: num('grid-angle', 0),
           aspect: num('grid-aspect', 1), gap: num('grid-gap', 0), origin: list('grid-origin', [0, 0]) },
@@ -1171,6 +1172,7 @@ const CMD = {
         'shot lighting: --shot-lighting on|off|file.json   scope key, fill, rim and negative fill',
         'reflection detail: --reflection-detail on|off   compare the authored core, streaks and distance clusters',
         'brushwork: --brushwork on|off   compare surface-aligned paint at export size',
+        'shadow bands: --shadow-band-paint on|off   compare painted lighting thresholds',
         'detail-preserving relighting: --relighting on|off|file.json --sky-time seconds',
         'bounce options: --sky-bounce color|preset|off --ground-bounce color|preset|off --sky-bounce-intensity n --ground-bounce-intensity n',
         'cloud options: --cloud-field cirrus|coastal-stratus|cumulus|storm-front|file.json|off --cloud-representation auto|card|impostor|volume|off --cloud-self-shadows on|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',

@@ -103,6 +103,9 @@ node cli/ink-studio.js render examples/surface-detail-courtyard.js --w 372 --h 2
 
 ## Material lighting ramps
 
+Use [shadow band paint](shadow-band-paint.md) to shift the diffuse ramp's
+thresholds along authored surface strokes.
+
 Use a `diffuse` finish layer to give a material its own transition from
 shadow to direct light. A `lightingRamp` can also tint and shape the response
 of a `specular`, `sheen`, `fiber`, `glints`, or `bevel` layer. The effects run in layer
