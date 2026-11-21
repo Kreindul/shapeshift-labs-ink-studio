@@ -80,6 +80,7 @@ const AreaLights = require('../src/area-lights.js');
 const ShotLighting = require('../src/shot-lighting.js');
 const EmissiveFinishes = require('../src/emissive-finishes.js');
 const AreaRaster = require('./area-lights.js');
+const ShadowCutouts = require('../src/shadow-cutouts.js');
 const surfaceShading = require('./surface-shading.js');
 const SceneOptics = require('../src/scene-optics.js');
 const AtmosphereDepthBands = require('../src/atmosphere-depth-bands.js');
@@ -903,10 +904,18 @@ function renderFrame(world, o, preparedPalettes) {
     ...depthBands.filter(band=>band.density>0).map(band=>band.depth[1]+depthOffset));
   const volumeLighting = o.volumeLighting ?? world.volumeLighting ?? (areaLights.length?{}:undefined);
   let localLighting;
+  const cutoutsForLight = areaLights.length || volumeLighting ? ShadowCutouts.prepare(world, {
+    time: t, interfaceTime: o.interfaceTime, enabled: o.cutoutShadows !== false,
+    surfaces: o.spriteSurfaces === false ? false : spriteSurfaces,
+    sprites: spriteAtlases, atlasMode: o.spriteAtlasMode
+  }) : [];
+  const cutoutShadow = cutoutsForLight.length ? (origin, direction, stop) =>
+    ShadowCutouts.occludes(cutoutsForLight, origin, direction, stop) : undefined;
   const lightCasters=areaLights.some(l=>l.shadows)?AreaLights.staticSources(world,d):[];
   const volumeSource=volumeLighting&&!volumeLighting.shadow&&lightCasters.length?{...volumeLighting,shadow:(x,y,z,direction,distance)=>AreaLights.occludes(lightCasters,[x,y,z],direction,distance)}:volumeLighting;
   const prepareVolumeLight = () => volumeSource ? (localLighting ??= SceneOptics.lighting(volumeSource, world.pal,
-    { time: t, localLights: o.volumeLocalLights, localShadows: o.volumeLocalShadows, celestialSun: celestial?.sun,areaLights })) : undefined;
+    { time: t, localLights: o.volumeLocalLights, localShadows: o.volumeLocalShadows, celestialSun: celestial?.sun,
+      areaLights, cutoutShadow })) : undefined;
   const daylight = o.lightDaylight ?? o.environment?.daylight ?? an.daylight ?? 1;
   const dusk = LightSchedule.gain(daylight);
   const lampEye = eye;
@@ -1238,7 +1247,7 @@ function renderFrame(world, o, preparedPalettes) {
   const spotLighting = Array.isArray(volumeLighting?.spots) && volumeLighting.spots.some(light => light?.surfaceIntensity !== undefined)
     ? prepareVolumeLight() : undefined;
   const directLight = AreaRaster.createLighting([...areaLights,...spillLights],world,d,AL,
-      { spots:spotLighting?.surfaceSpots, shadow:spotLighting?.shadow, shot:shotLighting });
+      { spots:spotLighting?.surfaceSpots, shadow:spotLighting?.shadow, cutoutShadow, shot:shotLighting });
   const diffuseFrames = (directLight || probes) && sampleFrames(world,t), diffuseNormals = [];
   function diffuseNormal(i) {
     return diffuseNormals[i] ?? (diffuseNormals[i] = receivesDiffuse(i) && diffuseFrames(i).normal || false);
@@ -2690,7 +2699,7 @@ function renderFrame(world, o, preparedPalettes) {
     const quality = atmosphereOptions();
     atmosphere = applyAtmosphere(volumes, col, axialDepth, rayAt, W, H, horizon, quality, t, quality.media,
       captureFog || effectMedia || transparent || fogPass, o.volumeHistory,
-      o.volumeHistory && [W, H, focal, ortho, o.volumeLocalLights, o.volumeLocalShadows, ...V].join('/'), fogScales);
+      o.volumeHistory && [W, H, focal, ortho, o.volumeLocalLights, o.volumeLocalShadows, o.cutoutShadows, ...V].join('/'), fogScales);
     if (effectMedia) for (let p = 0; p < W*H; p++) {
       effectMedia[p*3] = atmosphere.fog[p];
       effectMedia[p*3+2] = 1-atmosphere.fog[p];

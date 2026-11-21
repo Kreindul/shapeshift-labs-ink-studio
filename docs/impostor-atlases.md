@@ -63,6 +63,9 @@ A scenery atlas splits one painting into parallel planes in world space.
 Paint named depths for things a character can pass behind or in front of.
 The normal brush marks where the scene's live sun should relight the painting.
 The color PNG provides the silhouette and can include transparent pixels.
+Use `castsShadow: true` on the placement to cast shadows from those depth
+bands. [Shadows from painted cutouts](painted-cutout-shadows.md)
+
 Add the `scenery` section to an atlas manifest.
 
 ```json

@@ -39,7 +39,7 @@ function rasterize(lights, { w, h, rayAt, near, capture, clip }) {
 
 const {staticSources,occludes}=AreaLights;
 
-function createLighting(lights, world, data, alpha, { spots = [], shadow, shot } = {}) {
+function createLighting(lights, world, data, alpha, { spots = [], shadow, cutoutShadow, shot } = {}) {
   const active = lights.filter(light=>light.intensity>0).map(light=>({
     ...light, extent:Math.hypot(...light.half), tint:linear(light.rgb)
   }));
@@ -48,11 +48,13 @@ function createLighting(lights, world, data, alpha, { spots = [], shadow, shot }
   if (!active.length && !projectors.length && !rig) return null;
   const sources = active.some(light=>light.shadows) || (!shadow && spots.some(light=>light.castsShadow))
     ? staticSources(world,data,alpha) : [];
+  const areaShadow = sources.length || cutoutShadow ? (origin, direction, stop) =>
+    cutoutShadow?.(origin, direction, stop) || occludes(sources, origin, direction, stop) : null;
   const cache = [];
 
   function evaluate(point, normal, row) {
     const rgb=[0,0,0];
-    AreaLights.evaluate(active,point,normal,rgb,{shadow:sources.length?(o,d,s)=>occludes(sources,o,d,s):null});
+    AreaLights.evaluate(active,point,normal,rgb,{shadow:areaShadow});
     for (const light of projectors) {
       const offset = light.at.map((value,k) => value-point[k]), distance = Math.hypot(...offset);
       if (distance <= spotBias || distance >= light.radius) continue;
@@ -61,11 +63,12 @@ function createLighting(lights, world, data, alpha, { spots = [], shadow, shot }
       if (receive <= 0) continue;
       const weight = spotWeight(light,direction);
       if (!weight) continue;
-      if (light.castsShadow && (shadow || sources.length)) {
+      if (light.castsShadow && (shadow || sources.length || cutoutShadow)) {
         const origin = point.map((value,k) => value+normal[k]*spotBias);
         const ray = light.at.map((value,k) => value-origin[k]), stop = Math.hypot(...ray);
         if (stop > spotBias) {
           const toLight = ray.map(value => value/stop);
+          if (cutoutShadow?.(origin,toLight,stop-spotBias)) continue;
           if (shadow ? shadow(...origin,toLight,stop) : occludes(sources,origin,toLight,stop-spotBias)) continue;
         }
       }

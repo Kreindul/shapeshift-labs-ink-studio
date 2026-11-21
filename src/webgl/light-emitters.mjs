@@ -2,7 +2,7 @@
 export const emitterGLSL = `
 uniform highp sampler2D u_eData,u_eCookies;
 uniform highp sampler3D u_eShadow;
-uniform int u_eCount,u_eFogCount,u_ePick;
+uniform int u_eCount,u_eFogCount,u_ePick,u_eCutoutCount;
 uniform vec3 u_eShadowMin,u_eShadowSize;
 uniform float u_eShadowStep,u_eAmbient;
 uniform vec4 u_eSun;
@@ -20,6 +20,26 @@ float eShadow(vec3 p,vec3 toLight,float stop,float bias){
     float d=texture(u_eShadow,uv).r;
     if(d<max(.0015,u_eShadowStep*.025))return 0.0;
     t+=max(u_eShadowStep*.12,d*.8);
+  }
+  return 1.0;
+}
+vec4 eCutoutRow(int i,int row){return texelFetch(u_eData,ivec2(i*6+row,1),0);}
+float eCutoutShadow(vec3 p,vec3 sampleAt,float endBias){
+  if(u_eCutoutCount==0)return 1.0;
+  vec3 ray=sampleAt-p;float stop=length(ray);
+  if(stop<=endBias+1e-5)return 1.0;
+  vec3 dir=ray/stop;
+  for(int i=0;i<16;i++){
+    if(i>=u_eCutoutCount)break;
+    vec4 at=eCutoutRow(i,0);vec3 n=eCutoutRow(i,1).xyz,offset=at.xyz-p;
+    float facing=dot(dir,n);if(abs(facing)<=1e-8)continue;
+    float hit=dot(offset,n)/facing;if(hit<=1e-5||hit>=stop-endBias)continue;
+    vec3 local=dir*hit-offset;
+    vec2 uv=vec2(dot(local,eCutoutRow(i,2).xyz),dot(local,eCutoutRow(i,3).xyz));
+    if(any(lessThan(uv,vec2(0)))||any(greaterThan(uv,vec2(1))))continue;
+    vec4 region=eCutoutRow(i,4),mapping=eCutoutRow(i,5);
+    ivec2 texel=ivec2(region.xy+clamp(floor(mapping.xy+uv*mapping.zw),vec2(0),region.zw-1.0));
+    if(round(255.0*texelFetch(u_eCookies,texel,0).a)>=at.w)return 0.0;
   }
   return 1.0;
 }
@@ -56,7 +76,8 @@ vec3 eLighting(vec3 p,vec3 normal,bool fog,vec3 viewRay){
       if(type==3){float outer=u.w,inner=v.w;if(facing<outer)continue;float edge=inner==outer?1.0:clamp((facing-outer)/(inner-outer),0.0,1.0);angular*=edge*edge*(3.0-2.0*edge);}
       float amount=receive*angular*pow(1.0-d/at.w,2.0);total+=amount;
       bool shadows=mod(params.z,2.0)>.5&&(!fog||eRow(i,10).y>.5);
-      float visible=shadows?eShadow(p+(fog?vec3(0):normal*params.w),dir,d,params.w):1.0;
+      vec3 origin=p+(fog?vec3(0):normal*params.w);
+      float visible=shadows?eShadow(origin,dir,d,params.w)*eCutoutShadow(origin,sampleAt,fog&&type>=3?0.0:params.w):1.0;
       lit+=amount*visible;
     }
     float count=float(type==2?grid:type>=3?1:grid*grid),visibility=total>0.0?lit/total:0.0;
@@ -74,7 +95,8 @@ const white = [1, 1, 1];
 export function createLightEmitters(gl, resources, { table, textureUnit }, maxSize, toolkit) {
   const K = toolkit.KIT,
     A = toolkit.AreaLights ?? K?.areaLights,
-    C = toolkit.LightCookies ?? K?.lightCookies;
+    C = toolkit.LightCookies ?? K?.lightCookies,
+    Cutouts = K?.shadowCutouts;
   if (!A || !C) return { prepare: () => null, compose: (state, world, time, rows, active) => active, fog: () => {} };
   const lightTable = table(352, 26, maxSize),
     receivers = table(1024, 28, maxSize);
@@ -105,7 +127,8 @@ export function createLightEmitters(gl, resources, { table, textureUnit }, maxSi
     lastLights,
     lastBase,
     lastResolution,
-    lastShadowRevision;
+    lastShadowRevision,
+    lastCutoutRows, lastCutoutImages, cutoutRevision = 0;
   const fogTexture = resources.allocate('Texture'),
     fogBuffer = resources.allocate('Framebuffer');
   let fogProgram,
@@ -125,7 +148,7 @@ export function createLightEmitters(gl, resources, { table, textureUnit }, maxSi
     receiverData,
     receiverMetadata,
     receiverStatic = false,
-    lastFactorShadow;
+    lastFactorShadow, lastFactorCutouts;
   gl.activeTexture(gl.TEXTURE0 + 29);
   gl.bindTexture(gl.TEXTURE_3D, shadowTexture);
   for (const p of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_3D, p, gl.LINEAR);
@@ -170,7 +193,14 @@ export function createLightEmitters(gl, resources, { table, textureUnit }, maxSi
     if (!lamps.length && !raw?.sun && !world.atmosphere?.some(v => v.lit)) return null;
     if (!gl.getExtension('EXT_color_buffer_float'))
       throw new Error('Native emitter lighting needs EXT_color_buffer_float');
-    const images = [...new Set(lamps.map(l => l.cookie?.image).filter(Boolean))];
+    const cutouts = lamps.some(l => l.shadows) && Cutouts ? Cutouts.prepare(world, {
+      time, interfaceTime: frame.interfaceTime, enabled: frame.cutoutShadows !== false,
+      surfaces: frame.spriteSurfaces === false ? false : world.spriteSurfaces,
+      sprites: frame.spriteAtlases === true ? world.spriteAtlases : frame.spriteAtlases ?? world.spriteAtlases,
+      atlasMode: frame.spriteAtlasMode
+    }) : [];
+    const cutoutImages = cutouts.map(plane => plane.image);
+    const images = [...new Set([...lamps.map(l => l.cookie?.image).filter(Boolean), ...cutoutImages])];
     const regions = new Map();
     let x = 0,
       y = 0,
@@ -178,13 +208,13 @@ export function createLightEmitters(gl, resources, { table, textureUnit }, maxSi
     const width = Math.min(maxSize, 1024);
     for (const image of images) {
       if (image.width > width || image.height > maxSize)
-        throw new RangeError('Light cookie exceeds native atlas limits');
+        throw new RangeError('Light cookie or cutout exceeds native atlas limits');
       if (x + image.width > width) {
         x = 0;
         y += shelf;
         shelf = 0;
       }
-      if (y + image.height > maxSize) throw new RangeError('Light cookie atlas is full');
+      if (y + image.height > maxSize) throw new RangeError('Light cookie and cutout atlas is full');
       regions.set(image, [x, y, image.width, image.height]);
       x += image.width;
       shelf = Math.max(shelf, image.height);
@@ -193,9 +223,12 @@ export function createLightEmitters(gl, resources, { table, textureUnit }, maxSi
     textureUnit(27, cookieTexture);
     if (!same(lastCookies, images)) {
       const pixels = new Uint8Array(width * height * 4);
-      for (const [image, [x, y]] of regions)
-        for (let j = 0; j < image.height; j++)
-          pixels.set(image.data.subarray(j * image.width * 4, (j + 1) * image.width * 4), ((y + j) * width + x) * 4);
+      for (const [image, [x, y]] of regions) for (let j = 0; j < image.height; j++) {
+        const at = ((y + j) * width + x) * 4;
+        if (image.alpha) {
+          for (let u = 0; u < image.width; u++) pixels[at + u * 4 + 3] = image.alpha[j * image.width + u];
+        } else pixels.set(image.data.subarray(j * image.width * 4, (j + 1) * image.width * 4), at);
+      }
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
       lastCookies = images;
     }
@@ -235,7 +268,7 @@ export function createLightEmitters(gl, resources, { table, textureUnit }, maxSi
     }
     gl.activeTexture(gl.TEXTURE0 + 29);
     gl.bindTexture(gl.TEXTURE_3D, shadowTexture);
-    const rows = new Float32Array(352 * 4);
+    const stride = 352 * 4, rows = new Float32Array(stride * (cutouts.length ? 2 : 1));
     lamps.forEach((l, i) => {
       const p = i * 44,
         cookie = l.cookie;
@@ -269,12 +302,23 @@ export function createLightEmitters(gl, resources, { table, textureUnit }, maxSi
         p + 40
       );
     });
+    cutouts.forEach(({ origin, normal, u, v, image, mapping, cutoff }, i) => {
+      rows.set([...origin, cutoff, ...normal, 0, ...u, 0, ...v, 0, ...regions.get(image), ...mapping],
+        stride + i * 24);
+    });
+    const cutoutRows = rows.subarray(stride, stride + cutouts.length * 24);
+    if (!same(lastCutoutRows, cutoutRows) || !same(lastCutoutImages, cutoutImages)) {
+      lastCutoutRows = cutoutRows;
+      lastCutoutImages = cutoutImages;
+      cutoutRevision++;
+    }
     lightTable.upload(rows);
     const uniforms = {
       u_eData: 26,
       u_eCookies: 27,
       u_eShadow: 29,
       u_eCount: lamps.length,
+      u_eCutoutCount: cutouts.length,
       u_ePick: 0,
       u_eFogCount: lamps.filter(l => l.volume > 0).length,
       u_eShadowMin: grid?.min ?? [0, 0, 0],
@@ -349,6 +393,7 @@ export function createLightEmitters(gl, resources, { table, textureUnit }, maxSi
     return {
       count: lamps.length,
       shadow: grid,
+      cutoutRevision,
       active: true,
       surface: lamps.some(l => l.surface > 0),
       uniforms,
@@ -401,6 +446,7 @@ export function createLightEmitters(gl, resources, { table, textureUnit }, maxSi
         ...extent,
         resolution,
         state.shadow,
+        state.cutoutRevision,
         ...state.uniforms.u_eSun,
         ...state.uniforms.u_eSunColor,
         state.uniforms.u_eAmbient
@@ -473,7 +519,8 @@ uniform vec3 u_fogMin,u_fogExtent,u_fogSize;uniform int u_fogSlice;out vec4 colo
       !posesChanged &&
       same(lastLights, state.rows) &&
       (base === null ? lastBase === null : same(lastBase, base)) &&
-      lastFactorShadow === grid
+      lastFactorShadow === grid &&
+      lastFactorCutouts === state.cutoutRevision
     ) {
       textureUnit(21, factorTexture);
       return true;
@@ -483,10 +530,11 @@ uniform vec3 u_fogMin,u_fogExtent,u_fogSize;uniform int u_fogSlice;out vec4 colo
       lastPoses = rows.slice();
     }
     const previousLights = lastLights,
-      allChanged = posesChanged || lastFactorShadow !== grid;
+      allChanged = posesChanged || lastFactorShadow !== grid || lastFactorCutouts !== state.cutoutRevision;
     lastLights = state.rows.slice();
     lastBase = base?.slice() ?? null;
     lastFactorShadow = grid;
+    lastFactorCutouts = state.cutoutRevision;
     if (!baseActive) textureUnit(21, blankBase);
     const size = [512, Math.max(1, Math.ceil(world.count / 512))],
       vertex = `#version 300 es

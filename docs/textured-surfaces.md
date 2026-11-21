@@ -54,6 +54,9 @@ and attach it with `atlas.faceRegion(origin, right, up, region)` or
 writes a matching top-down RGBA raster into the region and marks those pixels
 dirty. [Camera feeds on textured panels](camera-atlas.md#route-a-feed-to-the-world)
 
+Set `castsShadow: true` on a planar face or face region to use its painted
+alpha to block local light. [Shadows from painted cutouts](painted-cutout-shadows.md)
+
 Run `ink-studio render examples/textured-surfaces.js` for a mixed example. Its `build(seed,{textured:false})` also exercises the SDF and splat rendering path.
 
 ## Palette-preserving minification

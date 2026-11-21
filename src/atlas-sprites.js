@@ -212,10 +212,10 @@ const AtlasSprites = (() => {
   function place(value) {
     if (value?.[placedBrand]) return value;
     const { atlas,at,mode,yaw=0,scale=1,opacity=1,frame,playback,depth=true,lighting=true,emission=true,
-      nativePixels=false,pixelOffset,visibleAt,objectId,materialId,clock='animation' }=value??{};
+      nativePixels=false,pixelOffset,visibleAt,objectId,materialId,clock='animation',castsShadow=false }=value??{};
     const asset=compile(atlas), placementMode=mode===undefined?(asset.sceneryPlanes?'scenery':'impostor'):mode;
     if (!['card','impostor','scenery'].includes(placementMode)||placementMode==='scenery'&&!asset.sceneryPlanes||!Number.isFinite(opacity)||opacity<0||opacity>1||
-        [depth,lighting,emission,nativePixels].some(value=>typeof value!=='boolean')||
+        [depth,lighting,emission,nativePixels,castsShadow].some(value=>typeof value!=='boolean')||
         !['animation','interface'].includes(clock)||
         (visibleAt!==undefined&&typeof visibleAt!=='function')||
         (pixelOffset!==undefined&&(!nativePixels||typeof pixelOffset!=='function'))||
@@ -223,6 +223,8 @@ const AtlasSprites = (() => {
       throw new RangeError('Invalid sprite atlas placement');
     if (nativePixels && (placementMode !== 'card' || scale !== 1))
       throw new RangeError('Native-pixel placement needs a camera-facing card at scale 1');
+    if (castsShadow && placementMode !== 'scenery')
+      throw new RangeError('A sprite atlas shadow caster needs an oriented scenery placement');
     if (objectId!==undefined || materialId!==undefined) {
       const selectors = typeof TargetSelectors === 'undefined' ? require('./target-selectors.js') : TargetSelectors;
       if (objectId!==undefined) selectors.prepare({object:objectId});
@@ -233,6 +235,7 @@ const AtlasSprites = (() => {
       yaw:finite(yaw,'Sprite placement yaw'), scale:positive(scale,'Sprite placement scale'),
       opacity,frame,depth,lighting,emission,...(nativePixels&&{nativePixels}),...(pixelOffset&&{pixelOffset}),
       ...(clock==='interface'&&{clock}),
+      ...(castsShadow&&{castsShadow}),
       ...(visibleAt&&{visibleAt}),...(playback!==undefined&&{frameAt:asset.playback(playback)}),
       ...(objectId!==undefined&&{objectId}),...(materialId!==undefined&&{materialId}) });
   }

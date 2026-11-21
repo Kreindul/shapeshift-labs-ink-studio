@@ -10,7 +10,7 @@ const SpriteSurface = (() => {
     let x = 0, y = 0, shelf = 0;
     const entries = [], vertices = [];
     const regions = new WeakSet();
-    const faces = new Map(), sampling = [];
+    const faces = new Map(), sampling = [], shadowFaces = [];
     const geometry = typeof TexturedSurface !== 'undefined' ? TexturedSurface : require('./textured-surface.js');
     function reserve(w, h, paint) {
       if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || w > width || h < 1 ||
@@ -35,20 +35,23 @@ const SpriteSurface = (() => {
       shelf = Math.max(nextShelf, h);
       return region;
     }
-    function faceOptions(options) {
+    function faceOptions(options, planar = false) {
       if (options === undefined) return {};
-      const { id, sampling } = options ?? {};
+      const { id, sampling, castsShadow = false } = options ?? {};
       if (!options || ![Object.prototype,null].includes(Object.getPrototypeOf(options)) ||
-          Object.keys(options).some(key => !['id', 'sampling'].includes(key)) ||
+          Object.keys(options).some(key => !['id', 'sampling', 'castsShadow'].includes(key)) ||
           id !== undefined && (typeof id !== 'string' || !id.trim() || faces.has(id)))
         throw new TypeError('A named surface needs a distinct nonempty ID and optional palette sampling');
-      return { id, rule: resampling.settings(sampling) };
+      if (typeof castsShadow !== 'boolean' || castsShadow && !planar)
+        throw new TypeError('Painted shadow casters need a planar face and boolean castsShadow');
+      return { id, rule: resampling.settings(sampling), castsShadow };
     }
-    function writeMesh(surface, region, { id, rule }) {
+    function writeMesh(surface, region, { id, rule, castsShadow }) {
       const { x, y, width, height } = region;
       const first = vertices.length / 5, count = surface.triangles.length;
       if (id !== undefined) faces.set(id, { first, count, from: region });
       if (rule && count) sampling.push({ first, end: first + count, region, rule });
+      if (castsShadow) shadowFaces.push(Object.freeze({ first, region }));
       for (const index of surface.triangles) {
         vertices.push(surface.points[index * 3], surface.points[index * 3 + 1], surface.points[index * 3 + 2],
           x + .5 + (width - 1) * surface.uvs[index * 2], y + .5 + (height - 1) * surface.uvs[index * 2 + 1]);
@@ -75,10 +78,17 @@ const SpriteSurface = (() => {
       return { points, uvs: [0, 0, 1, 0, 0, 1, 1, 1], triangles: [0, 1, 2, 2, 1, 3] };
     }
     function face(origin, right, up, w, h, paint, options) {
-      mesh(quad(origin, right, up), w, h, paint, options);
+      const surface = quad(origin, right, up);
+      geometry.validate(surface);
+      if (typeof paint !== 'function') throw new RangeError('Expected a surface paint function');
+      const settings = faceOptions(options, true);
+      writeMesh(surface, reserve(w, h, paint), settings);
     }
     function faceRegion(origin, right, up, region, options) {
-      meshRegion(quad(origin, right, up), region, options);
+      if (!regions.has(region)) throw new RangeError('Reserve the surface region in this atlas first');
+      const surface = quad(origin, right, up);
+      geometry.validate(surface);
+      writeMesh(surface, region, faceOptions(options, true));
     }
     function finish() {
       const height = Math.max(1, y + shelf), pixels = new Uint8Array(width * height * 4);
@@ -88,6 +98,7 @@ const SpriteSurface = (() => {
       const atlas = { width, height, pixels, vertices: Float32Array.from(vertices) };
       if (faces.size) namedFaces.set(atlas, new Map(faces));
       if (sampling.length) atlas.paletteSampling = sampling.slice();
+      if (shadowFaces.length) atlas.shadowFaces = Object.freeze(shadowFaces.slice());
       return atlas;
     }
     return { face, mesh, finish, reserve, meshRegion, faceRegion };

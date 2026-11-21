@@ -276,7 +276,7 @@ void main(){
           n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
         side = (Math.imul(side, 31) + (n.reduce((s, v, k) => s + v * (eye[k] - a[k]), 0) < 0 ? 1 : 0)) | 0;
       }
-      const key = [lightGeometry, lightRevision, lighting.shadow, resolution];
+      const key = [lightGeometry, lightRevision, lighting.shadow, lighting.cutoutRevision, resolution];
       const same = (a, b) => a?.length === b.length && b.every((v, i) => v === a[i]);
       if (same(lightKey, key) && same(lightRows, lighting.rows) && side === lastSide) {
         gl.activeTexture(gl.TEXTURE0 + 24);
