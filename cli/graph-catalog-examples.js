@@ -225,6 +225,8 @@ const specifications = {
   'music.suggest': { inputs:{source:{...arrangement,sections:[{id:'opening',bars:4,harmony:'home'}]},options:{limit:2}} },
   'music.renderProduction': { inputs:{source:production,options:{end:.25,sampleRate:8000,stems:true}} },
   'music.inspectProduction': { inputs:{source:production} },
+  'music.cueMap': {inputs:{source:production,map:{groups:[{id:'opening',from:0,to:4}],
+    landmarks:[{id:'statement',beat:2,kind:'return'}],register:[{from:2,to:4,parts:['lead'],semitones:12}]}}},
   'music.planPerformances': { inputs:{
     source:{...production,patches:{pluck:{type:'fm',gestures:{open:{cutoff:[[0,500],[1,6500]]}}}}},
     takes:[{id:'flat'},{id:'opening',tracks:{lead:[{gesture:'open'}]}}]

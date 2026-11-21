@@ -8,7 +8,7 @@
   const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 
   function revise(source,spec={},assets={}) {
-    check(fields(spec,['id','edits','pin','unpin','tracks','patches','harmonies','changes','room','gain']) &&
+    check(fields(spec,['id','edits','pin','unpin','tracks','patches','harmonies','changes','room','gain','cueMap']) &&
       (spec.id===undefined || id(spec.id)),'Invalid production revision');
     const baseline=A.compile(source,assets), next=clone(source);
     const arrangement=clone(baseline.arrangement.definition);
@@ -35,6 +35,8 @@
       next.arrangement.score.changes=[...changes.filter(row=>!ids.has(row.id)),...clone(spec.changes)];
     }
     if (spec.room!==undefined) next.room={...next.room,...clone(spec.room)};
+    if (spec.cueMap===null) delete next.cueMap;
+    else if (spec.cueMap!==undefined) next.cueMap=clone(spec.cueMap);
     if (spec.gain!==undefined) next.gain=spec.gain;
     const compiled=A.compile(next,assets);
     for (const [name,reason] of Object.entries(locked)) {

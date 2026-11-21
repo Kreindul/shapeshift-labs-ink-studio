@@ -8,6 +8,8 @@ and an eight-bar arc. Its recorded drum assets are credited with their source
 and license in the [sample directory](../examples/music-production/samples/CREDITS.md).
 Use [theme development](music-themes.md) to carry a motif between roles
 and make adaptive returns depend on what has already played.
+Use a [cue map](music-cue-map.md) to shape density, register, chord pace,
+silence, and room across the whole production.
 Use [patch gestures](music-gestures.md) to rehearse different performances
 of the written notes.
 

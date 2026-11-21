@@ -271,6 +271,14 @@
         return {value,events:value.events};
       }
     },
+    'music.cueMap': {
+      description: 'Apply cue groups, landmarks, density, register, harmony, silence and room lanes to a production.',
+      inputs:{source:'record',map:'record',assets:options},outputs:{value:'record',report:'record'},
+      run({source,map,assets}) {
+        const {production,report}=P.musicProduction.mapCue(source,map,assets);
+        return {value:production,report};
+      }
+    },
     'music.analyzeProduction': {
       description: 'Measure performed accent overlaps, orchestration and harmonic transitions across parts.',
       inputs:{source:'record',assets:options,options},outputs:{value:'record'},
