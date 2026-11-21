@@ -165,6 +165,51 @@ including duplicate swatches. The node returns the one-channel slot
 raster as `value`, the ordered swatches as `palette`, and per-pixel
 opacity bytes as `alpha`.
 
+### Discover registered nodes
+
+```sh
+ink-studio graph nodes
+ink-studio graph nodes --json
+ink-studio graph describe raster.resize
+ink-studio graph describe array.map --json
+ink-studio graph describe raster.resize --example > resize.json
+ink-studio graph run resize.json
+```
+
+The catalog lists the same toolkit, headless, and configured host
+operations that the runner resolves. `graph describe` reports named
+inputs and outputs, required inputs, defaults, units, constraints, and
+a runnable example. Its versioned JSON records also include the clock
+dependency and operation origin. A null unit means the port has no named
+unit in the registry or catalog. Structured properties document common
+settings inside the `options` records, and each operation enforces its
+full settings rules when evaluated.
+
+Dynamic nodes show a representative signature resolved by the compiler.
+For example, an `array.map` group supplies the item type, result type,
+and any extra inputs. The description identifies which field controls
+specialization. Catalog discovery plans the example as needed and leaves
+operation execution and instantiation to the runner.
+
+`--example` prints the versioned project by itself. Asset examples point
+to the small fixtures shipped with Ink. Operations that require JavaScript
+handles, such as `materialSample`, print a runnable Node script instead.
+
+```sh
+ink-studio graph describe materialSample --example > sample-material.cjs
+node sample-material.cjs
+```
+
+Use `ink.listGraphNodes({ operations })` and
+`ink.describeGraphNode(op, { operations })` for the same JSON structures
+in Node. A custom operation in `graphOperations` can attach a
+`description`, `constraints` (an array of strings), and an `example` with
+`{ kind: 'graph', project }` or `{ kind: 'node', source }`. A socket
+definition can also include a `unit`, a `description`, a `constraints`
+object, or named `properties`. These fields document the host operation's
+own validation. A host operation without an example still shows its
+declared ports.
+
 ### Outputs and CI
 
 Declare `exports` as a map of artifact names to `{ "output": "name", "format": "json" }`,
@@ -206,6 +251,10 @@ artifacts and report.
 
 Use [graph clips](graph-clips.md) to export a named raster or scene output at
 an exact frame rate with warm-up and cuts.
+
+See [connecting procedural rasters](render-graph.md#connect-procedural-rasters)
+for binding graph outputs to the renderer and reading image, mask, and native
+scene passes back into procedural nodes.
 
 ### Persistent sessions
 
@@ -420,6 +469,46 @@ with integer `scale`, `tracking`, and `leading`, optional `columns`
 for character wrapping, and `align: "left" | "center" | "right"`.
 Supply `customGlyphs` as a map from characters to rows of `#` and
 spaces to draw symbols in the same grid.
+
+### Tracked drawing anchors
+
+Connect `fx.regionObservations` to `draw.trackedAnchors.observations`
+to attach screen-space drawing commands to persistent region IDs.
+`fx.regionObservations` takes the same raster frames and segmentation
+settings as [region tracking](#track-regions-across-frames), with
+`options.fps` set to the source rate. Custom trackers can supply
+`{time, regions: [{id, center: [x,y], bounds, confidence}]}` records at
+increasing times in seconds. Bounds and confidence are optional. Omitted
+confidence is treated as 1.
+
+Each entry in `bindings` has its own `id`, a `track` ID, and local
+`commands` and/or `masks` arrays. Draw around the local origin. The
+anchor uses the tracked center, or a normalized `boundsAnchor: [u,v]`
+within the region's pixel bounds. Add an `offset: [x,y]` in pixels as needed.
+
+| Setting | Effect |
+| --- | --- |
+| `smoothing` | Position smoothing half-life in seconds. Set to zero for unsmoothed positions. |
+| `lag` | Delay the anchor in seconds. |
+| `hold` | Keep the last position for this many seconds after the first missed observation. |
+| `minConfidence` | Treat observations below this threshold as missing. |
+
+All four settings default to zero. Adjacent visible positions interpolate
+between observations. During a gap the position holds still until expiry.
+A track returning after expiry starts at its measured position.
+
+Feed the node's `value` to `draw.render.commands`. Render `masks`
+separately and pass the resulting raster as a layer's alpha mask in
+`raster.stack`. The `anchors` output reports each binding's position,
+last observation time and confidence, and its `tracked`, `held`, or
+`hidden` status. Sampling uses the graph clock or `options.time`.
+For direct use, call `drawing2d.trackedAnchors(observations, bindings).sample(time)`.
+
+[Browser demo](../examples/tracked-drawing-anchors.cjs)
+
+```sh
+node examples/tracked-drawing-anchors.cjs tracked-drawing-anchors.html
+```
 
 ### Relative boxes
 
@@ -941,6 +1030,7 @@ either axis with `edgeU` or `edgeV`.
 | `warp.polar` | Set `mode: "fromPolar"` to wrap a strip into a disc or annulus. Set `"toPolar"` to unwrap one. Strip X is angle and strip Y is radius. Set `center`, `radii` as fractions of the shorter disc dimension, `angle` in turns, and `clockwise`. |
 | `warp.displace` | Supply a numeric `map` of one channel or an X/Y pair. Subtract `center` and multiply by the two `scale` values in `pixels` or `normalized` units. A positive displacement moves the image toward positive coordinates. |
 | `warp.opticalFlow` | Estimate [dense motion](#dense-optical-flow) between aligned `before` and `after` rasters. Returns signed XY displacement and a separate `confidence` raster. |
+| `warp.cameraMotion` | Separate [camera and subject motion](#camera-motion-compensation) from a forward `motion` field, with optional `confidence` and a background `mask`. |
 | `warp.flow` | Pull a `source` raster through a backward `motion` field, with optional `confidence`. Returns the result and its inverse UV `field`. |
 | `warp.flowPoints` | Advance an `array<vec2>` of `points` through a forward `motion` field, with optional `confidence`. |
 | `warp.refract` | Supply a height raster in `map`. Choose its `channel`, `heightScale`, refractive `index`, and ray `depth` in pixels. Local height gradients bend the sampling ray. |
@@ -996,6 +1086,41 @@ fixed and flow-driven feedback.
 
 ```sh
 node examples/dense-optical-flow.cjs optical-flow.html
+```
+
+### Camera motion compensation
+
+`rasterWarp.cameraMotion(motion, options)` fits the dominant camera
+transform to a forward displacement raster. The default `similarity`
+model estimates pan, uniform zoom, and roll. Use `model: "translation"`
+for pan alone. The fit uses spatially distributed correspondences and
+[random sample consensus](https://www.cs.cmu.edu/~motionplanning/papers/sbp_papers/f/p381-fischler.pdf)
+to reject independently moving regions. Pass the optical-flow
+`confidence` plane and optionally a single-channel background `mask`
+to restrict the fit to pixels you choose.
+
+| Output | Meaning |
+| --- | --- |
+| `value` | Signed XY motion in pixels per frame pair, expressed in the earlier frame's stabilized axes. Use it with `warp.flowPoints` to move subject-attached effects. |
+| `camera` | The signed XY motion attributed to the camera at each earlier-frame pixel. |
+| `field` | Normalized UV coordinates for `warp.sample`. Pass the later frame as `source` to stabilize it against the earlier frame. Use `edge: "transparent"` to show uncovered edges. |
+| `inliers` | Byte mask of eligible pixels that agree with the camera transform. |
+| `transform` | Forward and inverse two-row pixel matrices, center-relative `pan`, uniform `scale`, `rotation` in radians, and fit diagnostics. Apply the forward matrix to a stabilized anchor to draw it in the later frame. |
+
+`threshold` is the pixel error allowed for camera inliers (1.35 by
+default). `minConfidence` defaults to .2, and `maskThreshold` defaults
+to .5 for masks with samples in 0–255. `minInliers` (6) and
+`minInlierRatio` (.55) control fit acceptance. `maxSamples`,
+`iterations`, and `seed` tune the bounded, deterministic fit.
+When the fit lacks support, `transform.valid` is false, both
+transforms are identity, and `value` preserves the input motion.
+
+The [browser example](../examples/camera-motion-compensation.cjs)
+compares a panning, zooming raster with its stabilized result and
+draws a subject anchor in both coordinate spaces.
+
+```sh
+node examples/camera-motion-compensation.cjs camera-motion.html
 ```
 
 ### Per-pixel time
@@ -1141,6 +1266,8 @@ port to hide a layer during that hold.
 | `anim.stagger` | Sample several clocks with `count`, `options.interval` and `offset`. `reverseOrder` switches which item starts first. Returns mapped times and per-item clock records. |
 | `anim.frame` | Select from raster `frames` with `fps` and a half-open interval from `first` to `end` in frame indices. Accepts the same delay, rate, reverse and looping controls. |
 | `anim.spriteDesync` | Composite a layered raster `source` with independent frame holds or offsets on named parts and pixel rectangles. Returns RGBA `value` and the sampled `frames`. |
+| `anim.captureTransforms` | Snapshot the pose channels of a `source` array of instance records with stable IDs. |
+| `anim.staleTransforms` | Patch independent pose channels on a `source` array using `edits` and optional named `snapshots`. Returns the edited array and an applied/skipped count. |
 | `anim.retime` | Sample a reusable graph named by `group` at the time mapped by its `timing` input. The group retains its inputs and outputs and owns its independent simulation caches. Pass `timing.time` to feed an explicit time, such as an item from `anim.stagger`. |
 | `anim.feedback` | Evolve raster `frames` at a fixed simulation `dt`. Set source `fps` and `mode`, signal `halfLife` and `gain`, and optional `threshold`, `warp`, `filter`, and `cuts`. Feed [backward motion](#dense-optical-flow) into `flow` to advect the retained signal. |
 
@@ -1179,6 +1306,52 @@ direct seek and sequential playback produce the same frame.
 
 Run `node examples/sprite-fragment-desync.cjs fragment-review` to render
 [the side-by-side sprite study](../examples/sprite-fragment-desync.cjs).
+
+### Hold or duplicate instance transforms
+
+`KIT.procedural.animationGraph.staleTransforms` reads instance records
+with unique string `id` values. Each edit selects `position`, `rotation`,
+`scale`, or any combination. Use `snapshot` to hold a recorded pose
+and `from` to read a different instance. Both can appear in one edit.
+Each edit reads the original input or snapshot, so a pair of live copies
+can exchange channels.
+
+```js
+const A = KIT.procedural.animationGraph;
+const held = A.captureTransforms(sampleAt(0.75));
+const { value: poses } = A.staleTransforms(sampleAt(time), [
+  { id: 'courier', snapshot: 'held', channels: ['position'] },
+  { id: 'scanner', from: 'guide', channels: ['rotation', 'scale'] }
+], { snapshots: { held } });
+```
+
+- A pose uses XYZ `position`, a right-handed row-major 3×3 `rotation`,
+  and positive uniform or XYZ `scale`. The defaults are the origin, identity
+  rotation and unit scale. Omit `channels` to copy all three.
+- Assign each target channel at most once. The default missing-ID policy is
+  `"error"`. Use `{ missing: "skip" }` with changing populations to skip
+  edits whose target or donor is absent.
+- `captureTransforms` copies pose channels into a serializable snapshot.
+  For deterministic seeking, capture from an authored time sample or use
+  `anim.retime` to sample a fixed time before `anim.captureTransforms`.
+  Pass the snapshot through `data.record` to the `snapshots` input.
+- Pass the result to `copies.updateTransforms(poses)` for shared baked
+  splat instances. This adapter uses uniform scale. Use
+  `A.instanceMatrix(pose)` to get the rotation-and-scale matrix for
+  `K.frameSplats` or for `sceneGraph.setLocal(pose.id, { position, matrix })`
+  when driving repeated geometry.
+- For native particles, supply `renderTransforms({ time, instances })`
+  in `K.particles` options. Return the same live IDs with uniform scales.
+  The hook runs on display poses after simulation. A newly emitted particle
+  gets a fresh ID even when it takes over a pool slot.
+
+[Phase Register](../examples/stale-instance-transforms.js) compares live
+flight markers with a position hold, a rotation hold and a copied scale.
+
+```sh
+node cli/ink-studio.js clip examples/stale-instance-transforms.js --w 464 --h 230 \
+  --to 5.333333333333333 --fps 12 --out phase-register.png
+```
 
 ### Planar simulation recipes
 
@@ -1338,6 +1511,52 @@ marks those pixels with zero. Use the renderer’s `frame.passes` in Node to
 read the original buffers. To request motion, use a prior
 `scene.render` with `captureMotion: true` in its options and connect its
 `motionReference` to the next render’s `options.motionFrom`.
+
+### Motion-driven deformation
+
+Feed `fx.regionObservations` into `motion.landmarks` to turn tracked
+features into paired `{from, to}` XY landmarks. Host tracking can supply
+the same timestamped point records described in [tracked drawing anchors](#tracked-drawing-anchors).
+
+A binding has a unique `id`, a `rest: [x,y]` point, and the stable
+`track` ID to follow. It can use the region's center, `boundsAnchor`,
+or `silhouetteDirection: [dx,dy]`. A silhouette direction finds the
+outermost intersection of a ray from the region center with its contour.
+Set `options.contours: true` on `fx.regionObservations` when using silhouette
+directions. Rays are expressed in image axes, with positive Y down.
+
+Bindings support the same `offset`, `smoothing`, `lag`, `hold`, and
+`minConfidence` settings as drawing anchors. A missing landmark holds for
+its configured duration and then uses its rest point. Omit `track` from
+a binding to pin its rest point throughout the shot. The graph clock or
+`options.time` samples the clip. The `landmarks` port reports each
+position and its `tracked`, `held`, `hidden`, or `pinned` status.
+
+| Consumer | Connect the landmark output to |
+| --- | --- |
+| `geo.motionMesh` | `control`. Mesh positions deform in a planar chart. UVs, vertex colors, material slots and indices stay bound to the same vertices and faces, and authored normals follow the local deformation. |
+| `rig.skinSprite` | `motion`. The bound sprite vertices and joints are first posed by their bones, then deformed in output pixels. The source artwork is sampled through the resulting mesh in one pass. |
+| `scene.motionSplats` | `control`. Select baked rows with `ids`. The node returns a new world and carries each selected row's covariance and authored brush axes along with its center. |
+
+The mesh and splat nodes use XY by default. Set
+`options.chart: {origin, u, v}` to place the landmarks on a different plane.
+The XYZ vectors `u` and `v` are one tracking pixel wide and tall. Depth out
+of the chart plane is retained. Interpolation reaches the authored controls
+and blends their displacement in between. Large offsets between nearby
+handles can fold a surface.
+
+For live hosts that already own a rig or splat world, sample
+`KIT.procedural.motionDeformation.track(observations, bindings)` and pass
+the sampled control to `KIT.deform.motion(control, {chart})`. Use the
+resulting map with the native `deform.rest` and `deform.apply` APIs or
+the stage's deformation skin. Keep one rest snapshot per selected group
+so repeated samples start from the authored shape.
+
+[Browser demo](../examples/motion-driven-deformation.cjs)
+
+```sh
+node examples/motion-driven-deformation.cjs motion-deformation.html
+```
 
 ### 2D skeletal sprites
 

@@ -18,6 +18,10 @@
     }));
   }
 
+  function operationSchema(operation) {
+    return { inputs: schema(operation.inputs || {}), outputs: schema(operation.outputs || { value: 'any' }) };
+  }
+
   function create(source, { operations = {}, groups = {}, planOnly = false } = {}) {
     const stored = P.data.freeze(P.data.clone(source));
     const specInputs = schema(stored.inputs || {});
@@ -66,7 +70,7 @@
       if (typeof operation?.run !== 'function' && typeof operation?.instantiate !== 'function')
         throw new TypeError('Unknown graph operation ' + spec.op);
       stack.add(name);
-      const sockets = schema(operation.inputs || {}), outputs = schema(operation.outputs || { value: 'any' });
+      const { inputs: sockets, outputs } = operationSchema(operation);
       const given = { ...spec.params, ...spec.inputs };
       for (const key of Object.keys(given)) if (!Object.hasOwn(sockets, key)) throw new RangeError('Unknown socket ' + name + '.' + key);
       const bindings = Object.entries(sockets).map(([key, socket]) => {
@@ -172,7 +176,14 @@
       });
     }
 
-    return Object.freeze({ spec: stored, evaluate, parameters, plan, clear() {
+    function sockets(node) {
+      const config = configs.get(node);
+      if (!config) throw new RangeError('Unknown graph node ' + node);
+      return P.data.clone({ inputs: Object.fromEntries(config.bindings.map(([key, socket]) => [key, socket])),
+        outputs: config.outputs, time: config.clock });
+    }
+
+    return Object.freeze({ spec: stored, evaluate, parameters, plan, sockets, clear() {
       marks.clear();
       for (const config of configs.values()) config.run?.clear?.();
     } });
@@ -243,5 +254,5 @@
     return { sample, clear() { root = undefined; frames.clear(); } };
   }
 
-  P.graph = { create, group, repeat, each, simulation };
+  P.graph = { create, group, repeat, each, simulation, operationSchema };
 })(KIT);

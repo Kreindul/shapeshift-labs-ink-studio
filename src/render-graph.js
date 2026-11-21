@@ -32,7 +32,7 @@ const RenderGraph = (() => {
     motionSmear: 15
   });
   const fields = {
-    mask: ['rect', 'feather', 'invert', 'volume'],
+    mask: ['rect', 'feather', 'invert', 'volume', 'raster'],
     grade: ['stack', 'cubeSize'],
     reflection: ['source', 'axis', 'line'],
     distortion: ['source', 'offset', 'amplitude', 'period', 'rate', 'phase', 'rows', 'rowEdits', 'depthThreshold', 'blend', 'wrap'],
@@ -74,6 +74,28 @@ const RenderGraph = (() => {
   function finite(value, field) {
     if (!Number.isFinite(value)) throw new RangeError(field + ' must be finite');
     return value;
+  }
+
+  function slot(value, mask = false) {
+    record(value, mask ? ['slot', 'channel', 'range'] : ['slot'], 'render graph raster binding');
+    const { slot: name, channel, range = [0, 255] } = value;
+    if (typeof name !== 'string' || !name.trim() ||
+        (channel !== undefined && !['alpha', 'luma', 'r', 'g', 'b'].includes(channel) &&
+          !(Number.isInteger(channel) && channel >= 0 && channel <= 3)) ||
+        !tuple(range, 2) || range[0] >= range[1] || !Number.isFinite(range[1] - range[0]))
+      throw new TypeError('A raster binding needs a named slot, an optional channel, and an increasing finite range');
+    return { name, ...(mask && { channel, range: range.slice() }) };
+  }
+
+  function attachLayer(node, value) {
+    const layout = node.slot ? { ...value, source() {} } : value;
+    node.needsCamera = compositor.settings({ layers: [layout] }).needsCamera || node.needsCamera;
+    node.layer = value;
+  }
+
+  function imageLayer(node, value) {
+    if (plain(value?.source) && Object.hasOwn(value.source, 'slot')) node.slot = slot(value.source);
+    attachLayer(node, value);
   }
 
   function prepareFrameAge(pass, reference, input, select) {
@@ -194,11 +216,17 @@ const RenderGraph = (() => {
     return table;
   }
 
-  function prepare(value) {
+  function prepare(value, capture = []) {
+    if (!Array.isArray(capture) || capture.length > 33 || new Set(capture).size !== capture.length ||
+        !Array.from(capture).every(id => typeof id === 'string' && id.trim()))
+      throw new TypeError('Render graph captures need a list of distinct pass IDs');
     const readSnapshot = value?.[editorSnapshot];
     if (readSnapshot) value = readSnapshot();
-    if (value === undefined || value === false) return null;
-    if (compiled.has(value)) return compiled.get(value);
+    if (value === undefined || value === false) {
+      if (capture.length) throw new RangeError('Cannot capture passes without a render graph');
+      return null;
+    }
+    if (!capture.length && compiled.has(value)) return compiled.get(value);
     record(value, ['passes', 'output', 'budget'], 'render graph');
     if (!Array.isArray(value.passes) || value.passes.length > 32)
       throw new RangeError('A render graph needs up to 32 passes');
@@ -250,7 +278,7 @@ const RenderGraph = (() => {
       if (effects.types.includes(type)) Object.assign(node, effects.settings(pass));
       switch (type) {
         case 'mask': {
-          const { rect, feather = 0, invert = false, volume } = pass;
+          const { rect, feather = 0, invert = false, volume, raster } = pass;
           if (
             (rect !== undefined && (!tuple(rect, 4) || rect[2] <= 0 || rect[3] <= 0)) ||
             !Number.isFinite(feather) ||
@@ -259,6 +287,12 @@ const RenderGraph = (() => {
           )
             throw new TypeError('A mask needs a positive rectangle, nonnegative feather and boolean invert');
           Object.assign(node, { rect: rect?.slice(), feather, invert });
+          if (raster !== undefined) {
+            record(raster, ['slot', 'channel', 'range', 'rect', 'filter'], 'render graph raster mask');
+            const { rect, filter, ...binding } = raster;
+            node.slot = slot(binding, true);
+            attachLayer(node, { ...(rect !== undefined && { rect }), ...(filter !== undefined && { filter }) });
+          }
           if (volume !== undefined) {
             record(volume, ['at', 'extent', 'feather'], 'world reveal volume');
             const { at, extent, feather = 0.25 } = volume;
@@ -400,7 +434,7 @@ const RenderGraph = (() => {
             throw new TypeError('Feedback accepts an image source or an emission layer');
           const layer = pass.layer;
           const source = layer === undefined ? reference(pass.source ?? input, 'image') : undefined;
-          const needsCamera = layer !== undefined && compositor.settings({ layers: [layer] }).needsCamera;
+          if (layer !== undefined) imageLayer(node, layer);
           if (pass.displayMask !== undefined && typeof pass.displayMask !== 'boolean')
             throw new TypeError('Feedback displayMask must be boolean');
           Object.assign(node, {
@@ -411,10 +445,9 @@ const RenderGraph = (() => {
             threshold: threshold?.slice(),
             filter,
             blend,
-            layer,
             source,
             warp: feedbackWarp(warp),
-            needsCamera: needsCamera || cameraMotion === 'reset',
+            needsCamera: Boolean(node.needsCamera || cameraMotion === 'reset'),
             historyKey: JSON.stringify([
               type,
               input,
@@ -434,8 +467,7 @@ const RenderGraph = (() => {
           node.isolated = pass.isolated === true;
           if (pass.layer !== undefined) {
             if (pass.blend !== undefined) throw new TypeError('Set layer blending on the layer');
-            node.needsCamera = compositor.settings({ layers: [pass.layer] }).needsCamera;
-            node.layer = pass.layer;
+            imageLayer(node, pass.layer);
           } else {
             const { blend = 'over' } = pass;
             if (blend !== 'over' && blend !== 'add') throw new TypeError('Composite blend must be over or add');
@@ -456,19 +488,25 @@ const RenderGraph = (() => {
       if (type !== 'mask') current = id;
       nodes.push(node);
     }
-    const output = reference(value.output ?? current, 'image'),
-      live = new Set([output]);
+    const output = reference(value.output ?? current, 'image');
+    const captures = new Map(capture.map(id => {
+      if (!outputs.has(id)) throw new RangeError('Unknown render graph capture: ' + id);
+      return [id, outputs.get(id)];
+    }));
+    const live = new Set([output, ...captures.keys()]);
     for (let i = nodes.length - 1; i >= 0; i--)
       if (live.has(nodes[i].id)) for (const dependency of nodes[i].dependencies) live.add(dependency);
     const passes = nodes.filter(node => live.has(node.id)),
       lastUse = new Map();
     passes.forEach((node, i) => node.dependencies.forEach(id => lastUse.set(id, i)));
+    for (const id of [output, ...captures.keys()]) if (lastUse.has(id)) lastUse.set(id, passes.length);
     const historyPasses = passes.filter(node => node.enabled && retainedTypes.includes(node.type));
     if (historyPasses.length > maxHistoryPasses)
       throw new RangeError('A graph supports up to four live screen history passes');
     const plan = {
       passes,
       output,
+      captures,
       lastUse,
       historyPasses,
       budget: graphBudget(value.budget),
@@ -476,7 +514,7 @@ const RenderGraph = (() => {
       needsOwner: passes.some(node => node.enabled && (node.select || node.effect || node.depth)),
       needsCamera: passes.some(node => node.enabled && node.needsCamera)
     };
-    if (readSnapshot) compiled.set(value, plan);
+    if (readSnapshot && !capture.length) compiled.set(value, plan);
     return plan;
   }
 
@@ -699,8 +737,25 @@ const RenderGraph = (() => {
     return data;
   }
 
-  function layer(node, w, h, world, time, text, camera, resolve, gl) {
-    const plan = compositor.prepare({ layers: [node.layer] }, w, h);
+  function slotPixels(node, sources, raster) {
+    const { name, channel, range } = node.slot;
+    if (!sources || !Object.hasOwn(sources, name)) throw new RangeError('Missing render graph raster slot: ' + name);
+    const source = sources[name];
+    if (!range) {
+      const { width, height, data } = raster.rgba(source);
+      return { w: width, h: height, rgba: data };
+    }
+    const channels = source?.channels ?? source?.data?.length / (source?.width * source?.height);
+    const { width, height, data } = raster.channel(source, { channel: channel ?? (channels % 2 === 0 ? 'alpha' : 'luma') });
+    const rgba = new Uint8Array(width * height * 4);
+    for (let p = 0; p < data.length; p++) rgba[p * 4 + 3] = byte(clamp((data[p] - range[0]) / (range[1] - range[0])));
+    return { w: width, h: height, rgba };
+  }
+
+  function layer(node, w, h, world, time, text, camera, resolve, gl, sources, raster) {
+    if (node.slot && node.layer.opacity === 0) return;
+    const input = node.slot ? { ...node.layer, source: slotPixels(node, sources, raster) } : node.layer;
+    const plan = compositor.prepare({ layers: [input] }, w, h);
     return compositor.layers(plan, world, time, text, camera, resolve, gl)[0];
   }
 

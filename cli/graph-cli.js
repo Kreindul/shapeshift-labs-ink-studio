@@ -5,6 +5,7 @@ const { createInterface } = require('node:readline');
 const files = require('./asset-files.js');
 const { readGraphProject } = require('./graph-project.js');
 const host = require('./graph-host-command.js');
+const catalog = require('./graph-catalog.js');
 
 const flags = {
   validate:['inputs','json'], plan:['inputs','json'],
@@ -14,8 +15,12 @@ const flags = {
   clip:['inputs','seed','out','output','from','to','fps','warmup','cuts','clock','format','render-options','json']
 };
 
-async function send(value, compact=false) {
-  if (!process.stdout.write(JSON.stringify(value,null,compact ? undefined : 2)+'\n')) await once(process.stdout,'drain');
+async function sendText(text) {
+  if (!process.stdout.write(text+'\n')) await once(process.stdout,'drain');
+}
+
+function send(value, compact=false) {
+  return sendText(JSON.stringify(value,null,compact ? undefined : 2));
 }
 
 function save(directory, result, inputs) {
@@ -112,6 +117,19 @@ function clipOptions(opt, sources, defaultClock) {
 
 module.exports = async function graphCommand(pos,opt,settings) {
   const [mode,file,caseFile]=pos;
+  if (mode==='nodes' || mode==='describe') {
+    const listing=mode==='nodes';
+    if (pos.length!==(listing ? 1 : 2) || opt.json && opt.example ||
+        Object.entries(opt).some(([key,value])=>value!==true || key!=='json' && (listing || key!=='example')))
+      throw new TypeError('Use graph nodes [--json] or graph describe <op> [--json | --example]');
+    const result=listing ? catalog.listGraphNodes(settings) : catalog.describeGraphNode(file,settings);
+    if (opt.json) return send(result);
+    if (opt.example) {
+      if (!result.example) throw new RangeError('No catalog example supplied for '+file);
+      return sendText(catalog.exampleText(result.example));
+    }
+    return sendText(listing ? catalog.listText(result) : catalog.nodeText(result));
+  }
   if (Object.hasOwn(host.commands,mode)) return send(await host.execute(pos,opt,settings),opt.json);
   if (!Object.hasOwn(flags,mode) || pos.length!==(mode==='batch'?3:2) ||
       Object.entries(opt).some(([key,value])=>key!=='adapters' && !flags[mode].includes(key) || (key==='json' ? value!==true : typeof value!=='string' || !value.trim())) ||

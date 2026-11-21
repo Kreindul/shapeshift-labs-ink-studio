@@ -9,7 +9,8 @@ const defaults = ['coverage', 'depth', 'normal', 'objectId', 'materialId', 'emis
 const positionPass = new Set(['position', 'objectPosition']);
 const finitePass = new Set(['depth', 'emissionDepth']);
 
-function renderGraphScene(source, { camera, lights, channels = defaults, options = {}, take, time = take?.start ?? 0, kit } = {}) {
+function renderGraphScene(source, { camera, lights, channels = defaults, options = {}, renderGraphInputs, renderGraphCapture,
+  take, time = take?.start ?? 0, kit } = {}) {
   const api = (kit ?? require('../index.js').load()).KIT.procedural.sceneGraph;
   const { width = 128, height = 128, time: at = time, ...settings } = options;
   if (![width, height].every(n => Number.isSafeInteger(n) && n > 0 && n <= 2048) ||
@@ -20,14 +21,16 @@ function renderGraphScene(source, { camera, lights, channels = defaults, options
   const lighting = lights?.length ? api.lightOptions(lights) : {};
   let sampledCamera;
   const renderOptions = { ...settings, ...lighting, ...(view && { camera: view }),
-    w: width, h: height, px: 1, t: at, passes: requested, ...(take !== undefined && { take }) };
+    w: width, h: height, px: 1, t: at, passes: requested, ...(take !== undefined && { take }),
+    ...(renderGraphInputs !== undefined && { renderGraphInputs }), ...(renderGraphCapture !== undefined && { renderGraphCapture }) };
   const frame = render(source, {
     ...renderOptions, ...cameraCapture(renderOptions, camera => { sampledCamera = camera; })
   });
   return { value: api.rasterFrame(frame), frame, motionReference: frame.motionReference ?? null,
     report: { width: frame.w, height: frame.h, time: at, splats: source.count,
       ...(sampledCamera && { camera: sampledCamera }),
-      passes: requested.filter(name => frame.passes?.[name]) } };
+      passes: requested.filter(name => frame.passes?.[name]),
+      ...(frame.renderGraphPasses && { graphPasses: Object.keys(frame.renderGraphPasses) }) } };
 }
 
 function createSceneSampler(kit) {
@@ -70,12 +73,24 @@ function positionPreview(samples, valid, width, height) {
 }
 
 function graphRenderPass(frame, channel, { emptyDepth = 1e9, kit } = {}) {
-  const api = (kit ?? require('../index.js').load()).KIT.procedural.sceneGraph;
+  const procedural = (kit ?? require('../index.js').load()).KIT.procedural;
+  const api = procedural.sceneGraph;
   if (channel === 'color') {
     const value = api.rasterFrame(frame);
     const { width, height, data } = value;
     return { value, data: value, valid: { width, height, channels: 1,
       data: Uint8Array.from({ length: width * height }, (_, p) => data[p * 4 + 3] ? 255 : 0) }, report: { channel, width, height } };
+  }
+  if (typeof channel === 'string' && channel.startsWith('graph:')) {
+    const id = channel.slice(6), captures = frame.renderGraphPasses ?? {};
+    if (!Object.hasOwn(captures, id)) throw new RangeError('Render did not capture pass ' + channel);
+    const { kind, width, height, channels, data } = captures[id];
+    const raster = { width, height, channels, data: data.slice() };
+    const value = kind === 'mask' ? procedural.raster.rgba(raster) : raster;
+    const valid = new Uint8Array(width * height).fill(255);
+    if (kind === 'image') for (let p = 0; p < valid.length; p++) valid[p] = data[p * 4 + 3] ? 255 : 0;
+    return { value, data: raster, valid: { width, height, channels: 1, data: valid },
+      report: { channel, kind, width, height } };
   }
   if (!Number.isFinite(emptyDepth) || select([channel]).length !== 1 || channel === 'environment')
     throw new RangeError('Pass needs one channel and a finite emptyDepth');
@@ -106,7 +121,8 @@ function graph3DOperations(kit) {
   return {
     'scene.render': {
       inputs: { source: 'world', camera: options, lights: { type: 'array<record>', default: [] },
-        channels: { type: 'array<string>', default: defaults }, options },
+        channels: { type: 'array<string>', default: defaults }, options,
+        renderGraphInputs: options, renderGraphCapture: { type: 'array<string>', default: [] } },
       outputs: { value: 'raster', frame: 'renderFrame', motionReference: 'any', report: 'record' }, time: true,
       instantiate() {
         const sample = createSceneSampler(kit);
