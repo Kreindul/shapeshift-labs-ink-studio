@@ -99,6 +99,7 @@
       HorizonBands.compile(look?.horizonBands);
       FrameComposite.settings(look?.composite);
       Cutaway.prepare(look?.cutaway);
+      ColorClusters.prepare(look?.colorClusters);
       RenderGraph.prepare(look?.renderGraph);
       RenderStages.prepare(look?.renderStages, paletteOptions);
       RenderStages.optics(look?.optics, paletteOptions);

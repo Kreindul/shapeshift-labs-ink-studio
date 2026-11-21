@@ -5,6 +5,7 @@ KIT.material = MaterialControls;
 KIT.detailBudgets = DetailBudgets;
 KIT.passQuality = PassQuality;
 KIT.renderContract = RenderContract;
+KIT.colorClusters = ColorClusters;
 KIT.shadowArt = ShadowArt;
 KIT.splatFrames = SplatFrames;
 KIT.splatRelighting = SplatRelighting;

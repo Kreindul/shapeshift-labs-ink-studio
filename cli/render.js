@@ -33,6 +33,7 @@ const Cutaway = require('../src/cutaway.js');
 const { blendLayers } = require('./translucent-layers.js');
 const OpticalMaterials = require('../src/optical-materials.js');
 const SplatRelighting = require('../src/splat-relighting.js');
+const ColorClusters = require('../src/color-clusters.js');
 const MaterialPixelStyle = require('../src/material-pixel-style.js');
 const EffectPalettes = require('../src/effect-palettes.js');
 const ArtEffects = require('../src/art-effects.js');
@@ -286,6 +287,8 @@ function renderFrame(world, o, preparedPalettes) {
   const coverageAware = !o.raw && (o.coverageAware ?? look.coverageAware ?? Boolean(optics || scopedReflection)) === true;
   const retainContributions = coverageAware || Boolean(stages || optics);
   const legacyLook = styled && !retainContributions;
+  const clusters = styled && !o.reflectionPlane && !probeView &&
+    ColorClusters.prepare(o.colorClusters ?? look.colorClusters);
   const effectPaletteSettings = styled ? EffectPalettes.prepare(
     o.effectPalettes === true ? look.effectPalettes : o.effectPalettes ?? look.effectPalettes, world.pal, world.paletteRoles
   ) : !o.raw && !o.captureCoverage ? o.effectPaletteCapture : null;
@@ -308,6 +311,7 @@ function renderFrame(world, o, preparedPalettes) {
   if (captureStages) passSelection.add('splatId');
   const readabilitySelectors = !o.samples && !o.captureCoverage && o.readabilitySelectors;
   if (readabilitySelectors) passSelection.add('splatId');
+  if (clusters) for (const channel of ['splatId', 'protected', 'emission', 'paletteOwner']) passSelection.add(channel);
   const paletteDiagnostic = passSelection.has('paletteOwner');
   if (paletteDiagnostic && !o.raw) passSelection.add('materialId');
   let lookPass;
@@ -402,7 +406,19 @@ function renderFrame(world, o, preparedPalettes) {
       RenderStages.finish(frame, stages, passes, t, visit, audit, ditherAt, stable, graded, paletteTrace, frameGrade);
       if (effectSignals) frame = ArtEffects.paletteUse(frame,world.pal);
     }
-    if (captureQuantization && !legacyLook) capture(graded ?? frame.rgb.slice(), 'frame');
+    ownership?.finish();
+    const unclustered = clusters && captureQuantization && !legacyLook && !graded ? frame.rgb : undefined;
+    if (clusters) {
+      const before = frame.rgb;
+      const { rgb, ...report } = ColorClusters.apply(frame, passes, clusters, world);
+      frame.colorClusters = report;
+      if (rgb !== before) {
+        frame = ArtEffects.paletteUse({ ...frame, rgb }, world.pal);
+        if (paletteTrace) paletteTrace.cluster(before, rgb);
+        if (frame.quantization) frame.quantization.resolved = rgb.slice();
+      }
+    }
+    if (captureQuantization && !legacyLook) capture(graded ?? (unclustered ?? frame.rgb).slice(), 'frame');
     if (captureStages) {
       const {w,h,alpha}=frame, base={w,h,rgb:new Uint8Array(w*h*3),alpha:new Uint8Array(w*h)};
       for (let y=0;y<h;y++) for (let x=0;x<w;x++) {
@@ -419,7 +435,6 @@ function renderFrame(world, o, preparedPalettes) {
     }
     if (paletteTrace) frame.palettePixel = paletteTrace.finish(frame,passes);
     if (readabilitySelectors) frame.readabilityMask = selectVisibleSubjects(world,passes.splatId,readabilitySelectors);
-    ownership?.finish();
     if (paletteDiagnostic && !passes?.paletteOwner)
       passes = { ...passes,w:frame.w,h:frame.h,paletteOwner:new Uint32Array(frame.w*frame.h),paletteOwners:[null] };
     if (framing) frame.cameraStaging = {

@@ -45,6 +45,13 @@ function create(at, w, h) {
       } else choice(steps,{domain:'effect',stage:'effect',effect:kind,colors:ramp.packed},
         input,index,trace,weight);
     },
+    cluster(before, after) {
+      if (colorAt(before, pixel) === colorAt(after, pixel)) return;
+      const input = before.subarray(pixel * 3, pixel * 3 + 3);
+      const color = parseInt(colorAt(after, pixel).slice(1), 16);
+      choice(steps,{domain:'cluster',stage:'color-clusters',colors:[color]},
+        Array.from(input, n => n / 255),0,{method:'connected-merge'});
+    },
     finish(frame, passes) {
       const objectId = passes.objectId?.[pixel] ?? 0, materialId = passes.materialId?.[pixel] ?? 0;
       const alpha = frame.alpha?.[pixel] ?? 255, outputColor = colorAt(frame.rgb,pixel);
