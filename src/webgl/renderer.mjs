@@ -4,7 +4,7 @@ import { createColorClusters } from './color-clusters.mjs';
 import { createRenderGrid } from './render-grid.mjs';
 import { createMaterialControls } from './material-controls.mjs';
 import { createLightEmitters } from './light-emitters.mjs';
-import { createHighlightCelDraw } from './highlight-cels.mjs';
+import { createNativeCelDraw } from './native-cel-pixels.mjs';
 import { createInspection, inspectionDepth } from './inspection.mjs';
 import { waterReflectionPlan, selectReflectionWorld } from './reflections.mjs';
 import { createRenderGraph, graphOwner, graphCapture } from './render-graph.mjs';
@@ -131,7 +131,9 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     const environment = createEnvironment(gl,resources,targets,maxSize,toolkit);
     const emitterLighting=createLightEmitters(gl,resources,targets,maxSize,toolkit);
     const highlightAPI = toolkit.KIT?.highlightCels;
-    let drawHighlights;
+    const foamAPI = toolkit.KIT?.shoreFoam;
+    const nativeCelAPI = toolkit.KIT?.nativeCelPixels;
+    let drawNativeCels;
     const materialControls=createMaterialControls(gl,resources,targets,maxSize,toolkit);
     const skyPrograms = new Map();
     const dryGeometry = target(2), dryContours = target(2), plainOwner = target(), key = target(1, { integer: true });
@@ -819,11 +821,17 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const constraints = !raw && prepareConstraints(world, constraintDefinition, frame.lookMasks === false);
       const masked = Boolean(constraints?.masked);
       if (masked && !coverage) maskOwner ??= target(2);
-      const highlightDefinition = !reflectionCapture && plane === zero && (frame.highlightCels ?? world.highlightCels);
+      const celView = !reflectionCapture && plane === zero;
+      const highlightDefinition = celView && (frame.highlightCels ?? world.highlightCels);
+      const foamDefinition = celView && !coverage && (frame.shoreFoam ?? world.shoreFoam);
+      const celClip = cutaway && (at => cutawayAPI.margin(cutaway, ...at,
+        -(camera.view[2]*at[0] + camera.view[6]*at[1] + camera.view[10]*at[2] + camera.view[14]) - camera.setback) >= 0);
+      const foamRows = foamDefinition && foamAPI?.frame(foamDefinition, world, camera,
+        { w: width, h: height, time: t, clip: celClip });
       const highlightPlan = highlightDefinition && highlightAPI?.prepare(highlightDefinition, {
         scenePalette: world.pal, paletteRoles: world.paletteRoles
       });
-      const packedDepth = Boolean(highlightPlan?.length || frame[graphOwner]?.depth);
+      const packedDepth = Boolean(foamRows?.length || highlightPlan?.length || frame[graphOwner]?.depth);
       const owner = packedDepth ? (graphOwnership ??= target(3)) : masked && !coverage ? maskOwner : plainOwner;
       const sourceWater = frame.water !== false && world.water?.count ? world.water : null;
       const drivenOptics = Array.isArray(look.optics) && look.optics.some(rule => rule.driver);
@@ -997,8 +1005,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         spriteSurfaces: frame.spriteSurfaces === false ? false : world.spriteSurfaces,
         spriteAtlases: frame.spriteAtlases === true ? world.spriteAtlases : frame.spriteAtlases,
         spriteAtlasMode: frame.spriteAtlasMode,
-        clip: cutaway && (at => cutawayAPI.margin(cutaway, ...at,
-          -(camera.view[2]*at[0] + camera.view[6]*at[1] + camera.view[10]*at[2] + camera.view[14]) - camera.setback) >= 0)
+        clip: celClip
       });
       relighting=emitterLighting.compose(emitterFrame,world,time,lightRows,relighting);
       emitterLighting.fog(emitterFrame,world,frame);
@@ -1311,9 +1318,10 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         clusterRenderer.finish(world, clusters, owner,
           cleaning ? cleaned : damping ? finished : clusterRenderer.buffer, output, width, height, continuity, frame.colorClustersFrame);
       }
-      if (highlightRows?.length) {
-        drawHighlights ??= createHighlightCelDraw(gl, resources, textureUnit, highlightAPI);
-        drawHighlights(highlightRows, width, height, output, owner.textures[2], camera.depthRange);
+      if (foamRows?.length || highlightRows?.length) {
+        drawNativeCels ??= createNativeCelDraw(gl, resources, textureUnit, nativeCelAPI.pixels);
+        const rows = [...(foamRows || []), ...(highlightRows || [])];
+        drawNativeCels(rows, width, height, output, owner.textures[2], camera.depthRange);
       }
       gl.activeTexture(gl.TEXTURE0);
       lastWorld = world;

@@ -91,7 +91,6 @@
     const named = new Map(lights.map(light => [light.id, light]));
     const project = DrawingPrimitives.projector(camera, w, h);
     const view = camera.view, back = [view[2], view[6], view[10]];
-    const inverseY = 2 * camera.tangent / h, inverseX = 2 * camera.tangent * camera.aspect / w;
     let shadow;
     function shadowQuery() {
       const sources = AreaLights.staticSources(world);
@@ -132,39 +131,11 @@
       const [x, y] = project.point(origin), image = pose.image(time);
       const left = Math.floor(x) + pose.x, top = Math.floor(y) + pose.y;
       if (left >= w || top >= h || left + image.width <= 0 || top + image.height <= 0) continue;
-      const nx = view[0]*n[0] + view[4]*n[1] + view[8]*n[2];
-      const ny = view[1]*n[0] + view[5]*n[1] + view[9]*n[2], nz = -V.dot(back, n);
-      const distance = nx*origin[0] + ny*origin[1] + nz*origin[2];
-      const depthAt = (px, py) => {
-        const lateral = (px + .5 - .5*w)*nx*inverseX + (.5*h - py - .5)*ny*inverseY;
-        const depth = camera.ortho ? (distance-lateral)/nz : distance/(lateral+nz);
-        return project.visible([0, 0, depth]) ? depth : Infinity;
-      };
+      const { depthAt } = K.nativeCelPixels.plane(camera,w,h,origin,n);
       result.push({ id: site.name, size: band.name, pose: pose.name, left, top, depth: origin[2], depthAt, image });
     }
     return result.sort((a,b) => b.depth - a.depth);
   }
 
-  function pixels(rows, w, h, emit) {
-    const winners = rows.length > 1 ? new Map() : null;
-    for (const { left, top, depthAt, image } of rows) {
-      const { width, height, rgba } = image;
-      for (let y = Math.max(0, -top); y < Math.min(height, h - top); y++)
-        for (let x = Math.max(0, -left); x < Math.min(width, w - left); x++) {
-          const p = (y * width + x) * 4;
-          if (!rgba[p + 3]) continue;
-          const X = x + left, Y = y + top, depth = depthAt(X, Y);
-          if (!Number.isFinite(depth)) continue;
-          const rgb = [rgba[p], rgba[p + 1], rgba[p + 2]];
-          if (!winners) emit(X, Y, depth, ...rgb);
-          else {
-            const index = Y * w + X, above = winners.get(index);
-            if (!above || depth <= above[2]) winners.set(index, [X, Y, depth, ...rgb]);
-          }
-        }
-    }
-    if (winners) for (const pixel of winners.values()) emit(...pixel);
-  }
-
-  K.highlightCels = Object.freeze({ preset, prepare, frame, pixels });
+  K.highlightCels = Object.freeze({ preset, prepare, frame, pixels: K.nativeCelPixels.pixels });
 })(KIT);

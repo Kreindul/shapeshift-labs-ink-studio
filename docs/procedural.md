@@ -1406,7 +1406,8 @@ const eyesMedium = environment.mediumAt(...eyePosition);
   sample the body center for swimming and current drift, and sample the eyes
   separately for submersion.
 - `inlet.shoreline()` returns world-space segment endpoint pairs along wet
-  cell edges bordering dry cells or the grid exterior.
+  cell edges bordering dry cells or the grid exterior. Use those edges to
+  place [hand-drawn shoreline foam](shore-foam.md).
   `inlet.particles({seed, count})` returns seeded `{position, current}`
   samples inside wet cells. Emit Gaussian splats there for suspended detail.
 - `W.fromShallowWater(solver.snapshot(), {id, optics})` captures the existing

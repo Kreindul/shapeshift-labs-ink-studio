@@ -122,6 +122,9 @@ finishes, selective ink, and sprite atlas integration.
 
 ## Effect presets and reusable clips
 
+The [shoreline foam](shore-foam.md) clips include separately drawn cardinal
+and diagonal cels for straight banks, inside corners, and rock tips.
+
 `KIT.pixelStamps.catalog()` lists the effect families and their variants,
 plus the editable clips they use. Open **Library clips** in the workshop to
 draw or retime any clip. `KIT.pixelStamps.clip(id, { swatches })` returns a

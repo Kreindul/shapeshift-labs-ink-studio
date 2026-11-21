@@ -27,7 +27,7 @@ void main() {
   color = vec4(v_rgb, 1.0);
 }`;
 
-export function createHighlightCelDraw(gl, resources, textureUnit, api) {
+export function createNativeCelDraw(gl, resources, textureUnit, pixels) {
   const shader = resources.program(vertex, fragment);
   const vao = resources.allocate('VertexArray'), buffer = resources.allocate('Buffer');
   gl.bindVertexArray(vao);
@@ -38,7 +38,7 @@ export function createHighlightCelDraw(gl, resources, textureUnit, api) {
   }
   return function draw(rows, width, height, output, depth, range) {
     const vertices = [];
-    api.pixels(rows, width, height, (x, y, z, r, g, b) => vertices.push(x, y, z, r/255, g/255, b/255));
+    pixels(rows, width, height, (x, y, z, r, g, b) => vertices.push(x, y, z, r/255, g/255, b/255));
     if (!vertices.length) return;
     gl.bindFramebuffer(gl.FRAMEBUFFER, output);
     gl.viewport(0, 0, width, height);
