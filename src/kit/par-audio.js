@@ -67,6 +67,33 @@
       inputs:{tracks:'record',routes:'record'},outputs:{value:'array<record>'},
       run({tracks,routes}) {return {value:A.sampleKit.route(tracks,routes)};}
     },
+    'music.programPads': {
+      description: 'Resolve seeded conditional pad hits, rolls and fills into an editable performance.',
+      inputs:{source:'record',options},
+      outputs:{value:'record',events:'array<record>',options:'record',report:'record'},
+      run({source,options}) {
+        const result=A.padPattern.perform(source,options);
+        return {...result,options:result.value.options};
+      }
+    },
+    'music.capturePadPerformance': {
+      description: 'Capture timestamped pad pulses with velocity and hit controls as editable sample-kit events.',
+      inputs:{source:'record',routes:'record',options},
+      outputs:{value:'record',events:'array<record>',options:'record'},
+      run({source,routes,options}) {
+        const value=A.padPattern.capture(source,routes,options);
+        return {value,...value};
+      }
+    },
+    'music.editPadPerformance': {
+      description: 'Change, move, insert or delete captured pad hits by stable event ID.',
+      inputs:{source:'record',edits:scoreRequests},
+      outputs:{value:'record',events:'array<record>',options:'record'},
+      run({source,edits}) {
+        const value=A.padPattern.edit(source,edits);
+        return {value,...value};
+      }
+    },
     'audio.window': media({ value: 'audio', report: 'record' }, A.audioWindow),
     'audio.analyze': media({ value: 'record', rms: 'number', peak: 'number' }, A.analyze),
     'audio.fft': media({ value: 'record', spectrum: 'raster', bands: 'record' }, A.fft),

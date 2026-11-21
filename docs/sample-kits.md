@@ -81,6 +81,8 @@ uses `default`. Name other articulations to author separate stacks.
 ## Play a kit
 
 Provide `events` and optional `options` in the performance file.
+Use the [pad sequencer](pad-patterns.md) to generate those events from
+conditions, fills, rolls, or recorded pad pulses and edit them by ID.
 
 ```json
 {

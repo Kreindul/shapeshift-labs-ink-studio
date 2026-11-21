@@ -1,6 +1,6 @@
 /* Deterministic, layered sample instruments on the shared audio sample clock. */
 (function (P) {
-  const A=P.mediaGraph, T=P.takeTime, M=P.mediaGraphSupport.sampleKitMix;
+  const A=P.mediaGraph, T=P.takeTime, M=P.mediaGraphSupport.sampleKitMix,E=P.mediaGraphSupport.padEvent;
   const {fields,record,check,finite,integer,id,clamp,db}=P.musicInstruments;
   const {midi}=P.musicHarmony;
   const budget=16e6, empty=[];
@@ -93,26 +93,41 @@
     check(finite(T.seconds(point),0,maximum),'Invalid kit event time or duration');
     return T.index(T.roundDown(T.mul(point,[BigInt(rate),1n])));
   }
+  function select(layers,play,velocity) {
+    if (play.sample===undefined) return layers.map(layer=>({layer,weight:velocityGain(velocity,layer.velocity)}))
+      .filter(({weight})=>weight>0);
+    const locks=[];
+    for (const layer of layers) {
+      if (play.layer!==undefined && play.layer!==layer.id) continue;
+      for (const [index,take] of layer.takes.entries()) if (take.name===play.sample)
+        locks.push({layer,weight:1,locked:index});
+    }
+    check(locks.length===1,'A sample lock must identify one take in the pad articulation');
+    return locks;
+  }
   function schedule(kit,events,rate,stop,clock) {
-    check(Array.isArray(events) && events.length<=24576,'Expected a bounded list of kit events');
+    check(Array.isArray(events) && events.length<=E.maxEvents,'Expected a bounded list of kit events');
     const point=time=>P.musicTiming.isPosition(time) ? clock.resolve(time) : T.read(time);
+    const ids=new Set();
     const rows=Array.from(events,(row,index)=>{
-      check(fields(row,['time','duration','until','pad','note','velocity','articulation']) &&
-        (row.note!==undefined || id(row.pad)) && (row.pad===undefined || id(row.pad)) &&
-        (row.articulation===undefined || id(row.articulation)) &&
+      check(fields(row,E.eventFields) && (row.id===undefined || id(row.id) && !ids.has(row.id)) &&
         (row.duration===undefined || row.until===undefined),'Invalid kit event or gate at index '+index);
+      if (row.id!==undefined) ids.add(row.id);
+      const play=E.trigger(row);
       const pitch=row.note===undefined ? null : midi(row.note), name=row.pad ?? kit.keys[pitch];
       const pad=own(kit.pads,name), articulation=row.articulation ?? 'default';
       check(pad && own(pad.articulations,articulation),'Unknown kit pad or articulation at event '+index);
       const start=point(row.time), at=frame(start,rate,3600), hasGate=row.duration!==undefined || row.until!==undefined;
-      check(!pad.gated || hasGate,'Gated pad '+name+' needs a duration or until');
+      const gated=pad.gated || play.gate===true;
+      check(!gated || hasGate,'Gated pad hit '+name+' needs a duration or until');
       const end=row.until!==undefined ? point(row.until) : hasGate ? T.add(start,T.read(row.duration)) : start;
       const off=frame(end,rate,3720);
       check(!hasGate || off>at && finite(T.seconds(T.sub(end,start)),0,120),'A kit gate must last between one sample and 120 seconds');
       const velocity=number(row,'velocity',.8,0,1);
-      const layers=pad.articulations[articulation].map(layer=>({layer,weight:velocityGain(velocity,layer.velocity)}))
-        .filter(({weight})=>weight>0);
-      return {index,pad,name,articulation,pitch,at,off,velocity,layers};
+      const layers=select(pad.articulations[articulation],play,velocity);
+      const sends=Object.entries(play.sends ?? {}).filter(([,level])=>level>0);
+      check(Object.keys(play.sends ?? {}).every(bus=>Object.hasOwn(kit.buses,bus)),'Hit send needs a named kit bus');
+      return {index,id:row.id,pad,name,articulation,pitch,at,off,velocity,layers,play,sends,gated};
     }).filter(row=>row.at<stop && row.velocity>0 && row.layers.length).sort((a,b)=>a.at-b.at);
     const next=new Map();
     for (let i=rows.length-1;i>=0;i--) {
@@ -131,9 +146,9 @@
     if (velocity>fullTo) return (to-velocity)/(to-fullTo);
     return 1;
   }
-  function reader(take,rate,pitch) {
+  function reader(take,rate,pitch,offset,detune) {
     const {audio:{samples,channels,sampleRate},frames:end,root,tune}=take;
-    const step=sampleRate/rate*2**(((root===null || pitch===null ? 0 : pitch-root)+tune/100)/12);
+    const step=sampleRate/rate*2**(((root===null || pitch===null ? 0 : pitch-root)+(tune+detune)/100)/12);
     check(finite(step,1/128,16),'Sample pitch or rate conversion exceeds the kit resampling range');
     const cutoff=step>1 ? .94/step : 1;
     const radius=Math.min(48,Math.ceil(8/cutoff));
@@ -146,7 +161,7 @@
         return;
       }
       let left=0,right=0,total=0;
-      for (let i=Math.max(0,base-radius+1);i<Math.min(end,base+radius+1);i++) {
+      for (let i=Math.max(offset,base-radius+1);i<Math.min(end,base+radius+1);i++) {
         const x=i-pos, w=sinc(x*cutoff)*sinc(x/radius);
         left+=w*samples[i*channels];
         if (channels===2) right+=w*samples[i*2+1];
@@ -158,16 +173,23 @@
     return {step,read,cost:step===1 ? 2 : radius*4};
   }
   function voice(take,row,rate,start,end,amplitude,release) {
-    const {step,read,cost}=reader(take,rate,row.pitch), loop=take.loop;
+    const {play,sends}=row, offset=release ? 0 : play.startSample ?? 0;
+    const loop=take.loop;
+    check(offset<(loop?.to ?? take.frames),'Hit starts outside take '+take.name);
+    const {step,read,cost}=reader(take,rate,row.pitch,loop ? Math.min(offset,loop.from) : offset,play.tune ?? 0);
     const loopLength=loop && loop.to-loop.from-loop.crossfade;
-    const last=loop ? end : Math.min(end,start+Math.ceil(take.frames/step));
+    const span=(take.frames-offset)/step, last=loop ? end : Math.min(end,start+Math.ceil(span));
     const attack=release ? 0 : row.pad.attack*rate;
     const chokeFade=Math.max(1,Math.round(rate*.004));
-    const naturalEnd=start+take.frames/step, releaseFrames=row.pad.release*rate;
-    function render(data,stop) {
+    const naturalEnd=start+span, releaseFrames=row.pad.release*rate;
+    const [left,right]=M.gains({gain:1,pan:play.pan ?? 0}), [padL,padR]=M.gains(row.pad);
+    const pole=play.filter && M.poleAt(play.filter.hz,rate), high=play.filter?.type==='highpass';
+    function render(data,stop,returns) {
       const out=[0,0], next=[0,0];
+      const feeds=sends.map(([bus,level])=>[returns[bus],level*padL,level*padR]);
+      let lowL=0,lowR=0;
       for (let i=start;i<Math.min(last,stop);i++) {
-        let pos=(i-start)*step;
+        let pos=offset+(i-start)*step;
         if (loop && pos>=loop.to) pos=loop.from+loop.crossfade+(pos-loop.to)%loopLength;
         read(pos,out);
         if (loop && pos>=loop.to-loop.crossfade) {
@@ -178,17 +200,28 @@
         }
         let env=attack ? clamp((i-start)/attack) : 1;
         if (!loop) env*=clamp((naturalEnd-i)/Math.max(1,rate*.003));
-        if (!release && row.pad.gated) env*=clamp(1-(i-row.off)/releaseFrames);
+        if (!release && row.gated) env*=clamp(1-(i-row.off)/releaseFrames);
         env*=clamp(1-(i-row.choke)/chokeFade);
-        data[2*i]+=out[0]*env*amplitude*take.gain;
-        data[2*i+1]+=out[1]*env*amplitude*take.gain;
+        if (pole) {
+          lowL+=(out[0]-lowL)*pole; lowR+=(out[1]-lowR)*pole;
+          out[0]=high ? out[0]-lowL : lowL;
+          out[1]=high ? out[1]-lowR : lowR;
+        }
+        const l=out[0]*env*amplitude*take.gain*left, r=out[1]*env*amplitude*take.gain*right;
+        data[2*i]+=l;
+        data[2*i+1]+=r;
+        for (const [wet,gainL,gainR] of feeds) {
+          wet[2*i]+=l*gainL;
+          wet[2*i+1]+=r*gainR;
+        }
       }
     }
-    return {start,last,cost:cost*(loop ? 2 : 1),render};
+    return {start,last,cost:cost*(loop ? 2 : 1)+sends.length*2,render};
   }
   function perform(kit,events,rate,stop,clock) {
     const counters=new Map(), result=Object.fromEntries(Object.keys(kit.pads).map(name=>[name,[]]));
     let work=0, count=0, end=0;
+    const sent=new Set();
     const report=[];
     for (const row of schedule(kit,events,rate,stop,clock)) {
       const {pad,name,articulation,index,at,off,choke,pitch,velocity}=row;
@@ -203,23 +236,26 @@
         check(work<=2.6e8 && ++count<=65536,'Kit performance exceeds its voice resampling budget');
         end=Math.max(end,Math.min(stop,sound.last));
       }
-      for (const {layer,weight} of row.layers) {
+      for (const {layer,weight,locked} of row.layers) {
         // Ghost notes must not advance a velocity layer they did not play.
-        const turn=counter.layers.get(layer.id) ?? 0;
-        counter.layers.set(layer.id,turn+1);
+        const turn=locked ?? counter.layers.get(layer.id) ?? 0;
+        if (locked===undefined) counter.layers.set(layer.id,turn+1);
         const gain=weight*layer.gain*velocity**.65;
         const hit=layer.takes[turn%layer.takes.length];
         const release=layer.releases.length && off<choke && off<stop ?
           layer.releases[turn%layer.releases.length] : undefined;
-        const bodyEnd=Math.min(stopChoke,pad.gated ? off+Math.ceil(pad.release*rate) : Infinity);
+        const bodyEnd=Math.min(stopChoke,row.gated ? off+Math.ceil(pad.release*rate) : Infinity);
         add(voice(hit,row,rate,at,bodyEnd,gain,false));
         if (release) add(voice(release,row,rate,off,stopChoke,gain,true));
-        layers.push({id:layer.id,weight,roundRobin:turn,take:hit.name,...(release && {release:release.name})});
+        layers.push({id:layer.id,weight,...(locked===undefined ? {roundRobin:turn} : {locked:true}),
+          take:hit.name,...(release && {release:release.name})});
       }
+      for (const [bus] of row.sends) sent.add(bus);
       report.push({index,pad:name,articulation,pitch,at,velocity,roundRobin:counter.triggers++,layers,
-        ...(pad.gated && {noteOff:off}),...(choke<stop && {chokeAt:choke})});
+        ...(row.id!==undefined && {id:row.id}),...(Object.keys(row.play).length && {play:row.play}),
+        ...(row.gated && {noteOff:off}),...(choke<stop && {chokeAt:choke})});
     }
-    return {voices:result,end,events:report};
+    return {voices:result,end,events:report,sent};
   }
   function render(raw,assets,events,options={}) {
     check(fields(options,['sampleRate','duration','stems','map']) &&
@@ -232,8 +268,8 @@
     const exact=options.duration===undefined ? undefined : frame(T.read(options.duration),sampleRate,3600);
     check(exact===undefined || integer(exact,1,capacity),'Kit output duration exceeds its PCM budget');
     const clock=P.musicTiming.compile(options.map);
-    const {voices,end,events:played}=perform(kit,events,sampleRate,exact ?? Infinity,clock);
-    let tail=0;
+    const {voices,end,events:played,sent}=perform(kit,events,sampleRate,exact ?? Infinity,clock);
+    let tail=Math.max(0,...Array.from(sent,name=>M.tail(kit.buses[name].inserts)));
     for (const [name,pad] of pads) if (voices[name].length) {
       const sendTail=Math.max(0,...pad.sends.map(([name])=>M.tail(kit.buses[name].inserts)));
       tail=Math.max(tail,M.tail(pad.inserts)+sendTail);
@@ -250,7 +286,7 @@
     }
     for (const [name,pad] of pads) {
       const data=new Float64Array(mix.length);
-      for (const sound of voices[name]) sound.render(data,length);
+      for (const sound of voices[name]) sound.render(data,length,returns);
       M.process(data,sampleRate,pad.inserts);
       M.route(data,mix,returns,pad);
       retain(name,data);

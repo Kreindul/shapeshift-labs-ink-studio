@@ -42,8 +42,9 @@
       if (++at===line.length) at=0;
     }
   }
+  const poleAt=(hz,rate)=>1-Math.exp(-2*Math.PI*Math.min(hz,.49*rate)/rate);
   function filter(data,rate,spec) {
-    const pole=1-Math.exp(-2*Math.PI*Math.min(spec.hz,.49*rate)/rate), state=[0,0];
+    const pole=poleAt(spec.hz,rate), state=[0,0];
     const high=spec.type==='highpass';
     for (let i=0;i<data.length;i++) {
       const ch=i%2, dry=data[i];
@@ -65,8 +66,9 @@
       }
     }
   }
+  const gains=({gain,pan})=>[gain*Math.sqrt(1-pan),gain*Math.sqrt(1+pan)];
   function route(data,mix,returns,channel) {
-    const left=channel.gain*Math.sqrt(1-channel.pan), right=channel.gain*Math.sqrt(1+channel.pan);
+    const [left,right]=gains(channel);
     for (let i=0;i<data.length;i+=2) {
       data[i]*=left;
       data[i+1]*=right;
@@ -78,5 +80,5 @@
       for (let i=0;i<data.length;i++) wet[i]+=data[i]*level;
     }
   }
-  P.mediaGraphSupport.sampleKitMix={inserts,tail,process,route};
+  P.mediaGraphSupport.sampleKitMix={inserts,tail,process,route,gains,poleAt};
 })(KIT.procedural);
