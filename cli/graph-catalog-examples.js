@@ -28,6 +28,10 @@ const arrangement = { score:{key:{root:'C4'},harmonies:{home:{root:'C4',quality:
   motifs:{melody:motif},parts:{lead:{role:'lead',material:'melody'}},
   sections:[{id:'opening',bars:1,harmony:'home'}] };
 const production = {arrangement,patches:{pluck:{type:'fm'}},tracks:{lead:{patch:'pluck',gain:-11,send:.2}}};
+const padPattern = {op:'music.programPads',inputs:{
+  source:{id:'bench-roll',length:1,steps:[{id:'tap',beat:0,pad:'metal',play:{sample:'hit'},
+    roll:{count:2,spacing:.25,velocity:[1,.7]}}]},options:{render:{sampleRate:8000}}
+}};
 const producerPlan = {op:'music.planProducer',inputs:{source:production,brief:{
   section:'opening',goal:'Expose the opening echo on the pluck.',strategies:[],takes:[{
     id:'echo',hypothesis:'More room makes the quiet spaces audible.',components:[
@@ -266,11 +270,16 @@ const specifications = {
     inputs:{source:link('edited'),options:{mode:'repitch',speed:.8}}},
   'music.renderSampleKit': {nodes:{
     hit:{op:'audio.renderSampleEdit',inputs:{source:audio,edit:slicedAudio,options:{slice:'middle'}}},
-    bank:{op:'data.record',inputs:{hit:link('hit')}}
+    bank:{op:'data.record',inputs:{hit:link('hit')}}, pads:padPattern
   },inputs:{source:{id:'bench',pads:{metal:{notes:[36,36],articulations:{default:[{id:'main',takes:[{asset:'hit'}]}]}}}},
-    assets:link('bank'),events:[{time:0,note:36},{time:{beat:.5},pad:'metal',velocity:.6}],options:{sampleRate:8000}}},
+    assets:link('bank'),events:link('pads','events'),options:link('pads','options')}},
   'music.routeSampleKit': {nodes:{played:{op:'music.inspectProduction',inputs:{source:production}}},
     inputs:{tracks:link('played','events'),routes:{lead:{pad:'reed'}}}},
+  'music.programPads': {inputs:padPattern.inputs},
+  'music.capturePadPerformance': {inputs:{source:{events:[{time:.25,kind:'pulse',channel:'switch',value:.65}]},
+    routes:{switch:{pad:'metal'}}}},
+  'music.editPadPerformance': {nodes:{pads:padPattern},
+    inputs:{source:link('pads'),edits:[{op:'set',id:'p0-tap-1',changes:{play:{pan:.5}}}]}},
   'audio.stemControls': { inputs: {
     stems: { drums: transientAudio, synth: audio },
     settings: { drums: { envelope: { measure: 'peak', attack: 0, threshold: .4 } },
