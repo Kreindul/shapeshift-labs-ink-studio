@@ -1,4 +1,4 @@
-import { instancePlan, transformed, stampInstancePixelStyle, stampInstanceNormals } from './instances.mjs';
+import { instancePlan, transformed, stampInstancePixelStyle, stampInstanceNormals, expandedFootprints } from './instances.mjs';
 
 const rowSamples = 512;
 const instanceWidth = 256, instanceStride = 64;
@@ -80,6 +80,7 @@ export function createExpandedInstances() {
         normals.subarray(from / 16 * 3, end / 16 * 3), from / 16 * 3);
     }
     if (revision !== plan.revision) {
+      if(plan.rows.some(row=>row.asset.splatFootprints?.frames))packed.splatFootprints=storage.splatFootprints=expandedFootprints(world,plan);
       for (const row of plan.rows) {
         if (!(row.version > revision)) continue;
         const at = world.count + row.start;

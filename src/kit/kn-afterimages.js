@@ -69,7 +69,7 @@
         return poseCache.get(i);
       }
 
-      const rows = [], footprints = [];
+      const rows = [], footprints = [], footprintFrames=[];
       for (const [r, rule] of rules.entries()) {
         if (!rule.opacity) continue;
         const state = states[r], sourceIds = [];
@@ -109,19 +109,22 @@
           let position = point.position, shape = point.covariance ? footprint : [
             footprint[0], footprint[1], footprint[2], footprint[1], footprint[3], footprint[4], footprint[2], footprint[4], footprint[5]];
           if (scale !== 1) shape = shape.map(value => value * scale * scale);
+          let brushFrame=SplatFootprints.posedFrame(world,index,poseTime,scale);
           if (guide) {
             position = V.sub(position, guide.position);
             if (rule.project) {
               const n = guide.normal;
               position = V.mad(position, n, rule.lift - V.dot(position, n));
               const flat = M.id().map((a, k) => a - n[k / 3 | 0] * n[k % 3]);
+              if(brushFrame)brushFrame=[...M.app(flat,brushFrame.slice(0,3)),...M.app(flat,brushFrame.slice(3))];
               shape = M.mul(M.mul(flat, shape), flat).map((a, k) => a + .000001 * n[k / 3 | 0] * n[k % 3]);
             }
+            if(brushFrame)brushFrame=[...M.app(inverse,brushFrame.slice(0,3)),...M.app(inverse,brushFrame.slice(3))];
             position = M.app(inverse, position);
             shape = M.mul(M.mul(inverse, shape), inverseTranspose);
           }
           current.set(world.splatIds?.[index] ?? index, { position, shape, alpha: Math.min(1, alpha),
-            color: rule.tint ?? data[q + 7], footprint: world.splatFootprints?.styles[(world.splatFootprints.indices[index]??0)-1] });
+            color: rule.tint ?? data[q + 7], brushFrame, footprint: world.splatFootprints?.styles[(world.splatFootprints.indices[index]??0)-1] });
         }
         state.frames = state.frames.filter(prior => time - prior.time < rule.duration);
         for (const prior of state.frames.filter(prior => prior.time < time).slice(-rule.copies)) {
@@ -134,6 +137,7 @@
             const position = guide ? V.add(guide.position, M.app(guide.anchor, dab.position)) : dab.position;
             const cov = guide ? M.mul(M.mul(guide.anchor, dab.shape), transpose) : dab.shape;
             footprints.push(dab.footprint);
+            footprintFrames.push(guide&&dab.brushFrame?[...M.app(guide.anchor,dab.brushFrame.slice(0,3)),...M.app(guide.anchor,dab.brushFrame.slice(3))]:dab.brushFrame);
             rows.push(...position, fade * dab.alpha, cov[0], cov[1], cov[2], dab.color, cov[4], cov[5], cov[8], noDepth, 0, 0, 0, 0);
           }
         }
@@ -145,7 +149,7 @@
         if (state.frames.length > rule.copies + 1) state.frames.shift();
       }
       const packed = Float32Array.from(rows);
-      if (footprints.some(Boolean)) packed.splatFootprints = footprints;
+      if (footprints.some(Boolean)){packed.splatFootprints = footprints;packed.footprintFrames=footprintFrames;}
       return packed;
     }
 
@@ -192,8 +196,8 @@
     const result = { ...world, count, data };
     if (world.splatFootprints || rows.splatFootprints) {
       const marks = SplatFootprints.recorder();
-      for (let i=0;i<world.count;i++) { const id=world.splatFootprints?.indices[i]??0; if(id) marks.record(i,i+1,world.splatFootprints.styles[id-1]); }
-      rows.splatFootprints?.forEach((style,i)=>{if(style)marks.record(world.count+i,world.count+i+1,style)});
+      for (let i=0;i<world.count;i++) { const id=world.splatFootprints?.indices[i]??0; if(id) marks.record(i,i+1,world.splatFootprints.styles[id-1],world.splatFootprints.frames&&i*6+6<=world.splatFootprints.frames.length?world.splatFootprints.frames.subarray(i*6,i*6+6):undefined); }
+      rows.splatFootprints?.forEach((style,i)=>{if(style)marks.record(world.count+i,world.count+i+1,style,rows.footprintFrames?.[i])});
       result.splatFootprints=marks.finish(count);
     }
     // These fixed-stride tables are uploaded for the whole draw stream.

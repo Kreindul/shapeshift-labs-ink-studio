@@ -78,12 +78,13 @@ function placement(raw, prototypes, old) {
 
 function joinFootprints(parts){
   if(!parts.some(p=>p.splatFootprints))return undefined;
-  const styles=[],dictionary=new Map(),indices=new Uint16Array(parts.reduce((n,p)=>n+p.count,0));let offset=0;
+  const styles=[],dictionary=new Map(),count=parts.reduce((n,p)=>n+p.count,0),indices=new Uint16Array(count),frames=parts.some(p=>p.splatFootprints?.frames)?new Float32Array(count*6):undefined;let offset=0;
   for(const p of parts){const b=p.splatFootprints;if(b){
     const remap=b.styles.map(style=>{const key=JSON.stringify(style);if(!dictionary.has(key)){if(styles.length>=64)throw new RangeError('Instances exceed 64 footprint styles');dictionary.set(key,styles.push(style));}return dictionary.get(key)});
     for(let i=0;i<p.count;i++){const id=b.indices[i]??0;indices[offset+i]=id?remap[id-1]:0;}
+    if(b.frames)frames.set(b.frames,offset*6);
   }offset+=p.count;}
-  return Object.freeze({version:1,styles:Object.freeze(styles),indices});
+  return Object.freeze({version:1,styles:Object.freeze(styles),indices,...(frames&&{frames})});
 }
 export function instancePlan(group) {
   const plan = plans.get(group);
@@ -114,7 +115,7 @@ export function createSplatInstances(prototypes, instances) {
         throw new TypeError('Instance optical materials must match the prototype splat count');
       asset = { offset:sharedCount, count:world.count, data,
         opticalSplats: world.opticalSplats?.slice(0, world.count * 12),
-        splatFootprints: world.splatFootprints && {version:1,styles:world.splatFootprints.styles.map(v=>JSON.parse(JSON.stringify(v))),indices:world.splatFootprints.indices.slice()},
+        splatFootprints: world.splatFootprints && {version:1,styles:world.splatFootprints.styles.map(v=>JSON.parse(JSON.stringify(v))),indices:world.splatFootprints.indices.slice(),...(world.splatFootprints.frames&&{frames:world.splatFootprints.frames.slice()})},
         normals: world.renderMetadata?.normals?.slice(0, world.count * 3),
         materialPixelStyles: sourceStyles?.slice(0, world.count * 4), ...bounds(data,world.count) };
       sharedCount += asset.count;
@@ -228,6 +229,14 @@ function stampInstanceNormals(out, { asset, authored: { rotation } }, start) {
   }
 }
 
+export function expandedFootprints(base,plan){
+  return joinFootprints([base,...plan.rows.map(({asset,matrix})=>{
+    const b=asset.splatFootprints;if(!b?.frames)return asset;
+    const frames=b.frames.slice();for(let i=0;i<frames.length;i+=3){const x=frames[i],y=frames[i+1],z=frames[i+2];for(let a=0;a<3;a++)frames[i+a]=matrix[a*3]*x+matrix[a*3+1]*y+matrix[a*3+2]*z;}
+    return {...asset,splatFootprints:{...b,frames}};
+  })]);
+}
+
 function flattened(base, plan) {
   validateSize(base.count, plan);
   const count = base.count + plan.count, data = new Float32Array(count * 16);
@@ -250,7 +259,7 @@ function flattened(base, plan) {
     for (const row of plan.rows) stampInstanceNormals(normals, row, base.count + row.start);
   }
   const result = { ...base, count, data, renderMetadata };
-  const footprints=joinFootprints([base,...plan.rows.map(row=>row.asset)]);
+  const footprints=expandedFootprints(base,plan);
   if(footprints)result.splatFootprints=footprints;
   if (base.opticalSplats || plan.hasOpticalSplats) {
     const profiles = result.opticalSplats = new Float32Array(count * 12);

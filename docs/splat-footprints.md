@@ -36,6 +36,8 @@ All profiles accept `rotation` (radians, −2π through 2π), `stretch: [x,y]` (
 
 A unit footprint fits the original Gaussian's half-density radius. Stretch transforms the footprint independently of the splat's geometry. A symmetric covariance square root supplies a continuous projected basis, avoiding sudden axis flips when covariance eigenvalues become equal. These are individual projected marks; they do not impose a shared tile grid on a scene.
 
+For brushwork attached to a surface orientation, use [surface-aligned brush strokes](surface-brush.md). They retain signed world-space U/V axes and project those directly instead of using the symmetric covariance basis.
+
 ## Existing worlds and animation
 
 ```js
