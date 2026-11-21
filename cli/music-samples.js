@@ -54,21 +54,26 @@ function capture(file, recipe, kit) {
     firstSample:input.firstSample,endSample:input.endSample});
 }
 
+function openEdit(file,library,tool) {
+  const edit=tool.validate(read(file)), found=library.get(edit.source.id);
+  if (found.entry.asset!==edit.source.asset) throw new RangeError('Sample edit source hash does not match the library');
+  return edit;
+}
+
 function editCommand(mode,file,settings,out,library,tool) {
   if (!file) throw new TypeError('Pass a sample ID or sample edit project');
   if (mode==='slice') {
     const {value,entry}=library.load(file);
     return tool.create(value,{source:{id:entry.id,asset:entry.asset},detect:settings ? read(settings) : {}});
   }
-  const edit=tool.validate(read(file)), {id,asset}=edit.source, found=library.get(id);
-  if (found.entry.asset!==asset) throw new RangeError('Sample edit source hash does not match the library');
+  const edit=openEdit(file,library,tool);
   if (mode==='edit') {
     if (!settings) throw new TypeError('Pass a JSON list of sample edits');
     return tool.edit(edit,read(settings));
   }
   if (typeof out!=='string') throw new TypeError('Use --out with an audio output directory');
   const options=settings ? read(settings) : {};
-  const result=tool[mode](library.load(id).value,edit,options);
+  const result=tool[mode](library.load(edit.source.id).value,edit,options);
   const folder=path.resolve(out), audio=path.join(folder,mode==='render' ? 'edit.wav' : 'audition.wav');
   write(audio,WAV.encode(result.value,{encoding:'float64'}));
   let hardCut;
@@ -81,6 +86,19 @@ function editCommand(mode,file,settings,out,library,tool) {
   return {audio,report,...(hardCut && {hardCut})};
 }
 
+function warpCommand(file,config,out,library,tools) {
+  if (!file || !config || typeof out!=='string')
+    throw new TypeError('Pass a sample ID or sample edit, a warp settings file and --out directory');
+  const edit=path.extname(file).toLowerCase()==='.json' ? openEdit(file,library,tools.sampleEdit) : null;
+  const {value,entry}=library.load(edit?.source.id ?? file);
+  const source=edit ? tools.sampleEdit.render(value,edit).value : value;
+  const settings=read(config), result=tools.warpAudio(source,settings), folder=path.resolve(out);
+  const audio=path.join(folder,'warp.wav'), report=path.join(folder,'report.json');
+  write(audio,WAV.encode(result.value,{encoding:'float64'}));
+  json(report,{...result.report,source:entry,...(edit && {edit:file}),settings,audio});
+  return {audio,report};
+}
+
 module.exports = function command([mode,directory,file,settings],opt,kit) {
   if (!directory) throw new TypeError('Pass a sample library directory');
   const library = openSampleLibrary(directory,{kit});
@@ -90,8 +108,9 @@ module.exports = function command([mode,directory,file,settings],opt,kit) {
   else if (mode==='get' && file) value = library.get(file);
   else if (['slice','edit','render','audition'].includes(mode))
     value=editCommand(mode,file,settings,opt.out,library,kit.KIT.procedural.mediaGraph.sampleEdit);
-  else throw new TypeError('Use music samples add, search, get, slice, edit, render or audition');
-  if (mode==='render' || mode==='audition') {
+  else if (mode==='warp') value=warpCommand(file,settings,opt.out,library,kit.KIT.procedural.mediaGraph);
+  else throw new TypeError('Use music samples add, search, get, slice, edit, render, audition or warp');
+  if (['render','audition','warp'].includes(mode)) {
     process.stdout.write(JSON.stringify(value)+'\n');
     return value;
   }

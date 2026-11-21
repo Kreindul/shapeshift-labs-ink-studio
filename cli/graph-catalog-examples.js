@@ -262,6 +262,8 @@ const specifications = {
   'audio.renderSampleEdit': {inputs:{source:audio,edit:slicedAudio}},
   'audio.auditionSampleEdit': {inputs:{source:audio,edit:slicedAudio,
     options:{left:'attack',right:'tail',before:12,after:12}}},
+  'audio.warp': {nodes:{edited:{op:'audio.renderSampleEdit',inputs:{source:audio,edit:slicedAudio}}},
+    inputs:{source:link('edited'),options:{mode:'repitch',speed:.8}}},
   'audio.stemControls': { inputs: {
     stems: { drums: transientAudio, synth: audio },
     settings: { drums: { envelope: { measure: 'peak', attack: 0, threshold: .4 } },

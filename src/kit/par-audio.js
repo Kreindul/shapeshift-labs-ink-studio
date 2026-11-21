@@ -51,6 +51,11 @@
         return {value,report,alternatives:hardCut ? {hardCut} : {}};
       }
     },
+    'audio.warp': {
+      description: 'Fit audio to tempo or sample and picture pins with beat, tonal, speech or varispeed processing.',
+      inputs: {source:'audio',options}, outputs: {value:'audio',report:'record'},
+      run({source,options}) {return A.warpAudio(source,options);}
+    },
     'audio.window': media({ value: 'audio', report: 'record' }, A.audioWindow),
     'audio.analyze': media({ value: 'record', rms: 'number', peak: 'number' }, A.analyze),
     'audio.fft': media({ value: 'record', spectrum: 'raster', bands: 'record' }, A.fft),
