@@ -995,6 +995,10 @@ const CMD = {
         '  splat-footprints <shape|profile.json> [--rotation n --stretch x,y --softness n --point x,y --preview file.png --out report.json]  inspect native splat silhouettes',
         '  render-grid <hex|triangle|diamond|settings.json> [--size 8 --point x,y --bounds x,y,w,h --out report.json]  inspect tessellating cells',
         '  render-graph <graph.json> [--w 900 --h 620 --out report.json]  inspect effect resolution and memory/work budgets',
+        '  music audition <recipe.json> --out directory   compare audiovisual phrase variations',
+        '  music arrange <arrangement.json> [--out plan.json]   compile motifs and roles into a score',
+        '  music revise <plan.json> <edits.json> [--out revised.json]   revise unpinned parts and bindings',
+        '  music reference <plan.json> --part ID --section ID [--out motif.json]   recover an audition idea',
         '  graph nodes [--json]   list registered graph operations and their ports',
         '  graph describe <op> [--json | --example]   show schema, units, limits and a runnable example',
         '  graph validate|plan <project.json> [--inputs values.json]   validate and describe a headless graph',
@@ -2124,6 +2128,9 @@ const CMD = {
   },
   graph() {
     return require('./graph-cli.js')(pos,opt,{kit:lib(),operations:cfg.graphOperations,adapters:cfg.graphAdapters});
+  },
+  music() {
+    return require('./music-composer.js')(pos,opt,lib());
   },
   'material-controls'() {
     return require('./material-controls.js')(pos,opt,lib());
