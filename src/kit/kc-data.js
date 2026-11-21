@@ -610,6 +610,11 @@
       bad('finish.look.edgeFilter', error.message);
     }
     try {
+      MotionalCoverage.prepare(look?.motionalCoverage);
+    } catch (error) {
+      bad('finish.look.motionalCoverage', error.message);
+    }
+    try {
       TranslucentSilhouettes.prepare(look?.translucentSilhouettes);
     } catch (error) {
       bad('finish.look.translucentSilhouettes', error.message);

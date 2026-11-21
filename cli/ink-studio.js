@@ -651,6 +651,16 @@ function translucentSilhouettesOption() {
   return translucentSilhouettesOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
 }
 
+let motionalCoverageOverride;
+function motionalCoverageOption() {
+  const value = opt['motional-coverage'];
+  if (value === undefined) return undefined;
+  if (value === true || value === 'on') return true;
+  if (value === 'off') return false;
+  if (typeof value !== 'string') die('--motional-coverage needs on, off or a JSON file');
+  return motionalCoverageOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
+}
+
 let inkOverride;
 function inkOption() {
   const value = opt.ink;
@@ -727,6 +737,7 @@ const view = extra =>
       stable: stabilityOption(),
       stableDetail: stableDetailOption(),
       edgeFilter: edgeFilterOption(),
+      motionalCoverage: motionalCoverageOption(),
       colorClusters: colorClustersOption(),
       artDirection: artDirectionOption(),
       silhouetteProtection: silhouetteOption(),
@@ -1120,6 +1131,7 @@ const CMD = {
         'bounce options: --sky-bounce color|preset|off --ground-bounce color|preset|off --sky-bounce-intensity n --ground-bounce-intensity n',
         'cloud options: --cloud-field cirrus|coastal-stratus|cumulus|storm-front|file.json|off --cloud-representation auto|card|impostor|volume|off --cloud-self-shadows on|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',
         'translucent silhouette options: --translucent-silhouettes file.json|off',
+        'motional pixel coverage: --motional-coverage on|off|file.json',
         'celestial options: --celestial-tracks on|off|file.json',
         'sky options: --sky-environment file.json|off --sky-time seconds --sky-profile track=profile --sky-transitions file.json|off --sky-reflections scene|material',
         'weather options: --weather-binding on|off|file.json --retained-weather on|off --weather-fronts on|off --weather-tracks on|off --world-precipitation on|off|file.json --rain-impacts on|off|file.json',
@@ -3031,12 +3043,13 @@ const CMD = {
       w = build(id),
       c = w.cam || {},
       frames = [];
+    const motionalCoverageHistory = require('../index.js').createMotionalCoverageHistory();
     const st = num('step', mode === 'orbit' ? 0.004 : mode === 'zoom' ? 0.012 : mode === 'pan' ? 0.02 : 1 / 12);
     let px = 0, bg = w.pal[0];
     for (let k = 0; k < n; k++) {
       const t = mode === 'still' ? t0 + k * st : t0;
       pose(w, t);
-      const v = view({ t, w: num('w', 480), h: num('h', 340) }),
+      const v = view({ t, w: num('w', 480), h: num('h', 340), motionalCoverageHistory }),
         T = (v.target || c.target || [0, 0, 0]).slice();
       if (mode === 'orbit') v.yaw = (v.yaw === undefined ? c.yaw || 0 : v.yaw) + k * st;
       if (mode === 'zoom') v.zoom = (v.zoom || 1) * (1 + k * st);

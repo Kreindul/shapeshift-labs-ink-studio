@@ -45,10 +45,11 @@ const ArtStability = require('../src/art-stability.js');
 const { ditherFootprint } = require('./dither-footprint.js');
 const StableDetail = require('../src/stable-detail.js');
 const EdgeFilter = require('../src/edge-filter.js');
+const MotionalCoverage = require('../src/motional-coverage.js');
 const TranslucentSilhouettes = require('../src/translucent-silhouettes.js');
 const SdfAssist = require('../src/sdf-assist.js');
 const SdfRaster = require('./sdf-assist.js');
-const { footprint, exportOffsets, sampledDepth } = require('./splat-sampling.js');
+const { footprint, exportOffsets, coverageOffsets, sampledDepth } = require('./splat-sampling.js');
 const { createMaskResolve, applyMasks } = require('./look-mask-resolve.js');
 const PalettePixel = require('./palette-pixel.js');
 const PaletteComposition = require('./palette-composition.js');
@@ -115,6 +116,7 @@ const probeCaptures = Symbol('reflection probe captures');
 const deepScope = Symbol('deep capture budget');
 const deepReflection = Symbol('deep reflection plane');
 const shutterPlan = Symbol('shutter plan');
+const coverageLane = Symbol('motional coverage native/oversampled lane');
 
 function cameraCapture(options, receive) {
   return { [captureCamera](camera) {
@@ -129,7 +131,8 @@ function sequenceHistory(kit) {
     afterimageHistory: kit.afterimages.history(),
     renderHistory: kit.renderGraph.history(),
     volumeHistory: kit.atmosphere.history(),
-    transparencyHistory: kit.stableTransparency.history()
+    transparencyHistory: kit.stableTransparency.history(),
+    motionalCoverageHistory: MotionalCoverage.history()
   };
 }
 
@@ -227,7 +230,7 @@ function render(world, o, preparedPalettes) {
     const exposedPasses = branches.length ? Shutter.graphPasses(o[reconstructionSource] ?? world, o, o[shutterPlan], branches,
       base.w, base.h, (sample, settings) => render(sample, { ...settings,
         [shutterPlan]: null, [captureCamera]: undefined, [probeCaptures]: undefined, [deepScope]: undefined,
-        [reconstructionSource]: undefined, [sampledPresentation]: false, [afterimageRows]: undefined
+        [reconstructionSource]: undefined, [sampledPresentation]: false, [afterimageRows]: undefined, motionalCoverageHistory: undefined
       }, preparedPalettes), kit) : o[Shutter.passImages];
     const frame = { ...base, ...runGraph(graph, base, world, time, kit.poly2.text, camera,
       (spec,ctx) => kit.annotations.anchor(spec,{ ...ctx,sceneTime:o?.t }),
@@ -261,7 +264,8 @@ function render(world, o, preparedPalettes) {
     const kit = require('../index.js').load();
     return Shutter.scene(o[reconstructionSource] ?? world, o, o[shutterPlan], (sample, settings, nominal) =>
       render(sample, { ...settings, [shutterPlan]: null, [reconstructionSource]: undefined, [probeCaptures]: undefined,
-        ...(!nominal && { [captureCamera]: undefined, [deepScope]: undefined, [sampledPresentation]: false })
+        motionalCoverageSource: settings.motionalCoverageSource ?? (o[reconstructionSource] ?? world).data,
+        ...(!nominal && { [captureCamera]: undefined, [deepScope]: undefined, [sampledPresentation]: false, motionalCoverageHistory: undefined })
       }, preparedPalettes), kit);
   }
   if (!o?.renderStats) return renderFrame(world, o, preparedPalettes);
@@ -306,6 +310,9 @@ function renderFrame(world, o, preparedPalettes) {
   const transparent = !!o.transparent && !o.captureCoverage;
   const integrateFootprint = o.splatFilter === 'footprint';
   const edgeStrengthAt = !o.captureCoverage && EdgeFilter.prepare(o.edgeFilter ?? look.edgeFilter)?.bind(world);
+  const coverageView = (!o.samples || o[coverageLane]) && !o.captureCoverage && !o.reflectionPlane && !o[probeCamera];
+  const motionCoverage = coverageView && MotionalCoverage.prepare(o.motionalCoverage ?? look.motionalCoverage);
+  if (coverageView && !motionCoverage?.strength) o.motionalCoverageHistory?.clear();
   const silhouettes = TranslucentSilhouettes.prepare(o.translucentSilhouettes ?? look.translucentSilhouettes);
   const stableDetail = StableDetail.prepare(o.stableDetail ?? look.stableDetail);
   const coverageMode = ContributionRules.coverageMode(o.splatCoverage ?? look.splatCoverage);
@@ -570,7 +577,7 @@ function renderFrame(world, o, preparedPalettes) {
       [captureCamera]:undefined, [deepScope]:null
     })));
   if (legacyLook && (specializedResolve || (o.colored && !tone))) {
-    const native = render(world, Object.assign({}, o, { colored: false, samples: true, worked: true, px, passes: [...passSelection], [scopedGlowPass]: trackGlow, artInkActive: !!ink,
+    const native = render(world, Object.assign({}, o, { colored: false, samples: true, worked: true, px, passes: [...passSelection], [scopedGlowPass]: trackGlow, [coverageLane]: 'native', artInkActive: !!ink,
       [subjectFocusPass]:focus,
       captureMotion, motionFrom, maskGrade: !tone && grade, reflectionTint: effects?.reflection,
       previewPalette: globalPaletteMark, lookAudit: audit,
@@ -588,6 +595,7 @@ function renderFrame(world, o, preparedPalettes) {
         h: H * px,
         reflectionScale: 2,
         artGridScale: 2,
+        [coverageLane]: 'oversampled',
         [deepScope]: null,
         volumeHistory: null,
         artInkActive: !!ink,
@@ -1267,6 +1275,11 @@ function renderFrame(world, o, preparedPalettes) {
   if(PIX&&engraved){PIX=PIX.slice();for(let i=0;i<engraved.indices.length;i++)if(engraved.indices[i])PIX[i*8]=0;}
   const materialStyles = o.raw ? null : world.materialPixelStyles;
   const artScale = o.artGridScale || 1;
+  const motionCoverageAt = motionCoverage?.strength && motionCoverage.bind(world);
+  const motionCoverageFrame = motionCoverageAt && o.motionalCoverageHistory?.begin(o[coverageLane] ?? 'native',
+    o.motionalCoverageSource ?? o[reconstructionSource]?.data ?? world.rest ?? world.data,
+    JSON.stringify([W,H,ortho,baseCount,motionCoverage.key]), sceneTime, o.resetRenderHistory || o.resetMotionalCoverage);
+  const coverageBack = motionCoverageAt && world.back?.length ? new Set(world.back) : null;
   const silhouetteWeight = silhouettes?.weight(Math.min(W,H)/artScale) ?? 0;
   const silhouetteAt = silhouetteWeight && silhouettes.bind(world);
   const silhouetteBackground = silhouetteAt && world.back?.length ? new Set(world.back) : null;
@@ -1277,7 +1290,7 @@ function renderFrame(world, o, preparedPalettes) {
   let contributions = retainLayers && PIX ? contributionLayers(col, captured, W, H, true, bend) : null;
   // The legacy pattern redraw otherwise replaces the composited edge with opaque paint.
   const edgePatterns = !retainLayers && edgeStrengthAt && PIX ? contributionLayers(col, captured, W, H, true, 0) : null;
-  const edgePixels = !o.raw && edgeStrengthAt ? new Float32Array(W * H) : null;
+  const edgePixels = !o.raw && (edgeStrengthAt || motionCoverageAt) ? new Float32Array(W * H) : null;
   const stageMasks = stages?.surfaceMask || contribution &&
     localConstraints?.some(policy => policy?.mask || policy?.tuning?.regions.length);
   const anchoredContributions = contribution && (anchoring ||
@@ -1715,6 +1728,22 @@ function renderFrame(world, o, preparedPalettes) {
       centers[i * 2] = sx;
       centers[i * 2 + 1] = H - sy;
     }
+    const motionStrength = motionCoverageAt && !fieldParticle && !opticalActive && !softCoverage && !shaped &&
+      !silhouette && !correction && !PIX?.[i*8] && !coverageBack?.has(i) &&
+      (kraw & ContributionRules.nonSurface) === 0 && al >= 1 && motionCoverageAt(i);
+    const thin = motionStrength && MotionalCoverage.thin(projectedA,Bq,projectedC,artScale,motionCoverage.maxWidth);
+    const coverageWeight = thin ? motionStrength*thin.weight : 0;
+    let coverageSamples;
+    if (thin) {
+      const center = { x:sx/artScale, y:sy/artScale, depth:-cz, nx:thin.nx, ny:thin.ny, radius:thin.radius };
+      const prior = motionCoverageFrame?.track(i,center);
+      const aperture = MotionalCoverage.aperture(motionCoverage,center,prior);
+      if (aperture) coverageSamples = coverageOffsets(aperture);
+      const margin = exportOffsets.at(-1)*(aperture ? Math.max(aperture[0],aperture[2])+Math.abs(aperture[1]) : 1);
+      const extra = Math.max(0,margin-footprintMargin);
+      ex += extra;
+      ey += extra;
+    }
     if (sx + ex < 0 || sx - ex > W || sy + ey < 0 || sy - ey > H) continue;
     let coverage = 1,
       glint = 0,
@@ -1854,7 +1883,13 @@ function renderFrame(world, o, preparedPalettes) {
           const average = footprint(dx, dy, k0, k1, k2, al, hard, edgeStyle, continuousCoverage, exportOffsets);
           a += (average - a) * edgeStrength;
         }
-        const filteredEdge = edgeStrength > 0 && Math.abs(a - centerAlpha) >= edgeCoverageThreshold;
+        if (coverageWeight) {
+          const average = footprint(dx,dy,k0,k1,k2,gain,hard,edgeStyle,continuousCoverage,exportOffsets,coverageSamples);
+          // Retain part of a centered core while restoring coverage at the edge.
+          const resolved = average + .30*Math.max(0,a-average);
+          a += (resolved-a)*coverageWeight;
+        }
+        const filteredEdge = (edgeStrength > 0 || coverageWeight > 0) && Math.abs(a - centerAlpha) >= edgeCoverageThreshold;
         a *= geometryWeight;
         if (a < ContributionRules.minimum) continue;
         const p = iy*W+ix, sdfRow = sdf?.rows[i], sdfHit = sdf?.hits[p];
@@ -2679,6 +2714,7 @@ function renderFrame(world, o, preparedPalettes) {
       const i = (y * W + x) * 3;
       audit.pixel('interior', (H - 1 - y) * W + x, c2[i], c2[i + 1], c2[i + 2]);
     }
+    motionCoverageFrame?.commit();
     return {
       w: W, h: H, color: Uint8Array.from(c2, v => Math.round(clamp(v, 0, 1) * 255)), depth: dep, drawn,
       ...(deepFrame && { deep: deepFrame }),
@@ -3019,7 +3055,7 @@ function renderFrame(world, o, preparedPalettes) {
   }
   applyMasks(out, masks?.output);
   if (paletteTrace) paletteTrace.steps.push(...paletteTrace.mask);
-  return finishLook({
+  const frame = finishLook({
     w: W, h: H, px, rgb: out, drawn, use,
     ...(deepFrame && { deep: deepFrame }),
     ...((localOutput || tone || evaluatedPalette) && { palette: localOutput?.packed || tone?.palette || evaluatedPalette }),
@@ -3027,6 +3063,8 @@ function renderFrame(world, o, preparedPalettes) {
     ...(volumeStats && { volumeStats }), ...(silhouetteMask && {silhouetteMask}), ...(o.captureFog && atmosphere?.fog && { fog: atmosphere.fog }),
     ...(alpha && { alpha }), ...(orderFallback && { orderFallback })
   }, passes, atmosphere?.fog, effectSignals, effectColor, paletteState,paletteInventory,beforePalette,paintStage);
+  motionCoverageFrame?.commit();
+  return frame;
 }
 function pixelIndex(w, h, sourceW, sourceH) {
   if (w === sourceW && h === sourceH) return (x, y) => y * w + x;
