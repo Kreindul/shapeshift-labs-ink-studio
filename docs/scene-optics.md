@@ -277,6 +277,43 @@ The `reflections` export pass contains both kinds.
 ink-studio render examples/local-reflection-workshop.js --w 356 --h 183 --px 1 --out workshop.png
 ```
 
+## Reflection detail by surface and distance
+
+Set `detail` on a `planarReflection` or `localReflection` finish layer, or
+on a live water body's `optics.reflection`. Multiple surfaces can use the
+same capture with different detail settings.
+
+```js
+const puddle = K.reflection.material({ r: [7], materialId: 'puddle' }, 'basin', {
+  f0: 0.9,
+  distortion: 13,
+  detail: { core: 0.7, stretch: [4.5, 0.4], direction: 'ripple', distance: [9.2, 13], cluster: 3 }
+});
+```
+
+| Setting | Behaviour |
+| --- | --- |
+| `core` | Weight of the sharp, unperturbed reflection. Defaults to `.6`. A value of 1 gives the sharp sample all the near weight. |
+| `stretch` | Along- and across-axis filter radii in native art pixels. Defaults to `[2, .55]`. Planar layers also factor in their existing blur. |
+| `direction`, `rotation` | `ripple` follows the crest indicated by the finish normal or water waves. It uses the surface tangent on calm water. `surface` always uses the material tangent, or world X on a water body. Rotate the result in radians. |
+| `distance` | Optional `[near, far]` in camera-axis scene units. Between those distances Ink blends from the core and streak to the coarse reflection. The same range applies in either projection. |
+| `cluster` | Size of a distant reflection block, from 1 to 16 art pixels for planar captures. Defaults to 3. Local probes use coarser levels of their directional capture. |
+
+Planar blocks average colour and coverage in the capture. Local probes
+use their prefiltered cube faces. This preserves the contribution of
+small warm highlights. The existing camera capture budgets still apply.
+
+Headless rendering supports finish layers and live water. WebGL
+supports the profile on live water, with prefiltered capture levels for
+distant blocks. Use `--reflection-detail off` in the CLI or
+`reflectionDetail: false` in a render frame to compare with ordinary
+reflection sampling.
+
+```sh
+node cli/ink-studio.js render examples/reflection-detail.js --w 356 --h 183 --px 1 --t .65 --out near.png
+node cli/ink-studio.js render examples/reflection-detail.js --w 356 --h 183 --px 1 --t .65 --zoom .51 --out distant.png
+```
+
 ## Ripple sources
 
 ```js

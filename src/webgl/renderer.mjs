@@ -453,7 +453,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       anchorCount = points.n;
     }
 
-    function waterUniforms(scene, camera, time, plane, captures, width, height) {
+    function waterUniforms(scene, camera, time, plane, captures, width, height, detailOn) {
       if (!scene) return null;
       waterTexture ??= resources.texture();
       textureUnit(3, waterTexture);
@@ -473,7 +473,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         u_waterCamera: [camera.tangent * camera.aspect, camera.tangent, +camera.ortho], u_waterTime: time,
         u_waterReflections: captures ? 23 : 0, u_waterReflectionCount: captures?.count ?? 0,
         u_waterReflectionActive: captures?.active ?? zero, u_waterReflectionHeights: captures?.heights ?? zero,
-        u_waterReflectionGrid: captures?.grid ?? [2,1], u_waterReflectionViewport:[width,height], u_waterProjection:camera.projection };
+        u_waterReflectionGrid: captures?.grid ?? [2,1], u_waterReflectionViewport:[width,height],
+        u_waterReflectionDetailOn:detailOn,u_waterProjection:camera.projection };
     }
 
     function wetVariant(water, media) {
@@ -669,6 +670,12 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         } else {
           gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, x, y, 0, 0, width, height);
         }
+      }
+      const clusters = frame.reflectionDetail!==false && world.water.reflectionClusters;
+      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,clusters ? gl.NEAREST_MIPMAP_LINEAR : gl.NEAREST);
+      if (clusters) {
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,null);
+        gl.generateMipmap(gl.TEXTURE_2D);
       }
       gl.activeTexture(gl.TEXTURE0);
       return plan;
@@ -903,7 +910,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         flex = channel => airflow.frame(velocity(channel)).flex;
         if (direction?.cadence.rain !== undefined) rainWind = velocity('rain');
       }
-      const water = waterUniforms(waterScene, camera, motion?.water ?? time, plane, captures, width, height);
+      const water = waterUniforms(waterScene, camera, motion?.water ?? time, plane, captures, width, height,
+        frame.reflectionDetail!==false);
       if (water) water.u_waterWindGain = (windResponse?.water ?? 0) * Math.hypot(...flex('water'));
       const env = environment.prepare(world,frame,camera,t,width,height,reflectionCapture);
       if (env || lastEnvironment) historyValid = false;

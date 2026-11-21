@@ -868,7 +868,7 @@ function renderFrame(world, o, preparedPalettes) {
           V,
           eye,
           o.reflectionScale ?? 1,
-          { quality: passQuality, width: W, height: H }
+          { quality: passQuality, width: W, height: H, focal, ortho, detail:o.reflectionDetail!==false }
         )
       : null;
   let definitions = useLocalReflections ? ReflectionProbes.prepare(world.reflectionProbes) : [];
@@ -1177,7 +1177,7 @@ function renderFrame(world, o, preparedPalettes) {
   const mediaOptions = (water || aerial || cloudView || blendDepth && volumes.length) && atmosphereOptions();
   const hazeCoverage = effectRules?.ramps.get('fog')?.geometry && world.fog.max > 0 && new Float32Array(W * H);
   const rayMedia = mediaOptions && mediaSampler(volumes, water, rayAt, W, mediumHorizon, {
-    ...mediaOptions, reflection, reflectionBackground: bg, waterTransition: blendDepth
+    ...mediaOptions, reflection, reflectionBackground: bg, reflectionDetail:o.reflectionDetail, waterTransition: blendDepth
   }, air);
   const retainLayers = retainContributions || Boolean(rayMedia);
   const col = new Float32Array(W * H * 3),
