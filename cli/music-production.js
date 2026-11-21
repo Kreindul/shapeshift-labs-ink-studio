@@ -107,7 +107,7 @@ module.exports=function command([mode,file,config],opt,kit) {
     let template=map.template;
     if (config && typeof template==='string') template=read(path.resolve(path.dirname(config),template));
     value={...P.mapGroove(production,{...map,template:template?.template ?? template},assets),
-      ...(recipe.assets && {assets:paths})};
+      ...(recipe.assets && {assets:paths}),...(recipe.options && {options:recipe.options})};
   }
   else if (mode==='analyze') value=P.analyze(production,assets,config ? read(config) : recipe.options);
   else if (mode==='suggest') value=P.suggest(production,config ? read(config) : recipe.options,assets);
