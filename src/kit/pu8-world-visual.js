@@ -123,8 +123,8 @@
     return { look, material, forEntity, validate };
   }
 
-  function visual({makeBuilder,makeSculpt},view,query,{ controls, take } = {}) {
-    const time = take?.start ?? view.time ?? view.tick * view.world.dt;
+  function visual({makeBuilder,makeSculpt},view,query,{ controls, take, time: presentationTime } = {}) {
+    const time = take?.start ?? presentationTime ?? view.time ?? view.tick * view.world.dt;
     const timeline = sceneTimeline(view.world), frame = take && timeline?.forTake ? timeline.forTake(take) : timeline?.sample(time);
     const { world: bound, values, dataInputs } = visualParameters(view.world, { time, query, controls });
     const edits = frame?.edits.filter(edit => edit.path[0] === 'visual');

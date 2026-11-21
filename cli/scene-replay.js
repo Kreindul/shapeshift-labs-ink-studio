@@ -10,9 +10,13 @@ const integer = (n, min, max) => Number.isSafeInteger(n) && n >= min && n <= max
 const dimensions = (width, height) => [width, height].every(n => integer(n, 1, 8192)) && width * height <= maxImagePixels;
 
 function validate(document) {
-  const { version, width, height, start, fps, frames, title } = document ?? {};
+  const { version, width, height, start, fps, frameRate, frames, title } = document ?? {};
+  const validRate = frameRate === undefined ? integer(fps, 1, 120) :
+    Number.isFinite(fps) && fps >= 1 && fps <= 120 &&
+    integer(frameRate?.numerator, 1, Number.MAX_SAFE_INTEGER) && integer(frameRate?.denominator, 1, Number.MAX_SAFE_INTEGER) &&
+    fps === frameRate.numerator / frameRate.denominator;
   if (document?.format !== format || version !== 1 || !dimensions(width, height) ||
-      !Number.isFinite(start) || !integer(fps, 1, 120) || typeof title !== 'string' ||
+      !Number.isFinite(start) || !validRate || typeof title !== 'string' ||
       !Array.isArray(frames) || !integer(frames.length, 1, maxFrames) || frames.length * width * height > maxPixels)
     throw new TypeError('Invalid Ink Studio scene replay');
   return document;

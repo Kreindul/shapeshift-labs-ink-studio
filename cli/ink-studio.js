@@ -1014,7 +1014,8 @@ const CMD = {
         '  retarget --profiles  show built-in role templates',
         '  passes <id> [--channels coverage,depth,normal,objectId,materialId,emission]  save art-pixel render pass previews',
         '  export-layers <id> [--t 0,1,2 | --from 0 --to 2 --n 3] [--out directory]   export aligned RGBA, depth, normals, IDs and material mattes',
-        '  export-scene <id> --out directory [--formats still,loop,replay,embed]   publish one scene in multiple formats',
+        '  export-scene <scene|world|take> --out directory [--formats still,loop,replay,embed]',
+        '    --audio soundtrack.json [--mux CODEC --adapters host.cjs]   export aligned WAV stems and optional video',
         '    --loop-join   inspect the actual frame join and excluded endpoint on a clip or scene export',
         '    --w width --h height --still-scale 2 --t seconds --from 0 --to 2 --fps 12 --embed-config file.json',
         '  scene-replay <recording.json> --out output.png [--at seconds]   save a frame from a replay',
@@ -2181,20 +2182,34 @@ const CMD = {
     });
     console.log('wrote', file, manifest.frames.length, 'frame(s)');
   },
-  'export-scene'() {
+  async 'export-scene'() {
     if (pos.length !== 1 || typeof opt.out !== 'string')
       die('Use export-scene <scene> --out directory [--formats still,loop,replay,embed]');
     if (['w', 'h', 'still-scale', 't', 'from', 'to', 'fps'].some(key => opt[key] === true) || opt.formats === true)
       die('Scene export flags need values');
-    const settings = sceneEmbedConfig();
+    const settings = sceneEmbedConfig(), kit = lib();
     const transparent = onOffOption('transparent');
+    if ([opt.audio, opt.mux, opt.adapters].includes(true) || opt.mux !== undefined && opt.audio === undefined)
+      die('Use --audio soundtrack.json with an optional --mux codec ID and --adapters module');
+    const host = await require('./graph-host-command.js').adapters(opt.adapters, {
+      kit, operations: cfg.graphOperations, adapters: cfg.graphAdapters
+    });
+    const audio = opt.audio === undefined ? undefined : require('./scene-audio.js').readSceneAudio(opt.audio, host);
+    const video = opt.mux === undefined ? undefined : require('./graph-host.js').createGraphHost(host.adapters, { kit });
+    video?.requireCodec(opt.mux, 'mux');
+    const native = require('./scene-export-world.js').readExportWorld(pos[0], kit);
+    const fpsText = opt.fps, fraction = typeof fpsText === 'string' && /^(\d+)\/(\d+)$/.exec(fpsText);
+    const fps = fraction ? { numerator: Number(fraction[1]), denominator: Number(fraction[2]) } :
+      fpsText === undefined ? native?.fps ?? 12 : Number(fpsText);
     const { file } = require('./scene-export.js').exportScene(({ width, height, moving, from }) => {
+      if (native) return native.capture({ width, height, from, render: R.render,
+        options: view({ ...(moving && sequenceHistory()), transparent, ...(opt.px1 && { px: 1 }) }) });
       const world = buildPreview(pos[0], { parameterInputs: { time: num('parameter-time', from) } });
       const frame = view({ ...(moving && sequenceHistory()), w: width, h: height, transparent,
         ...(opt.px1 && { px: 1 }) });
       const camera = moving ? clipCamera(world) : null, replay = moving ? feedbackReplay(world, from, frame) : null;
       return {
-        scene: world.id, title: world.name,
+        scene: world.id, title: world.name, timeline: world.timeline,
         ...(world.simulationInputs && { seed: world.simulationInputSeed,
           simulationInputs: lib().KIT.simulationInputs.tracks(world.simulationInputs) }),
         duration: Math.max(world.timeline?.duration ?? 0, world.cameraRig?.duration ?? 0),
@@ -2208,8 +2223,9 @@ const CMD = {
         }
       };
     }, { out: opt.out, formats: opt.formats?.split(',').map(format => format.trim()), embed: settings,
-      width: num('w', 640), height: num('h', 360), fps: num('fps', 12), from: num('from', 0), to: num('to'),
-      stillScale: num('still-scale', 2), stillTime: num('t'), loopJoin: onOffOption('loop-join') });
+      width: num('w', 640), height: num('h', 360), fps, from: num('from', 0), to: num('to'),
+      stillScale: num('still-scale', 2), stillTime: num('t'), loopJoin: onOffOption('loop-join'), kit, audio,
+      ...(video && { mux: payload => video.mux(opt.mux, payload) }) });
     console.log('wrote', file);
   },
   'scene-replay'() {

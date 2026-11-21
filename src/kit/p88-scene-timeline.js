@@ -211,7 +211,16 @@
         .map(({ clip, time: from, offset, rate }) => ({ ...clip, position: seconds(add(offset, mul(sub(time, from), rate))) }));
       return { time: seconds(time), edits: [...edits.values()], audio };
     }
+    function audioSchedule(clock) {
+      const coordinate = exact ? value => T.locate(clock, value).sample : value => clock.locate(value).sample;
+      return [
+        ...sounds.map(({ clip, time, end }) => ({ ...clip, firstSample: coordinate(time), endSample: coordinate(end) })),
+        ...points.filter(row => row.type === 'audio' && !row.phase)
+          .map(row => ({ ...row, firstSample: coordinate(timeOf(row)) }))
+      ].sort((a, b) => a.firstSample - b.firstSample);
+    }
     return freeze({
+      audioSchedule,
       duration: seconds(graph.duration), targets: [...targets.values()], markers: points.filter(row => row.type === 'marker'),
       events: points.filter(row => row.type === 'event'), audio: sounds.map(row => row.clip),
       sample(time) {

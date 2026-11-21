@@ -126,6 +126,7 @@ module.exports = {
   checkPaletteShot: require('./cli/palette-checks.js').checkPaletteShot,
   exportLayers: require('./cli/export-layers.js').exportLayers,
   exportScene: require('./cli/scene-export.js').exportScene,
+  ...require('./cli/scene-audio.js'),
   readSceneReplay: require('./cli/scene-replay.js').readSceneReplay,
   sampleSceneReplay: require('./cli/scene-replay.js').sampleSceneReplay,
   writeSceneEmbed: require('./cli/scene-replay.js').writeSceneEmbed,

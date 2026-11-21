@@ -29,7 +29,7 @@ function createGraphHost(config = {}, { kit = require('../index.js').load() } = 
     throw new TypeError('Expected device, network, codec or PXC adapter registries');
   const { devices = {}, network = {}, codecs = {}, pxc = {} } = config;
   const entries = { device: registry(devices, ['read']), network: registry(network, ['read', 'write']),
-    codec: registry(codecs, ['decode', 'encode']), pxc: registry(pxc, ['import']) };
+    codec: registry(codecs, ['decode', 'encode', 'mux']), pxc: registry(pxc, ['import']) };
 
   function method(kind, name, action) {
     const row = entries[kind];
@@ -87,13 +87,21 @@ function createGraphHost(config = {}, { kit = require('../index.js').load() } = 
     return normalize(type, sync(call({ bytes: bytes(source, 'Codec input'), type, file, options: codecOptions(type, options) })));
   }
 
-  function encode(name, value, { type, options = {} } = {}) {
-    const call = method('codec', name, 'encode');
-    options = codecOptions(type, options);
-    const result = sync(call({ value: normalize(type, value), type, options }));
+  function codecOutput(result) {
     if (!plain(result) || typeof result.extension !== 'string' || !/^[a-z0-9]{1,16}$/i.test(result.extension))
       throw new RangeError('Codec output needs a safe extension and bytes');
     return { extension: result.extension.toLowerCase(), bytes: bytes(result.bytes, 'Codec output') };
+  }
+
+  function encode(name, value, { type, options = {} } = {}) {
+    const call = method('codec', name, 'encode');
+    options = codecOptions(type, options);
+    return codecOutput(sync(call({ value: normalize(type, value), type, options })));
+  }
+
+  function mux(name, sequence, options = {}) {
+    if (!plain(options)) throw new TypeError('Video codec settings must be a record');
+    return codecOutput(sync(method('codec', name, 'mux')({ ...sequence, options: P.data.clone(options) })));
   }
 
   async function importPxc(source, { using, file, options = {} } = {}) {
@@ -106,7 +114,7 @@ function createGraphHost(config = {}, { kit = require('../index.js').load() } = 
     return { project: P.data.clone(result.project), report: { ...P.data.clone(result.report ?? {}), mode: 'adapter', adapter: using } };
   }
 
-  return Object.freeze({ request, normalize, exchange, decode, encode, importPxc,
+  return Object.freeze({ request, normalize, exchange, decode, encode, mux, importPxc,
     requireCodec(name, action) { method('codec', name, action); }
   });
 }

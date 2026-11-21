@@ -90,7 +90,7 @@ The host supplies the device driver, additional codec or project translator.
 | --- | --- |
 | `devices` | `read({ type, options, signal })` returns a typed snapshot, such as normalized audio or a recorded control take. |
 | `network` | `read({ type, options, signal })` receives data. `write({ type, value, options, signal })` sends a typed value and returns a JSON receipt. `ink.httpJsonAdapter(url)` supplies a bounded GET/POST JSON transport for a host-configured endpoint. |
-| `codecs` | `decode({ bytes, type, file, options })` returns audio or a raster. `encode({ value, type, options })` returns `{ extension, bytes }`. These two callbacks are synchronous. |
+| `codecs` | `decode({ bytes, type, file, options })` returns audio or a raster. `encode({ value, type, options })` returns `{ extension, bytes }`. An optional `mux` callback packages scene exports with sound. These callbacks are synchronous. [Scene soundtrack export](scene-audio.md#optional-video-adapter) |
 | `pxc` | `import({ bytes, file, options, inspect })` returns `{ project, report? }` with an Ink graph project. `inspect()` decodes a supported PXCX payload for translators. |
 
 Use asset or export `format: "codec"` with `codec`, `type` of `audio` or
