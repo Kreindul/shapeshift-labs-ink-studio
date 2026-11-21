@@ -6,6 +6,8 @@ rules. The [Relay Glass cue](../examples/music-production/relay-glass.json)
 includes a playable kit, an authored hook, a bass line, a polyphonic pad,
 and an eight-bar arc. Its recorded drum assets are credited with their source
 and license in the [sample directory](../examples/music-production/samples/CREDITS.md).
+Use [theme development](music-themes.md) to carry a motif between roles
+and make adaptive returns depend on what has already played.
 
 ## Instruments and performance
 
