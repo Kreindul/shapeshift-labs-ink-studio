@@ -198,6 +198,9 @@ Exit status is 0 on success, 2 when any assertion fails, and 1 for invalid
 input or execution errors. Assertion failures still write the declared
 artifacts and report.
 
+Use [graph clips](graph-clips.md) to export a named raster or scene output at
+an exact frame rate with warm-up and cuts.
+
 ### Persistent sessions
 
 Send one JSON request per line. The response echoes the optional request

@@ -205,13 +205,25 @@ function packFrame({ w, h, rgb, alpha }) {
   return { header: hd, compressed: scanlines(w, h, alpha ? withAlpha(rgb, alpha) : rgb, channels) };
 }
 
+function packRGBA({ width, height, data }) {
+  return { header: header(width, height, 8, 6), compressed: scanlines(width, height, data, 4) };
+}
+
 function encodeFrame(frame) {
   return image(frame.header, frame.compressed);
 }
 
+function animationDelay(fps) {
+  if (typeof fps === 'number') return { numerator: 1, denominator: fps };
+  const { numerator, denominator } = fps;
+  if (![numerator, denominator].every(n => Number.isSafeInteger(n) && n >= 1 && n <= 65535))
+    throw new RangeError('APNG frame delay needs positive 16-bit integers. Choose a representable rate or export numbered frames.');
+  return { numerator: denominator, denominator: numerator };
+}
+
 // The numbered PNG frames and APNG share their compressed image data.
 function encodeAnimation(frames, fps) {
-  const hd = frames[0].header;
+  const hd = frames[0].header, delay = animationDelay(fps);
   const ac = Buffer.alloc(8);
   ac.writeUInt32BE(frames.length, 0);
   ac.writeUInt32BE(0, 4);
@@ -222,8 +234,8 @@ function encodeAnimation(frames, fps) {
     const fc = Buffer.alloc(26);
     fc.writeUInt32BE(seq++, 0);
     hd.copy(fc, 4, 0, 8);
-    fc.writeUInt16BE(1, 20);
-    fc.writeUInt16BE(fps, 22);
+    fc.writeUInt16BE(delay.numerator, 20);
+    fc.writeUInt16BE(delay.denominator, 22);
     out.push(chunk('fcTL', fc));
     const z = frame.compressed;
     if (i === 0) out.push(chunk('IDAT', z));
@@ -239,4 +251,4 @@ function encodeAnimation(frames, fps) {
 function animate(file, frames, fps) {
   fs.writeFileSync(file, encodeAnimation(frames.map(packFrame), fps));
 }
-module.exports = { encode, encodeGray, write, writeIndexed, read, raster, paletteSource, animate, packFrame, encodeFrame, encodeAnimation };
+module.exports = { encode, encodeGray, write, writeIndexed, read, raster, paletteSource, animate, packFrame, packRGBA, encodeFrame, encodeAnimation, animationDelay };

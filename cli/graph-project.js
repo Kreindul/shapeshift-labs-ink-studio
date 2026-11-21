@@ -5,6 +5,7 @@ const { isDeepStrictEqual } = require('node:util');
 const PNG = require('./png.js');
 const WAV = require('./wav.js');
 const { createGraphHost } = require('./graph-host.js');
+const { clip } = require('./graph-clip.js');
 
 const format = 'ink-studio/graph-project';
 const reportFormat = 'ink-studio/graph-report';
@@ -352,7 +353,6 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
   clock(time,seed);
   const projectPlan={...header,kind:'plan',...rootPlan,time,seed,assets:assetInfo,exports,assertions:assertionSpecs,
     groups:Object.fromEntries(preparedGroups),hostOperations:Object.keys(operations).sort()};
-  let executable, previous=new Map();
 
   function request(options={}) {
     const {inputs={},take,time:t=take?.start ?? time,seed:s=seed}=fields(options,['inputs','time','seed','take'],'graph run options');
@@ -366,30 +366,36 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     return {...resolved,take,inputs:compiled.parameters(snapshotInputs(inputs,data.clone))};
   }
 
-  function clear() {
-    try { executable?.clear(); }
-    finally {
-      executable=undefined;
-      previous=new Map();
+  function execution() {
+    let executable, previous=new Map();
+    function clear() {
+      try { executable?.clear(); }
+      finally {
+        executable=undefined;
+        previous=new Map();
+      }
     }
-  }
 
-  function evaluate({inputs,time,seed,take}) {
-    const values=Object.fromEntries(Object.entries(inputs).map(([name,value])=>{
-      const prior=previous.get(name);
-      return [name,sameValue(prior,value) ? prior : value];
-    }));
-    try {
-      executable??=graph.create(spec,{operations:ops,groups});
-      const frame=executable.evaluate(values,{time,seed,take});
-      previous=new Map(Object.entries(values));
-      return {frame,report:{...header,time,seed,...(take!==undefined && {take}),cache:cacheReport(frame),
-        inputs:Object.fromEntries(Object.entries(values).map(([name,value])=>[name,describe(value)]))}};
-    } catch (error) {
-      try { clear(); } catch { /* Preserve the evaluation error after discarding this instance. */ }
-      throw error;
+    function evaluate({inputs,time,seed,take},sequence) {
+      const values=Object.fromEntries(Object.entries(inputs).map(([name,value])=>{
+        const prior=previous.get(name);
+        return [name,sameValue(prior,value) ? prior : value];
+      }));
+      try {
+        executable??=graph.create(spec,{operations:ops,groups});
+        const frame=executable.evaluate(values,{time,seed,take,sequence});
+        previous=new Map(Object.entries(values));
+        return {frame,report:{...header,time,seed,...(take!==undefined && {take}),cache:cacheReport(frame),
+          inputs:Object.fromEntries(Object.entries(values).map(([name,value])=>[name,describe(value)]))}};
+      } catch (error) {
+        try { clear(); } catch { /* Preserve the evaluation error after discarding this instance. */ }
+        throw error;
+      }
     }
+
+    return {evaluate,clear};
   }
+  const {evaluate,clear}=execution();
 
   function encode(name,value,format,settings={}) {
     const result=format==='codec' ? host.encode(settings.codec,value,settings) : undefined;
@@ -463,6 +469,18 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
       return {...header,kind:'validate',valid:true,nodes:rootPlan.expandedNodes,groups:preparedGroups.size};
     },
     run:options=>run(request(options)),
+    clip(options) {
+      const { inputs, seed, ...settings } = fields(options,
+        ['output','from','to','warmup','format','clock','renderOptions','inputs','seed'], 'graph clip options');
+      const requestOptions = request({inputs,seed});
+      const runner = execution();
+      try {
+        return clip(settings,{kit,plan:projectPlan,checks:assertions,seed:requestOptions.seed,
+          sample(take,sequence) {
+            return runner.evaluate({...requestOptions,time:take.start,take},sequence).frame;
+          }});
+      } finally { runner.clear(); }
+    },
     inspect,
     batch(cases,defaults={}) {
       fields(defaults,['inputs','time','seed'],'graph batch defaults');
