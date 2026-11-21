@@ -227,8 +227,8 @@ const ScreenPrint = (() => {
   };
   function mark(shape, u, v, area, footprint = 0) {
     if (!shapes.includes(shape)) throw new TypeError('Screen print: unknown screen');
-    number(u, -1e9, 1e9, 'screen coordinate');
-    number(v, -1e9, 1e9, 'screen coordinate');
+    number(u, -1e12, 1e12, 'screen coordinate');
+    number(v, -1e12, 1e12, 'screen coordinate');
     number(area, 0, 1, 'coverage');
     number(footprint, 0, 1e6, 'footprint');
     if (area === 0 || area === 1) return area;
@@ -288,7 +288,7 @@ const ScreenPrint = (() => {
       return (h >>> 8) / 16777216;
     };
     const noise = p.grain * (1 - smooth(0.03, 0.2, filter)),
-      result = p.paper.map(v => v * (1 + (hash(q[0] * p.grainScale, q[1] * p.grainScale) - 0.5) * noise));
+      result = p.paper.map(v => v * (1 + (noise ? hash(q[0] * p.grainScale, q[1] * p.grainScale) - 0.5 : 0) * noise));
     for (const { area, plate } of plates) {
       const co = Math.cos(plate.angle),
         si = Math.sin(plate.angle),

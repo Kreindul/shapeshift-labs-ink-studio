@@ -279,3 +279,7 @@ test(
     }
   }
 );
+test('valid extreme coordinates and dense frequencies filter without overflowing coordinate budgets', () => {
+  const p = P.prepare({ spacing: 0.001, grain: 0, plates: [{ frequency: 8 }] });
+  assert(P.shade(p, [1000000, -1000000], [0.4, 0.5, 0.6], { footprint: 1 }).every(Number.isFinite));
+});
