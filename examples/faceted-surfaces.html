@@ -170,6 +170,7 @@
       },
       { passive: false }
     );
+    refresh();
     window.facetQA = { demo, renderer, kit };
     function tick(t) {
       const dt = last === undefined ? 0 : Math.min(0.05, (t - last) / 1000);
