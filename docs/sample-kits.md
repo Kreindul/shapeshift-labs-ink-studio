@@ -22,6 +22,8 @@ source with an alias. Use a catalog `sample` ID and an optional `asset`
 hash, or an `edit` path relative to the recipe and an optional `slice`
 ID. An edit without a slice plays its assembled timeline. The command
 verifies catalog content and the original hash referenced by the edit.
+An [audio print](audio-prints.md#reuse-a-take-in-a-kit) can also supply a
+whole take or a marked slice directly from its portable folder.
 
 ```json
 {

@@ -6,6 +6,7 @@ const {openSampleLibrary} = require('./sample-library.js');
 const {readGraphProject} = require('./graph-project.js');
 const {readSceneAudio} = require('./scene-audio.js');
 const {assetPaths} = require('./music-production.js');
+const {printAudio,readAudioPrint}=require('./audio-print.js');
 const read = file => JSON.parse(fs.readFileSync(file,'utf8'));
 const text = value => typeof value==='string' && value.trim().length>0;
 
@@ -64,7 +65,11 @@ function editCommand(mode,file,settings,out,library,tool) {
   if (!file) throw new TypeError('Pass a sample ID or sample edit project');
   if (mode==='slice') {
     const {value,entry}=library.load(file);
-    return tool.create(value,{source:{id:entry.id,asset:entry.asset},detect:settings ? read(settings) : {}});
+    const edit=tool.create(value,{source:{id:entry.id,asset:entry.asset},detect:settings ? read(settings) : {}});
+    if (!entry.print?.markers.length) return edit;
+    const authored=entry.print.markers, ids=new Set(authored.map(row=>row.id)), positions=new Set(authored.map(row=>row.at));
+    const proposed=edit.markers.filter(row=>!ids.has(row.id) && !positions.has(row.at)).slice(0,4096-authored.length);
+    return tool.validate({...edit,markers:[...authored,...proposed]});
   }
   const edit=openEdit(file,library,tool);
   if (mode==='edit') {
@@ -99,16 +104,16 @@ function warpCommand(file,config,out,library,tools) {
   return {audio,report};
 }
 
-function kitCommand(file,performance,out,library,procedural) {
+function kitCommand(file,performance,out,library,kit) {
   if (!file || !performance || typeof out!=='string')
     throw new TypeError('Pass a kit recipe, performance file and --out directory');
-  const {fields,record,id,check}=procedural.musicInstruments;
+  const procedural=kit.KIT.procedural,{fields,record,id,check}=procedural.musicInstruments;
   const {sampleEdit,sampleKit}=procedural.mediaGraph;
   const recipe=read(file), score=read(performance);
   check(fields(recipe,['kit','assets']) && record(recipe.assets) && Object.keys(recipe.assets).length<=512,
     'A kit recipe needs a kit and a table of sample sources');
   check(fields(score,['events','options']) && Array.isArray(score.events),'A kit performance needs events and optional render options');
-  const buffers=new Map(), assets={}, sources={};
+  const buffers=new Map(), prints=new Map(), assets={}, sources={};
   let samples=0, originalSamples=0;
   function readSample(name) {
     if (!buffers.has(name)) {
@@ -121,9 +126,17 @@ function kitCommand(file,performance,out,library,procedural) {
   }
   for (const [name,ref] of Object.entries(recipe.assets)) {
     check(id(name) && (fields(ref,['sample','asset']) && id(ref.sample) ||
-      fields(ref,['edit','slice']) && text(ref.edit) && (ref.slice===undefined || id(ref.slice))),
-    'Use a catalog sample or a sample edit and optional slice for '+name);
-    if (ref.edit!==undefined) {
+      fields(ref,['edit','slice']) && text(ref.edit) && (ref.slice===undefined || id(ref.slice)) ||
+      fields(ref,['print','take','slice']) && text(ref.print) && (ref.slice===undefined || id(ref.slice))),
+    'Use a catalog sample, sample edit or printed take for '+name);
+    if (ref.print!==undefined) {
+      const filePath=path.resolve(path.dirname(file),ref.print);
+      if (!prints.has(filePath)) prints.set(filePath,readAudioPrint(filePath,kit));
+      const {entry,value}=prints.get(filePath).load(ref.take,ref.slice);
+      assets[name]=value;
+      sources[name]={id:entry.id,asset:entry.asset,print:ref.print,take:entry.print.take,
+        ...(ref.slice!==undefined && {slice:ref.slice})};
+    } else if (ref.edit!==undefined) {
       const edit=openEdit(path.resolve(path.dirname(file),ref.edit),library,sampleEdit);
       const {value}=readSample(edit.source.id);
       assets[name]=sampleEdit.render(value,edit,ref.slice===undefined ? {} : {slice:ref.slice}).value;
@@ -159,9 +172,10 @@ module.exports = function command([mode,directory,file,settings],opt,kit) {
   else if (['slice','edit','render','audition'].includes(mode))
     value=editCommand(mode,file,settings,opt.out,library,kit.KIT.procedural.mediaGraph.sampleEdit);
   else if (mode==='warp') value=warpCommand(file,settings,opt.out,library,kit.KIT.procedural.mediaGraph);
-  else if (mode==='kit') value=kitCommand(file,settings,opt.out,library,kit.KIT.procedural);
-  else throw new TypeError('Use music samples add, search, get, slice, edit, render, audition, warp or kit');
-  if (['render','audition','warp','kit'].includes(mode)) {
+  else if (mode==='kit') value=kitCommand(file,settings,opt.out,library,kit);
+  else if (mode==='print') value=printAudio(file,opt.out,library,kit);
+  else throw new TypeError('Use music samples add, search, get, slice, edit, render, audition, warp, kit or print');
+  if (['render','audition','warp','kit','print'].includes(mode)) {
     process.stdout.write(JSON.stringify(value)+'\n');
     return value;
   }

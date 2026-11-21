@@ -84,6 +84,9 @@ All file paths are relative to the soundtrack document.
   can set `time`, `seed`, and `inputs`. Tracks accept `time`, `duration`,
   source `offset`, `gain`, playback `rate`, and `loop`. A looping track
   with no duration continues through the exported range.
+  A track can use `frame` and `fps` in place of `time`. A
+  [printed take](audio-prints.md#place-a-print-against-picture) can align
+  one of its markers to that frame.
 
 Set optional `world` to a native world file to accompany a diorama with a
 sound simulation. It supplies committed spatial and score state while the

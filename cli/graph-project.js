@@ -556,6 +556,35 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
         artifacts:bytes ? [{file,format,sha256,bytes:bytes.length}] : []}};
   }
 
+  function audioTaps(targets,options={}) {
+    const rows=named(targets,'audio taps');
+    if (!rows.length || rows.length>2 || rows.some(([name])=>!['dry','wet'].includes(name)))
+      throw new TypeError('Select dry and/or wet graph taps');
+    for (const [,tap] of rows) {
+      const {output,node,port,field}=fields(tap,['output','node','port','field'],'graph audio tap');
+      if ((output===undefined)===(node===undefined) ||
+          output!==undefined && (!Object.hasOwn(rootPlan.outputs,output) || port!==undefined) ||
+          node!==undefined && (typeof node!=='string' || !node.split('/').every(id) || port!==undefined && !id(port)) ||
+          field!==undefined && (!Array.isArray(field) || !field.length || field.length>8 || !Array.from(field).every(id)))
+        throw new TypeError('Tap a graph output or node port with an optional record field path');
+    }
+    const prepared=request(options), {frame,report}=evaluate(prepared);
+    if (!prepareFrameChecks(frame).passed) throw new Error('Audio print graph assertions failed');
+    const {audioTrace}=require('./graph-audio-trace.js');
+    const {time,seed}=report, graph=snapshot({time,seed,inputs:options.inputs ?? {}});
+    const sources={}, traces={};
+    for (const [name,target] of rows) {
+      let value=target.output!==undefined ? frame.outputs[target.output] : frame.preview(target.node,target.port);
+      for (const key of target.field ?? []) {
+        if (!record(value) || !Object.hasOwn(value,key)) throw new RangeError('Unknown audio tap field '+key);
+        value=value[key];
+      }
+      sources[name]=mediaGraph.audio(value);
+      traces[name]=audioTrace(graph,target);
+    }
+    return {sources,traces,projectHash,time,seed};
+  }
+
   async function previewFrame(targets, options, { profile = false, encodeArtifacts = true } = {}) {
     const watches=named(targets,'patch previews');
     if (watches.length>64) throw new RangeError('A patch frame supports up to 64 previews');
@@ -656,6 +685,7 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
       } finally { runner.clear(); }
     },
     inspect,
+    audioTaps,
     previewFrame,
     prepareBatch,
     batch(cases,defaults={}) {

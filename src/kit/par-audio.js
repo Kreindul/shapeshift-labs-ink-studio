@@ -20,6 +20,11 @@
       inputs: { source:'audio', settings:'record' }, outputs: { value:'audio', entry:'record' },
       run({ source, settings }) { return A.sampleCatalog.capture(source, settings); }
     },
+    'audio.print': {
+      description: 'Crop an aligned dry, wet or paired print and emit catalog entries with source markers and provenance.',
+      inputs:{sources:'record',settings:'record'},outputs:{audio:'record',entries:'record',report:'record'},
+      run({sources,settings},{seed,time}) {return A.audioPrint.prepare(sources,settings,{seed,time});}
+    },
     'audio.searchSamples': {
       description: 'Filter sample metadata by material, articulation, pitch, duration, provenance and license.',
       inputs: { entries:'array<record>', options }, outputs: { value:'record', items:'array<record>' },
