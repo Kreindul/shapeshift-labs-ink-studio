@@ -261,4 +261,4 @@ function reviewSubjectReadability(world,options={}) {
     legend:{clear:tones[0],weakColor:tones[1],weakLightness:tones[2],weakBoth:tones[3]}}};
 }
 
-module.exports = { reviewSubjectReadability,measure,prepareReview,captureReview,sheet,edgeLegend };
+module.exports = { reviewSubjectReadability,measure,prepareReview,captureReview,compositeMatte,sheet,edgeLegend };

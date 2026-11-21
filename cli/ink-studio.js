@@ -608,6 +608,14 @@ function sdfAssistOption() {
   return sdfAssistOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
 }
 
+let colorClustersOverride;
+function colorClustersOption() {
+  const value = opt['color-clusters'];
+  if (value === undefined) return;
+  if (value === 'off') return false;
+  if (typeof value !== 'string') die('--color-clusters needs a JSON file or off');
+  return colorClustersOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
+}
 let edgeFilterOverride;
 function edgeFilterOption() {
   const value = opt['edge-filter'];
@@ -682,6 +690,7 @@ const view = extra =>
       stable: stabilityOption(),
       stableDetail: stableDetailOption(),
       edgeFilter: edgeFilterOption(),
+      colorClusters: colorClustersOption(),
       artDirection: artDirectionOption(),
       silhouetteProtection: silhouetteOption(),
       horizonBands: horizonOption(),
@@ -809,14 +818,7 @@ function sceneEmbedConfig() {
   return JSON.parse(fs.readFileSync(path.resolve(opt['embed-config']), 'utf8'));
 }
 function sequenceHistory() {
-  const K = lib().KIT;
-  return {
-    artHistory: require('../src/art-effects.js').history({ frames: 24 }),
-    afterimageHistory: K.afterimages.history(),
-    renderHistory: K.renderGraph.history(),
-    volumeHistory: K.atmosphere.history(),
-    transparencyHistory: K.stableTransparency.history()
-  };
+  return R.sequenceHistory(lib().KIT);
 }
 function feedbackReplay(world, start, frame) {
   const api = lib().KIT.renderGraph;
@@ -824,7 +826,7 @@ function feedbackReplay(world, start, frame) {
   const definition = graph?.snapshot?.() ?? graph;
   const cuts = opt['feedback-cuts'];
   if (opt['feedback-fps'] === undefined && cuts === undefined &&
-      !definition?.passes?.some(pass => ['feedback', 'frameAge'].includes(pass.type))) return null;
+      !definition?.passes?.some(pass => ['feedback', 'frameAge', 'motionSmear'].includes(pass.type))) return null;
   if (opt['feedback-fps'] === true) die('--feedback-fps needs a rate in (0, 240]');
   if (cuts !== undefined && (typeof cuts !== 'string' && typeof cuts !== 'number' ||
       String(cuts).split(',').some(cut => !cut.trim())))
@@ -846,7 +848,7 @@ function die(m) {
   process.exit(1);
 }
 const worldCLI = () => require('./world.js')({kit:lib(),build,pose,dataScene,opt,renderOptions:view,sequenceHistory,inkOption,atmosphereEmittersOption,depthBandsOption,effectPalettesOption,stabilityOption,artDirectionOption,silhouetteOption,horizonOption,skyTransitionsOption,
-  weatherTracksOption:() => onOffOption('weather-tracks'),skyOptions,cameraOptions,compositeOption,shot,shotReplay,shotRender});
+  weatherTracksOption:() => onOffOption('weather-tracks'),skyOptions,cameraOptions,compositeOption,colorClustersOption,shot,shotReplay,shotRender});
 const worldCommands = new Set(['inspect','probe','trace','field','data-inputs','scene','sim']);
 const CMD = {
   help() {
@@ -940,6 +942,7 @@ const CMD = {
         '  render <id> --look-masks off   bypass masked look bindings',
         '  render, clip, transition-review, sim render: --recipe <shot.json>   save reproducible review inputs',
         '  shot replay <shot-or-bundle.json> --out <image.png> [--root project | --shot ID]   verify the saved render',
+        '  shot approve <scene> [--plan plan.json] --out report.json [--frame N] [--report-only]',
         '  render <scene.json> --asset-pack <pack-or-bundle.json> [--environment-preset pack/preset]   install and select a reusable look',
         '  ramps <id> [--n 12]         the ramps it is shaded on, and which only get darker without turning; a turning one is offered from the same palette',
         '  values <id> [--t 1.5]       the value check: the picture sorted into dark, middle and light, and whether it reads in three tones',
@@ -1041,6 +1044,7 @@ const CMD = {
         'any command that plays a diorama takes --poke 2:x,y,z (tap it at 2 seconds, toward that point; several with ;)',
         'sun options: --live-sun on|off --sun-direction x,y,z --sun-ambient n --sun-intensity n --shadow-map-size n --shadow-bias n --sun-shadows off',
         'shadow art: --shadow-art file.json|off for baked JSON scenes and live sun',
+        'color clusters: --color-clusters file.json|off for material-specific cluster size, grain and protection',
         'pass quality: --pass-quality file.json|off for background, particles and secondary reflections',
         'detail-preserving relighting: --relighting on|off|file.json --sky-time seconds',
         'bounce options: --sky-bounce color|preset|off --ground-bounce color|preset|off --sky-bounce-intensity n --ground-bounce-intensity n',
@@ -1748,6 +1752,29 @@ const CMD = {
     console.log(warn.length ? 'warnings:\n  ' + warn.join('\n  ') : 'no warnings');
   },
   shot() {
+    if (pos[0] === 'approve') {
+      if (pos.length !== 2 || opt.plan === true || typeof opt.out !== 'string' || !/\.json$/i.test(opt.out) ||
+          opt.frame === true || opt['report-only'] !== undefined && opt['report-only'] !== true)
+        die('Use shot approve <scene> [--plan plan.json] --out report.json [--frame N] [--report-only]');
+      const approval = require('./shot-approval.js');
+      const document = opt.plan === undefined ? undefined : JSON.parse(fs.readFileSync(path.resolve(opt.plan), 'utf8'));
+      if (document?.format === approval.format && document.version !== 1) die('Unsupported shot approval report version');
+      const world = buildPreview(pos[1]);
+      const settings = view({ w: num('w', undefined), h: num('h', undefined), transparent: onOffOption('transparent') });
+      const result = approval.approveShot(world, { plan:document?.format === approval.format ? document.plan : document,
+        view:settings, pose, camera:clipCamera(world), kit:lib(), frame:num('frame', undefined) });
+      const findings = require('./shot-approval-output.js').write(result, {
+        file:path.resolve(opt.out), source:pos[1], options:opt, cwd:CWD, entry:__filename
+      });
+      console.log('wrote', path.resolve(opt.out));
+      if (findings) {
+        console.log('First failure at frame', findings.frame, '(' + findings.time.toFixed(6) + 's)',
+          findings.category + '/' + findings.check, 'on', findings.subject);
+        console.log(findings.reproduce.command);
+        if (!opt['report-only']) process.exitCode = 2;
+      }
+      return;
+    }
     if (pos[0] !== 'replay') die('Use shot replay <recipe.json> --out <image.png>');
     if (opt.shot !== undefined) {
       if (opt.root !== undefined) die('A bundled shot uses its packaged project root');

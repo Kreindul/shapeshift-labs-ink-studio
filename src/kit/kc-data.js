@@ -655,6 +655,11 @@
       bad('finish.look.stable', error.message);
     }
     try {
+      ColorClusters.prepare(look?.colorClusters);
+    } catch (error) {
+      bad('finish.look.colorClusters', error.message);
+    }
+    try {
       SplatOrder.transparency(look?.stableTransparency);
     } catch (error) {
       bad('finish.look.stableTransparency', error.message);
