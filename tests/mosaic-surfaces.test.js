@@ -352,3 +352,10 @@ test(
     assert(result.perspectiveLength > 0);
   }
 );
+
+test('plane compositing never silently drops exact depth when a fragment budget is exhausted', () => {
+  assert.throws(
+    () => require('../cli/render').render(crossingFixture(kit), { w: 96, h: 96, px: 1, raw: true, fragmentBudget: 1 }),
+    /Surface-plane rendering exceeded/
+  );
+});

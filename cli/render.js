@@ -1262,6 +1262,7 @@ function renderFrame(world, o, preparedPalettes) {
     FPAL = FN ? world.pal.map((h, i) => hex(i)) : null;
   let deferred = sortedSurfaces || sdf || emitterHits ? new Map() : null, deferredCount = 0, orderFallback = false;
   function countDeferred() {
+    if(planarFootprints&&deferredCount>=fragmentBudget)throw new RangeError('Surface-plane rendering exceeded the fragment budget. Raise fragmentBudget or reduce resolution.');
     if (blendDepth && deferredCount >= fragmentBudget)
       throw new RangeError('Layered transparency exceeded the fragment budget. Raise it or reduce the art resolution.');
     deferredCount++;
@@ -1901,7 +1902,7 @@ function renderFrame(world, o, preparedPalettes) {
           sampledDepth(rayAt(ix + .5, iy + .5), probeNormal, probeCenter, -cz, probeReach) : -cz);
         if (preciseDepth && surfaceDepth && surfaceZ>surfaceDepth[p]+1e-5) continue;
         if (probe) probe(p, i, -cz, surfaceZ, pr, pg, pb, a);
-        if (!blendDepth && deferred && deferredCount >= fragmentBudget) {
+        if (!blendDepth && !planarFootprints && deferred && deferredCount >= fragmentBudget) {
           playFragments(false,-cz);
           orderFallback = true;
         }
