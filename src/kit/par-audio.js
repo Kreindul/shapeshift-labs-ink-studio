@@ -86,6 +86,27 @@
         return {value,report,alternatives:hardCut ? {hardCut} : {}};
       }
     },
+    'audio.inspectEditorial': {
+      description: 'Resolve source sync markers, take ranges and exact picture, world or beat targets.',
+      inputs:{source:'record',assets:'record'},outputs:{value:'record'},
+      run({source,assets}) {return {value:A.audioEditorial.inspect(source,assets)};}
+    },
+    'audio.reviseEditorial': {
+      description: 'Change source handles, head slips, fades, spotting or a time-range comp without altering PCM.',
+      inputs:{source:'record',assets:'record',edits:scoreRequests},outputs:{value:'record',report:'record'},
+      run({source,assets,edits}) {return A.audioEditorial.revise(source,assets,edits);}
+    },
+    'audio.renderEditorial': {
+      description: 'Print sync-anchored clips and optional stems onto the picture sample grid.',
+      inputs:{source:'record',assets:'record',options},outputs:{value:'audio',stems:'record',report:'record'},
+      run({source,assets,options}) {return A.audioEditorial.render(source,assets,options);}
+    },
+    'audio.reconformEditorial': {
+      description: 'Compare two picture, world or tempo edits with aligned before and after audio and moved or missing sync points.',
+      inputs:{source:'record',assets:'record',revision:'record'},
+      outputs:{value:'audio',before:'audio',session:'record',report:'record'},
+      run({source,assets,revision}) {return A.audioEditorial.reconform(source,assets,revision);}
+    },
     'audio.warp': {
       description: 'Fit audio to tempo or sample and picture pins with beat, tonal, speech or varispeed processing.',
       inputs: {source:'audio',options}, outputs: {value:'audio',report:'record'},

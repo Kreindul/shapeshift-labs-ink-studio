@@ -151,6 +151,7 @@ module.exports=function musicCommand(pos,opt,kit) {
   if (mode==='pads') return require('./music-pads.js')(pos.slice(1),opt,kit);
   if (mode==='mix') return require('./music-mixer.js')(pos.slice(1),opt,kit);
   if (mode==='rack') return require('./music-racks.js')(pos.slice(1),opt,kit);
+  if (mode==='editorial') return require('./music-editorial.js')(pos.slice(1),opt,kit);
   if (mode==='groove') return require('./music-groove.js')(pos.slice(1),opt,kit);
   if (mode==='soundfont') return require('./music-soundfont.js')(file,editFile,opt);
   if (!file) throw new TypeError('Use music with a JSON file for arrange, revise, reference, audition, analyze, suggest, or phrase');

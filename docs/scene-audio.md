@@ -23,6 +23,9 @@ delivered between picture frames.
 
 Feed the aligned WAV files into [per-stem control signals](graph-media.md#per-stem-control-signals) to drive visuals from independent envelopes, bands, and triggers.
 
+Use [audio editorial](audio-editorial.md) to spot a transient inside a take,
+comp alternate performances, and audition the same edits against a recut.
+
 ## Soundtrack file
 
 Use `proceduralScore` for a [shared audiovisual score](procedural-score.md).

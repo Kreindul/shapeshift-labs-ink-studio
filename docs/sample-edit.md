@@ -5,6 +5,9 @@ project stores the original catalog ID and audio hash, transient markers
 on the source, and an ordered list of playback clips. The source WAV
 stays available through the library.
 
+Use [audio editorial](audio-editorial.md) to pin one of these original
+markers to picture or a world event, manage alternates, and preview a recut.
+
 ```sh
 ink-studio music samples slice library metal-take --out proposed.json
 ink-studio music samples edit library proposed.json changes.json --out edit.json

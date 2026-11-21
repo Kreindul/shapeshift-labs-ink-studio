@@ -23,6 +23,11 @@ const slicedAudio = {format:'ink-studio/sample-edit',version:1,
   clips:[{id:'attack',from:0,to:64},{id:'tail',from:64,to:128,reverse:true}],
   joins:[{left:'attack',right:'tail',frames:8,curve:'linear'}]
 };
+const editorial = {
+  format:'ink-studio/audio-editorial',version:1,id:'bench',sampleRate:8000,
+  picture:{fps:25,shots:[{id:'door',frames:2}]},sourceEdits:{tone:slicedAudio},
+  clips:[{id:'tap',spot:{shot:'door',sourceFrame:1},take:'first',takes:{first:{asset:'tone',sync:{marker:'middle'}}}}]
+};
 const motif = { length: 2, events: [{beat:0,duration:.35,degree:1}, {beat:.75,duration:.25,degree:3}] };
 const arrangement = { score:{key:{root:'C4'},harmonies:{home:{root:'C4',quality:'unison'}}},
   motifs:{melody:motif},parts:{lead:{role:'lead',material:'melody'}},
@@ -283,6 +288,11 @@ const specifications = {
   'audio.renderSampleEdit': {inputs:{source:audio,edit:slicedAudio}},
   'audio.auditionSampleEdit': {inputs:{source:audio,edit:slicedAudio,
     options:{left:'attack',right:'tail',before:12,after:12}}},
+  'audio.inspectEditorial': {inputs:{source:editorial,assets:{tone:audio}}},
+  'audio.reviseEditorial': {inputs:{source:editorial,assets:{tone:audio},edits:[{op:'fades',clip:'tap',fades:{inSamples:8}}]}},
+  'audio.renderEditorial': {inputs:{source:editorial,assets:{tone:audio},options:{stems:true}}},
+  'audio.reconformEditorial': {inputs:{source:editorial,assets:{tone:audio},revision:{
+    picture:{fps:25,shots:[{id:'insert',frames:1},{id:'door',frames:2}]}}}},
   'audio.warp': {nodes:{edited:{op:'audio.renderSampleEdit',inputs:{source:audio,edit:slicedAudio}}},
     inputs:{source:link('edited'),options:{mode:'repitch',speed:.8}}},
   'music.renderSampleKit': {nodes:{

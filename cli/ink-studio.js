@@ -1103,6 +1103,8 @@ const CMD = {
         '  music rack state rack [settings.json] --out state.json   save recalled macro automation',
         '  music rack render|audition rack recipe.json --out directory   render a rack or compare with bypass',
         '  music rack plugin-info|plugin-state alias [settings.json] --clap-host manifest.json   inspect or save CLAP state',
+        '  music editorial inspect|render project.json --out output   spot and print editorial audio',
+        '  music editorial edit|reconform project.json changes.json --out output   revise or preview a new cut',
         '  music groove extract <recipe.json> [--out groove.json]   measure a WAV or MIDI performance',
         '  music samples <add|search|get> <library> [recipe or ID]   capture and find reusable samples',
         '  music samples <slice|edit|render|audition> <library> <ID or project> [settings.json]   edit sample audio',
