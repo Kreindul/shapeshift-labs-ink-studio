@@ -133,6 +133,10 @@ const ink = {
 
 Use `--ink file.json` to apply a standalone ink profile through the CLI or `--ink off` to disable selective ink. The [aqueduct courier scene](../examples/selective-ink.js) shows a colored character contour in front of stonework that loses its ink over distance.
 
+Use an [indexed paint mask](pixel-stamps.md#marking-a-surface) to gate a
+line by rest-space marks. `silhouette.contrast` selects a dark or light
+swatch using neighboring background pixels.
+
 ```sh
 node cli/ink-studio.js render examples/selective-ink.js --w 318 --h 160 --px 1 --out aqueduct.png
 ```

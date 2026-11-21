@@ -293,6 +293,9 @@ console.log(world.count);
 
 Use the [headless scene editor](docs/scene-editor.md) to select solids, edit transforms and materials, and save the resulting diorama JSON.
 
+Use the [Pixel Stamp Workshop](docs/pixel-stamps.md) to draw indexed surface
+paint and contour masks, or author held cels for depth-aware effects.
+
 Reuse unchanged bake inputs in the editor and pass `--asset-cache DIR` to retain diorama bake results across CLI runs. [Incremental baking](docs/scene-editor.md#incremental-baking)
 
 Apply a [versioned complete look](docs/environment-packs.md#complete-looks) to a diorama with `--asset-pack` and `--environment-preset`. The Copperwind example compares three styles with the same camera, geometry, and animation.

@@ -1146,6 +1146,11 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     if (world.atmosphereEmitters) world.atmosphereEmitters = KIT.atmosphere.emitters.compile(world.atmosphereEmitters);
     if (world.splatFields) world.splatFields = KIT.splatFields.compile(world.splatFields);
     if (world.surfaceEffects) world.surfaceEffects = KIT.splatEffects.context(world.surfaceEffects);
+    if (world.pixelStamps !== undefined) {
+      const placed = PixelStamps.placements(world.pixelStamps, { scenePalette: world.pal, paletteRoles: world.paletteRoles });
+      const atlases = world.spriteAtlases === false ? [] : world.spriteAtlases ?? [];
+      world.spriteAtlases = [...atlases, ...placed];
+    }
     return world;
   }
   // hand over everything pushed so far and start again empty

@@ -233,11 +233,11 @@ const FrameComposite = (() => {
     return { w: layer.w, h: layer.h, data };
   }
 
-  function paintMap(w, h, strokes) {
+  function paintMap(w, h, strokes, budget) {
     if (strokes.some(stroke => !['path', 'polygon', 'rect'].includes(stroke?.type) ||
         stroke.space !== undefined && stroke.space !== 'screen'))
       throw new TypeError('Paint maps use pixel paths, polygons and rectangles');
-    return drawLayer({ w, h }, w, h, null, null, Array.from(strokes, command), true).data;
+    return drawLayer({ w, h }, w, h, null, null, Array.from(strokes, command), true, budget).data;
   }
 
   function screenDrawing(width, height, strokes, {edges = 'smooth', bitmap} = {}) {

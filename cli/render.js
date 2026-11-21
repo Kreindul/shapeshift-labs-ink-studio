@@ -342,6 +342,7 @@ function renderFrame(world, o, preparedPalettes) {
   if (effects) for (const channel of ArtEffects.channels) passSelection.add(channel);
   if (effects?.smear && o.artHistory) passSelection.add('emissionMotion');
   if (ink) for (const channel of ArtInk.channels) passSelection.add(channel);
+  if (ink?.painted) for (const channel of ['position', 'objectPosition']) passSelection.add(channel);
   if (effectPaletteSettings) {
     for (const channel of ['coverage', 'depth']) passSelection.add(channel);
     if (effectPaletteSettings.ramps.has('emission') || effectPaletteSettings.ramps.has('darks')) passSelection.add('emission');
@@ -391,7 +392,7 @@ function renderFrame(world, o, preparedPalettes) {
         ...(frame.alpha && {alpha:frame.alpha.slice()}) };
     }
     if (captureQuantization && legacyLook) capture(beforePalette, 'legacy');
-    if (ink) frame = ArtInk.apply(frame, passes, ink, world.pal, fog, { world, depthOffset, inspect:paletteTrace });
+    if (ink) frame = ArtInk.apply(frame, passes, ink, world.pal, fog, { world, time:t, depthOffset, inspect:paletteTrace });
     if (effects) frame = ArtEffects.apply(frame, passes, effects, t, {
       history: o.artHistory, world: o[reconstructionSource] ?? world, palette: world.pal, motionReference: frame.motionReference,
       haloSource: passes.scopedEmission && (p => emissive.profiles[passes.scopedEmission.slots[p]-1]?.glow === undefined)
@@ -474,7 +475,8 @@ function renderFrame(world, o, preparedPalettes) {
           for (const color of style.ramp ?? []) declared.add(color);
           for (const key of ['silhouette','crease','boundary']) {
             const line = style[key];
-            for (const color of [line?.color,line?.highlight,line?.shadow]) if (color !== undefined) declared.add(color);
+            for (const color of [line?.color,line?.highlight,line?.shadow,line?.contrast?.dark,line?.contrast?.light])
+              if (color !== undefined) declared.add(color);
           }
         }
         for (const layer of [effects?.halo,effects?.emitter,effects?.reflection,effects?.trail,effects?.smear,...(effects?.cycles ?? [])])

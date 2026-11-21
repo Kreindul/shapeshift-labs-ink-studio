@@ -655,6 +655,11 @@
     } catch (error) {
       bad('finish.look.ink', error.message);
     }
+    if (st.finish.pixelStamps !== undefined) try {
+      PixelStamps.placements(st.finish.pixelStamps, { scenePalette: st.palette, paletteRoles: st.roles });
+    } catch (error) {
+      bad('finish.pixelStamps', error.message);
+    }
     try {
       ArtEffects.prepare(look?.effects, st.palette);
     } catch (error) {

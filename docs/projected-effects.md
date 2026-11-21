@@ -187,6 +187,9 @@ projected units before the layer's uniform `scale`. It defaults to `[1, 1]`.
 Use `wrap: true` to repeat the tile. A wrapping one-texel tile also works with
 an ordinary material mask to cycle a whole region.
 
+The same raster can use [hard brush strokes or held animation cels](pixel-stamps.md).
+Its painted texels can also gate a material finish or a selective ink line.
+
 ```json
 {
   "type": "projected",
