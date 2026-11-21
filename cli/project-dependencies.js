@@ -4,6 +4,7 @@ const { createHash } = require('node:crypto');
 const Shot = require('./shot-recipes.js');
 const { validateTake } = require('./take-document.js');
 const { resolveCheckpoint } = require('./checkpoint-file.js');
+const { groupEntries, groupReference, groupDocument, requireGroupReference } = require('./graph-groups.js');
 
 const formats = {
   'ink-studio/take': 'take',
@@ -27,7 +28,7 @@ const record = value => value !== null && typeof value === 'object' && !Array.is
 const values = value => Object.values(value ?? {});
 
 function collectDependencies(bundles, entry, get, attachments = {}) {
-  const { resolvePath } = bundles, visited = new Map(), atlasPaths = new Set();
+  const { resolvePath } = bundles, visited = new Map(), atlasPaths = new Set(), activeGroups = new Set();
   const virtualRoot = path.resolve(path.sep, 'ink-project');
   const requireFile = name => {
     const value = get(name);
@@ -43,6 +44,18 @@ function collectDependencies(bundles, entry, get, attachments = {}) {
   function datasetFiles(file, data) {
     for (const dataset of values(data)) if (dataset?.file !== undefined)
       requireFile(resolvePath(file, dataset.file));
+  }
+
+  function graphGroups(file, declarations = {}) {
+    for (const [name, value] of groupEntries(declarations)) {
+      const reference = groupReference(value);
+      if (reference) {
+        const target = resolvePath(file, reference.file);
+        if (activeGroups.has(target)) throw new Error('Graph group file cycle at ' + target);
+        const { group } = visit(target, 'group');
+        requireGroupReference(reference, group, name + ' (' + target + ')');
+      } else if (value?.groups !== undefined) graphGroups(file, value.groups);
+    }
   }
 
   function shot(file, document) {
@@ -83,8 +96,9 @@ function collectDependencies(bundles, entry, get, attachments = {}) {
 
   function visit(file, expected, json = false) {
     if (visited.has(file)) {
-      if (expected && expected !== visited.get(file)) throw new TypeError('Unexpected project dependency type: ' + file);
-      return;
+      const prior = visited.get(file);
+      if (expected && expected !== prior.kind) throw new TypeError('Unexpected project dependency type: ' + file);
+      return prior;
     }
     const raw = requireFile(file);
     const document = /\.json$/i.test(file) || expected || json ? JSON.parse(bytes(raw).toString('utf8')) : undefined;
@@ -93,7 +107,8 @@ function collectDependencies(bundles, entry, get, attachments = {}) {
       document && (file === entry || Array.isArray(document.solids) || document.brushRegion || document.prefabLibrary || document.instances)
         ? 'scene' : undefined;
     if (expected && expected !== kind) throw new TypeError('Unexpected project dependency type: ' + file);
-    visited.set(file, kind);
+    const dependency = { kind, ...(kind === 'group' && { group: groupDocument(document, bytes(raw), file) }) };
+    visited.set(file, dependency);
     const follow = (ref, type) => { if (ref !== undefined) visit(resolvePath(file, ref), type); };
 
     if (kind === 'take') {
@@ -105,11 +120,15 @@ function collectDependencies(bundles, entry, get, attachments = {}) {
       follow(document.checkpoint, 'checkpoints');
       for (const ref of values(document.shots)) follow(ref, 'shot');
     } else if (kind === 'graph') {
-      for (const group of values(document.groups)) if (typeof group === 'string') follow(group, 'group');
+      graphGroups(file, document.groups);
       for (const asset of values(document.assets)) {
         if (asset?.format === 'json') visit(resolvePath(file, asset.file), undefined, true);
         else requireFile(resolvePath(file, asset?.file));
       }
+    } else if (kind === 'group') {
+      activeGroups.add(file);
+      graphGroups(file, dependency.group.definition.groups);
+      activeGroups.delete(file);
     } else if (kind === 'audio') {
       follow(document.world, 'world');
       for (const asset of values(document.assets)) {
@@ -135,6 +154,7 @@ function collectDependencies(bundles, entry, get, attachments = {}) {
     } else if (kind === undefined) {
       bundles.collectAttachment(file, get);
     }
+    return dependency;
   }
   visit(entry);
   for (const file of values(attachments)) visit(file);

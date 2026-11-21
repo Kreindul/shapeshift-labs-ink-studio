@@ -4,11 +4,12 @@ const { once } = require('node:events');
 const { createInterface } = require('node:readline');
 const files = require('./asset-files.js');
 const { readGraphProject } = require('./graph-project.js');
+const { findGraphGroupUsers } = require('./graph-groups.js');
 const host = require('./graph-host-command.js');
 const catalog = require('./graph-catalog.js');
 
 const flags = {
-  validate:['inputs','json'], plan:['inputs','json'],
+  validate:['inputs','json'], plan:['inputs','json'], dependencies:['json'],
   inspect:['inputs','at','seed','out','output','node','port','json'],
   run:['inputs','at','seed','out','json'], batch:['inputs','at','seed','out','json'],
   session:['protocol','out'],
@@ -130,11 +131,17 @@ module.exports = async function graphCommand(pos,opt,settings) {
     }
     return sendText(listing ? catalog.listText(result) : catalog.nodeText(result));
   }
+  if (mode==='impact') {
+    if (pos.length!==2 || Object.entries(opt).some(([key,value])=>
+      key==='json' ? value!==true : key!=='root' || typeof value!=='string' || !value.trim()))
+      throw new TypeError('Use graph impact <group.json> [--root directory] [--json]');
+    return send(findGraphGroupUsers(file,{root:opt.root}),opt.json);
+  }
   if (Object.hasOwn(host.commands,mode)) return send(await host.execute(pos,opt,settings),opt.json);
   if (!Object.hasOwn(flags,mode) || pos.length!==(mode==='batch'?3:2) ||
       Object.entries(opt).some(([key,value])=>key!=='adapters' && !flags[mode].includes(key) || (key==='json' ? value!==true : typeof value!=='string' || !value.trim())) ||
       opt.port!==undefined && opt.node===undefined || opt.protocol!==undefined && opt.protocol!=='ndjson')
-    throw new TypeError('Use graph validate|plan|inspect|run|batch|session|clip <project.json> [cases-or-sweep.json]. See ink-studio help');
+    throw new TypeError('Use graph validate|plan|dependencies|inspect|run|batch|session|clip <project.json> [cases-or-sweep.json]. See ink-studio help');
   settings=await host.adapters(opt.adapters,settings);
   const project=readGraphProject(file,settings), sources=project.sourceFiles();
   if (settings.adapterFile) sources.push(settings.adapterFile);
@@ -149,6 +156,7 @@ module.exports = async function graphCommand(pos,opt,settings) {
   const output=opt.out===undefined ? undefined : path.resolve(opt.out);
   if (mode==='validate') return send(project.validate(inputs),opt.json);
   if (mode==='plan') return send(project.plan(inputs),opt.json);
+  if (mode==='dependencies') return send(project.dependencies(),opt.json);
   if (mode==='session') return session(project,output,sources);
   if (mode==='clip') result=project.clip({...run,...clipOptions(opt,sources,project.takeClock)});
   else if (mode==='inspect') result=project.inspect({output:opt.output,node:opt.node,port:opt.port},run);

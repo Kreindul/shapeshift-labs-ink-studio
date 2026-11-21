@@ -135,10 +135,8 @@ typed ports and pass overrides as a JSON object with `--inputs values.json`.
 Optional project `time` and `seed` default to zero. Set `--at` for seconds and
 `--seed` for a specific integer seed.
 
-The `groups` map registers each named group as an operation. A group value is
-an inline graph or a file path relative to the project. Group files use
-`"format": "ink-studio/graph-group"` and `"version": 1` with the graph fields.
-Groups can use other groups registered in the same project. Each instance
+The `groups` map registers each named group as an operation. A group can be
+inline or use a [shared group file](#reference-a-shared-group). Each instance
 owns its own evaluator and cache. Validation checks typed links, missing
 ports, asset references with literal names, and dependency and group cycles
 without running nodes. Planning reports the evaluation order, source links
@@ -164,6 +162,71 @@ Use `{"format":"indexed-png","file":"sprite.png"}` with
 including duplicate swatches. The node returns the one-channel slot
 raster as `value`, the ordered swatches as `palette`, and per-pixel
 opacity bytes as `alpha`.
+
+### Reference a shared group
+
+Put a reusable graph in its own file. Its `inputs` declare named sockets and
+their types and defaults. Its `outputs` declare the named result sockets.
+`version` identifies the file format. `revision` identifies the authored
+group revision and defaults to 1 when omitted.
+
+```json
+{
+  "format": "ink-studio/graph-group",
+  "version": 1,
+  "revision": 3,
+  "inputs": { "level": { "type": "number", "default": 2 } },
+  "nodes": {
+    "scaled": { "op": "multiply", "inputs": { "a": { "input": "level" }, "b": 5 } }
+  },
+  "outputs": { "brightness": { "node": "scaled" } }
+}
+```
+
+Register the file under a local operation name in the graph project.
+
+```json
+{
+  "format": "ink-studio/graph-project",
+  "version": 1,
+  "groups": { "Gain": { "file": "../shared/gain.json", "revision": 3 } },
+  "nodes": { "lamp": { "op": "Gain", "inputs": { "level": 3 } } },
+  "outputs": { "brightness": { "node": "lamp", "port": "brightness" } }
+}
+```
+
+Use a path string or `{ "file": "../shared/gain.json" }` to follow the file
+on each project load. Set `revision` to require that exact authored revision.
+Add `sha256` to require the exact file bytes. A mismatch identifies the
+group and the expected and actual values. Existing projects and sessions
+keep their loaded snapshot until reopened.
+
+A group can declare its own `groups` map to use private dependencies and
+travel between projects. Resolve each path relative to the file that declares
+it. A group that omits the map can call siblings in its registering scope,
+including existing project-level siblings. A group with its own map looks up
+group names there. Pin nested references individually when you need to fix
+their revisions or bytes.
+
+```sh
+ink-studio graph dependencies shots/market.json
+ink-studio graph impact shared/gain.json --root .
+```
+
+`graph dependencies` lists direct and nested aliases, files, revisions,
+SHA-256 hashes and pins. `graph plan` includes the same list and the named
+group sockets. `graph impact` scans graph project JSON files under the chosen
+directory and reports which projects use the group directly or through a
+dependency. For a new revision, `updates` follows the live file and
+`requires-reference-update` has a revision or byte pin to update.
+`declared-only` identifies an unused reference. The report also includes
+existing pin mismatches and projects whose references could not be read.
+The scan skips hidden directories, `node_modules`, and embedded groups inside
+packed takes. Use the report's hash to set a byte pin.
+
+In Node, use `readGraphProject(file).dependencies()` and
+`findGraphGroupUsers(file, { root })`. [Packing a take](project-bundles.md#bundle-a-whole-take)
+keeps the exact group files, including nested references.
 
 ### Discover registered nodes
 

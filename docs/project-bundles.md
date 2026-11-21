@@ -38,8 +38,11 @@ a saved resume point, and named review shots.
 }
 ```
 
-Packing follows external graph groups and graph assets, including WAVs and input
-recordings. It also follows soundtrack WAVs and graphs, world data tables, and
+Packing follows [external graph groups](headless-authoring.md#reference-a-shared-group)
+and graph assets, including nested group references, WAVs, and input recordings.
+It verifies group revision and SHA-256 pins and embeds the original files.
+The bundled graph continues to use those copies when shared source files change.
+Packing also follows soundtrack WAVs and graphs, world data tables, and
 the original inputs recorded by each shot recipe. An asset pack retains its
 existing schema and revision. The bundle preserves the directory layout so
 references and shot input fingerprints survive relocation.

@@ -7,6 +7,7 @@ const WAV = require('./wav.js');
 const { createGraphHost } = require('./graph-host.js');
 const { clip } = require('./graph-clip.js');
 const { resolveCheckpoint } = require('./checkpoint-file.js');
+const { loadGraphGroups, groupFor, groupDependencies } = require('./graph-groups.js');
 
 const format = 'ink-studio/graph-project';
 const reportFormat = 'ink-studio/graph-report';
@@ -259,17 +260,8 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
   if (kind!==format || revision!==version) throw new TypeError('Expected ink-studio/graph-project version 1');
   const spec=graphSpec(root,'project graph',groupOperators);
   const paths=new Set(sourceFile ? [path.resolve(sourceFile)] : []);
-  const groupSpecs=new Map(named(definitions,'groups').map(([name,value])=>{
-    if (typeof value==='string' && value.length) {
-      const file=path.resolve(baseDir,value);
-      paths.add(file);
-      const {format,version,...spec}=JSON.parse(fs.readFileSync(file,'utf8'));
-      if (format!=='ink-studio/graph-group' || version!==1)
-        throw new TypeError('Expected ink-studio/graph-group version 1 in '+value);
-      return [name,graphSpec(spec,'group '+name,groupOperators)];
-    }
-    return [name,graphSpec(value,'group '+name,groupOperators)];
-  }));
+  const groupTree=loadGraphGroups(definitions,baseDir,{onFile:file=>paths.add(file)});
+  const groupSpecs=new Map(groupTree.entries.map(group=>[group,graphSpec(group.spec,'group '+group.alias,groupOperators)]));
   const assets=new Map(named(assetDefinitions,'assets').map(([name,definition])=>{
     const {format,file,type,codec,options}=fields(definition,
       definition?.format==='codec' ? ['format','file','type','codec','options'] : ['format','file'],'graph asset '+name);
@@ -301,16 +293,20 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     return [name,{format,file,sha256:sha256(bytes),value,...(kind && {type:kind}),...(codec && {codec})}];
   }));
   const {stock,overrides:ops}=operationRegistry(kit,operations,assets);
-  const groups=Object.create(null), preparedGroups=new Map(), visiting=new Set();
+  const scopes=new Map(), preparedGroups=new Map(), visiting=new Set();
+  function operationsIn(scope) {
+    if (!scopes.has(scope)) scopes.set(scope,Object.create(null));
+    return scopes.get(scope);
+  }
 
-  function compile(spec) {
+  function compile(spec,scope) {
     let expandedNodes=Object.keys(spec.nodes).length;
-    for (const {op,group} of Object.values(spec.nodes)) {
-      const dependency=groupOperators.includes(op) ? group : op;
-      if (groupSpecs.has(dependency)) expandedNodes+=compileGroup(dependency).expandedNodes;
+    for (const node of Object.values(spec.nodes)) {
+      const dependency=groupFor(scope,node);
+      if (dependency) expandedNodes+=compileGroup(dependency).expandedNodes;
     }
     if (expandedNodes>maxNodes) throw new RangeError('Expanded graph exceeds its '+maxNodes+' node budget');
-    const compiled=graph.create(spec,{operations:ops,groups,planOnly:true}), plan=compiled.plan();
+    const compiled=graph.create(spec,{operations:ops,groups:operationsIn(scope),planOnly:true}), plan=compiled.plan();
     for (const {id,op,inputs} of plan.nodes) {
       if (ops[op]!==stock[op] || !['pngAsset','indexedPngAsset','jsonAsset','audioAsset','rasterAsset','inputAsset'].includes(op) ||
           inputs.name.source.kind!=='value') continue;
@@ -322,22 +318,25 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     return {compiled,plan:{...plan,expandedNodes}};
   }
 
-  function compileGroup(name) {
-    if (preparedGroups.has(name)) return preparedGroups.get(name);
-    if (visiting.has(name)) throw new Error('Graph group cycle at '+name);
+  function compileGroup(group) {
+    const {name,alias,owner,scope}=group;
+    if (preparedGroups.has(alias)) return preparedGroups.get(alias);
+    if (visiting.has(group)) throw new Error('Graph group cycle at '+alias);
     if (Object.hasOwn(ops,name) || Object.hasOwn(graph.operations??{},name))
-      throw new Error('Graph group name conflicts with an operation: '+name);
-    visiting.add(name);
-    const spec=groupSpecs.get(name), {plan}=compile(spec);
-    visiting.delete(name);
+      throw new Error('Graph group name conflicts with an operation: '+alias);
+    visiting.add(group);
+    const spec=groupSpecs.get(group), {plan}=compile(spec,scope);
+    visiting.delete(group);
     const outputs=Object.fromEntries(Object.entries(plan.outputs).map(([key,link])=>[key,link.type]));
-    groups[name]={...graph.group(spec,{operations:ops,groups,outputs}),expandedNodes:plan.expandedNodes};
-    preparedGroups.set(name,plan);
+    operationsIn(owner)[name]={...graph.group(spec,{operations:ops,groups:operationsIn(scope),outputs}),
+      expandedNodes:plan.expandedNodes};
+    preparedGroups.set(alias,plan);
     return plan;
   }
 
-  for (const name of groupSpecs.keys()) compileGroup(name);
-  const {compiled,plan:rootPlan}=compile(spec);
+  for (const group of groupTree.entries) compileGroup(group);
+  const groups=operationsIn(groupTree.scope);
+  const {compiled,plan:rootPlan}=compile(spec,groupTree.scope);
   const exports=named(exportsSpec,'exports').map(([name,definition])=>{
     const {output,format,encoding,type,codec,options}=fields(definition,definition?.format==='wav' ?
       ['output','format','encoding'] : definition?.format==='codec' ? ['output','format','type','codec','options'] :
@@ -360,7 +359,16 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     {width:value.width,height:value.height}),...(entry.type==='audio' && {
       sampleRate:value.sampleRate,channels:value.channels,frames:value.samples.length/value.channels
     })}]));
-  const projectHash=sha256(jsonBytes({project,groups:Object.fromEntries(groupSpecs),assets:assetInfo}));
+  const dependencyRows=groupDependencies(groupTree,spec.nodes,baseDir);
+  // Preserve existing graph hashes for unchanged legacy groups and take checkpoints.
+  const versionedGroups=groupTree.entries.filter(group=>group.document &&
+    (group.document.versioned || group.alias.includes('/') || group.scope!==group.owner ||
+      typeof definitions[group.name]!=='string'));
+  const groupFiles=Object.fromEntries(versionedGroups.map(group=>[group.alias,
+    { reference:group.reference, sha256:group.document.sha256 }]));
+  const projectHash=sha256(jsonBytes({project,
+    groups:Object.fromEntries([...groupSpecs].map(([group,body])=>[group.alias,body])),assets:assetInfo,
+    ...(versionedGroups.length && {groupFiles})}));
   const header={format:reportFormat,version,projectHash};
 
   function clock(t,s) {
@@ -369,7 +377,7 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
   }
   clock(time,seed);
   const projectPlan={...header,kind:'plan',...rootPlan,time,seed,assets:assetInfo,exports,assertions:assertionSpecs,
-    groups:Object.fromEntries(preparedGroups),hostOperations:Object.keys(operations).sort()};
+    groups:Object.fromEntries(preparedGroups),groupDependencies:dependencyRows,hostOperations:Object.keys(operations).sort()};
 
   function request(options={}) {
     const {inputs={},take,time:t=take?.start ?? time,seed:s=seed}=fields(options,['inputs','time','seed','take'],'graph run options');
@@ -486,6 +494,7 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
       if (inputs!==undefined) request({inputs});
       return {...header,kind:'validate',valid:true,nodes:rootPlan.expandedNodes,groups:preparedGroups.size};
     },
+    dependencies:()=>({...header,kind:'dependencies',groups:data.clone(dependencyRows)}),
     run:options=>run(request(options)),
     clip(options) {
       const { inputs, seed, ...settings } = fields(options,
