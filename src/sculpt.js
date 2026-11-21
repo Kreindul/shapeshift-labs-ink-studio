@@ -2115,7 +2115,8 @@ function makeSculpt(B, rest) {
     const sampling = !S.capture && SculptSampling.prepare(override ?? S.adaptiveSampling);
     const keepSdf = S.keepRenderSdf || (typeof globalThis !== 'undefined' && globalThis.INK_RETAIN_RENDER_SDF);
     renderSdf = keepSdf && !S.capture && B.keepRenderSdf ? captureRenderSdf() : null;
-    stippleProfile=Stippling.prepare(S.stipple);stippleCandidates=stippleProfile&&!S.capture?[]:null;stippleProbes=0;
+    if(S.stipple&&S.stipple!==true&&(typeof S.stipple!=='object'||Array.isArray(S.stipple)))throw new TypeError('Stippling needs a boolean or settings');
+    stippleProfile=Stippling.prepare(S.stipple ? {light:S.sun,ambient:S.amb,...(S.stipple===true?{}:S.stipple)} : S.stipple);stippleCandidates=stippleProfile&&!S.capture?[]:null;stippleProbes=0;
     buildGrid();
     L = S.sun;
     for (const p of pos.concat(neg)) {
