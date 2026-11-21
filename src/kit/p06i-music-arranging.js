@@ -1,7 +1,7 @@
 /* Revisions whose generated notes depend on what the rest of the phrase is playing. */
 (function (P) {
   const A=P.musicProduction, C=P.musicComposer, H=P.musicHarmony, I=P.musicInstruments;
-  const {record,fields,finite,id,check,hash}=I;
+  const {record,fields,finite,integer,id,check,hash}=I;
   const clone=value=>JSON.parse(JSON.stringify(value));
   const rounded=value=>Number(value.toFixed(9));
   const pc=value=>((value%12)+12)%12;
@@ -242,8 +242,54 @@
     return P.data.freeze({section:section.id,variants,blocked});
   }
 
+  function renderedAnalysis(score,raw) {
+    check(fields(raw,['start','end','sampleRate','kick','bass']),'Invalid rendered analysis options');
+    const {start=0,end=Math.min(score.end,start+20),sampleRate=16000}=raw;
+    check(finite(start,0,score.end) && finite(end,start,score.end) && end>start && end-start<=30 &&
+      integer(sampleRate,8000,48000),'Rendered analysis needs a window of up to thirty seconds');
+    const {report,stems}=A.renderCompiled(score,{start,end,sampleRate,stems:true});
+    const level=({samples})=>{
+      let sum=0, peak=0;
+      for (const x of samples) {sum+=x*x;peak=Math.max(peak,Math.abs(x));}
+      return {rms:Math.sqrt(sum/samples.length),peak};
+    };
+    const first=report.firstSample, frames=report.endSample-first;
+    const names=Object.keys(score.tracks);
+    const kick=raw.kick ?? names.find(name=>name==='kick' || score.arrangement.parts[name].voice.instrument==='kick');
+    const bass=raw.bass ?? names.find(name=>score.arrangement.parts[name].role==='bass');
+    check([kick,bass].every(name=>name===undefined || names.includes(name)) && (kick===undefined || kick!==bass),
+      'Choose distinct production tracks for kick and bass analysis');
+    const lowEnd=[];
+    if (kick && bass) {
+      const attacks=score.events[kick].filter(note=>note.time>=start && note.time<end && note.velocity>.25);
+      const band=(audio)=>{
+        const a=1-Math.exp(-2*Math.PI*30/sampleRate), b=1-Math.exp(-2*Math.PI*180/sampleRate);
+        const summed=new Float64Array(frames+1);
+        let low=0, high=0;
+        for (let n=0;n<frames;n++) {
+          const mono=(audio.samples[n*2]+audio.samples[n*2+1])*.5;
+          low+=(mono-low)*a;
+          high+=(mono-low-high)*b;
+          summed[n+1]=summed[n]+high*high;
+        }
+        return summed;
+      };
+      const x=band(stems[kick]), y=band(stems[bass]);
+      for (const note of attacks) {
+        const at=Math.max(0,Math.ceil(note.time*sampleRate)-first), to=Math.min(frames,at+Math.round(.065*sampleRate));
+        if (to<=at) continue;
+        const k=x[to]-x[at], b=y[to]-y[at];
+        lowEnd.push({beat:note.beat,time:note.time,kickRms:Math.sqrt(k/(to-at)),bassRms:Math.sqrt(b/(to-at)),
+          bassOverKickDb:k>1e-15 && b>1e-15 ? Number((10*Math.log10(b/k)).toFixed(2)) : null});
+      }
+    }
+    return {...report,start,end,stems:Object.fromEntries(Object.entries(stems).map(([name,stem])=>[name,level(stem)])),
+      ...(kick && bass && {lowEnd:{tracks:[kick,bass],bandHz:[30,180],windowSeconds:.065,attacks:lowEnd}})};
+  }
+
   function analyze(source,assets={},options={}) {
-    check(fields(options,['section','window']) && finite(options.window ?? .055,.005,.2),'Invalid production analysis options');
+    check(fields(options,['section','window','audio']) && finite(options.window ?? .055,.005,.2),
+      'Invalid production analysis options');
     const score=A.compile(source,assets), window=options.window ?? .055, plan=score.arrangement;
     const sections=plan.sections.filter(section=>options.section===undefined || section.id===options.section);
     check(sections.length,'Unknown production analysis section');
@@ -269,7 +315,8 @@
       return {id:section.id,range:[section.time,section.endTime],pairs,harmony,crossing,
         attacks:Object.fromEntries(Object.entries(rows).map(([part,notes])=>[part,notes.length]))};
     });
-    return P.data.freeze({duration:score.end,window,sections:details});
+    return P.data.freeze({duration:score.end,window,sections:details,
+      ...(options.audio!==undefined && {audio:renderedAnalysis(score,options.audio)})});
   }
   P.musicProduction=Object.freeze({...A,revise,suggest,analyze});
 })(KIT.procedural);

@@ -78,6 +78,12 @@ provide your own changes to motifs, patches, mix, and harmony. Part and
 scene binding pins protect the affected score parts, their instrumentation
 and performance data. An explicit `unpin` releases a pin for a take.
 
+Pass analysis options `audio: {start, end, sampleRate, kick, bass}` to measure
+rendered stem levels and compare the bass and kick in the low end at each
+kick attack. The track names are optional when the arrangement names a kick
+or assigns it by instrument, and has a bass role. The reported decibel
+difference compares stem energy in a short, band-limited window.
+
 An audition compares the same named time range for each revision. It exports
 stems, editable recipes, gated K-weighted loudness and estimated true peak.
 A shared target is reduced if necessary to keep all takes under the chosen
