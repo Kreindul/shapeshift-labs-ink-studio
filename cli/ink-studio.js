@@ -1095,6 +1095,8 @@ const CMD = {
         '  music production <mode> <recipe.json> [config.json]   arrange, mix, audition and render adaptive music',
         '  music production cue-map <recipe.json> [map.json]   apply or inspect a cue-wide arrangement map',
         '  music production voice-lead <recipe.json> <settings.json>   search inner lines around locked outer tracks',
+        '  music production groove <recipe.json> [mapping.json]   transfer performance timing, accents and gates',
+        '  music groove extract <recipe.json> [--out groove.json]   measure a WAV or MIDI performance',
         '  music samples <add|search|get> <library> [recipe or ID]   capture and find reusable samples',
         '  music samples <slice|edit|render|audition> <library> <ID or project> [settings.json]   edit sample audio',
         '  music samples warp <library> <ID or project> settings.json --out directory   warp or repitch sample audio',

@@ -129,6 +129,16 @@
       inputs: { source: 'audio', options }, outputs: { value: 'record', events: 'array<record>', report: 'record' },
       run({ source, options }) { return A.detectTransients(source, options); }
     },
+    'audio.extractGroove': {
+      description: 'Measure audio attack timing, relative accents and audible lengths into groove lanes.',
+      inputs:{sources:'record',options},outputs:{value:'record',report:'record'},
+      run({sources,options}) {return A.extractGroove(sources,options);}
+    },
+    'music.fitGroove': {
+      description: 'Fit measured or MIDI note timings, accents and lengths to a repeating reference grid.',
+      inputs:{events:'array<record>',options},outputs:{value:'record',report:'record'},
+      run({events,options}) {return P.performanceGroove.fit(events,options);}
+    },
     'audio.editEvents': {
       description: 'Apply cue edits by ID and expose the musical event track, timeline, and replay pulses.',
       inputs: { source: 'record', edits: { type: 'array<record>', default: [] }, options },
@@ -269,6 +279,14 @@
       run({source,assets}) {
         const value=P.musicProduction.inspect(source,assets);
         return {value,events:value.events};
+      }
+    },
+    'music.applyGroove': {
+      description: 'Borrow timing, accents and gates by role or track, with anchor beats and linked attacks.',
+      inputs:{source:'record',mapping:'record',assets:options},outputs:{value:'record',report:'record'},
+      run({source,mapping,assets}) {
+        const {production,report}=P.musicProduction.mapGroove(source,mapping,assets);
+        return {value:production,report};
       }
     },
     'music.cueMap': {

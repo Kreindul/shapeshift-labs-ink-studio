@@ -1,7 +1,7 @@
 /* An arranged cue with independent performance, instrumentation and mix. */
 (function (P) {
   const C=P.musicComposer, H=P.musicHarmony, T=P.takeTime, I=P.musicInstruments, G=P.musicGestures,Q=P.musicCueMap;
-  const N=P.musicNoteClips;
+  const N=P.musicNoteClips,R=P.performanceGroove;
   const {record,fields,finite,integer,id,check,clamp,db,hash}=I;
   const epsilon=1e-8;
   const number=(raw,key,fallback,low,high)=>{
@@ -159,7 +159,7 @@
   }
 
   function compile(source,assets={}) {
-    check(fields(source,['arrangement','patches','tracks','room','gain','seed','cueMap']) &&
+    check(fields(source,['arrangement','patches','tracks','room','gain','seed','cueMap','grooveMap']) &&
       Number.isSafeInteger(source.seed ?? 0), 'A production needs an arrangement, patches and tracks');
     const written=source.arrangement?.format==='ink-studio/phrase-arrangement' ?
       C.compose(source.arrangement.definition) : C.compose(source.arrangement);
@@ -200,9 +200,12 @@
         groove:groove(raw.groove),pad:raw.pad===undefined ? null : pad(raw.pad,plan.sections)}];
     }));
     check(Object.keys(tracks).length>0,'A production needs at least one track');
-    const events={}, end=program.duration;
+    const names=Object.keys(tracks), end=program.duration;
+    const performance=source.grooveMap===undefined ? null : R.compile(source.grooveMap,plan,names);
+    const events=Object.fromEntries(names.map(name=>[name,[]]));
     let eventCount=0;
-    for (const [name,track] of Object.entries(tracks)) {
+    for (const name of performance?.order ?? names) {
+      const track=tracks[name], follow=performance?.driver(name,events);
       const scoreNotes=N.overlay(scoreRows(plan,program,clock,name,track.pad),track.clips,clock), g=track.groove;
       const rows=cue ? Q.shape(cue,name,scoreNotes) : scoreNotes;
       const silence=cue?.perTrack[name].silence ?? [], cuts=cue?.perTrack[name].cuts ?? [];
@@ -213,11 +216,14 @@
         if (row.midi===null || !row.frequency || !row.velocity) continue;
         const beatStyle=grooveAt(g,row.beat), style=G.perform(track.gestures,row.beat,row.play,track.color);
         let play=style.play;
-        const time=Math.max(0,row.time+beatStyle.delay+(play.delay ?? 0));
+        const inherited=performance?.style(name,play.articulation,round(row.beat),clock);
+        const authored=row.time+beatStyle.delay+(play.delay ?? 0)+(inherited?.delay ?? 0);
+        const time=Math.max(0,performance?.anchor(row.beat) ? row.time : follow ? follow(authored,row.beat) : authored);
         const connection=round(time);
         if (silent(connection)) continue;
-        const velocity=clamp(row.velocity*beatStyle.accent*style.accent);
-        const gate=Math.max(.001,(row.end-row.time)*(row.ties ? 1 : play.gate ?? 1));
+        const velocity=clamp(row.velocity*beatStyle.accent*style.accent*(inherited?.accent ?? 1));
+        const writtenGate=(row.end-row.time)*(row.ties ? 1 : play.gate ?? 1), length=inherited?.gate;
+        const gate=Math.max(.001,writtenGate+(length && !row.ties ? (length.target-writtenGate)*length.strength : 0));
         const voice=row.voice ?? 0, retrigger=row.ties ? 1 : play.retrigger ?? 1, fromFrequency=last.get(voice);
         const previous=lastNotes.get(voice);
         const connected=style.legato && velocity>0 && plan.parts[name].role!=='percussion' &&
@@ -252,16 +258,16 @@
       events[name]=notes;
     }
     applyChokes(tracks,events);
-    const locks=cue ? Object.keys(C.locks(written)) : [];
+    const locks=cue || performance ? Object.keys(C.locks(written)) : [];
     if (locks.length) {
-      const {cueMap,...plain}=source, base=compile(plain,assets);
+      const {cueMap,grooveMap,...plain}=source, base=compile(plain,assets);
       for (const name of locks) {
         const moments=[...base.program.events,...program.events,...written.cues.filter(row=>row.part===name)];
         check(tracks[name] ? JSON.stringify(base.events[name])===JSON.stringify(events[name]) &&
-          cue.perTrack[name].room.every(row=>row.send.every(value=>value===tracks[name].mix.send)) &&
-          !cue.perTrack[name].cuts.length :
+          (!cue || cue.perTrack[name].room.every(row=>row.send.every(value=>value===tracks[name].mix.send)) &&
+          !cue.perTrack[name].cuts.length) :
           moments.every(row=>JSON.stringify(base.program.pitch(name,row.time))===JSON.stringify(program.pitch(name,row.time))),
-        'Cue map changes pinned part '+name);
+        (cue ? 'Cue map or groove changes pinned part ' : 'Groove changes pinned part ')+name);
       }
     }
     return {arrangement:plan,events,end,program,clock,tracks,room,gain,cue};
@@ -420,6 +426,34 @@
     const production={...source,cueMap:P.data.clone(map)}, music=compile(production,assets);
     return {production:P.data.freeze(P.data.clone(production)),report:Q.report(music)};
   }
+  function mapGroove(source,map,assets) {
+    const production={...source,grooveMap:P.data.clone(map)}, after=compile(production,assets);
+    const {grooveMap,...plain}=source, before=compile(plain,assets);
+    const identity=note=>JSON.stringify([note.beat,note.midi,note.voice ?? 0]);
+    const tracks=Object.fromEntries(Object.entries(after.events).map(([name,rows])=>{
+      const groups=new Map();
+      for (const note of before.events[name]) {
+        const key=identity(note);
+        if (!groups.has(key)) groups.set(key,{rows:[],index:0});
+        groups.get(key).rows.push(note);
+      }
+      let moved=0, accented=0, resized=0, matched=0, maxShift=0;
+      for (const note of rows) {
+        const group=groups.get(identity(note)), old=group && group.rows[group.index++];
+        if (!old) continue;
+        matched++;
+        const shift=Math.abs(note.time-old.time);
+        maxShift=Math.max(maxShift,shift);
+        moved+=Number(shift>epsilon);
+        accented+=Number(Math.abs(note.velocity-old.velocity)>epsilon);
+        resized+=Number(Math.abs(note.gate-old.gate)>epsilon);
+      }
+      return [name,{notes:rows.length,moved,accented,resized,
+        added:rows.length-matched,dropped:before.events[name].length-matched,maxShiftSeconds:round(maxShift)}];
+    }));
+    return {production:P.data.freeze(P.data.clone(production)),
+      report:{id:map.template.id,anchors:map.anchors ?? [],links:map.links ?? [],tracks}};
+  }
   function inspect(source,assets) {
     const compiled=compile(source,assets),{arrangement,events,end,tracks,cue}=compiled;
     const gestures=Object.fromEntries(Object.entries(tracks).filter(([,track])=>track.gestures.length).map(([name,track])=>
@@ -427,5 +461,5 @@
     return P.data.freeze({arrangement,events:json(events),duration:end,
       ...(Object.keys(gestures).length && {gestures}),...(cue && {cueMap:Q.report(compiled)})});
   }
-  P.musicProduction=Object.freeze({compile,renderCompiled,render,inspect,mapCue,grooveAt,applyChokes});
+  P.musicProduction=Object.freeze({compile,renderCompiled,render,inspect,mapCue,mapGroove,grooveAt,applyChokes});
 })(KIT.procedural);

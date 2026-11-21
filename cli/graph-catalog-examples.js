@@ -225,6 +225,10 @@ const specifications = {
   'music.suggest': { inputs:{source:{...arrangement,sections:[{id:'opening',bars:4,harmony:'home'}]},options:{limit:2}} },
   'music.renderProduction': { inputs:{source:production,options:{end:.25,sampleRate:8000,stems:true}} },
   'music.inspectProduction': { inputs:{source:production} },
+  'music.applyGroove': {inputs:{source:production,mapping:{
+    template:{format:'ink-studio/performance-groove',version:1,id:'take',step:.25,length:2,
+      lanes:{keys:[{slot:3,offset:.035,accent:.9,length:.21}]}},roles:{lead:{lane:'keys'}}
+  }}},
   'music.noteClip': {inputs:{source:{id:'lines',beat:0,length:2,voices:[
     {id:'alto',notes:[{id:'held',beat:0,duration:2,midi:64}]},
     {id:'tenor',notes:[{id:'answer',beat:.5,duration:1,midi:55}]}]}}},
@@ -300,6 +304,9 @@ const specifications = {
     options: { time: .02 }
   } },
   'audio.detectTransients': { inputs: { source: transientAudio } },
+  'audio.extractGroove': {inputs:{sources:{tap:transientAudio},options:{
+    detect:{size:32,hop:8,sensitivity:1,minStrength:.01}}}},
+  'music.fitGroove': {inputs:{events:[{lane:'hat',beat:.52,velocity:.8,durationBeats:.13}]}},
   'audio.editEvents': {
     nodes: { detected: { op: 'audio.detectTransients', inputs: { source: transientAudio } } },
     inputs: { source: link('detected'), edits: [{ op: 'rename', id: 'hit-32', name: 'Opening' },

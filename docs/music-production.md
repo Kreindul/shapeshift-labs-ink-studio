@@ -107,6 +107,9 @@ comparison by default.
 decisions, hear focused bars and stems in context, and keep individual
 choices with a reusable listening rationale.
 
+[Transfer groove from a performance](performance-groove.md) to borrow
+timing, accents and note lengths from an audio break or MIDI take.
+
 ## Assemble adaptive transitions
 
 Pass the `music-transition` and `music-cue` intents from Ink's
