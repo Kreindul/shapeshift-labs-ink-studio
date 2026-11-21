@@ -168,11 +168,17 @@ function tessellate(K,B,row,style,seed) {
   K.mosaic.emit(B,mesh,{object:row.id,ambient:.9});
 }
 
-function label(K, SpriteSurface, style) {
+function label(SpriteSurface, style) {
   const atlas=SpriteSurface.make(128);
-  const font=K.inspection.font({}), glyphs=[...'TIDELINE'].map(ch=>font.get(ch));
-  atlas.face([-.747,-1.736,1.054],[1.494,0,0],[0,.228,0],48,7,
-    (x,y)=>glyphs[Math.floor(x/6)]?.[y*6+x%6] ? parseInt(style.palette.label.slice(1),16) : undefined,{id:'title'});
+  // Three strokes per glyph stay readable when the seven-pixel plaque tilts.
+  const font={
+    T:['###','.#.','.#.','.#.','.#.'], I:['###','.#.','.#.','.#.','###'],
+    D:['##.','#.#','#.#','#.#','##.'], E:['###','#..','##.','#..','###'],
+    L:['#..','#..','#..','#..','###'], N:['#.#','###','###','#.#','#.#']
+  };
+  const glyphs=[...'TIDELINE'].map(ch=>font[ch]), ink=parseInt(style.palette.label.slice(1),16);
+  atlas.face([-.747,-1.736,1.054],[1.494,0,0],[0,.228,0],32,5,
+    (x,y)=>glyphs[Math.floor(x/4)][y][x%4]==='#' ? ink : undefined,{id:'title'});
   return atlas.finish();
 }
 
@@ -217,7 +223,7 @@ module.exports = ({KIT:K,makeBuilder,SpriteSurface})=>({
       drawLook(K,B,SpriteSurface,mixed ? artwork.filter(row=>treatment(row)===key) : artwork,key,seed,atlases);
     rig.own('ferry',()=>patches(K,B,paperPlan(K,boat,style,0),style,movingLook));
     rig.own('beam',()=>patches(K,B,paperPlan(K,beam,style,0),style,movingLook,{opacity:movingLook==='enamel' ? .22 : .31,coat:false}));
-    atlases.push(label(K,SpriteSurface,style));
+    atlases.push(label(SpriteSurface,style));
     const areaLights = id==='stained-glass' || mixed ? [{
       id:'glass-backlight',at:[0,mixed ? -.84 : .12,-.690],normal:[0,0,1],size:[6.60,mixed ? 1.125 : 3.04],
       radius:1.2,intensity:.86,volumeIntensity:0,color:'#ffe6c7',reflection:false,shadows:false
