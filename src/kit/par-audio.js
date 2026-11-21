@@ -30,6 +30,18 @@
       inputs:{source:'record',assets:'record'},outputs:{value:'audio',taps:'record',report:'record'},
       run({source,assets}) {return A.mixer.render(source,assets);}
     },
+    'audio.renderRack': {
+      description: 'Render a reusable routing rack from named audio inputs and a saved or automated macro state.',
+      inputs:{source:'record',sources:'record',state:{type:'record',default:{}},options},
+      outputs:{value:'audio',taps:'record',report:'record',state:'record'},
+      run({source,sources,state,options}) {return A.audioRack.render(source,sources,state,options);}
+    },
+    'audio.auditionRack': {
+      description: 'Print an aligned, loudness-matched bypass and effects rack with a recalled state.',
+      inputs:{source:'record',sources:'record',state:{type:'record',default:{}},options},
+      outputs:{value:'audio',bypass:'audio',report:'record',state:'record'},
+      run({source,sources,state,options}) {return A.audioRack.audition(source,sources,state,options);}
+    },
     'audio.meterMix': {
       description: 'Measure peak, reconstructed true peak, loudness, stereo correlation and mono fold loss.',
       inputs:{source:'audio',options},outputs:{value:'record'},
