@@ -24,6 +24,10 @@ and its adaptive score. [Scene soundtrack exports](scene-audio.md)
 
 ## Replay and embed
 
+Use the [standalone playback build](build-profiles.md#play-baked-frames) to
+mount a recording in your own page. The same frame sampling and playback
+code is used by the self-contained embed.
+
 `ink-studio scene-replay <recording.json> --at <elapsed-seconds> --out <frame.png>` extracts the original PNG for that playback time. Add the recording's `start` to the frame offset to recover its source scene time. Use `--embed --out <embed.html>` to regenerate the player from the recording.
 
 With `--embed-config <file.json>`, configure the page title and image alternative text with `title` and `alt`. Use booleans `controls`, `autoplay`, `loop`, and `pixelated`. Set `fit` to `contain` or `cover`, and choose hex colors or `transparent` for `background`, `color`, and `accent`. The default player starts paused and shows controls for multi-frame recordings. Autoplay respects the browser's reduced-motion preference. The output HTML contains its styles, which can also be edited directly.

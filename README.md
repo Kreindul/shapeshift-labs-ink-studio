@@ -129,7 +129,7 @@ console.log(world.count, world.data instanceof Float32Array);
 console.log(SCENES.map(scene => scene.id));
 ```
 
-`makeSculpt(B)` creates the base sculptor. `K.sculpt(...)` adds the toolkit's extended shape operations. `load()` compiles and caches a concatenated CommonJS bundle in the package's `dist/standalone.js`; it needs a writable package directory on first use or after source changes.
+`makeSculpt(B)` creates the base sculptor. `K.sculpt(...)` adds the toolkit's extended shape operations. `load()` uses the precompiled Node toolkit in a packed install. A source checkout can build it with `npm run build` or compile on demand. See [authoring and playback builds](docs/build-profiles.md).
 
 The package entry point exposes:
 
@@ -919,7 +919,7 @@ shows the core APIs and a runnable pool scene. The [depth import guide](docs/dep
 
 ## Embedding and custom scene collections
 
-Use [scene publishing](docs/scene-publishing.md) to export a self-contained web player for rendered scene frames.
+Use [scene publishing](docs/scene-publishing.md) to export a self-contained web player for rendered scene frames, or serve the [standalone playback module](docs/build-profiles.md#play-baked-frames) with a published recording.
 
 Use a [portable project bundle](docs/project-bundles.md) to carry an editable diorama and its local dependencies into Node, WebGL, or the CLI.
 

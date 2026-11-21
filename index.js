@@ -2,7 +2,7 @@
 // The sources are plain scripts (they are concatenated into a web page as they stand), so this file offers them three ways:
 //   files()   the library's source files, in the order they must be loaded
 //   bundle()  those files as one piece of text, to put in a page or in front of your own scripts
-//   load()    the same compiled for Node, with the demo dioramas: { makeBuilder, makeSculpt, KIT, SCENES, ... }
+//   load()    the prebuilt Node toolkit and demos, or a source build in a development checkout
 const fs = require('fs'),
   path = require('path'),
   { randomUUID } = require('crypto');
@@ -29,16 +29,51 @@ const demoFiles = () => [path.join(__dirname, 'demos', 'labscenes.js')];
 // the names the bundle defines at top level (add them to your own module.exports)
 const EXPORTS =
   'Typography, SplatFootprints, RenderGrid, Randomness, MathFields, MaterialControls, CameraLens, CameraImpulses, makeBuilder, makeSculpt, basis, flame, motes, pondMat, lilies, courses, PALETTES, PAL_HEX, KIT, FrameBudget, InkVeil, TexturedSurface, SpriteSurface, TargetSelectors, SplatProvenance, ColorSpace, PaintCorrections, ColorCurves, ColorLUT, ColorStack, PixelLook, PaletteFields, LookInputs, RenderStages, ContributionRules, SurfaceDetailKits, SurfaceLook, SceneOptics, ReflectionProbes, SceneExposure, SkyEnvironment, AtmospherePalette, EnvironmentFrame, CelestialTracks, CloudField, Lightning, VOX, SplatEffects, ArtPasses, ArtDirection, ArtInk, EffectPalettes, SilhouetteProtection, DetailBudgets, ContactShadows, BounceProbes, LightCookies, AreaLights, EmissiveFinishes, HorizonBands, ArtStability, ColorClusters, StableDetail, EdgeFilter, ArtEffects, VolumeField, VolumeLight';
+const prebuiltNode = path.join(__dirname, 'dist', 'ink-studio.node.cjs');
+const playbackSource = path.join(__dirname, 'src', 'scene-replay.js');
+const playbackExports = 'mountSceneReplay, sampleReplayFrame, validateSceneReplay';
+
+function bundle({ format = 'script', profile = 'development' } = {}) {
+  if (!['script', 'module', 'commonjs'].includes(format)) throw Error('Ink bundle format must be script, module or commonjs');
+  if (profile === 'playback') {
+    const source = read(playbackSource);
+    if (format === 'module') return source + '\nexport { ' + playbackExports + ' };\n';
+    if (format === 'commonjs') return source + '\nmodule.exports = { ' + playbackExports + ' };\n';
+    return 'const InkScenePlayer = (() => {\n' + source + '\nreturn { ' + playbackExports + ' };\n})();\n';
+  }
+  if (profile !== 'development') throw Error('Ink bundle profile must be development or playback');
+  const sources = files().map(read).join('\n');
+  if (format === 'module') return sources + '\nexport { ' + EXPORTS + ' };\n';
+  if (format === 'commonjs')
+    return sources + '\nconst SCENES = [];\n' + demoFiles().map(read).join('\n') +
+      '\nmodule.exports = { SCENES, ' + EXPORTS + ' };\n';
+  return sources;
+}
+
+function nodeBundlePath() {
+  if (process.env.INK_STUDIO_DEVELOPMENT !== '1' && fs.existsSync(prebuiltNode)) return prebuiltNode;
+  const out = path.join(__dirname, 'dist', 'standalone.js');
+  const newest = Math.max(...files().concat(demoFiles(), [__filename]).map(f => fs.statSync(f).mtimeMs));
+  if ((fs.statSync(out, { throwIfNoEntry: false })?.mtimeMs ?? -1) < newest) {
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    // Parallel consumers may compile together. Publish only complete bundles.
+    const temporary = out + '.' + randomUUID() + '.tmp';
+    try {
+      fs.writeFileSync(temporary, bundle({ format: 'commonjs' }));
+      fs.renameSync(temporary, out);
+    } finally {
+      if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+    }
+  }
+  return out;
+}
+
 module.exports = {
   files,
   demoFiles,
   EXPORTS,
   version: require('./package.json').version,
-  bundle: ({ format = 'script' } = {}) => {
-    if (format !== 'script' && format !== 'module') throw Error('Ink bundle format must be script or module');
-    const sources = files().map(read).join('\n');
-    return format === 'module' ? sources + '\nexport { ' + EXPORTS + ' };\n' : sources;
-  },
+  bundle,
   // the seven built-in demo dioramas. They push onto an array called SCENES, which must already exist
   demos: () => demoFiles().map(read).join('\n'),
   // refuse-to-build check: code written after a // comment on the same line never runs. Returns the offending lines
@@ -174,29 +209,6 @@ module.exports = {
   },
   createSimulationWorkers: require('./src/simulation-worker-pool.js'),
   openCheckpointStore: require('./src/simulation-checkpoint-store.js').openCheckpointStore,
-  load() {
-    const out = path.join(__dirname, 'dist', 'standalone.js'),
-      srcs = files().concat(demoFiles()),
-      newest = Math.max(...srcs.map(f => fs.statSync(f).mtimeMs));
-    if (!fs.existsSync(out) || fs.statSync(out).mtimeMs < newest) {
-      fs.mkdirSync(path.dirname(out), { recursive: true });
-      // Parallel consumers may compile together. Publish only complete bundles.
-      const temporary = out + '.' + randomUUID() + '.tmp';
-      try {
-        fs.writeFileSync(
-          temporary,
-          module.exports.bundle() +
-            '\nconst SCENES = [];\n' +
-            module.exports.demos() +
-            '\nmodule.exports = { SCENES, ' +
-            EXPORTS +
-            ' };\n'
-        );
-        fs.renameSync(temporary, out);
-      } finally {
-        if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
-      }
-    }
-    return require(out);
-  }
+  nodeBundlePath,
+  load() { return require(nodeBundlePath()); }
 };
