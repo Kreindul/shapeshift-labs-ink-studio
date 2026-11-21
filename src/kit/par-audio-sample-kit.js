@@ -1,6 +1,6 @@
 /* Deterministic, layered sample instruments on the shared audio sample clock. */
 (function (P) {
-  const A=P.mediaGraph, T=P.takeTime, M=P.mediaGraphSupport.sampleKitMix,E=P.mediaGraphSupport.padEvent;
+  const A=P.mediaGraph, T=P.takeTime, S=P.mediaGraphSupport,M=S.sampleKitMix,E=S.padEvent;
   const {fields,record,check,finite,integer,id,clamp,db}=P.musicInstruments;
   const {midi}=P.musicHarmony;
   const budget=16e6, empty=[];
@@ -147,30 +147,10 @@
     return 1;
   }
   function reader(take,rate,pitch,offset,detune) {
-    const {audio:{samples,channels,sampleRate},frames:end,root,tune}=take;
-    const step=sampleRate/rate*2**(((root===null || pitch===null ? 0 : pitch-root)+(tune+detune)/100)/12);
+    const {audio,frames:end,root,tune}=take;
+    const step=audio.sampleRate/rate*2**(((root===null || pitch===null ? 0 : pitch-root)+(tune+detune)/100)/12);
     check(finite(step,1/128,16),'Sample pitch or rate conversion exceeds the kit resampling range');
-    const cutoff=step>1 ? .94/step : 1;
-    const radius=Math.min(48,Math.ceil(8/cutoff));
-    const sinc=x=>Math.abs(x)<1e-10 ? 1 : Math.sin(Math.PI*x)/(Math.PI*x);
-    function read(pos,out) {
-      const base=Math.floor(pos);
-      if (cutoff===1 && base===pos) {
-        out[0]=samples[base*channels] ?? 0;
-        out[1]=channels===1 ? out[0] : samples[base*2+1] ?? 0;
-        return;
-      }
-      let left=0,right=0,total=0;
-      for (let i=Math.max(offset,base-radius+1);i<Math.min(end,base+radius+1);i++) {
-        const x=i-pos, w=sinc(x*cutoff)*sinc(x/radius);
-        left+=w*samples[i*channels];
-        if (channels===2) right+=w*samples[i*2+1];
-        total+=w;
-      }
-      out[0]=left/total;
-      out[1]=channels===1 ? out[0] : right/total;
-    }
-    return {step,read,cost:step===1 ? 2 : radius*4};
+    return {step,...S.pcmReader(audio,offset,end,step)};
   }
   function voice(take,row,rate,start,end,amplitude,release) {
     const {play,sends}=row, offset=release ? 0 : play.startSample ?? 0;

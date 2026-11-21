@@ -25,6 +25,11 @@
       inputs:{sources:'record',settings:'record'},outputs:{audio:'record',entries:'record',report:'record'},
       run({sources,settings},{seed,time}) {return A.audioPrint.prepare(sources,settings,{seed,time});}
     },
+    'audio.renderMixer': {
+      description: 'Render clips through latency-compensated strips, sends, sidechains and automated inserts.',
+      inputs:{source:'record',assets:'record'},outputs:{value:'audio',taps:'record',report:'record'},
+      run({source,assets}) {return A.mixer.render(source,assets);}
+    },
     'audio.searchSamples': {
       description: 'Filter sample metadata by material, articulation, pitch, duration, provenance and license.',
       inputs: { entries:'array<record>', options }, outputs: { value:'record', items:'array<record>' },
