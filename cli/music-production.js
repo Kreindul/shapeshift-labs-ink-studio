@@ -101,6 +101,14 @@ module.exports=function command([mode,file,config],opt,kit) {
   else if (mode==='cue-map')
     value={...P.mapCue(production,config ? read(config) : production.cueMap,assets),...(recipe.assets && {assets:paths})};
   else if (mode==='voice-lead' && config) value=P.voiceLead(production,read(config),assets);
+  else if (mode==='groove') {
+    const map=config ? read(config) : production.grooveMap;
+    if (!map) throw new TypeError('Provide a groove transfer settings file');
+    let template=map.template;
+    if (config && typeof template==='string') template=read(path.resolve(path.dirname(config),template));
+    value={...P.mapGroove(production,{...map,template:template?.template ?? template},assets),
+      ...(recipe.assets && {assets:paths}),...(recipe.options && {options:recipe.options})};
+  }
   else if (mode==='analyze') value=P.analyze(production,assets,config ? read(config) : recipe.options);
   else if (mode==='suggest') value=P.suggest(production,config ? read(config) : recipe.options,assets);
   else if (mode==='plan-audition') value=P.planProducer(production,config ? read(config) : recipe.brief,assets);
