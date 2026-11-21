@@ -86,13 +86,18 @@
         return {value,report,alternatives:hardCut ? {hardCut} : {}};
       }
     },
+    'audio.spotFoley': {
+      description: 'Spot material and action recordings from committed world events, with paired close and distant takes in an editable session.',
+      inputs:{source:'record',assets:'record'}, outputs:{value:'record',report:'record'},
+      run({source,assets}) {return A.foley.plan(source,assets);}
+    },
     'audio.inspectEditorial': {
       description: 'Resolve source sync markers, take ranges and exact picture, world or beat targets.',
       inputs:{source:'record',assets:'record'},outputs:{value:'record'},
       run({source,assets}) {return {value:A.audioEditorial.inspect(source,assets)};}
     },
     'audio.reviseEditorial': {
-      description: 'Change source handles, head slips, fades, spotting or a time-range comp without altering PCM.',
+      description: 'Change source handles, head slips, tail duration, fades, spotting or a time-range comp without altering PCM.',
       inputs:{source:'record',assets:'record',edits:scoreRequests},outputs:{value:'record',report:'record'},
       run({source,assets,edits}) {return A.audioEditorial.revise(source,assets,edits);}
     },

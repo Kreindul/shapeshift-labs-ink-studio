@@ -16,7 +16,7 @@
       integer(session.sampleRate,8000,96000) && record(assets) && Array.isArray(session.clips) &&
       session.clips.length<=512,'Expected a bounded audio editorial session');
     const {sampleRate}=session, clock=S.editorialClock(session), editDocs=new Map(table(session.sourceEdits ?? {},128,'source edit'));
-    const inputs=new Map(), edits=new Map();
+    const inputs=new Map(), edits=new Map(), stretchTail=S.editorialTails();
     let budget=0;
     function load(asset) {
       check(id(asset) && Object.hasOwn(assets,asset),'Missing editorial source '+asset);
@@ -41,7 +41,7 @@
       return index;
     }
     function take(raw) {
-      check(fields(raw,['asset','sync','fromSample','toSample','handles','slip']),
+      check(fields(raw,['asset','sync','fromSample','toSample','handles','slip','tail']),
         'Invalid editorial take');
       const {asset,sync,fromSample=0}=raw, {source,frames}=load(asset), {toSample=frames}=raw;
       const handles=raw.handles ?? {fromSample:0,toSample:frames};
@@ -55,7 +55,8 @@
       const step=source.sampleRate/sampleRate, ratio=T.div(T.read(sampleRate),T.read(source.sampleRate));
       check(finite(step,1/128,16),'Editorial resampling ratio exceeds its range');
       const offset=sourceSample=>ceil(T.mul(T.read(sourceSample-pin),ratio));
-      const first=offset(fromSample), last=offset(toSample), original=S.pcmReader(source,fromSample,toSample,step);
+      const tail=stretchTail(source,fromSample,toSample,pin,step,raw.tail);
+      const first=offset(fromSample), last=offset(tail?.end ?? toSample), original=S.pcmReader(source,fromSample,toSample,step);
       const slip=raw.slip;
       let displaced, joinEnd=0, joinStart=0;
       if (slip!==undefined) {
@@ -71,7 +72,8 @@
       }
       const pcm=(t,out,scratch)=>{
         const position=pin+t*step;
-        original.read(position,out);
+        if (tail?.read && position>=tail.info.fromSample) tail.read(position,out);
+        else original.read(position,out);
         if (displaced && t<joinEnd) {
           displaced.read(position+slip.samples,scratch);
           const u=Math.max(0,(t-joinStart)/slip.joinSamples);
@@ -81,7 +83,7 @@
       };
       return {asset,sourceSync:pin,sourceRate:source.sampleRate,range:{fromSample,toSample},handles:{...handles},
         first,last,cost:original.cost*(displaced ? 2 : 1),pcm,
-        ...(marked && {marker:sync.marker}),...(slip && {slip:{...slip}})};
+        ...(marked && {marker:sync.marker}),...(slip && {slip:{...slip}}),...(tail && {tail:tail.info})};
     }
     const tracks=new Set(), ids=new Set(), clips=[];
     for (const raw of session.clips) {
@@ -228,7 +230,8 @@
           break;
         case 'handles':
         case 'trim':
-        case 'slip-head': {
+        case 'slip-head':
+        case 'stretch-tail': {
           const name=row.take ?? clip.take;
           check(id(name) && Object.hasOwn(clip.takes,name),'Unknown editorial take');
           const take=clip.takes[name];
@@ -240,11 +243,16 @@
           } else if (row.op==='handles') {
             check(fields(row,['op','clip','take','handles']) && record(row.handles),'Invalid take handles');
             take.handles=row.handles;
-          } else {
+          } else if (row.op==='slip-head') {
             check(fields(row,['op','clip','take','slip']) && (row.slip===null || record(row.slip)),
               'Invalid head slip edit');
             if (row.slip===null) delete take.slip;
             else take.slip=row.slip;
+          } else {
+            check(fields(row,['op','clip','take','tail']) && (row.tail===null || record(row.tail)),
+              'Invalid tail stretch edit');
+            if (row.tail===null) delete take.tail;
+            else take.tail=row.tail;
           }
           break;
         }

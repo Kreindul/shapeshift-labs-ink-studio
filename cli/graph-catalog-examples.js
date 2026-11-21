@@ -288,6 +288,14 @@ const specifications = {
   'audio.renderSampleEdit': {inputs:{source:audio,edit:slicedAudio}},
   'audio.auditionSampleEdit': {inputs:{source:audio,edit:slicedAudio,
     options:{left:'attack',right:'tail',before:12,after:12}}},
+  'audio.spotFoley': {inputs:{assets:{tone:audio},source:{
+    kit:{id:'bench',materials:{steel:{tap:{soft:{
+      close:{asset:'tone',sync:{sample:63}},distant:{asset:'tone',sync:{sample:64}}
+    }}}}},
+    sampleRate:8000,picture:editorial.picture,
+    world:{simulationRate:25,events:[{id:'1.0',tick:1,kind:'contact',material:'steel',action:'tap'}]},
+    bindings:[{id:'contacts',on:{kind:'contact'}}]
+  }}},
   'audio.inspectEditorial': {inputs:{source:editorial,assets:{tone:audio}}},
   'audio.reviseEditorial': {inputs:{source:editorial,assets:{tone:audio},edits:[{op:'fades',clip:'tap',fades:{inSamples:8}}]}},
   'audio.renderEditorial': {inputs:{source:editorial,assets:{tone:audio},options:{stems:true}}},

@@ -17,6 +17,9 @@ stems. `reconform` writes level-matched `before.wav` and `after.wav` on the
 same sample grid, a report, and a revised `project.json` for further work.
 Both project files reference the original WAVs by relative path.
 
+Use [Foley spotting](foley-perspective.md) to derive a session with paired
+close and distant takes from committed world events.
+
 ## Session
 
 A CLI recipe contains a `session` object and an `assets` table mapping

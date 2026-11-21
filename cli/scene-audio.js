@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const WAV = require('./wav.js');
 const { mix } = require('./scene-audio-mix.js');
+const { createScenePost, buses, legacy } = require('./scene-audio-post.js');
+const { readEditorialProject } = require('./music-editorial.js');
 const { readGraphProject } = require('./graph-project.js');
 const { readAudioPrint } = require('./audio-print.js');
 const { embed } = require('./data-inputs.js');
@@ -15,29 +17,31 @@ const token = value => typeof value === 'string' && value.trim() && value.length
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 
 function createSceneAudio(definition, { kit = require('../index.js').load(), resolveAsset, runtime } = {}) {
-  if (!fields(definition, ['format', 'version', 'sampleRate', 'gain', 'tracks', 'spatial', 'listener', 'music', 'proceduralScore']) ||
+  if (!fields(definition, ['format', 'version', 'sampleRate', 'gain', 'tracks', 'spatial', 'listener', 'music', 'proceduralScore', 'post']) ||
       definition.format !== format || definition.version !== 1 || typeof resolveAsset !== 'function')
     throw new TypeError('Expected a version 1 scene soundtrack and audio resolver');
   const { KIT: K } = kit, T = K.procedural.takeTime;
-  const { sampleRate = 48000, gain = 1, tracks = [], spatial, listener = [0, 0, 0], music, proceduralScore } = definition;
+  const { sampleRate = 48000, gain = 1, tracks = [], spatial, listener = [0, 0, 0], music, proceduralScore, post: postConfig } = definition;
   if (!Number.isSafeInteger(sampleRate) || !finite(sampleRate, 8000, 192000) || !finite(gain, 0, 16) ||
       !Array.isArray(tracks) || tracks.length > 4096)
     throw new RangeError('Invalid scene soundtrack rate, gain, or track count');
+  const post = postConfig===undefined ? null : createScenePost(K.procedural,postConfig,sampleRate);
   const rate = [BigInt(sampleRate), 1n];
   const sampleOf = point => T.index(T.roundDown(T.mul(point, rate)));
   const stamp = value => sampleOf(T.read(value));
   const mixer = spatial === undefined ? null : K.world.spatialAudio.create(spatial);
   const clock = K.timeDomains.take({ sampleRate });
   const bed = Array.from(tracks, row => {
-    if (!fields(row, ['asset','time','duration','offset','rate','gain','loop']) || !token(row.asset) ||
+    if (!fields(row, ['asset','time','duration','offset','rate','gain','loop','bus']) || !token(row.asset) ||
+        row.bus!==undefined && (!post || !buses.includes(row.bus)) ||
         !finite(row.offset ?? 0, 0, 1e9) || !finite(row.rate ?? 1, .001, 64) || !finite(row.gain ?? 1, 0, 16) ||
         row.loop !== undefined && typeof row.loop !== 'boolean')
       throw new TypeError('Invalid soundtrack placement');
     const time = T.read(row.time ?? 0), duration = row.duration === undefined ? undefined : T.read(row.duration);
     if (T.seconds(time) < 0 || duration && !(T.seconds(duration) > 0))
       throw new RangeError('Soundtrack placements need nonnegative start times and positive durations');
-    const { asset, offset, rate, gain, loop } = row;
-    return { stem: 'tracks', asset, offset, rate, gain, loop, first: sampleOf(time),
+    const { asset, offset, rate, gain, loop, bus } = row;
+    return { bus, stem: 'tracks', asset, offset, rate, gain, loop, first: sampleOf(time),
       ...(duration && { end: sampleOf(T.add(time, duration)) }) };
   });
   if (music !== undefined && (!fields(music, ['system','gain','fade','layers','production']) || !token(music.system) ||
@@ -63,7 +67,9 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
 
   function render(sequence, { timeline, runtime: sceneRuntime } = {}, selection) {
     const start = sampleOf(sequence.startPoint), end = sampleOf(sequence.endPoint);
-    const musicSelected = !selection || selection.kind==='stem' && ['mix','music'].includes(selection.name);
+    const postSelected=post && (!selection || selection.kind==='stem' && !legacy.includes(selection.name));
+    const mixStart=postSelected ? 0 : start;
+    const musicSelected = postSelected || !selection || selection.kind==='stem' && ['mix','music'].includes(selection.name);
     const factory = runtime ?? sceneRuntime;
     const run = mixer || music || scoreSystem || !timeline ? factory?.() : undefined;
     if (music && !run) throw new Error('Adaptive music export needs a native sound world with its score system');
@@ -218,11 +224,11 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
     if (live && live.status !== 'ok') throw new Error('Procedural score schedule is unavailable');
     const program = live ? K.music.score.compile(live.value.score,{requests:live.value.requests}) : inline;
     if (musicSelected && program) {
-      if (end <= start || (end-start)*2 > WAV.maxSamples)
+      if (end <= mixStart || (end-mixStart)*2 > WAV.maxSamples)
         throw new RangeError('Scene soundtrack exceeds its WAV sample budget');
-      generated = program.audio({ sampleRate, start: {numerator:start,denominator:sampleRate},
+      generated = program.audio({ sampleRate, start: {numerator:mixStart,denominator:sampleRate},
         end: {numerator:end,denominator:sampleRate}, gain: proceduralScore.gain ?? 1 }).value;
-      push({ stem: 'music', asset: synthAsset, first: start, end });
+      push({ stem: 'music', asset: synthAsset, first: mixStart, end });
     }
     if (musicSelected && production) {
       const {timeline,sources}=production;
@@ -230,24 +236,25 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
       if (entry.section!==timeline.entry || !initial)
         throw new RangeError('Production entry must match the adaptive music state');
       const stop=Math.min(end,stamp(timeline.end));
-      if (stop>start) {
+      if (stop>mixStart) {
         const sourcesByName=Object.fromEntries(Object.entries(production.assets ?? {}).map(([key,asset])=>[key,resolve(asset)]));
         const liveLayers=Object.fromEntries(Object.entries(entry.layers ?? {}).filter(([name])=>
           Object.hasOwn(sources[initial.source]?.tracks ?? {},name)));
         const liveTimeline={...timeline,segments:{...timeline.segments,
           [timeline.entry]:{...initial,layers:{...initial.layers,...liveLayers}}}};
         const result=K.music.production.renderTimeline(sources,liveTimeline,productionIntents,sourcesByName,
-          {sampleRate,start:{numerator:start,denominator:sampleRate},end:{numerator:stop,denominator:sampleRate},
+          {sampleRate,start:{numerator:mixStart,denominator:sampleRate},end:{numerator:stop,denominator:sampleRate},
             ...(captureWorld && {world:{...production.world,events:worldEvents}})});
         produced=result.value;
         worldReport=result.report.world;
-        push({stem:'music',asset:productionAsset,first:start,end:stop,gain:music.gain});
+        push({stem:'music',asset:productionAsset,first:mixStart,end:stop,gain:music.gain});
       }
     }
-    const active=voices.filter(row => row.first < end && (!selection ||
+    const active=voices.filter(row => row.first < end && (postSelected || !selection ||
       (selection.kind==='stem' ? selection.name==='mix' || row.stem===selection.name :
         row.stem==='spatial' && row[selection.by]===selection.name)));
-    const result=mix(active,resolve,{start,end,sampleRate,gain,capture:selection!==undefined});
+    const result=postSelected ? post.render(active,resolve,{start,end,gain},selection) :
+      mix(active,resolve,{start,end,sampleRate,gain,capture:selection!==undefined});
     if (selection?.kind==='world' && !result.report.stems.spatial.voices)
       throw new RangeError('No audible world source in the selected capture range');
     if (worldReport) result.report.worldScore=worldReport;
@@ -257,7 +264,7 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
     render: (sequence, options) => render(sequence, options),
     capture(sequence, {source, ...options} = {}) {
       if (!fields(source,['kind','name','by']) || !token(source.name) ||
-          !(source.kind==='stem' ? ['mix','timeline','spatial','music','tracks'].includes(source.name) &&
+          !(source.kind==='stem' ? ['mix','music',...legacy,...(post ? buses : [])].includes(source.name) &&
               source.by===undefined : source.kind==='world' && ['emitter','cue'].includes(source.by)))
         throw new TypeError('Select a soundtrack stem, named world emitter, or world cue');
       return render(sequence,options,source);
@@ -271,7 +278,7 @@ function readSceneAudio(file, { kit = require('../index.js').load(), ...graphOpt
   const assetsByName = assets === undefined && (definition.proceduralScore!==undefined || definition.music?.production) ? {} : assets;
   if (!record(assetsByName) || Object.keys(assetsByName).length > 1024 || !Object.keys(assetsByName).every(token))
     throw new TypeError('Soundtrack needs named audio assets');
-  const assetCache = new Map(), graphs = new Map(), prints=new Map();
+  const assetCache = new Map(), graphs = new Map(), prints=new Map(), editorials=new Map();
   const T=kit.KIT.procedural.takeTime;
   let soundWorld, totalSamples = 0;
   if (world !== undefined) {
@@ -317,6 +324,16 @@ function readSceneAudio(file, { kit = require('../index.js').load(), ...graphOpt
     let audio;
     if (typeof spec === 'string') audio = WAV.read(path.resolve(folder, spec));
     else if (record(spec) && Object.hasOwn(spec,'print')) audio=printAsset(spec).load(spec.take).value;
+    else if (fields(spec,['editorial','track']) && token(spec.editorial) && (spec.track===undefined || token(spec.track))) {
+      const file=path.resolve(folder,spec.editorial), P=kit.KIT.procedural;
+      if (!editorials.has(file)) {
+        const project=readEditorialProject(file,P);
+        editorials.set(file,P.mediaGraph.audioEditorial.render(project.session,project.assets,{stems:true}));
+      }
+      const result=editorials.get(file);
+      audio=spec.track===undefined ? result.value : Object.hasOwn(result.stems,spec.track) ? result.stems[spec.track] : undefined;
+      if (!audio) throw new RangeError('Unknown editorial soundtrack track '+spec.track);
+    }
     else if (fields(spec, ['graph','output','time','seed','inputs']) && token(spec.graph) && token(spec.output)) {
       const file = path.resolve(folder, spec.graph);
       if (!graphs.has(file)) graphs.set(file, readGraphProject(file, { kit, ...graphOptions }));
