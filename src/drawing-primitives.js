@@ -113,6 +113,45 @@ const DrawingPrimitives = (() => {
         keys(raw, [...baseKeys, ...headKeys, 'from', 'to'], 'arrow command');
         return { ...draw, from: vector(raw.from, n, 'Arrow start'), to: vector(raw.to, n, 'Arrow tip'), head: head(raw, space) };
       }
+      case 'registrationGrid': {
+        keys(raw, [...baseKeys, 'origin', 'u', 'v', 'step', 'guides', 'crosses', 'omit', 'markColor', 'markWidth'],
+          'registration grid command');
+        const { origin, u = axes[0], v = axes[1], step: size = 1, guides = [], crosses = [], omit = [],
+          markColor, markWidth } = raw;
+        const U = unit(u,n,'Registration U axis'), V = unit(v,n,'Registration V axis');
+        check(Math.abs(U.reduce((sum,x,i) => sum+x*V[i],0)) <= 1e-6, 'Registration axes must be perpendicular');
+        const spacing = Array.isArray(size) ? vector(size,2,'Registration step') : [size,size];
+        spacing.forEach(value => positive(value,'Registration step'));
+        check(Array.isArray(guides) && guides.length <= 128 && Array.isArray(crosses) && crosses.length <= 128 &&
+          guides.length+crosses.length > 0 && Array.isArray(omit) && omit.length <= 32,
+          'Registration allows 128 guides, 128 crosses and 32 cutouts');
+        const cell = value => bounded(value,-4096,4096);
+        let segments = crosses.length*2;
+        const lines = Array.from(guides, guide => {
+          keys(guide,['axis','index','span','dash'],'registration guide');
+          const {axis, index, span, dash} = guide;
+          check((axis === 'u' || axis === 'v') && cell(index) &&
+            tuple(span,2) && span.every(cell) && span[1] > span[0],
+            'A guide needs a u or v axis, perpendicular index, and increasing span in cells');
+          check(dash === undefined || tuple(dash,2) && dash.every(value => bounded(value,1e-5,8192)),
+            'Guide dash on and off lengths must be positive');
+          segments += (dash ? Math.ceil((span[1]-span[0])/(dash[0]+dash[1])) : 1)+omit.length;
+          check(segments <= 4096,'Registration grid exceeds its segment budget');
+          return { axis, index, span: span.slice(), dash: dash?.slice() };
+        });
+        return { ...draw, origin: vector(origin,n,'Registration origin'), u: U, v: V, spacing, lines,
+          crosses: Array.from(crosses, mark => {
+            keys(mark,['at','size'],'registration cross');
+            check(tuple(mark.at,2) && mark.at.every(cell),'A registration cross needs cell coordinates');
+            return { at: mark.at.slice(), size: positive(mark.size,'Registration cross size') };
+          }),
+          omit: Array.from(omit, rect => {
+            check(tuple(rect,4) && rect.every(cell) && rect[2] > 0 && rect[3] > 0,
+              'A registration cutout needs cell coordinates and positive size');
+            return rect.slice();
+          }),
+          mark: { ...style, color: color(markColor ?? tint), width: positive(markWidth ?? style.width,'Registration mark width') } };
+      }
       case 'polygon': {
         keys(raw, [...baseKeys, 'points', 'rings', 'fill', 'stroke', 'fillFalloff', 'strokeFalloff'], 'polygon command');
         const { points: outline, rings, fill, stroke } = raw;
@@ -364,6 +403,46 @@ const DrawingPrimitives = (() => {
           out.labels.push({ text: draw.label, at: step(xy(center),side,gap), size: draw.labelSize });
         }
       }
+    }
+    if (draw.type === 'registrationGrid') {
+      const at = (u,v) => step(step(draw.origin,draw.u,u*draw.spacing[0]),draw.v,v*draw.spacing[1]);
+      for (const {axis,index,span,dash} of draw.lines) {
+        const parallelU = axis === 'u';
+        const point = x => view(parallelU ? at(x,index) : at(index,x));
+        let spans = [span];
+        for (const [x,y,w,h] of draw.omit) {
+          const across = parallelU ? y : x, thickness = parallelU ? h : w;
+          if (index <= across || index >= across+thickness) continue;
+          const start = parallelU ? x : y, end = start+(parallelU ? w : h);
+          spans = spans.flatMap(([lo,hi]) => {
+            if (end <= lo || start >= hi) return [[lo,hi]];
+            const parts = [];
+            if (lo < start) parts.push([lo,start]);
+            if (hi > end) parts.push([end,hi]);
+            return parts;
+          });
+        }
+        for (const [lo,hi] of spans) {
+          if (!dash) {
+            stroke(out,point(lo),point(hi));
+            continue;
+          }
+          const [length,gap] = dash, period = length+gap;
+          const count = Math.ceil((hi-span[0])/period);
+          for (let i = Math.floor((lo-span[0])/period); i < count; i++) {
+            const start = span[0]+i*period;
+            const from = Math.max(lo,start), to = Math.min(hi,start+length);
+            if (to > from) stroke(out,point(from),point(to));
+          }
+        }
+      }
+      const marks = batch(draw.mark.color);
+      for (const {at: coord,size} of draw.crosses) {
+        const center = at(...coord);
+        for (const direction of [draw.u,draw.v])
+          stroke(marks,view(step(center,direction,-size*.5)),view(step(center,direction,size*.5)),draw.mark);
+      }
+      return [out,marks];
     }
     if (draw.type === 'rayFan') {
       for (let i = 0; i < draw.count; i++) {
