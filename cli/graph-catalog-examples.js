@@ -13,6 +13,10 @@ const mesh = { points: [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], faces: [[0,
 const clip = { width: 4, height: 4, fps: 8, layers: { ink: { frames: [rgba.data, rgba.data] } } };
 const audio = { sampleRate: 8000, channels: 1, samples: Array.from({ length: 128 }, (_, i) => i % 4 === 1 ? .5 : i % 4 === 3 ? -.5 : 0) };
 const event = { time: 0, channel: 'held', value: true };
+const motif = { length: 2, events: [{beat:0,duration:.35,degree:1}, {beat:.75,duration:.25,degree:3}] };
+const arrangement = { score:{key:{root:'C4'},harmonies:{home:{root:'C4',quality:'unison'}}},
+  motifs:{melody:motif},parts:{lead:{role:'lead',material:'melody'}},
+  sections:[{id:'opening',bars:1,harmony:'home'}] };
 const transientAudio = { sampleRate: 8000, channels: 1,
   samples: Array.from({ length: 80 }, (_, i) => i === 32 ? .9 : 0) };
 const diorama = { id: 'node-catalog', seed: 1, style: 'slate', solids: [
@@ -143,6 +147,7 @@ const specifications = {
     bones: [bone] } } }, inputs: { bind: link('binding') } },
   'anim.keyframes': { inputs: { channels: { x: 'number' }, keys: [{ time: 0, value: { x: 2 } }] } },
   'anim.spriteDesync': { inputs: { source: clip } },
+  'anim.datamosh': { inputs: { source: rgba, motion, options: { halfLife: 1 } } },
   'anim.frameBank': { inputs: { source: rgba, options: { tiles: { size: [2, 2], every: 4 } } } },
   'sim.define': { inputs: { kind: 'particles' } },
   'sim.run': { nodes: { recipe: { op: 'sim.define', inputs: { kind: 'particles' } } }, inputs: { recipe: link('recipe') } },
@@ -163,6 +168,13 @@ const specifications = {
     changes: [{harmony:'home',time:0}]
   }, options:{sampleRate:8000} } },
   'music.fifths': { inputs: { from:'C',to:'A' } },
+  'music.motif': { inputs:{source:motif,operations:[{type:'answer'}]} },
+  'music.makeMotif': { inputs:{options:{length:2,count:3,seed:42}} },
+  'music.arrange': { inputs:{source:arrangement} },
+  'music.revise': { inputs:{source:arrangement,options:{edits:[{part:'lead',operations:[{type:'answer'}]}]}} },
+  'music.reference': { inputs:{source:arrangement,part:'lead',section:'opening'} },
+  'music.audition': { inputs:{source:arrangement,variants:[{id:'original'},{id:'answer',
+    edits:[{part:'lead',operations:[{type:'answer'}]}]}],options:{audio:false,end:1}} },
   'music.scale': { inputs: {root:'C4',options:{mode:'dorian'}} },
   'music.scaleChord': { inputs: {root:'C4',degree:5,options:{mode:'major',size:4}} },
   'music.scaleMap': { inputs: {value:.61,options:{mode:'majorPentatonic'}} },
