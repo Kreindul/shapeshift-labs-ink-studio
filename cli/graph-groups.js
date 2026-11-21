@@ -171,4 +171,4 @@ function findGraphGroupUsers(groupFile, { root = process.cwd() } = {}) {
 }
 
 module.exports = { groupEntries, groupReference, groupDocument, requireGroupReference, loadGraphGroups,
-  groupFor, groupDependencies, findGraphGroupUsers };
+  groupFor, groupUsage, groupDependencies, findGraphGroupUsers };

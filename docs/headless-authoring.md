@@ -354,6 +354,40 @@ See [connecting procedural rasters](render-graph.md#connect-procedural-rasters)
 for binding graph outputs to the renderer and reading image, mask, and native
 scene passes back into procedural nodes.
 
+### Reuse artifacts across CLI processes
+
+```sh
+ink-studio graph run project.json --cache .ink-cache --out review-a
+ink-studio graph run project.json --cache .ink-cache --out review-b
+```
+
+Pass the same `--cache` directory to reuse a completed `run`, `inspect`,
+`batch`, or `clip` invocation. Each entry holds its report and encoded
+artifacts. A hit publishes those artifacts into the requested output
+directory and preserves assertion results and exit status. A cached clip
+replays the whole sequence, including its warm-up and cuts.
+
+The SHA-256 request key covers the graph and group definitions, source
+asset hashes, input overrides, seed, time, command settings, and operation
+implementations. Built-in operations and encoders use the loaded toolkit
+and runner build fingerprints. Custom operations opt in with a
+`cacheVersion` string or positive integer on their registration. Use it
+for deterministic operations whose inputs account for everything they read,
+and bump it when their implementation or dependencies change. Projects
+using unversioned custom operations, hosted codecs, or a custom toolkit
+build execute normally and report a cache bypass.
+
+The directory owns an `ink-graph-artifacts-v1` subdirectory, with a default
+budget of 256 MiB and 128 entries. Override the limits with
+`--cache-bytes N` and `--cache-entries N`. The cache evicts least recently
+used entries, publishes complete entries atomically, and verifies checksums
+before replay. Results larger than the configured byte budget or the
+256 MiB per-entry limit are still exported normally.
+
+The report adds `artifactCache.status` (`hit`, `miss`, or `bypass`).
+On a hit, the `cache` counters describe the original graph evaluation.
+Persistent sessions continue to serve their own in-process evaluator cache.
+
 ### Persistent sessions
 
 Send one JSON request per line. The response echoes the optional request

@@ -7,8 +7,9 @@ const WAV = require('./wav.js');
 const { createGraphHost } = require('./graph-host.js');
 const { clip } = require('./graph-clip.js');
 const { resolveCheckpoint } = require('./checkpoint-file.js');
-const { loadGraphGroups, groupFor, groupDependencies } = require('./graph-groups.js');
+const { loadGraphGroups, groupFor, groupUsage, groupDependencies } = require('./graph-groups.js');
 const { snapshotFormat } = require('./graph-diff.js');
+const { fingerprint } = require('./graph-artifact-cache.js');
 
 const format = 'ink-studio/graph-project';
 const reportFormat = 'ink-studio/graph-report';
@@ -381,6 +382,26 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     groups:Object.fromEntries([...preparedGroups].map(([name,{plan}])=>[name,plan])),
     groupDependencies:dependencyRows,hostOperations:Object.keys(operations).sort()};
 
+  function artifactIdentity() {
+    if ([...assets.values()].some(asset=>asset.format==='codec') || exports.some(entry=>entry.format==='codec'))
+      return {reason:'host-codec'};
+    const used=groupUsage(groupTree.scope,spec.nodes);
+    const names=new Set();
+    for (const body of [spec,...[...used].map(group=>groupSpecs.get(group))])
+      for (const {op} of Object.values(body.nodes)) if (Object.hasOwn(operations,op)) names.add(op);
+    const versions=[...names].sort().map(name=>[name,operations[name].cacheVersion]);
+    const unversioned=versions.filter(([,id])=>!(typeof id==='string' && id.trim()) &&
+      !(Number.isSafeInteger(id) && id>0)).map(([name])=>name);
+    if (unversioned.length) return {reason:'unversioned-operation',operations:unversioned};
+    const registered=versions.map(([name,id])=>[name,id,...['run','instantiate','specialize'].map(method=>{
+      const implementation=operations[name][method];
+      return typeof implementation==='function' ? Function.prototype.toString.call(implementation) : null;
+    })]);
+    // Include declaration order and exact numbers alongside the existing project hash.
+    return {fingerprint:fingerprint([projectHash,project,[...groupSpecs].map(([group,body])=>[group.alias,body]),
+      dependencyRows,registered])};
+  }
+
   function snapshot(options={}) {
     const {inputs={},time:at=time,seed:sampleSeed=seed}=fields(options,['inputs','time','seed'],'graph snapshot options');
     clock(at,sampleSeed);
@@ -522,6 +543,7 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
       return {...header,kind:'validate',valid:true,nodes:rootPlan.expandedNodes,groups:preparedGroups.size};
     },
     dependencies:()=>({...header,kind:'dependencies',groups:data.clone(dependencyRows)}),
+    artifactIdentity,
     snapshot,
     run:options=>run(request(options)),
     clip(options) {

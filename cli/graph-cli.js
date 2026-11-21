@@ -6,15 +6,17 @@ const files = require('./asset-files.js');
 const { readGraphProject } = require('./graph-project.js');
 const { findGraphGroupUsers } = require('./graph-groups.js');
 const { snapshotFormat, diffGraphs } = require('./graph-diff.js');
+const { openGraphArtifactCache } = require('./graph-artifact-cache.js');
 const host = require('./graph-host-command.js');
 const catalog = require('./graph-catalog.js');
 
+const cacheFlags=['cache','cache-bytes','cache-entries'];
 const flags = {
   validate:['inputs','json'], plan:['inputs','json'], dependencies:['json'], snapshot:['inputs','at','seed','json'],
-  inspect:['inputs','at','seed','out','output','node','port','json'],
-  run:['inputs','at','seed','out','json'], batch:['inputs','at','seed','out','json'],
+  inspect:['inputs','at','seed','out','output','node','port','json',...cacheFlags],
+  run:['inputs','at','seed','out','json',...cacheFlags], batch:['inputs','at','seed','out','json',...cacheFlags],
   session:['protocol','out'],
-  clip:['inputs','seed','out','output','from','to','fps','warmup','cuts','clock','format','render-options','json']
+  clip:['inputs','seed','out','output','from','to','fps','warmup','cuts','clock','format','render-options','json',...cacheFlags]
 };
 
 async function sendText(text) {
@@ -154,6 +156,8 @@ module.exports = async function graphCommand(pos,opt,settings) {
       Object.entries(opt).some(([key,value])=>key!=='adapters' && !flags[mode].includes(key) || (key==='json' ? value!==true : typeof value!=='string' || !value.trim())) ||
       opt.port!==undefined && opt.node===undefined || opt.protocol!==undefined && opt.protocol!=='ndjson')
     throw new TypeError('Use graph validate|plan|dependencies|snapshot|inspect|run|batch|session|clip <project.json> [cases-or-sweep.json]. See ink-studio help');
+  if (opt.cache===undefined && cacheFlags.slice(1).some(flag=>opt[flag]!==undefined))
+    throw new TypeError('Graph cache limits need --cache directory');
   settings=await host.adapters(opt.adapters,settings);
   const project=readGraphProject(file,settings), sources=project.sourceFiles();
   if (settings.adapterFile) sources.push(settings.adapterFile);
@@ -171,13 +175,23 @@ module.exports = async function graphCommand(pos,opt,settings) {
   if (mode==='dependencies') return send(project.dependencies(),opt.json);
   if (mode==='snapshot') return send(project.snapshot(run),opt.json);
   if (mode==='session') return session(project,output,sources);
-  if (mode==='clip') result=project.clip({...run,...clipOptions(opt,sources,project.takeClock)});
-  else if (mode==='inspect') result=project.inspect({output:opt.output,node:opt.node,port:opt.port},run);
-  else if (mode==='batch') {
+  const cache=opt.cache===undefined ? undefined : openGraphArtifactCache(opt.cache,{
+    kit:settings.kit, maxBytes:opt['cache-bytes']===undefined ? undefined : Number(opt['cache-bytes']),
+    maxEntries:opt['cache-entries']===undefined ? undefined : Number(opt['cache-entries'])
+  });
+  const execute=(settings,work)=>cache ? cache(mode,project.artifactIdentity(),settings,work) : work();
+  if (mode==='clip') {
+    const options={...run,...clipOptions(opt,sources,project.takeClock)};
+    result=execute(options,()=>project.clip(options));
+  } else if (mode==='inspect') {
+    const target={output:opt.output,node:opt.node,port:opt.port ?? 'value'};
+    result=execute([target,run],()=>project.inspect(target,run));
+  } else if (mode==='batch') {
     const cases=path.resolve(caseFile);
     sources.push(cases);
-    result=project.batch(JSON.parse(fs.readFileSync(cases,'utf8')),run);
-  } else result=project.run(run);
+    const definition=JSON.parse(fs.readFileSync(cases,'utf8'));
+    result=execute([definition,run],()=>project.batch(definition,run));
+  } else result=execute(run,()=>project.run(run));
   if (output) save(output,result,sources);
   await send(result.report,opt.json);
   if (result.report.passed===false) process.exitCode=2;
