@@ -130,10 +130,10 @@ module.exports = ({ KIT: K, SpriteSurface, makeBuilder, makeSculpt }) => ({
       radius: 11, detail: 25, dither: 0, spriteSurfaces: surfaces,
       look: { splatCoverage: 'continuous' }
     });
-    // Snapshot the unlit geometry before allocating the presentation splats.
+    // Snapshot the source geometry before allocating the presentation splats.
     const geometry = B.finish(finish());
     const scanner = K.pixelScanner.create({
-      capacity: 6200, spacing: .109, range: [.40, 10], width: .022, density: 1.9, surfaceBias: .027,
+      capacity: 8192, spacing: .109, range: [.40, 10], width: .022, density: 1.9, surfaceBias: .027,
       freshFor: .24, settleAfter: 1.1,
       fresh: ['#ffeab1', '#b1fff0', '#dfd1ff'],
       settled: ['#f7ae74', '#72e9cf', '#ae9deb'],
