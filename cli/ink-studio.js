@@ -730,6 +730,7 @@ const view = extra =>
       splatOrder: opt['splat-order'],
       splatCoverage: opt['splat-coverage'],
       splatFootprints: onOffOption('splat-footprints'),
+      brushwork: onOffOption('brushwork'),
       renderGrid: opt['render-grid'] === 'off' ? false : opt['render-grid'] === undefined ? undefined :
         { mode: opt['render-grid'], size: num('grid-size', 8), angle: num('grid-angle', 0),
           aspect: num('grid-aspect', 1), gap: num('grid-gap', 0), origin: list('grid-origin', [0, 0]) },
@@ -1078,6 +1079,7 @@ const CMD = {
         'color clusters: --color-clusters file.json|off for material-specific cluster size, grain and protection',
         'pass quality: --pass-quality file.json|off for background, particles and secondary reflections',
         'shot lighting: --shot-lighting on|off|file.json   scope key, fill, rim and negative fill',
+        'brushwork: --brushwork on|off   compare surface-aligned paint at export size',
         'detail-preserving relighting: --relighting on|off|file.json --sky-time seconds',
         'bounce options: --sky-bounce color|preset|off --ground-bounce color|preset|off --sky-bounce-intensity n --ground-bounce-intensity n',
         'cloud options: --cloud-field cirrus|coastal-stratus|cumulus|storm-front|file.json|off --cloud-representation auto|card|impostor|volume|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',

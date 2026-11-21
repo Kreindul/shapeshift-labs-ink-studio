@@ -2,6 +2,8 @@
 
 Render native SDF/splat objects with parallel hatching, cross engraving, white-cut woodcut or stippled shading. Ink density responds to lighting or lit color. Retained surface coordinates keep the marks attached through camera motion, bone animation, CPU deformation, fragment reconstruction, copies and instances.
 
+The same charts support [surface brushwork](surface-brushwork.md) with curvature-directed paint and broad pigment groups for distant views.
+
 The [Copperplate Cabinet](../examples/engraving.html) contains an animated moth and an etched observatory, with free orbit/pan/zoom, live lighting, four techniques, density/spacing and ink/paper controls, and native-material comparison. Build `dist/ink-studio.browser.js` with `require('.').bundle()` and serve the repository over HTTP.
 
 This implementation adapts the nested-tone and related-scale ideas in Praun et al., [Real-Time Hatching](https://hhoppe.com/proj/hatching/) (SIGGRAPH 2001). It uses retained splat charts and procedural projection rather than the paper's mesh-based lapped parameterization.

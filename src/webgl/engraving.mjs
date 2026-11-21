@@ -42,7 +42,8 @@ export function createEngravingBinding(api) {
         }
       }
       if (styles !== b.styles || count !== world.count) {
-        fields = [...new Set(b.styles.map(s => (s.screenPrint ? api.print.pack(s.screenPrint) : api.maps(s).data)))];
+        const styleFields = b.styles.map(s => s.brushwork ? null : s.screenPrint ? api.print.pack(s.screenPrint) : api.maps(s).data);
+        fields = [...new Set(styleFields.filter(Boolean))];
         params = new Float32Array(16 * 9 * 4);
         let row =
           Math.ceil((world.count * 16) / 8192) + Math.ceil(metadata.length / 8192) + Math.ceil(params.length / 8192);
@@ -52,13 +53,13 @@ export function createEngravingBinding(api) {
           row += Math.ceil(field.length / 8192);
         }
         b.styles.forEach((s, i) => {
-          const field = s.screenPrint ? api.print.pack(s.screenPrint) : api.maps(s).data,
-            means = s.screenPrint ? emptyMeans : api.maps(s).levels[2].means;
+          const brush = s.brushwork, field = styleFields[i],
+            means = brush || s.screenPrint ? emptyMeans : api.maps(s).levels[2].means;
           params.set(
             [
-              fieldRows.get(field) * (s.screenPrint ? -1 : 1),
-              s.screenPrint ? +(s.screenPrint.space === 'screen') : s.resolution,
-              ['plane', 'cylinder', 'sphere', 'triplanar'].indexOf(s.projection),
+              brush ? 0 : fieldRows.get(field) * (s.screenPrint ? -1 : 1),
+              brush ? s.seed & 0xffffff : s.screenPrint ? +(s.screenPrint.space === 'screen') : s.resolution,
+              brush ? s.seed >>> 24 : ['plane', 'cylinder', 'sphere', 'triplanar'].indexOf(s.projection),
               ['normal', 'luminance', 'hybrid'].indexOf(s.tone),
               s.scale,
               s.density,
@@ -71,9 +72,9 @@ export function createEngravingBinding(api) {
               ...s.origin,
               s.radius,
               ...s.along,
-              s.lodBias,
-              ...s.across,
-              0,
+              brush ? brush.groupScale : s.lodBias,
+              ...(brush ? [brush.width, ...brush.detailPixels] : s.across),
+              brush?.groupContrast ?? 0,
               ...means
             ],
             i * 36

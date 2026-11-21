@@ -1,6 +1,6 @@
 /* Nested tonal art maps over retained native-splat coordinates. No frame-time raster generation. */
 const Engraving = (() => {
-  let F, Print;
+  let F, Print, Paint;
   try {
     Print = ScreenPrint;
   } catch {
@@ -10,6 +10,11 @@ const Engraving = (() => {
     F = SplatFootprints;
   } catch {
     F = require('./splat-footprints.js');
+  }
+  try {
+    Paint = Brushwork;
+  } catch {
+    Paint = require('./brushwork.js');
   }
   const styles = Object.freeze(['hatching', 'engraving', 'woodcut', 'stippling']),
     maxStyles = 16,
@@ -71,7 +76,8 @@ const Engraving = (() => {
       'seed',
       'resolution',
       'lodBias',
-      'screenPrint'
+      'screenPrint',
+      'brushwork'
     ];
     if (!value || Object.getPrototypeOf(value) !== Object.prototype || Object.keys(value).some(k => !keys.includes(k)))
       throw new TypeError('Engraving: invalid settings');
@@ -119,6 +125,9 @@ const Engraving = (() => {
     const u = unit(xyz(along, 'along')),
       a = xyz(across, 'across'),
       v = unit(a.map((n, i) => n - dot(a, u) * u[i]));
+    const brushwork = Paint.prepare(value.brushwork);
+    if (brushwork && value.screenPrint !== undefined && value.screenPrint !== false)
+      throw new TypeError('Engraving: choose brushwork or screenPrint for a chart');
     const p = Object.freeze({
       style,
       projection,
@@ -140,6 +149,7 @@ const Engraving = (() => {
       seed,
       resolution,
       lodBias,
+      ...(brushwork && { brushwork }),
       ...(value.screenPrint !== undefined &&
         value.screenPrint !== false && { screenPrint: Print.prepare(value.screenPrint) })
     });
@@ -318,7 +328,8 @@ const Engraving = (() => {
     point,
     normal,
     rgb,
-    { light = [-0.45, 0.8, 0.55], visibility = 1, footprint = 0, restNormal = normal, screen } = {}
+    { light = [-0.45, 0.8, 0.55], visibility = 1, footprint = 0, artScale = 1,
+      restNormal = normal, restTangent, screen } = {}
   ) {
     const p = prepare(definition);
     if (!p) return rgb;
@@ -327,6 +338,11 @@ const Engraving = (() => {
       lit = 1 - clamp(p.ambient + (1 - p.ambient) * Math.max(0, dot(n, sun)) * clamp(visibility));
     const lum = 1 - clamp(rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722),
       tone = p.tone === 'normal' ? lit : p.tone === 'luminance' ? lum : lit * 0.65 + lum * 0.35;
+    if (p.brushwork) {
+      const darkness = clamp(clamp((tone - .5) * p.contrast + .5 + p.bias) * p.density);
+      const ink = Paint.coverage(p, point, restNormal, restTangent, darkness, footprint * artScale);
+      return rgb.map((n, i) => n * (1 - p.strength) + (p.paper[i] * (1 - ink) + p.ink[i] * ink) * p.strength);
+    }
     const uv = coordinates(p, point);
     if (p.screenPrint) {
       if (p.screenPrint.strength === 0) return rgb;
@@ -425,11 +441,12 @@ const Engraving = (() => {
       anchors.set(old.anchors);
       restFrames.set(old.restFrames);
     }
-    if (world.splatFootprints?.frames) frames.set(world.splatFootprints.frames);
+    const authoredFrames = world.splatFootprints?.frames;
+    if (authoredFrames) frames.set(authoredFrames);
     const normals = world.renderMetadata?.normals,
       keys = new Map(settings.map((p, i) => [JSON.stringify(p), i + 1]));
     let id = 0;
-    for (const [selection, definition] of assignments) {
+    for (const [selection, definition, flowFrame] of assignments) {
       const p = prepare(definition),
         rows = selection === 'all' ? Array.from({ length: world.count }, (_, i) => i) : Array.from(selection);
       if (rows.some(i => !Number.isInteger(i) || i < 0 || i >= world.count))
@@ -449,7 +466,13 @@ const Engraving = (() => {
         const q = i * 16,
           flags = Math.round(world.data[q + 11]);
         if (world.data[q + 3] <= 0 || flags & (32 | 256 | 32768)) continue;
+        if (p.brushwork && (world.data[q + 3] < 1 || flags & (15 | 16 | 64 | 128 | 2048))) {
+          indices[i] = 0;
+          continue;
+        }
         let f = frames.subarray(i * 6, i * 6 + 6);
+        const useFlow = p.brushwork && flowFrame && !authoredFrames?.subarray(i * 6, i * 6 + 6).some(Boolean);
+        if (useFlow) f.set(flowFrame);
         if (!f.some(Boolean)) {
           const n = normals && Array.from(normals.subarray(i * 3, i * 3 + 3));
           if (!n || Math.hypot(...n) < 1e-8) continue;
@@ -457,10 +480,9 @@ const Engraving = (() => {
             axis = Math.abs(normal[0]) < 0.8 ? [1, 0, 0] : [0, 1, 0],
             u = unit(cross(axis, normal)),
             v = cross(normal, u);
-          frames.set([...u, ...v], i * 6);
-          f = frames.subarray(i * 6, i * 6 + 6);
+          f.set(p.brushwork ? Paint.frame(p.brushwork, [0, 0, 0], normal) : [...u, ...v]);
         }
-        if (!indices[i]) {
+        if (!indices[i] || useFlow) {
           anchors.set(world.data.subarray(q, q + 3), i * 3);
           restFrames.set(f, i * 6);
         }

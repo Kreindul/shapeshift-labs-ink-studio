@@ -600,6 +600,11 @@
       bad('finish.look.stableDetail', error.message);
     }
     try {
+      Engraving.prepare(look?.engraving);
+    } catch (error) {
+      bad('finish.look.engraving', error.message);
+    }
+    try {
       EdgeFilter.prepare(look?.edgeFilter);
     } catch (error) {
       bad('finish.look.edgeFilter', error.message);
@@ -758,7 +763,9 @@
       if (m === undefined) return;
       const role = typeof m === 'string' ? m : m && m.role;
       if (m && typeof m === 'object') {
-        keys(m, path, { role: 1, ramp: 1, noise: 1, scale: 1, glow: 1, over: 1, surface: 1, model: 1, lookAsset: 1, albedo: 1, materialId: 1, surfaceId: 1, pixelStyle: 1, glass: 1, optical: 1, controls: 1 });
+        keys(m, path, { role: 1, ramp: 1, noise: 1, scale: 1, glow: 1, over: 1, surface: 1, model: 1, lookAsset: 1, albedo: 1, materialId: 1, surfaceId: 1, pixelStyle: 1, glass: 1, optical: 1, controls: 1, engraving: 1 });
+        try { Engraving.prepare(m.engraving); }
+        catch (error) { bad(path + '.engraving', error.message); }
         if (m.controls !== undefined) {
           try { MaterialControls.describe(m.controls); }
           catch (error) { bad(path + '.controls', error.message); }
@@ -1431,6 +1438,7 @@
       }
       if (st0.finish.res) S.res = st0.finish.res;
       if(st0.finish.stipple!==undefined)S.stipple=st0.finish.stipple;
+      if (Engraving.prepare(st0.finish.look?.engraving)?.brushwork) S.engraving = st0.finish.look.engraving;
       if (st0.finish.adaptiveSampling !== undefined) S.adaptiveSampling = st0.finish.adaptiveSampling;
       grp = {};
       for (const [g, v] of Object.entries(spec.groups || {})) grp[g] = S.grp(v.blend);
@@ -1454,6 +1462,7 @@
           if (m.glass !== undefined) out.glass = m.glass;
           if (m.optical !== undefined) out.optical = m.controls === undefined ? OpticalMaterials.material(m.optical) : m.optical;
           if (m.pixelStyle !== undefined) out.pixelStyle = m.pixelStyle;
+          if (m.engraving !== undefined) out.engraving = m.engraving;
           if (m.over) {
             const r2 = ramp(m.over.role),
               above = m.over.above === undefined ? 0.55 : m.over.above,

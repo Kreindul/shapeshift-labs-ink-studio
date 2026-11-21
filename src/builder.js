@@ -143,10 +143,11 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     cidx = [],
     nrms = [];
   let footprintRecorder, engravingRanges;
-  function describeEngraving(first,end,spec) {
+  function describeEngraving(first,end,spec,frame) {
     if(first>=end||spec===undefined)return;
     const prepared=Engraving.prepare(spec);engravingRanges??=[];const last=engravingRanges.at(-1);
-    if(last&&last[1]===first&&last[2]===prepared)last[1]=end;else engravingRanges.push([first,end,prepared]);
+    if (!frame && last && !last[3] && last[1] === first && last[2] === prepared) last[1] = end;
+    else engravingRanges.push([first, end, prepared, frame]);
   }
   let ownerRows, materialRows, targetRows, muteEmission, materialAlbedo, materialPixelStyles, opticalSplats;
   let unnamedOwners = new WeakMap(), unnamedMaterials = new WeakMap();
@@ -1122,7 +1123,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     if(engravingRanges||world.look?.screenPrint!==undefined&&world.look.screenPrint!==false||world.look?.engraving!==undefined&&world.look.engraving!==false){
       const assignments=[];if(world.look?.engraving!==undefined&&world.look.engraving!==false)assignments.push(['all',world.look.engraving]);
       if(world.look?.screenPrint!==undefined&&world.look.screenPrint!==false)assignments.push(['all',KIT.screenPrint.chart(world.look.screenPrint)]);
-      if(engravingRanges)for(const [first,end,spec]of engravingRanges)assignments.push([Array.from({length:end-first},(_,i)=>first+i),spec??false]);
+      if(engravingRanges)for(const [first,end,spec,frame]of engravingRanges)assignments.push([Array.from({length:end-first},(_,i)=>first+i),spec??false,frame]);
       Engraving.bindMany(world,assignments);
     }
     if (detailBudgets !== undefined)

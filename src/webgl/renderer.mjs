@@ -1053,6 +1053,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         u_paintMarker: paint?.marker ?? 0, u_afterimageStart: trailStart,
         ...footprintUniforms,...engravingUniforms,
         u_screenPrintOn:frame.screenPrint!==false,
+        u_brushworkOn:frame.brushwork!==false,
         ...(opticalMaterials && { u_optical: opticalUnit }),
         ...(relighting && { u_relight: relightUnit }),
         u_fog: rgb(world.pal[fog.c ?? 0] ?? 0),

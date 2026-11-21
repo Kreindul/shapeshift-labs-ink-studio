@@ -2,6 +2,8 @@
 
 Paint SDF surfaces with marks that follow their form, contours, or an authored direction field. Each mark retains two signed world-space axes. The WebGL and software renderers project those axes to sample its paint mask, so irregular edges and bristle gaps stay attached as the camera moves. Geometry remains native SDFs and splats; brushes are optional per material or across a sculpt.
 
+[Surface brushwork](surface-brushwork.md) uses the same curvature directions to apply retained paint over a solid surface and simplify it into broad pigment groups at distance.
+
 Run the [Pigment Coast and Painted Koi demos](../examples/surface-brush.html). They include free orbit/pan/zoom, four brush profiles, length/width adjustments, Gaussian comparison, and a 32-section GPU-skinned koi. Generate `dist/ink-studio.browser.js` with `require('.').bundle()` and serve the repository over HTTP.
 
 ## Sculpt authoring

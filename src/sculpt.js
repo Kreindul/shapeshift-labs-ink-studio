@@ -904,6 +904,17 @@ function makeSculpt(B, rest) {
     }
     return bevelSculpt;
   }
+  function withBrushNormals(run) {
+    const saved = [g3[0], g3[1], g3[2], gm, own, ownNeg];
+    try {
+      return run((x, y, z) => {
+        grad(x, y, z, field(x, y, z));
+        return [g3[0], g3[1], g3[2]];
+      });
+    } finally {
+      [g3[0], g3[1], g3[2], gm, own, ownNeg] = saved;
+    }
+  }
   const RR = [null, 0];
   function light(m, res, x, y, z, nx, ny, nz, full, selected, fine, coarse = false) {
     if (!coarse && S.clip && !S.clip(x, y, z)) return;
@@ -1379,20 +1390,9 @@ function makeSculpt(B, rest) {
     if (alternate) B.shadowNext(ci, alternate);
     const brushDefinition = m.brush === undefined ? (m0.brush ?? S.brush) : m.brush;
     if (brushDefinition !== undefined && brushDefinition !== false && !m.glass && Math.hypot(nx, ny, nz) > 1e-8) {
-      const brush = brushSettings(brushDefinition), saved = [g3[0], g3[1], g3[2], gm, own, ownNeg];
-      let frame;
-      try {
-        frame = SurfaceBrush.direction(brush, [x, y, z], [nx, ny, nz], {
-          spacing: res,
-          normalAt: (a, b, c) => {
-            const d = field(a, b, c);
-            grad(a, b, c, d);
-            return [g3[0], g3[1], g3[2]];
-          }
-        });
-      } finally {
-        [g3[0], g3[1], g3[2], gm, own, ownNeg] = saved;
-      }
+      const brush = brushSettings(brushDefinition);
+      const frame = withBrushNormals(normalAt =>
+        SurfaceBrush.direction(brush, [x, y, z], [nx, ny, nz], { spacing: res, normalAt }));
       SurfaceBrush.stamp(B, frame, P[ci], brush, { opacity: m.a === undefined || glint ? 3 : m.a, animation: fl });
       return;
     }
@@ -1820,7 +1820,20 @@ function makeSculpt(B, rest) {
     }
     if (effective.footprint !== undefined) B.describeFootprint?.(first,end,effective.footprint);
     if (collectFootprint) B.describeFootprint?.(first, end, effective.footprint ?? material.footprint);
-    if(collectEngraving)B.describeEngraving?.(first,end,effective.engraving??material.engraving??S.engraving);
+    if (collectEngraving && first < end && B.describeEngraving) {
+      const definition = effective.engraving ?? material.engraving ?? S.engraving;
+      const settings = Engraving.prepare(definition);
+      if (settings?.brushwork) {
+        const [spacing, x, y, z, nx, ny, nz] = sample;
+        if (effective.glass || effective.optical || Math.hypot(nx, ny, nz) < 1e-8)
+          B.describeEngraving(first, end, false);
+        else {
+          const frame = withBrushNormals(normalAt =>
+            Brushwork.frame(settings.brushwork, [x, y, z], [nx, ny, nz], { spacing, normalAt }));
+          B.describeEngraving(first, end, settings, frame);
+        }
+      } else B.describeEngraving(first, end, definition);
+    }
     if(collectPrint)B.describeScreenPrint?.(first,end,effective.screenPrint??material.screenPrint??S.screenPrint);
     if (effective.optical !== undefined) B.describeOptical?.(first, end, effective.optical);
     if (style) B.describePixelStyle?.(first, end, style, pair);
