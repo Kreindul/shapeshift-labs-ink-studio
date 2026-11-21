@@ -1,5 +1,5 @@
 /* Original burst cels. Each mark is an indexed run at an integer x and y. */
-const InkGlitterBursts = (() => {
+const GlitterBurstCels = (() => {
   const palette=['#583147','#983e4c','#cf584c','#f08355','#fac477','#ffe4a6','#fff8e0'];
   const width=25,height=25,durations=[.12,.10,.12,.14,.16,.20,.21,.45];
 
@@ -66,4 +66,4 @@ const InkGlitterBursts = (() => {
 
   return Object.freeze({burst});
 })();
-if(typeof module!=='undefined') module.exports=InkGlitterBursts;
+if(typeof module!=='undefined') module.exports=GlitterBurstCels;

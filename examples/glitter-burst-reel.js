@@ -1,5 +1,4 @@
 /* Three original burst families and a spell trail using the same native cels. */
-const { burst }=require('./glitter-burst-cels.js');
 const { rect,fill,line,pixel }=require('./pixel-stamp-studies.js');
 const W=244,H=128,U=.042,D=10;
 const at=(x,y,z)=>[(x-W/2)*U,(H-y)*U,z];
@@ -52,10 +51,11 @@ function fleck(palette) {
   ]};
 }
 
-module.exports=({makeBuilder})=>({
+module.exports=({KIT:K,makeBuilder})=>({
   id:'glitter-burst-reel',name:'Glitter Burst Reel',seed:19,
   build(seed) {
-    const fork=burst(),diamond=burst('diamond'),fan=burst('fan'),dust=fleck(fork.palette);
+    const fork=K.pixelStamps.clip('burst-fork'),diamond=K.pixelStamps.clip('burst-diamond'),fan=K.pixelStamps.clip('burst-fan');
+    const dust=fleck(fork.palette);
     const b=makeBuilder(seed,[...tones,...fork.palette].map(c=>parseInt(c.slice(1),16)));
     const cards=[{stamp:backdrop(),at:at(W/2,H/2,-2),unitsPerPixel:U}];
     const place=(stamp,x,y,phase)=>cards.push({stamp,at:at(x,y,0),phase,nativePixels:true});

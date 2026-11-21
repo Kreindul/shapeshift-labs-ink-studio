@@ -936,7 +936,12 @@ function renderFrame(world, o, preparedPalettes) {
   const surfaceGlint = surface ? new Uint8Array(W * H) : null;
   const focusPixel = SubjectFocus.raster(focus,W,H);
   const fallingCoverage = focus && focus.settings.detail < 1 ? new Float32Array(W*H) : null;
-  const layerPalettes = surface?.palettes ?? [];
+  const layerPalettes = [...(surface?.palettes ?? [])];
+  const spritePalettes = new Map();
+  if (!o.raw) for (const { swatches } of sprites) {
+    if (!swatches || spritePalettes.has(swatches)) continue;
+    spritePalettes.set(swatches,layerPalettes.push(swatches));
+  }
   const localConstraints = paletteRules
     ? Object.assign(Array(layerPalettes.length).fill(undefined), surface?.constraints).concat(paletteRules.palettes)
     : surface?.constraints;
@@ -1359,7 +1364,7 @@ function renderFrame(world, o, preparedPalettes) {
     const rule = i<0 ? protection : subject?.(i);
     const dn=normalizedDepth(z), fogMix=world.fog.max>0&&world.fog.start<1 ?
       targetFog(sstep(world.fog.start,1,dn)*world.fog.max*(exposure?.fog?.(...position)??1),rule) : 0;
-    let color=sprite.color, highlight=0, paletteId=0, reflected, claim, stageBase;
+    let color=sprite.color, highlight=0, paletteId=spritePalettes.get(sprite.swatches) ?? 0, reflected, claim, stageBase;
     if (i>=0) {
       const packed=d[i*16+7];
       color=live?.albedo(i) ?? [(packed&255)/255, (packed>>8&255)/255, (packed>>16)/255];

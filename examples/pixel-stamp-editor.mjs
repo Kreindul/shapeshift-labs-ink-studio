@@ -74,7 +74,7 @@ function selectSwatch(index) {
   document.querySelectorAll('.swatch').forEach((button,i) => button.setAttribute('aria-pressed',i === index));
   const color = state.doc.palette[index];
   $('color').value = color;
-  $('swatch-label').textContent = `Swatch ${index+1} · ${color}`;
+  $('swatch-label').textContent = `${state.doc.swatchRoles?.[index] ?? `Swatch ${index+1}`} · ${color}`;
   draw();
 }
 
@@ -208,16 +208,16 @@ $('color').addEventListener('change',()=>edit(()=>{ state.doc.palette[state.swat
 $('add-color').addEventListener('click',()=>edit(()=>{ state.swatch=state.doc.palette.push('#ffffff')-1; }));
 
 const ink=flowingInk();
-const presets={stone:stonePaint,glint,star:starTwinkle,bubble,burst:InkGlitterBursts.burst,body:()=>ink.body,eye:()=>ink.eye,
+const presets={stone:stonePaint,glint,star:starTwinkle,bubble,library:stamp.clip,body:()=>ink.body,eye:()=>ink.eye,
   blank:()=>({width:48,height:48,palette:['#273a47','#5c8277','#e6dbb6'],strokes:[]})};
 const sparkleSizes=['7x7','5x4','5x3','4x3','3x3'];
 const sizes={glint:sparkleSizes,star:sparkleSizes,bubble:['9x9','6x5','5x5']};
-const burstNames={fork:'Forked flare',diamond:'Hollow diamond',fan:'Ember fan'};
+const library=stamp.catalog().clips.map(({id,label})=>[id,label]);
 $('preset').addEventListener('change',()=>{
   const name=$('preset').value;
-  const options=name==='burst' ? Object.entries(burstNames) : (sizes[name] ?? []).map(size=>[size,size.replace('x',' × ')]);
+  const options=name==='library' ? library : (sizes[name] ?? []).map(size=>[size,size.replace('x',' × ')]);
   $('size-label').hidden=!options.length;
-  $('variant-label').textContent=name==='burst' ? 'Burst' : 'Size';
+  $('variant-label').textContent=name==='library' ? 'Clip' : 'Size';
   $('size').replaceChildren(...options.map(([value,label])=>new Option(label,value)));
   load(presets[name]($('size').value || undefined));
   notify('');

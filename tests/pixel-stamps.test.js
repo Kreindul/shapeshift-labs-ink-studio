@@ -112,3 +112,57 @@ test('diorama stamp frames render protected swatches, transparent holes and behi
   assert.notDeepEqual(pixel(first,32,26),pixel(later,32,26));
   assert.notDeepEqual(pixel(first,50,26),pixel(later,50,26));
 });
+
+test('library presets expose editable indexed clips and named swatches', () => {
+  const { clips, presets } = stamps.catalog();
+  assert.deepEqual(presets.map(entry=>entry.id),['star','glint','bubble','ember','burst']);
+  assert(clips.some(entry=>entry.id==='bubble-pop-small'));
+  for (const {id} of clips) stamps.prepare(stamps.clip(id));
+  for (const {id,variants} of presets) for (const variant of variants)
+    assert(stamps.placements([{preset:id,variant,at:[0,0,0]}]).length);
+  const original=stamps.clip('ember-chip');
+  const recolor=stamps.clip('ember-chip',{swatches:{hot:'#fafaba'}});
+  assert.deepEqual(original.frames,recolor.frames);
+  assert.equal(recolor.palette[recolor.swatchRoles.indexOf('hot')],'#fafaba');
+  recolor.frames[0].rows[0]='00000';
+  assert.deepEqual(stamps.clip('ember-chip'),original);
+  assert.throws(()=>stamps.clip('ember-chip',{swatches:{unknown:'#eeeeee'}}),/need roles/);
+  assert.throws(()=>stamps.preset('bubble',{at:[0,0,0],period:1}),/whole effect/);
+});
+
+test('native stamp cues hide outside their window and move whole pixels through out-of-order seeks', () => {
+  const b=makeBuilder(17,[0x151923,0x2d444e]);
+  const spec={width:2,height:1,rows:['01'],palette:['#ecc887','#df6860']};
+  const world=b.finish({cam:{target:[0,0,0],dist:5,pitch:0,yaw:0,sway:0,projection:'orthographic'},dither:0,
+    pixelStamps:[{stamp:{...spec,fps:2},at:[0,0,0],nativePixels:true,keepSwatches:true,
+      cue:{start:.5,period:1},offsets:[[0,0,0],[.25,4,-2]]}]});
+  function points(t) {
+    const frame=render(world,{w:61,h:41,px:1,t}), result=[];
+    for (let i=0;i<frame.rgb.length;i+=3) {
+      const value=(frame.rgb[i]<<16)|(frame.rgb[i+1]<<8)|frame.rgb[i+2];
+      if (value===0xecc887 || value===0xdf6860) result.push([i/3%frame.w,Math.floor(i/3/frame.w),value]);
+    }
+    return result;
+  }
+  const origin=points(.5);
+  assert.equal(origin.length,2);
+  assert.deepEqual(points(.75),origin.map(([x,y,color])=>[x+4,y-2,color]));
+  assert.deepEqual(points(.49),[]);
+  assert.deepEqual(points(1),[]);
+  assert.deepEqual(points(1.5),origin);
+});
+
+test('JSON presets use their own swatches and start a bubble pop at the rise endpoint', () => {
+  const background=0x11141f, base=0x476771, hot=0xf57db1;
+  const spec={id:'bubble-preset-fixture',palette:[background,base,...Array(28).fill(background)],
+    solids:[],camera:{target:[0,0,0],dist:5,yaw:0,pitch:0,projection:'orthographic',sway:0},
+    finish:{dither:0,pixelStamps:[{preset:'bubble',at:[0,-.9,0],start:.25,swatches:{catchlight:'#f57db1'}}]}};
+  assert.deepEqual(K.diorama.check(spec).filter(problem=>problem.level==='error'),[]);
+  const world=K.diorama.build(JSON.parse(JSON.stringify(spec)));
+  const read=t=>render(world,{w:88,h:104,px:1,t});
+  const empty=read(0), rise=read(.3), pop=read(1.64);
+  assert.notDeepEqual(rise.rgb,empty.rgb);
+  assert.notDeepEqual(pop.rgb,empty.rgb);
+  assert([...pop.palette].includes(hot));
+  assert.deepEqual(read(3).rgb,empty.rgb);
+});

@@ -3,6 +3,7 @@ const PixelStamps = (() => {
   const composite = typeof FrameComposite === 'undefined' ? require('./frame-composite.js') : FrameComposite;
   const cels = typeof SpriteCels === 'undefined' ? require('./sprite-cels.js') : SpriteCels;
   const atlases = typeof AtlasSprites === 'undefined' ? require('./atlas-sprites.js') : AtlasSprites;
+  const presets = typeof PixelStampPresets === 'undefined' ? require('./pixel-stamp-presets.js') : PixelStampPresets;
   const record = value => value && Object.getPrototypeOf(value) === Object.prototype;
   const index = value => Number.isSafeInteger(value) && value >= 0 && value < 0xfffffe;
   const colorString = value => typeof value === 'string' && /^#[a-f\d]{6}$/i.test(value);
@@ -65,7 +66,8 @@ const PixelStamps = (() => {
       return { frame, duration, slots: texels };
     });
     const clock = cels.playback(entries, fps, playback);
-    return { width, height, entries, palette: palette?.slice(), at: time => clock((Number.isFinite(time) ? time : 0) + phase) };
+    const duration = entries.reduce((sum, entry) => sum + entry.duration, 0);
+    return { width, height, duration, entries, palette: palette?.slice(), at: time => clock((Number.isFinite(time) ? time : 0) + phase) };
   }
 
   function layout(spec) {
@@ -94,11 +96,10 @@ const PixelStamps = (() => {
     return color;
   }
 
-  function raster(width, height, slots, palette, scenePalette, paletteRoles, emissive) {
+  function raster(width, height, slots, palette, scenePalette, paletteRoles, emissive, colors = new Map()) {
     const length = width * height;
     const rgba = new Uint8Array(length * 4);
     const emission = emissive.size ? new Uint8Array(length * 4) : undefined;
-    const colors = new Map();
     for (let i = 0; i < length; i++) {
       const slot = slots[i];
       if (slot === null) continue;
@@ -116,21 +117,22 @@ const PixelStamps = (() => {
     return { width, height, rgba };
   }
 
-  function atlas(spec, { scenePalette, paletteRoles, pivot, unitsPerPixel = 1, emissionSlots = [], yaw = 0, pitch = 0 } = {}) {
-    const { width, height, entries, palette } = prepare(spec);
+  function buildAtlas({ width, height, entries, palette },
+      { scenePalette, paletteRoles, pivot, unitsPerPixel = 1, emissionSlots = [], yaw = 0, pitch = 0, keepSwatches = false } = {}) {
     if (!Array.isArray(emissionSlots) || !Array.from(emissionSlots).every(slot => index(slot) && (!palette || slot < palette.length)))
       throw new RangeError('Pixel stamp emission slots must be valid palette indices');
+    if (typeof keepSwatches !== 'boolean') throw new TypeError('Pixel stamp keepSwatches needs a boolean');
     if (width > 8192 || height > 8192) throw new RangeError('Pixel stamp frames do not fit the atlas dimensions');
     const minColumns = Math.ceil(entries.length / Math.floor(8192 / height));
     const columns = Math.min(entries.length, Math.floor(8192 / width),
       Math.max(minColumns, Math.ceil(Math.sqrt(entries.length * height / width))));
     const w = width * columns, h = height * Math.ceil(entries.length / columns);
     if (w < 1 || h > 8192) throw new RangeError('Pixel stamp frames do not fit the atlas dimensions');
-    const emissive = new Set(emissionSlots);
+    const emissive = new Set(emissionSlots), known = new Map();
     const color = new Uint8Array(w * h * 4), emission = emissive.size ? new Uint8Array(color.length) : undefined;
     const frames = entries.map(({ frame, duration, slots }) => {
       const x = frame % columns * width, y = Math.floor(frame / columns) * height;
-      const result = raster(width, height, slots, palette, scenePalette, paletteRoles, emissive);
+      const result = raster(width, height, slots, palette, scenePalette, paletteRoles, emissive, known);
       for (let row = 0; row < height; row++) {
         const from = row * width * 4, to = ((y + row) * w + x) * 4;
         color.set(result.rgba.subarray(from, from + width * 4), to);
@@ -138,30 +140,98 @@ const PixelStamps = (() => {
       }
       return { frame, duration, rect: { x, y, width, height }, unitsPerPixel, pivot, yaw, pitch };
     });
-    return atlases.compile({ metadata: { width: w, height: h, frames, emissionMode: 'baked' },
+    const outputPalette = keepSwatches && [...new Set(known.values())];
+    return atlases.compile({ metadata: { width: w, height: h, frames, emissionMode: 'baked',
+      ...(outputPalette?.length && {outputPalette}) },
       images: { color, ...(emission && { emission }) } });
+  }
+
+  function atlas(spec, options) {
+    return buildAtlas(prepare(spec), options);
+  }
+
+  function cueClock(cue, duration) {
+    if (!record(cue) || Object.keys(cue).some(key => !['start','period'].includes(key)))
+      throw new TypeError('Pixel stamp cue needs a start and optional repeat period');
+    const { start = 0, period } = cue;
+    if (!Number.isFinite(start) || !Number.isFinite(start+duration) ||
+        (period !== undefined && (!Number.isFinite(period) || period<=0 || period < duration-4*Number.EPSILON*Math.max(1,duration))))
+      throw new RangeError('Pixel stamp cue needs a finite start and a period at least as long as its clip');
+    const epsilon = Math.min(duration*1e-6,Math.max(1,duration,period??0)*4*Number.EPSILON);
+    return time => {
+      const elapsed = (Number.isFinite(time) ? time : 0) - start;
+      if (!Number.isFinite(elapsed) || elapsed < -epsilon) return null;
+      let age = Math.max(0,elapsed);
+      if (period !== undefined) {
+        age %= period;
+        if (period-age<=epsilon) age=0;
+      }
+      return age < duration-epsilon ? age : null;
+    };
+  }
+
+  function pixelTrack(keys) {
+    if (!Array.isArray(keys) || !keys.length || keys.length>256)
+      throw new TypeError('Pixel stamp offsets need 1 to 256 [seconds, x, y] keys');
+    let last=-1;
+    const points=Array.from(keys,key=>{
+      if (!Array.isArray(key) || key.length!==3 || !Number.isFinite(key[0]) || key[0]<0 || key[0]<=last ||
+          ![key[1],key[2]].every(value=>Number.isInteger(value)&&Math.abs(value)<=65536))
+        throw new RangeError('Pixel stamp offsets need ascending times and integer pixel positions');
+      last=key[0];
+      return key.slice();
+    });
+    return time=>{
+      let lo=0, hi=points.length;
+      while (hi-lo>1) {
+        const mid=(lo+hi)>>1;
+        if (points[mid][0]<=time) lo=mid;
+        else hi=mid;
+      }
+      const [start,x,y]=points[lo];
+      if (time<=start || hi===points.length) return [x,y];
+      const [end,u,v]=points[hi], f=(time-start)/(end-start);
+      return [Math.round(x+(u-x)*f),Math.round(y+(v-y)*f)];
+    };
   }
 
   function place(spec, { scenePalette, paletteRoles, pivot, unitsPerPixel, emissionSlots, mode = 'card',
       pitch = 0, viewYaw = 0, phase = spec?.phase ?? 0,
-      playback = spec?.playback ?? 'loop', ...placement } = {}) {
+      playback = spec?.playback ?? 'loop', cue, offsets, keepSwatches, ...placement } = {}) {
     if (!Number.isFinite(phase)) throw new RangeError('Pixel stamp phase must be finite');
-    const asset = atlas(spec, { scenePalette, paletteRoles, pivot, unitsPerPixel, emissionSlots, yaw: viewYaw, pitch });
+    const art = prepare(spec);
+    const age = cue === undefined ? null : cueClock(cue,art.duration);
+    const offsetAt = offsets === undefined ? null : pixelTrack(offsets);
+    const asset = buildAtlas(art, { scenePalette, paletteRoles, pivot, unitsPerPixel, emissionSlots, yaw: viewYaw, pitch, keepSwatches });
     const clock = asset.playback(playback);
-    return atlases.place({ ...placement, atlas: asset, mode, frame: time => clock(time + phase) });
+    const elapsed = time => age ? age(time) ?? 0 : Number.isFinite(time) ? time : 0;
+    const trackTime = age || playback==='once' ? elapsed : time => {
+      const value=elapsed(time), wrapped=value%art.duration;
+      return wrapped<0 ? wrapped+art.duration : wrapped;
+    };
+    return atlases.place({ ...placement, atlas: asset, mode, frame: time => clock(elapsed(time)+phase),
+      ...(age&&{visibleAt:time=>age(time)!==null}),
+      ...(offsetAt&&{pixelOffset:time=>offsetAt(trackTime(time))}) });
   }
 
   function placements(definitions, { scenePalette, paletteRoles } = {}) {
     if (!Array.isArray(definitions) || definitions.length > 128)
       throw new TypeError('Pixel stamps need a list of up to 128 placements');
-    return Array.from(definitions, definition => {
-      if (!record(definition) || definition.stamp === undefined)
-        throw new TypeError('Each pixel stamp placement needs art and an anchor');
-      const { stamp, ...options } = definition;
-      return place(stamp, { ...options, scenePalette, paletteRoles });
-    });
+    const expanded=[];
+    for (const definition of definitions) {
+      if (!record(definition) || (definition.stamp===undefined)===(definition.preset===undefined))
+        throw new TypeError('Each pixel stamp placement needs an anchor and either art or a preset');
+      if (definition.preset===undefined) expanded.push(definition);
+      else {
+        const {preset,...options}=definition;
+        expanded.push(...presets.preset(preset,options));
+      }
+      if (expanded.length>128) throw new RangeError('Pixel stamp presets expand to more than 128 placements');
+    }
+    return expanded.map(({stamp,...options})=>place(stamp,{...options,scenePalette,paletteRoles}));
   }
 
-  return Object.freeze({ paint, prepare, layout, image, atlas, place, placements });
+  return Object.freeze({ paint, prepare, layout, image, atlas, place, placements,
+    clip:presets.clip, preset:presets.preset, catalog:presets.list });
 })();
 if (typeof module !== 'undefined') module.exports = PixelStamps;

@@ -36,7 +36,7 @@ function rasterize(placements, settings) {
   for (const placement of placements) {
     const {atlas,opacity}=placement, mode=override??placement.mode;
     const protection=subject?.({object:placement.objectId,entity:placement.objectId,material:placement.materialId});
-    if (!opacity) continue;
+    if (!opacity || placement.visibleAt && !placement.visibleAt(time)) continue;
     const at=typeof placement.at==='function'?vector(placement.at(time),'Sprite atlas anchor'):placement.at;
     const fixed=mode==='scenery';
     const exact=placement.nativePixels && mode==='card';
@@ -53,8 +53,9 @@ function rasterize(placements, settings) {
     const units=tile.unitsPerPixel*placement.scale;
     const {x:tileX,y:tileY,width,height}=tile.rect, px=tile.pivot.x,py=tile.pivot.y;
     // Round the card origin once. Every texel then gets one integer art-pixel address.
-    const rasterX=exact?Math.round(anchorScreen[0]-px):0;
-    const rasterY=exact?Math.round(anchorScreen[1]+py-height):0;
+    const offset=exact&&placement.pixelOffset?placement.pixelOffset(time):null;
+    const rasterX=exact?Math.round(anchorScreen[0]-px)+(offset?.[0]??0):0;
+    const rasterY=exact?Math.round(anchorScreen[1]+py-height)-(offset?.[1]??0):0;
     const planes=fixed&&placement.depth?atlas.sceneryPlanes:[{depth:0}];
     for (const {id,depth,bounds} of planes) {
       const anchor=depth?at.map((n,i)=>n-depth*placement.scale*axes.normal[i]):at;
@@ -103,7 +104,7 @@ function rasterize(placements, settings) {
               if (atlas.emissionMode==='add') return clamp(value*gain+glow,0,1);
               return gain===1 ? value : clamp(Math.max(0,value-glow)*gain+glow,0,1);
             });
-            results.push({p,...hit,alpha:sample.alpha*opacity,color,normal,emission,protection,
+            results.push({p,...hit,alpha:sample.alpha*opacity,color,normal,emission,protection,swatches:atlas.swatches,
               objectPosition:local(rotation,position.map((n,i)=>(n-at[i])/placement.scale)), objectScale:placement.scale,
               ...(objectDither && mode==='card' && { patternPosition:[(uAt-px)*tile.unitsPerPixel,(py-vAt)*tile.unitsPerPixel,0] })});
           }

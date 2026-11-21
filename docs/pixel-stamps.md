@@ -114,6 +114,57 @@ the indexed raster and atlas construction API. See
 [WebGL feature coverage](browser-renderer.md#feature-coverage) for projected
 finishes, selective ink, and sprite atlas integration.
 
+## Effect presets and reusable clips
+
+`KIT.pixelStamps.catalog()` lists the five effect families and their variants,
+plus the editable clips they use. Open **Library clips** in the workshop to
+draw or retime any clip. `KIT.pixelStamps.clip(id, { swatches })` returns a
+fresh, JSON-serializable descriptor, with its named `swatchRoles`.
+
+| Preset | Variants | Placement |
+| --- | --- | --- |
+| `star` | `tall`, `wide`, `distant` | Pinned twinkle, repeating by default |
+| `glint` | `sweep`, `echo` | A catch and directional sweep followed by a smaller echo |
+| `bubble` | `full`, `small` | An authored rise, then a pop and ripple at its endpoint |
+| `ember` | `rising`, `chip`, `fleck`, `bed` | Whole-pixel trails and individual cooling poses |
+| `burst` | `spray`, `fork`, `diamond`, `fan` | An expanding mark that breaks into detached pixels |
+
+```json
+{
+  "pixelStamps": [
+    { "preset": "star", "variant": "wide", "at": [0, 2, -3], "phase": 1.2 },
+    { "preset": "bubble", "at": [0.4, 0.3, 0.2], "start": 0.6, "period": 3 },
+    { "preset": "ember", "variant": "chip", "at": [1, 0.2, 0],
+      "start": 1, "swatches": { "hot": "#ffe8a6", "ember": "#d85d48" } }
+  ]
+}
+```
+
+Place this under `finish` in a diorama, or pass it to `B.finish()`. Presets
+use native-pixel placement. `at` anchors them in the scene. `offset` nudges
+the whole effect by `[x, y]` art pixels. Positive X is right and positive Y
+is down. `start` and `period` schedule the effect in seconds. `phase` offsets
+cel playback. Star twinkles and the coal bed repeat by default. Presets keep
+their own swatches in the standard palette resolve. Set `keepSwatches: false`
+to use the scene palette, or supply named swatches of your own. Later shading,
+compositing, and grading can affect the visible result.
+
+`KIT.pixelStamps.preset(name, options)` returns ordinary stamp placements
+that can be edited or flattened into a scene. To compose one yourself, set
+`cue: { start, period }` on a placement with a custom `stamp`. A cue is
+invisible before its start and after the clip finishes. Add `period` for a
+repeat with an optional gap. On a native-pixel card, `offsets` takes a list
+of `[seconds, x, y]` keys relative to its cue. Motion rounds to whole pixels.
+Cel size, timing, and swatch indices are independent from motion.
+
+The [preset reel](../examples/pixel-effect-presets.js) places the five
+families by name and uses their own swatches over a painted scene.
+
+```sh
+node cli/ink-studio.js clip examples/pixel-effect-presets.js --w 244 --h 156 --px 1 \
+  --from 0 --to 4 --fps 18 --out pixel-effects.png
+```
+
 ## Red Spring Observatory
 
 The [example scene](../examples/red-spring.js) combines painted stone planes
@@ -142,8 +193,8 @@ node cli/ink-studio.js clip examples/starfall-window.js --w 244 --h 142 --px 1 \
 
 [Glitter Burst Reel](../examples/glitter-burst-reel.js) shows three drawn
 bursts whose bright cores give way to open shapes and detached embers. The
-same cels and smaller flecks are phased along a spell trail. Choose Glitter
-burst in the workshop to edit the fork, diamond, or fan one cell at a time.
+same cels and smaller flecks are phased along a spell trail. Open the fork,
+diamond, or fan under **Library clips** to edit their individual cells.
 
 ```sh
 node cli/ink-studio.js clip examples/glitter-burst-reel.js --w 244 --h 128 --px 1 \
