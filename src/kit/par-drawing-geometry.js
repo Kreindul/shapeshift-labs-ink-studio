@@ -122,12 +122,12 @@
   }
 
   function shape(draw) {
-    const {type, rect, radius = 0, color, stroke, fill = color ?? '#ffffff', width} = draw;
+    const {type, rect, radius = 0, color, stroke, fill = color ?? '#ffffff', width, falloff, fillFalloff, strokeFalloff} = draw;
     if (!tuple(rect, 4) || rect[2] <= 0 || rect[3] <= 0 || !finite(radius) || radius < 0)
       throw new RangeError('Shape needs a positive rectangle and a nonnegative radius');
     const [x,y,w,h] = rect;
-    if (type === 'rect' && !radius && stroke === undefined && fill !== false)
-      return {type:'rect',rect,color:fill};
+    if (type === 'rect' && !radius && stroke === undefined && fill !== false && strokeFalloff === undefined)
+      return {type:'rect',rect,color:fill,falloff:fillFalloff === undefined ? falloff : fillFalloff};
     const r = Math.min(radius,w/2,h/2);
     let points;
     if (type === 'ellipse') {
@@ -144,11 +144,12 @@
         return [cx+r*Math.cos(angle),cy+r*Math.sin(angle)];
       }));
     } else points = [[x,y],[x+w,y],[x+w,y+h],[x,y+h]];
-    return {type:'polygon',points,fill,...(stroke!==undefined && {stroke}),...(width!==undefined && {width})};
+    return {type:'polygon',points,fill,falloff,fillFalloff,strokeFalloff,
+      ...(stroke!==undefined && {stroke}),...(width!==undefined && {width})};
   }
 
   function drawingPath(draw) {
-    const {source, d, points, closed, fill, color, stroke, width, steps} = draw;
+    const {source, d, points, closed, fill, color, stroke, width, steps, falloff, fillFalloff, strokeFalloff} = draw;
     const vertices = source === undefined ? points : Array.isArray(source) ? source : source?.points;
     const paths = d === undefined ? [pathSource({points:vertices,closed:closed ?? source?.closed})] : contours(d,steps);
     const lines = stroke ?? (fill ? false : color ?? '#ffffff');
@@ -156,9 +157,9 @@
     const output = [];
     if (fill) {
       if (!paths.every(p => p.closed)) throw new TypeError('A filled path needs closed contours');
-      output.push({type:'polygon',rings:paths.map(p=>p.points),fill,...size});
+      output.push({type:'polygon',rings:paths.map(p=>p.points),fill,falloff:fillFalloff === undefined ? falloff : fillFalloff,...size});
     }
-    if (lines) for (const p of paths) output.push({type:'path',...p,color:lines,...size});
+    if (lines) for (const p of paths) output.push({type:'path',...p,color:lines,falloff:strokeFalloff === undefined ? falloff : strokeFalloff,...size});
     return output;
   }
 
@@ -177,6 +178,12 @@
     if (draw.from) result.from = at(draw.from);
     if (draw.to) result.to = at(draw.to);
     if (draw.origin) result.origin = at(draw.origin);
+    for (const key of ['falloff','fillFalloff','strokeFalloff','uFalloff','vFalloff']) {
+      const fade = draw[key];
+      if (fade && (fade.type === undefined || fade.type === 'linear'))
+        result[key] = { ...fade, from: at(fade.from), to: at(fade.to) };
+      if (fade?.type === 'radial') result[key] = { ...fade, center: at(fade.center) };
+    }
     if (draw.type === 'text') {
       const origin = draw.at ?? [0, 0];
       if (!point(origin) || !origin.every(Number.isSafeInteger)) throw new TypeError('Bitmap text needs an integer XY anchor');
