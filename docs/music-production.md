@@ -129,6 +129,11 @@ bridge scheduled just after its endpoint.
 cues into percussion phrases and reserve space in the music for effects
 or silence.
 
+## Capture new samples
+
+[Capture and catalog audio](sample-capture.md) to make new sample sources
+from a recording, live bus, instrument, graph, or scene.
+
 ## Import a SoundFont patch
 
 ```sh

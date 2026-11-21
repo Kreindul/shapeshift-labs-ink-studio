@@ -152,3 +152,4 @@ module.exports=function command([mode,file,config],opt,kit) {
   else process.stdout.write(JSON.stringify(value,null,2)+'\n');
   return value;
 };
+module.exports.assetPaths = assetPaths;

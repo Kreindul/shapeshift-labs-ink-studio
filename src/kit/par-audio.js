@@ -15,6 +15,19 @@
       inputs: { sampleRate: 'number', channels: 'number', samples: 'array<number>' }, outputs: { value: 'audio' },
       run(input) { return { value: A.audio(input) }; }
     },
+    'audio.captureSample': {
+      description: 'Capture an exact sample range from a graph output and attach reusable library metadata.',
+      inputs: { source:'audio', settings:'record' }, outputs: { value:'audio', entry:'record' },
+      run({ source, settings }) { return A.sampleCatalog.capture(source, settings); }
+    },
+    'audio.searchSamples': {
+      description: 'Filter sample metadata by material, articulation, pitch, duration, provenance and license.',
+      inputs: { entries:'array<record>', options }, outputs: { value:'record', items:'array<record>' },
+      run({ entries, options }) {
+        const value = A.sampleCatalog.create(entries).search(options);
+        return { value, items:value.items };
+      }
+    },
     'audio.window': media({ value: 'audio', report: 'record' }, A.audioWindow),
     'audio.analyze': media({ value: 'record', rms: 'number', peak: 'number' }, A.analyze),
     'audio.fft': media({ value: 'record', spectrum: 'raster', bands: 'record' }, A.fft),

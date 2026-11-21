@@ -13,6 +13,10 @@ const mesh = { points: [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], faces: [[0,
 const clip = { width: 4, height: 4, fps: 8, layers: { ink: { frames: [rgba.data, rgba.data] } } };
 const audio = { sampleRate: 8000, channels: 1, samples: Array.from({ length: 128 }, (_, i) => i % 4 === 1 ? .5 : i % 4 === 3 ? -.5 : 0) };
 const event = { time: 0, channel: 'held', value: true };
+const sampleCapture = {op:'audio.captureSample',inputs:{source:audio,settings:{
+  sample:{id:'tone',label:'Bench tone',material:'synth',pitch:'A4',license:{id:'CC0-1.0'}},
+  source:{kind:'graph',name:'oscillator'},firstSample:16,endSample:48
+}}};
 const motif = { length: 2, events: [{beat:0,duration:.35,degree:1}, {beat:.75,duration:.25,degree:3}] };
 const arrangement = { score:{key:{root:'C4'},harmonies:{home:{root:'C4',quality:'unison'}}},
   motifs:{melody:motif},parts:{lead:{role:'lead',material:'melody'}},
@@ -243,6 +247,10 @@ const specifications = {
   'music.interval': { inputs: {a:220,b:330} },
   'music.roughness': { inputs: {spectra:[[[220,1],[440,.5]],[[228,1],[456,.5]]]} },
   'audio.buffer': { inputs: audio },
+  'audio.captureSample': {inputs:sampleCapture.inputs},
+  'audio.searchSamples': {inputs:{entries:[{...sampleCapture.inputs.settings.sample,sampleRate:8000,
+    channels:1,frames:32,duration:.004,source:{kind:'graph',name:'oscillator',firstSample:16,endSample:48,sampleRate:8000}}],
+    options:{material:'synth'}}},
   'audio.stemControls': { inputs: {
     stems: { drums: transientAudio, synth: audio },
     settings: { drums: { envelope: { measure: 'peak', attack: 0, threshold: .4 } },

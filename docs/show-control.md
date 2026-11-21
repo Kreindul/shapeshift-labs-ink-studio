@@ -42,6 +42,9 @@ Connect any source node from the same AudioContext, including a file buffer, osc
 
 Pass an existing [Ink modulation recorder](graph-media.md#recordable-live-modulation) to `router.capture(recorder, ['main', 'music'], performance.now() / 1000)` to record named meter and band samples in a portable input take. Use the recorder's clock domain for explicit timestamps. Each capture writes up to 128 channels in one packet.
 
+Use [sample capture](sample-capture.md) to recover the actual PCM from a
+live bus or microphone and save it as a reusable library sample.
+
 ## Synchronize music and picture
 
 | Source | Use |
