@@ -9,6 +9,7 @@
 
   G.operations = Object.freeze({
     'proc.noise': {
+      seed: 'options',
       inputs: { definition: input('record', { type: 'simplex', axes: ['x', 'y'] }), options },
       ...value('field', ({ definition, options }, context) => G.noise(definition, seeded(options, context)))
     },
@@ -18,10 +19,12 @@
       ...value('raster', ({ source, options }, { time }) => G.sample(source, { time, ...options }))
     },
     'proc.scatter': {
+      seed: 'options',
       inputs: { options }, outputs: { value: 'points', samples: 'array<record>', report: 'record' }, time: true,
       run: ({ options }, context) => G.scatter(timed(options, context))
     },
     'proc.reaction': {
+      seed: 'options',
       inputs: { steps: input('number', 400), options },
       outputs: { value: 'raster', u: 'raster', report: 'record' },
       run: ({ steps, options }, context) => G.reaction({ ...seeded(options, context), steps })
@@ -31,6 +34,7 @@
       ...value('raster', ({ source, options }) => G.repeat(source, options))
     },
     'proc.tiles': {
+      seed: 'options',
       inputs: { definitions: 'array<record>', options },
       ...value('record', ({ definitions, options }, context) => G.tiles(definitions, seeded(options, context)))
     },
@@ -44,22 +48,27 @@
     },
     'proc.smpteColorBars': { inputs: { options }, ...value('raster', ({ options }) => G.smpteColorBars(options)) },
     'proc.tvStatic': {
+      seed: 'options',
       inputs: { options }, time: true,
       ...value('raster', ({ options }, context) => G.tvStatic(timed(options, context)))
     },
     'proc.rain': {
+      seed: 'options',
       inputs: { options }, outputs: { value: 'raster', particles: 'array<record>' }, time: true,
       run: ({ options }, context) => G.rain(timed(options, context))
     },
     'proc.sparks': {
+      seed: 'options',
       inputs: { options }, outputs: { value: 'raster', particles: 'array<record>' }, time: true,
       run: ({ options }, context) => G.sparks(timed(options, context))
     },
     'proc.plume': {
+      seed: 'options',
       inputs: { options }, outputs: { value: 'raster', recipe: 'record' }, time: true,
       run: ({ options }, context) => G.plume(timed(options, context))
     },
     'proc.tree': {
+      seed: 'options',
       inputs: { options }, outputs: { value: 'raster', branches: 'array<record>', leaves: 'points' },
       run: ({ options }, context) => G.tree(seeded(options, context))
     },

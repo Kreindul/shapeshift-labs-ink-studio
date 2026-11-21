@@ -258,6 +258,7 @@
       run({ source, options }) { return { value: P.density.toMesh(source, options) }; }
     },
     densityPoints: {
+      seed: 'options',
       inputs: { source: 'field', options: { type: 'any', default: {} } },
       outputs: { value: 'points' },
       run({ source, options }, { seed }) { return { value: P.density.scatter(source, { seed, ...options }).samples }; }
@@ -275,6 +276,7 @@
       run({ source, uv }, { time }) { return source.sample(...uv, time); }
     },
     tiles: {
+      seed: 'settings',
       inputs: { settings: 'any' }, outputs: { value: 'points' }, time: true,
       run({ settings }, { seed, time }) { return { value: tiles({ seed, time, ...settings }) }; }
     }

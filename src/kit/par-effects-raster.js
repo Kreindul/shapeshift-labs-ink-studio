@@ -59,14 +59,17 @@
     'fx.repair':raster(E.repair,{value:'raster',mask:'raster',added:'raster'}),
     'fx.pixelSort':raster((source,options)=>({value:E.pixelSort(source,options)})),
     'fx.tvStatic':{
+      seed: 'options',
       inputs:{source:'raster',options},outputs:{value:'raster'},time:true,
       run({source,options},{seed,time}){return {value:E.tvStatic(source,{seed,time,...options})};}
     },
     'fx.tileScramble':{
+      seed: 'options',
       inputs:{source:'raster',options},outputs:{value:'raster',addresses:'raster'},time:true,
       run({source,options},{seed,time}){return E.tileScramble(source,{seed,time,...options});}
     },
     'fx.tileBleed':{
+      seed: 'options',
       inputs:{source:'raster',bank:'raster',options},outputs:{value:'raster',addresses:'raster'},time:true,
       run({source,bank,options},{seed,time}){return E.tileBleed(source,bank,{seed,time,...options});}
     },

@@ -999,6 +999,8 @@ const CMD = {
         '  graph validate|plan <project.json> [--inputs values.json]   validate and describe a headless graph',
         '  graph dependencies <project.json> [--json]   list direct and nested group files and pins',
         '  graph impact <group.json> [--root folder] [--json]   find consumers of a shared group',
+        '  graph snapshot <project.json> [--inputs values.json] [--seed N] [--at T]   capture graph bindings and asset hashes',
+        '  graph diff <before.json> <after.json> [--json]   explain node, port and named output changes',
         '  graph inspect <project.json> [--output NAME | --node PATH --port NAME] [--out directory]',
         '  graph run <project.json> [--inputs values.json --at seconds --seed N --out directory]',
         '  graph clip <project.json> --output NAME --from FRAME --to FRAME --out directory',

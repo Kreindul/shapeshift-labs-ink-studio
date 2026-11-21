@@ -142,6 +142,7 @@ module.exports = {
   createGraphProject: require('./cli/graph-project.js').createGraphProject,
   readGraphProject: require('./cli/graph-project.js').readGraphProject,
   findGraphGroupUsers: require('./cli/graph-groups.js').findGraphGroupUsers,
+  diffGraphs: require('./cli/graph-diff.js').diffGraphs,
   listGraphNodes: require('./cli/graph-catalog.js').listGraphNodes,
   describeGraphNode: require('./cli/graph-catalog.js').describeGraphNode,
   createTake: require('./cli/take.js').createTake,

@@ -13,6 +13,7 @@
 
   S.operations = Object.freeze({
     'sim.define': {
+      seed: 'clock',
       inputs: { kind: 'string', settings: options, clock: options }, outputs: { value: 'record' },
       run({ kind, settings, clock }, { seed }) { return { value: S.define(kind, settings, { seed, ...clock }) }; }
     },
@@ -32,6 +33,7 @@
       }
     },
     'anim.feedback': {
+      seed: true,
       inputs: { frames: 'array<raster>', flow: { type: 'array<raster>', default: [] }, options }, outputs, time: true,
       instantiate() {
         let current, priorFrames, priorFlow, priorOptions, priorSeed, priorSequence, previousTick, firstTick = 0;

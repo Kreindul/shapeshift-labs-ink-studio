@@ -228,6 +228,41 @@ In Node, use `readGraphProject(file).dependencies()` and
 `findGraphGroupUsers(file, { root })`. [Packing a take](project-bundles.md#bundle-a-whole-take)
 keeps the exact group files, including nested references.
 
+### Explain changes between graphs
+
+```sh
+ink-studio graph diff previous/project.json next/project.json
+```
+
+The report compares nodes by ID and follows changes to their input bindings,
+output ports, named parameters, and keyframes. It includes asset hashes,
+nested group edits, and changes to named outputs. Each affected output lists
+JSON Pointer paths back to the changes that can reach it. A change inside
+a group follows the affected group output, so an unrelated port can remain
+outside the report.
+
+To compare an in-place edit, save the old graph's bindings and asset hashes
+before changing its files. A snapshot can also capture input overrides and
+a specific seed or sample time.
+
+```sh
+ink-studio graph snapshot project.json --seed 11 > before.json
+# Edit the project, source image, or a referenced group, then compare.
+ink-studio graph snapshot project.json --seed 12 --inputs new-look.json > after.json
+ink-studio graph diff before.json after.json --json
+```
+
+Both sides of `graph diff` can be graph projects, packed takes with graphs,
+or saved snapshots. In Node, use `diffGraphs(before, after)` with projects
+from `readGraphProject` or snapshots from `project.snapshot({ inputs, seed, time })`.
+
+The report traces potential changes through the compiled graph without
+rendering. A seed change follows operations that consume the graph seed.
+Camera and palette edits follow the ports that use them. An asset reader
+whose filename is chosen at runtime can depend on any changed asset.
+For a built-in or host operation, its inputs can affect each of its outputs.
+A host operation can declare `seed: false` when it ignores the seed.
+
 ### Discover registered nodes
 
 ```sh
