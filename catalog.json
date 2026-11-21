@@ -1492,6 +1492,24 @@
         "splat",
         "render"
       ]
+    },
+    {
+      "id": "kit.contour",
+      "what": "Trace heightfields, SDF cross-sections and curved-surface scalar isolines into native ribbons; elevation materials, physical dashes and materialisation carriers.",
+      "where": "src/kit/p51-contour-ribbons.js",
+      "example": "docs/contour-ribbons.md, examples/contour-ribbons.html",
+      "tags": [
+        "contour",
+        "topography",
+        "ribbon",
+        "sdf",
+        "splat",
+        "materialisation"
+      ],
+      "title": "Contour ribbons and topographic rendering",
+      "kind": "api",
+      "status": "ready",
+      "use": "K.contour.heightfield / slices / surface / ribbons / draw / bands"
     }
   ]
 }

@@ -1125,3 +1125,5 @@ Use [halftone and layered screen printing](docs/screen-print.md) for analytic ci
 Use [adaptive stippling and pointillism](docs/stippling.md) to place native marks according to silhouette, curvature, light and authored detail. Explore [The Quiet Mark](examples/stippling.html).
 
 Use [irregular mosaics and stained glass](docs/mosaic-surfaces.md) for fitted polygon pieces on planar or curved carriers, opaque grout, geometric bevels and native optical transmission. Explore [The Tessera Collection](examples/mosaic-surfaces.html).
+
+Use [contour ribbons and topographic rendering](docs/contour-ribbons.md) to trace heightfields, SDF slices and curved-surface isolines into native marks. Explore [Lines of Matter](examples/contour-ribbons.html), including ribbons peeling into particles.
