@@ -24,9 +24,11 @@
       owners.set(key,component);
     };
     for (const [index,{revision:row}] of components.entries()) {
-      check(fields(row,['edits','harmonies','changes','tracks','patches','room','gain']) && Object.keys(row).length>0,
+      check(fields(row,['id','edits','harmonies','changes','tracks','patches','room','gain']) &&
+        (row.id===undefined || id(row.id)) && Object.keys(row).some(key=>key!=='id'),
         'Producer components need a production revision');
       for (const [key,value] of Object.entries(row)) {
+        if (key==='id') continue;
         if (key==='gain') {
           claim('gain',index);
           revision.gain=value;
@@ -74,10 +76,10 @@
     const beats=Math.min(meter/2,(section.beat-latest.beat)/2,section.beat-previous.beat);
     if (beats<.5) return 'The lead-in already has a chord change close to the return.';
     const beat=round(section.beat-beats);
-    const incoming=H.midi(latest.root), fifth=(H.midi(destination.root)+7)%12;
-    const root=fifth+12*Math.max(0,Math.min(9,Math.round((incoming-fifth)/12)));
-    if (incoming%12===fifth && latest.quality==='dominant7')
-      return 'The score already approaches this return through its dominant seventh.';
+    const incoming=H.midi(latest.root), tonic=H.midi(destination.root), fifth=(tonic+7)%12;
+    const substitute=incoming%12===fifth && latest.quality==='dominant7';
+    const pitchClass=substitute ? (tonic+1)%12 : fifth, register=substitute ? tonic+1 : incoming;
+    const root=pitchClass+12*Math.max(0,Math.min(9,Math.round((register-pitchClass)/12)));
     const keys=new Set(score.program.events.map(row=>row.id));
     const unique= (stem,has)=>{
       let name=stem, suffix=1;
@@ -93,7 +95,8 @@
     if (destination.time<section.time-epsilon)
       changes.push({id:unique('producer-resolve',key=>keys.has(key)),time:{beat:section.beat},harmony:destination.harmony});
     return {
-      id:'harmony',hypothesis:'A dominant seventh in the lead-in can make the same arrival feel more conclusive.',
+      id:'harmony',hypothesis:substitute ? 'A tritone substitution keeps the dominant guide tones and approaches the tonic from a semitone above.' :
+        'A dominant seventh in the lead-in can make the same arrival feel more conclusive.',
       components:[{id:'cadence',summary:H.pitchName(root)+' dominant seventh resolves into '+destination.root+' '+destination.quality+'.',
         revision:{harmonies:{[name]:{root,quality:'dominant7',notes}},changes}}]
     };

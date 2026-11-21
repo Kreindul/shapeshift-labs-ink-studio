@@ -18,7 +18,8 @@ influenced the decision. Keep named components and record why they work.
 
 `music.planProducer` always supplies the current arrangement as a reference.
 The `harmony` strategy tries a dominant-seventh preparation in the preceding
-section. The `orchestration` strategy doubles the opening melody on a resting
+section. If a dominant seventh already leads into the return, it tries a
+tritone substitution. The `orchestration` strategy doubles the opening melody on a resting
 instrument, or revoices an active chord pad. The goal is carried through into
 the comparison and the final reference. Use `strategies` to choose which
 approaches to try, or `[]` to compare only your own takes. Choose `octave: -12`
@@ -27,7 +28,8 @@ with pinned material.
 
 Provide custom `takes` as entries with `id`, `hypothesis`, and
 `components`. Each component has `id`, `summary`, and a `revision` in the
-same format as `music.reviseProduction`. Group related chord definitions
+production format used by `music.reviseProduction`. Session components apply
+musical edits and preserve the source's pins. Group related chord definitions
 and their change events in one component. Keep independent choices such as
 an octave double and a drum accent in separate components. The baseline
 and alternatives can total up to eight takes.

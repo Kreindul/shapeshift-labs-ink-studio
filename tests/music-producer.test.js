@@ -52,10 +52,22 @@ test('producer takes offer distinct score and ensemble decisions, with aligned c
   assert(guarded.blocked.every(row=>/pinned/.test(row.reason)));
 });
 
+test('a return with a dominant can audition a chromatic substitute instead of repeating the same change',()=>{
+  const altered=structuredClone(source);
+  altered.arrangement.score.harmonies.drift={root:'A2',quality:'dominant7',notes:[45,49,52,55]};
+  const session=A.planProducer(altered,{...brief,strategies:['harmony']});
+  const take=session.takes.find(row=>row.id==='harmony');
+  assert.match(take.hypothesis,/tritone substitution/);
+  const [substitute]=Object.values(take.components[0].revision.harmonies);
+  assert.equal(substitute.root,51);
+  assert.equal(substitute.quality,'dominant7');
+});
+
 test('a decision can keep one named change from a compound take and replay its saved revision',()=>{
   const initial=A.planProducer(source,brief);
   const layer=initial.takes.find(take=>take.id==='orchestration').components[0];
-  const compound={id:'wide',hypothesis:'Double the hook and accent the first hit.',components:[layer,drum]};
+  const compound={id:'wide',hypothesis:'Double the hook and accent the first hit.',
+    components:[layer,{...drum,revision:{id:'brush-idea',...drum.revision}}]};
   const session=A.planProducer(source,{...brief,takes:[compound]});
   const compare=A.reviewProducer(source,session,{},schedule);
   const take=compare.takes.find(take=>take.id==='wide');
