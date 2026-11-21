@@ -5,6 +5,9 @@ WAV. Each library entry carries the original sample interval and searchable
 metadata. The entry resolves to a WAV that can go into a production patch,
 soundtrack, or graph.
 
+Use [audio prints](audio-prints.md) to capture related dry and wet graph taps
+with their processing paths, exact ranges, seed, and reusable markers.
+
 Use [sample editing](sample-edit.md) to mark and audition transients,
 split recordings into reusable regions, and assemble crossfaded takes.
 

@@ -8,7 +8,7 @@
   const int = (n, lo, hi) => Number.isSafeInteger(n) && n >= lo && n <= hi;
   const kinds = ['file', 'mic', 'world', 'instrument', 'stem', 'bus', 'graph'];
   const attributes = ['id', 'label', 'material', 'articulation', 'pitch', 'tags', 'license'];
-  const entryFields = [...attributes, 'sampleRate', 'channels', 'frames', 'duration', 'source', 'asset'];
+  const entryFields = [...attributes, 'sampleRate', 'channels', 'frames', 'duration', 'source', 'asset', 'print'];
   const folded = value => value.normalize('NFKC').trim().toLowerCase();
   const defined = value => Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined));
 
@@ -36,8 +36,9 @@
         source.endSample !== source.firstSample + raw.frames ||
         source.gain !== undefined && !(Number.isFinite(source.gain) && source.gain > 0 && source.gain <= 1))
       throw new TypeError('A sample needs a named source and a matching absolute sample range');
-    const {pitch: note, ...rest} = raw;
+    const {pitch: note, print, ...rest} = raw;
     return P.data.freeze({...defined(rest), ...(note !== undefined && {pitch:pitchOf(note)}),
+      ...(print!==undefined && {print:A.audioPrint.metadata(print,raw)}),
       tags:[...new Set(tags)], license:defined(license), source:defined(source)});
   }
   function describe(audio, metadata, source) {

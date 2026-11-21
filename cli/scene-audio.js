@@ -4,6 +4,7 @@ const path = require('node:path');
 const WAV = require('./wav.js');
 const { mix } = require('./scene-audio-mix.js');
 const { readGraphProject } = require('./graph-project.js');
+const { readAudioPrint } = require('./audio-print.js');
 const { embed } = require('./data-inputs.js');
 
 const format = 'ink-studio/scene-audio';
@@ -270,7 +271,8 @@ function readSceneAudio(file, { kit = require('../index.js').load(), ...graphOpt
   const assetsByName = assets === undefined && (definition.proceduralScore!==undefined || definition.music?.production) ? {} : assets;
   if (!record(assetsByName) || Object.keys(assetsByName).length > 1024 || !Object.keys(assetsByName).every(token))
     throw new TypeError('Soundtrack needs named audio assets');
-  const assetCache = new Map(), graphs = new Map();
+  const assetCache = new Map(), graphs = new Map(), prints=new Map();
+  const T=kit.KIT.procedural.takeTime;
   let soundWorld, totalSamples = 0;
   if (world !== undefined) {
     if (!token(world)) throw new TypeError('Sound world must be a file path');
@@ -279,11 +281,42 @@ function readSceneAudio(file, { kit = require('../index.js').load(), ...graphOpt
     if (soundWorld.dataInputs !== undefined)
       soundWorld.dataInputs = embed(kit.KIT.dataInputs, soundWorld.dataInputs, worldFile);
   }
+  function printAsset(spec) {
+    if (!fields(spec,['print','take']) || !token(spec.print)) throw new TypeError('Invalid soundtrack print reference');
+    const file=path.resolve(folder,spec.print);
+    if (!prints.has(file)) prints.set(file,readAudioPrint(file,kit));
+    return prints.get(file);
+  }
+  function place(row) {
+    if (!record(row) || !['frame','fps','marker'].some(key=>Object.hasOwn(row,key))) return row;
+    const {frame,fps,marker,...track}=row;
+    if (fps!==undefined && frame===undefined || frame!==undefined &&
+        (track.time!==undefined || !Number.isSafeInteger(frame) || frame<0 || fps===undefined))
+      throw new TypeError('Place a soundtrack track with time or a frame and fps');
+    let time=T.read(track.time ?? 0);
+    if (frame!==undefined) {
+      const rate=T.read(fps);
+      if (!finite(T.seconds(rate),1,1000)) throw new RangeError('Invalid soundtrack picture rate');
+      time=T.div(T.read(frame),rate);
+    }
+    if (marker!==undefined) {
+      const spec=Object.hasOwn(assetsByName,track.asset) ? assetsByName[track.asset] : undefined;
+      const entry=printAsset(spec).entry(spec.take), mark=entry.print.markers.find(row=>row.id===marker);
+      const rate=track.rate ?? 1, offset=track.offset ?? 0;
+      if (!mark || !finite(rate,.001,64) || !finite(offset,0,mark.at/entry.sampleRate))
+        throw new RangeError('Unknown print marker or a track offset beyond it');
+      const markerTime=T.div(T.read(mark.at),T.read(entry.sampleRate));
+      time=T.sub(time,T.div(T.sub(markerTime,T.read(offset)),T.read(rate)));
+      if (T.seconds(time)<0) throw new RangeError('Print marker would place the track before picture start');
+    }
+    return {...track,time:{numerator:T.index(time[0]),denominator:T.index(time[1])}};
+  }
   function resolveAsset(name) {
     if (assetCache.has(name)) return assetCache.get(name);
     const spec = Object.hasOwn(assetsByName, name) ? assetsByName[name] : undefined;
     let audio;
     if (typeof spec === 'string') audio = WAV.read(path.resolve(folder, spec));
+    else if (record(spec) && Object.hasOwn(spec,'print')) audio=printAsset(spec).load(spec.take).value;
     else if (fields(spec, ['graph','output','time','seed','inputs']) && token(spec.graph) && token(spec.output)) {
       const file = path.resolve(folder, spec.graph);
       if (!graphs.has(file)) graphs.set(file, readGraphProject(file, { kit, ...graphOptions }));
@@ -299,7 +332,8 @@ function readSceneAudio(file, { kit = require('../index.js').load(), ...graphOpt
     }
     return audio;
   }
-  return createSceneAudio(definition, { kit, resolveAsset,
+  const tracks=Array.isArray(definition.tracks) ? definition.tracks.map(place) : definition.tracks;
+  return createSceneAudio({...definition,...(tracks!==undefined && {tracks})}, { kit, resolveAsset,
     ...(soundWorld && { runtime: () => kit.KIT.world.runtime.create(soundWorld) }) });
 }
 

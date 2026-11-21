@@ -1095,6 +1095,7 @@ const CMD = {
         '  music samples <slice|edit|render|audition> <library> <ID or project> [settings.json]   edit sample audio',
         '  music samples warp <library> <ID or project> settings.json --out directory   warp or repitch sample audio',
         '  music samples kit <library> kit.json performance.json --out directory   play a sample kit and export its stems',
+        '  music samples print <library> recipe.json --out directory   print dry and/or wet graph taps as reusable samples',
         '  music pads program pattern.json [settings.json] --out performance.json   resolve a pad pattern',
         '  music pads capture recording.json routes.json --out performance.json   capture timestamped pad pulses',
         '  music pads edit performance.json edits.json --out revised.json   edit captured hits by ID',
