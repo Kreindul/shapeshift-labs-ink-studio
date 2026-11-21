@@ -423,6 +423,40 @@ The report adds `artifactCache.status` (`hit`, `miss`, or `bypass`).
 On a hit, the `cache` counters describe the original graph evaluation.
 Persistent sessions continue to serve their own in-process evaluator cache.
 
+### Schedule independent raster branches
+
+```sh
+ink-studio graph run project.json --workers 2 --out review
+ink-studio graph run project.json --workers 1 --out serial-review
+```
+
+`--workers` is available for `run`, `inspect`, `batch`, `clip`, and
+`session`. Choose 1–8. A count of 1 measures the serial baseline. Workers
+start when a ready set contains at least two eligible uncached blur jobs.
+The current kernels are `fx.pathBlur` and `fx.kernelBlur`. Their work
+threshold is 12 million estimated sample taps on a cold pool and 5 million
+on a warm pool. Jobs with inputs above the 16 MiB payload budget run locally.
+
+The coordinator keeps the graph's inputs and cached values. Workers receive
+copies of their inputs and transfer back the buffers they produce. Named
+outputs, artifacts, and batch cases retain their declared order. Host
+operations and stateful nodes run in the coordinator in dependency order.
+An unavailable worker falls back to serial execution of the affected pure
+block. Reusable groups can use the same pool.
+
+The report's `workers` record counts jobs, peak concurrency, estimated
+input payload bytes, transferred output buffer bytes, and fallbacks.
+`postMs` measures the coordinator's message submission time.
+`waitMs` measures time blocked while collecting results.
+`computeMs` sums kernel time across workers. A clip reports totals across
+its frames. Node callers can pass `createGraphWorkers(2)` as the project's
+`workerPool` and close the pool when finished.
+
+Run `node scripts/benchmark-graph-workers.js` after building to compare
+cold and warm wall times on two independent branches. The benchmark checks
+serial and parallel output hashes and measures raster round trips from
+256 KiB through 16 MiB with both output-copy and output-transfer paths.
+
 ### Persistent sessions
 
 Send one JSON request per line. The response echoes the optional request
@@ -451,6 +485,52 @@ evaluator caches them.
 ## Typed data and arrays
 
 Declare these types on project inputs, group ports, or library operations.
+
+### Convert coordinates, time and colour explicitly
+
+`graph validate` and `graph plan` identify incompatible typed links by
+source and destination port and suggest a conversion when one is available.
+The named types describe ordinary arrays, numbers and raster records.
+Legacy `vec2`, `vec3`, `number`, and `raster` sockets can still carry these
+values. Declare semantic types on graph inputs and group ports to keep the
+unit checks across the graph. Raw literals use the destination's type.
+
+| From and to | Graph operations |
+| --- | --- |
+| `pixels` and `uv` | `coord.pixelToUV`, `coord.uvToPixel` |
+| `worldPosition` and projected `pixels` | `coord.project`, `coord.unproject` |
+| `seconds` and `frames` | `time.toFrames`, `time.toSeconds` |
+| Display RGB(A) byte levels and normalized sRGB | `color.fromRGB8`, `color.toRGB8` |
+| Normalized display sRGB and linear sRGB | `color.toLinear`, `color.toDisplay` |
+| RGB or RGBA rasters | `color.rasterToLinear`, `color.rasterToDisplay` |
+
+Pixel and UV coordinates start at the top-left edge. The first pixel
+center is `[0.5, 0.5]`. Divide by the viewport's full width and height
+to obtain UV. Values can extend beyond the viewport for offscreen work.
+`coord.project` returns the pixel point, UV, axial camera depth, and a
+`visible` flag for viewport and clip-plane coverage. Unprojection
+requires axial camera depth, measured along the forward axis.
+
+Use `coord.renderGrid` on the `report` output of `scene.render` or
+`sdf.render` to use the actual camera and native art grid. This includes
+orthographic setback and any view offset captured by the renderer.
+Use `coord.cameraGrid` for a standalone authored camera and viewport.
+
+Give the time nodes an explicit frame rate. They accept a number or an
+integer ratio such as `{"numerator":30000,"denominator":1001}`. Frames
+are signed integer indices. Seconds-to-frames uses `floor` by default
+and accepts `ceil`, `nearest` with ties toward +∞, and `exact` to reject
+times between frames.
+
+The colour nodes preserve straight alpha. For a linear raster, RGB
+uses floating-point linear sRGB and alpha uses `[0,1]`. Convert it to
+display RGB before PNG or clip export. Encoding clamps out-of-range RGB
+by default and supports `outOfRange: "error"` to diagnose clipping.
+
+Use `ink-studio graph describe coord.project` for a runnable example or
+`KIT.procedural.conversions` for the same operations in the library.
+
+### Legacy and shared port shapes
 
 | Port type | Value |
 | --- | --- |
