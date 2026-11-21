@@ -11,7 +11,7 @@
     replay: RenderGraph.replay,
     feedbackMotion: RenderGraph.feedbackMotion,
     rowTable: RenderGraph.rowTable,
-    layer: (node, w, h, world, time, camera, gl, sceneTime) =>
+    layer: (node, w, h, world, time, camera, gl, sceneTime, inputs) =>
       RenderGraph.layer(
         node,
         w,
@@ -21,7 +21,9 @@
         K.poly2.text,
         camera,
         (spec, ctx) => K.annotations.anchor(spec, { ...ctx, sceneTime }),
-        gl
+        gl,
+        inputs,
+        K.procedural.raster
       )
   });
 })(KIT);

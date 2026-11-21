@@ -67,6 +67,7 @@ void main() {
     weight *= n >= 1.0 ? (u_background ? 1.0 : 0.0) : (u_depthInvert ? 1.0 - a : a);
   }
   if (u_operation == 1) {
+    if (u_layer) weight *= placedLayerAt(u_source, pixel, u_layerDest, u_layerRegion, u_layerTopDown, u_linear).a;
     if (u_volume) {
       ivec2 size = textureSize(u_depth, 0);
       ivec2 site = min(ivec2(pixel / u_size * vec2(size)), size - 1);
@@ -322,7 +323,8 @@ export function createRenderGraph(gl, { api, program, resources, target, texture
         const mask = outputs.get(node.mask),
           table = node.type === 'grade' && api.cube(node);
         const layer =
-          node.layer && (!feedback || memory.capture) && api.layer(node, w, h, world, time, camera, gl, frame.time);
+          node.enabled && node.layer && (!feedback || memory.capture) &&
+          api.layer(node, w, h, world, time, camera, gl, frame.time, frame.renderGraphInputs);
         const scanlines = api.rowTable(node.rows, w, h, time, node.rowEdits);
         const select = node.enabled && ownership && node.select && JSON.stringify(node.select);
         const opacity = node.opacity * (node.layer && !feedback ? (layer?.opacity ?? 0) : 1);

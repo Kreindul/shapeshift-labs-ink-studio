@@ -252,6 +252,10 @@ artifacts and report.
 Use [graph clips](graph-clips.md) to export a named raster or scene output at
 an exact frame rate with warm-up and cuts.
 
+See [connecting procedural rasters](render-graph.md#connect-procedural-rasters)
+for binding graph outputs to the renderer and reading image, mask, and native
+scene passes back into procedural nodes.
+
 ### Persistent sessions
 
 Send one JSON request per line. The response echoes the optional request

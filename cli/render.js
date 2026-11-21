@@ -187,8 +187,9 @@ function render(world, o, preparedPalettes) {
     if (result.renderStats) result.renderStats.frameMs = performance.now() - start;
     return result;
   }
-  const graph = o?.samples || o?.captureCoverage ? null : RenderGraph.prepare(o?.renderGraph ?? world.look?.renderGraph);
-  if (graph?.passes.length) {
+  const graph = o?.samples || o?.captureCoverage ? null :
+    RenderGraph.prepare(o?.renderGraph ?? world.look?.renderGraph, o?.renderGraphCapture);
+  if (graph?.passes.length || graph?.captures.size) {
     RenderGraph.resources(graph, o.w ?? o.width ?? 900, o.h ?? o.height ?? 620);
     const start = o?.renderStats ? performance.now() : 0;
     const requested = ArtPasses.select(o?.passes);
@@ -196,11 +197,13 @@ function render(world, o, preparedPalettes) {
     const passes = diagnostic ? [...new Set([...requested, ...(graph.needsOwner ? ['splatId'] : []),
       ...(graph.needsDepth ? ['depth'] : [])])] : o?.passes;
     let camera;
-    const base = render(world, { ...o, renderGraph: false, renderHistory: undefined, passes,
+    const base = render(world, { ...o, renderGraph: false, renderGraphCapture: undefined, renderHistory: undefined, passes,
       ...(graph.needsCamera && cameraCapture(o, view => { camera ??= view; })) }, preparedPalettes);
     const time = o?.interfaceTime ?? o?.t ?? world.lookSnapshot?.time ?? 0;
     const kit = require('../index.js').load().KIT;
-    const frame = { ...base, ...runGraph(graph, base, world, time, kit.poly2.text, camera, (spec,ctx) => kit.annotations.anchor(spec,{ ...ctx,sceneTime:o?.t }), { ...o, renderHistoryKey: o?.renderHistoryKey ?? o?.[reconstructionSource] }) };
+    const frame = { ...base, ...runGraph(graph, base, world, time, kit.poly2.text, camera,
+      (spec,ctx) => kit.annotations.anchor(spec,{ ...ctx,sceneTime:o?.t }),
+      { ...o, renderHistoryKey: o?.renderHistoryKey ?? o?.[reconstructionSource] }, kit.procedural) };
     if (base.passes && diagnostic) {
       if (requested.length) frame.passes = ArtPasses.subset(base.passes, requested);
       else delete frame.passes;

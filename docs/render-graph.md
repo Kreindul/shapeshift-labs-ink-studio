@@ -20,6 +20,70 @@ Screen coordinates are in final output pixels from the top left. Reflected and d
 
 Passes can set `select` to a named object, entity, material, surface, prefab or tag selector. The selection follows the visible depth-writing splat at each pixel of the world grid. A `mask` reference can narrow the selection further. `opacity` scales the effect from zero to one. A pass with `enabled: false` keeps its image input or supplies zero mask coverage. Requested diagnostic buffers remain on the native world grid.
 
+## Connect procedural rasters
+
+Bind a named raster to a composite or feedback layer with
+`layer.source: { slot: "ink" }`. Bind a raster to a mask pass with
+`raster: { slot: "puddle" }`. The CPU and WebGL renderer accept the same
+`renderGraphInputs` record.
+
+```js
+const renderGraph = { passes: [
+  { id: 'wet', type: 'mask', raster: {
+    slot: 'puddle', channel: 0, range: [0, 1], rect: [48, 92, 120, 24], filter: 'linear'
+  } },
+  { id: 'ink', type: 'composite', mask: 'wet', layer: {
+    source: { slot: 'ink' }, rect: [48, 92, 120, 24]
+  } }
+] };
+const renderGraphInputs = { ink: preparedImage, puddle: proceduralMask };
+```
+
+Each slot takes a procedural raster with `width`, `height`, `data`, and
+an optional `channels` count. An image uses its own dimensions and straight
+alpha. Use the layer's `rect` and `filter` for destination placement and
+resampling. A mask defaults to alpha for two- or four-channel rasters and
+to luma for RGB or the sole channel of a scalar raster. Select a numerical
+channel index or `alpha`, `luma`, `r`, `g`, or `b` explicitly. The default
+range is `[0, 255]`. Samples are normalized and clamped to the specified
+range, then multiplied by any rectangle, earlier mask, or depth selection
+on the pass. Inversion applies to the combined coverage. Layers stretch to
+the frame when no destination rectangle is set. Disabled or unused passes
+do not read their slots.
+
+In an ordinary procedural graph, connect raster outputs to a `data.record`
+node with one key per slot and connect the record to
+`scene.render.renderGraphInputs`. Set `scene.render.options.renderGraph`
+to the graph definition. The two graphs sample the scene at the same take
+time. Screen-space layers composite after scene optics. Use
+`warp.surface` to place a procedural texture on a depth-tested world
+surface when glass or rain should cover it.
+
+## Read screen and scene passes
+
+In the headless renderer, pass a list of IDs in `renderGraphCapture` to
+keep the selected passes on `frame.renderGraphPasses`. This also works
+with the `scene.render.renderGraphCapture` input. Read a captured pass
+with `scene.pass` and a channel such as `graph:wet`. Its `data` port returns
+one byte channel for a mask or straight RGBA for an image, both at the
+render graph grid. The `value` port is an RGBA preview. You can capture
+the original `scene` image or a branch outside the final image. The chosen
+final output remains the same.
+
+Native scene channels such as `depth` and `precipitation` use the existing
+`scene.render.channels` and `scene.pass` ports. They retain their native
+art grid and units. A procedural node can consume either kind of pass.
+
+```sh
+node examples/render-graph-bridge.cjs graph-bridge-review
+```
+
+The example places a procedural ferry sign behind a blue glass pane and
+world-space rain. The sign also supplies an image slot for its reflection
+on wet paving. A second procedural raster supplies the puddle mask. The
+example exports the final scene, the native rain pass, and the puddle mask
+captured from the render graph and resized by an ordinary raster node.
+
 ## Scanline distortion
 
 Give a distortion pass `rows` to change its source sampling one output row

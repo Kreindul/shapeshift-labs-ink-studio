@@ -66,7 +66,7 @@ function smearFrame(node, work, input, field, refresh, output, weightAt, memory,
   }
 }
 
-function runGraph(plan, frame, world, time, text, camera, resolve, options) {
+function runGraph(plan, frame, world, time, text, camera, resolve, options, procedural) {
   const { w, h, passes } = frame;
   const layout = resources(plan, w, h),
     groups = plan.passes.some(n => n.effect) && ownerGroups(world);
@@ -116,7 +116,8 @@ function runGraph(plan, frame, world, time, text, camera, resolve, options) {
       const work = layout.passes[index];
       const held = memory && (memory.capture ? new Uint8Array(work.width * work.height * 4) : memory.value);
       const raster =
-        node.layer && (!feedback || memory.capture) && layer(node, w, h, world, time, text, camera, resolve);
+        node.layer && (!feedback || memory.capture) &&
+        layer(node, w, h, world, time, text, camera, resolve, undefined, options.renderGraphInputs, procedural?.raster);
       const oldSignal = feedback &&
         memory.capture &&
         memory.decay > 0 && { data: memory.value, w, h, filter: node.filter };
@@ -262,6 +263,8 @@ function runGraph(plan, frame, world, time, text, camera, resolve, options) {
             let weight = (chosen ? (mask ? mask[p] / 255 : 1) : 0) * effects.depthWeight(node.depth, depth?.[native]);
             const q = p * 4;
             if (maskPass) {
+              if (raster && weight)
+                weight *= FrameComposite.samplePlaced(raster, x, y, color) ? color[3] / 255 : 0;
               if (node.volume && weight) {
                 const z = depth?.[native];
                 const u = ((native % passes.w) + 0.5) / passes.w,
@@ -419,6 +422,13 @@ function runGraph(plan, frame, world, time, text, camera, resolve, options) {
     outputs.set(node.id, output);
     for (const dependency of node.dependencies) if (plan.lastUse.get(dependency) === index) outputs.delete(dependency);
   }
-  return FrameComposite.straight(outputs.get(plan.output), w, h, frame.alpha);
+  const result = FrameComposite.straight(outputs.get(plan.output), w, h, frame.alpha);
+  if (plan.captures?.size) result.renderGraphPasses = Object.fromEntries([...plan.captures].map(([id, kind]) => {
+    const data = outputs.get(id);
+    const raster = kind === 'mask' ? { width: w, height: h, channels: 1, data: data.slice() } :
+      procedural.sceneGraph.rasterFrame(FrameComposite.straight(data, w, h, true));
+    return [id, { kind, ...raster }];
+  }));
+  return result;
 }
 module.exports = runGraph;
