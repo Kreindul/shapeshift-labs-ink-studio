@@ -1140,3 +1140,5 @@ Use [faceted surface reconstruction](docs/faceted-surfaces.md) for optional flat
 Use [layered cut paper and relief](docs/paper-relief.md) for real apertures, paper thickness, parallax, native geometry and optional crisp front paint with baked soft shadows. Explore [The Quiet Orchard / Tidal Atlas](examples/paper-relief.html).
 
 Use [voxel and relief-pixel surfaces](docs/voxel-surface.md) to sample selected signed fields into cubes, columns, slabs or shallow relief. [Solid Signals](examples/voxel-surface.html) includes a breakable tower and a sculpt that scatters into rigid blocks.
+
+Use [thread, stitch and woven surfaces](docs/textile-rendering.md) for raised embroidery, interlocking knit loops and patterned warp and weft on curved charts. [Thread Studies](examples/thread-studies.html) includes an embroidered garden, a knitted moth and a woven harbor.
