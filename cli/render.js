@@ -1584,7 +1584,7 @@ function renderFrame(world, o, preparedPalettes) {
     let ex = Math.min((shaped ? shaped.reach : 3) * Math.sqrt(A) + footprintMargin, 2048),
       ey = Math.min((shaped ? shaped.reach : 3) * Math.sqrt(C) + footprintMargin, 2048);
     if(projectedFrame){const reach=shaped.reach/SplatFootprints.half;ex=Math.min(2048,Math.max(ex,(Math.abs(projectedFrame[0])+Math.abs(projectedFrame[2]))*reach));ey=Math.min(2048,Math.max(ey,(Math.abs(projectedFrame[1])+Math.abs(projectedFrame[3]))*reach));}
-    const engravingId=engraved?.indices[i]??0,engravingStyle=engravingId&&engraved.styles[engravingId-1];
+    const engravingId=(kraw&(32|256|32768))?0:(engraved?.indices[i]??0),engravingStyle=engravingId&&engraved.styles[engravingId-1];
     let engrave;
     if(engravingStyle){
       const f=SplatFootprints.posedFrame(world,i,t,SC[i]);

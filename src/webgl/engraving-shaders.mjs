@@ -6,7 +6,7 @@ vec4 engravingData(int texel){return texelFetch(u_data,ivec2(texel%2048,texel/20
 export const engravingVertex = `
  int eq=u_engravingRows*2048+a_index*4;
  vec4 ea=engravingData(eq),eb=engravingData(eq+1),ec=engravingData(eq+2),ed=engravingData(eq+3);
- int slot=int(ea.x);v_engravingAnchor=vec4(ea.yzw,ea.x);v_engravingX=vec4(0);v_engravingY=vec4(0);v_engravingRestNormal=vec4(0,1,0,fogk);
+ int slot=(kraw&(32|256|32768))!=0?0:int(ea.x);v_engravingAnchor=vec4(ea.yzw,float(slot));v_engravingX=vec4(0);v_engravingY=vec4(0);v_engravingRestNormal=vec4(0,1,0,fogk);
  if(slot>0){
   vec3 ru=eb.xyz,rv=ec.xyz,lu=vec3(eb.w,ec.w,ed.x),lv=ed.yzw;
   vec3 wu=FM*lu*sc,wv=FM*lv*sc;vec2 pu=(T*wu).xy,pv=(T*wv).xy;float area=pu.x*pv.y-pu.y*pv.x;

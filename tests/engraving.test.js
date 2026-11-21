@@ -277,3 +277,31 @@ test(
     }
   }
 );
+
+test('reconstruction and afterimages retain engraving anchors with transported live axes', () => {
+  const w = fixture(kit),
+    original = w.engraving,
+    settings = {
+      select: { object: 'plate' },
+      cell: 0.5,
+      distance: 0.7,
+      spin: 1.3,
+      keys: [
+        { time: 0, state: 'solid' },
+        { time: 1, state: 'fragmented' }
+      ]
+    },
+    broken = K.reconstruction.frame(w, 1, settings);
+  assert.equal(broken.engraving, original);
+  assert.notDeepEqual(broken.splatFootprints.frames, w.splatFootprints.frames);
+  const history = K.afterimages.history(),
+    rules = K.afterimages.prepare([{ select: { object: 'plate' }, duration: 1, interval: 0.1, maxSamples: 1 }]);
+  history.frame(w, 0, rules);
+  w.data[0] = 1;
+  const ghosts = history.frame(w, 0.2, rules),
+    appended = K.afterimages.append(w, ghosts);
+  assert.equal(appended.count, 2);
+  assert.equal(appended.engraving.indices[1], 1);
+  assert.deepEqual(appended.engraving.anchors.subarray(3, 6), original.anchors.subarray(0, 3));
+  assert(appended.splatFootprints.frames.subarray(6, 12).some(Boolean));
+});
