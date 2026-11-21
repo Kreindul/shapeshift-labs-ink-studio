@@ -293,6 +293,14 @@ const specifications = {
   'music.routeSampleKit': {nodes:{played:{op:'music.inspectProduction',inputs:{source:production}}},
     inputs:{tracks:link('played','events'),routes:{lead:{pad:'reed'}}}},
   'music.programPads': {inputs:padPattern.inputs},
+  'music.composeSlices': {inputs:{source:{id:'slice-canon',output:'duet',slices:{
+    tick:{pad:'metal',play:{sample:'hit'}}
+  },patterns:{
+    call:{op:'phrase',length:1,hits:[{id:'tap',beat:0,slice:'tick'},{id:'answer',beat:.625,slice:'tick'}]},
+    steady:{op:'loop',source:'call',length:4},
+    drift:{op:'loop',source:'call',length:4,period:1.0625},
+    duet:{op:'stack',layers:{steady:{source:'steady'},drift:{source:'drift'}}}
+  },render:{sampleRate:8000}}}},
   'music.capturePadPerformance': {inputs:{source:{events:[{time:.25,kind:'pulse',channel:'switch',value:.65}]},
     routes:{switch:{pad:'metal'}}}},
   'music.editPadPerformance': {nodes:{pads:padPattern},

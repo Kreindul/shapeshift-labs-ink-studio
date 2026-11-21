@@ -192,5 +192,8 @@
     }
     return performance([...rows.values()],baseline.options);
   }
-  A.padPattern=Object.freeze({perform,capture,edit});
+  A.padPattern=Object.freeze({perform,capture,edit,validate(source) {
+    check(fields(source,['events','options']),'Expected an editable pad performance');
+    return performance(source.events,source.options);
+  }});
 })(KIT.procedural);
