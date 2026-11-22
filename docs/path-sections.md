@@ -88,3 +88,6 @@ an animated sweep, portable plans and the full numerical reports.
 node examples/simulation-path-sections/demo.cjs /tmp/ink-duct
 node cli/ink-studio.js sim sections /tmp/ink-duct/duct-sdf.plan.json --out /tmp/duct-measurements.json
 ```
+
+Use [branched domains](branched-domains.md) to join measured tubes at sockets and
+retain their path and geometry provenance in a simulation model.

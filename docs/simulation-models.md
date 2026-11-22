@@ -152,3 +152,6 @@ through both the world and the graph.
 
 [Section measurements along a path](path-sections.md) provide geometry profiles
 for models of ducts, valves and variable-width channels.
+
+[Branched domains](branched-domains.md) assemble those profiles into a versioned
+geometry graph with explicit junctions, cavities, reservoirs, ports and probes.

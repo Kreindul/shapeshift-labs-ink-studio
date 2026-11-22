@@ -510,6 +510,32 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         const result=require('./path-sections.js').measure(kit,read(file),file,shot?.dependency);
         return respond(result);
       }
+      case 'domain': {
+        ensure(typeof file==='string' && other===undefined &&
+          (opt.section===undefined||typeof opt.section==='string') &&
+          (opt.world===undefined?opt.ticks===undefined&&opt.steps===undefined&&opt.t===undefined:typeof opt.world==='string'),
+        'Use sim domain <domain.json> [--world world.json --section tube/index --out file.json]');
+        const source=read(file);
+        let domain;
+        if (source?.format===W.domains.compiledFormat) {
+          ensure(source.version===1&&opt.world===undefined,'A compiled domain already pins its socket positions');
+          domain=source;
+        } else {
+          let query,snapshot;
+          if (opt.world!==undefined) {
+            shot?.dependency(opt.world);
+            const run=runtime(load(opt.world));
+            if (opt.ticks!==undefined||opt.steps!==undefined||opt.t!==undefined) run.advance(to(run));
+            query=run.query();
+            const {world,tick}=run.view();
+            snapshot={world:world.id,tick};
+          }
+          const {resolveSource}=require('./path-sections.js');
+          domain=W.domains.compile(source,{query,snapshot,
+            resolveSource:definition=>resolveSource(kit,definition,file,shot?.dependency)});
+        }
+        return respond(opt.section===undefined?domain:W.domains.trace(domain,opt.section));
+      }
       case 'run':
       case 'resume':
       case 'fork': {

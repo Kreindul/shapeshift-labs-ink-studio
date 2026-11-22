@@ -2,11 +2,8 @@
 const fs=require('node:fs'), path=require('node:path');
 const format='ink-studio/path-section-plan';
 
-function measure(kit,document,file,dependency=()=>{}) {
-  if (document?.format!==format || document.version!==1 || !document.source)
-    throw Error('Expected a version 1 path section plan');
-  const {format:_,version,...options}=document;
-  const {kind,file:reference,sculpt,...source}=options.source;
+function resolveSource(kit,raw,file,dependency=()=>{}) {
+  const {kind,file:reference,sculpt,...source}=raw;
   const K=kit.KIT, origin=path.dirname(path.resolve(file));
   if (reference!==undefined && (typeof reference!=='string'||!reference||path.isAbsolute(reference)||path.win32.isAbsolute(reference)))
     throw Error('Section geometry file must be relative to its plan');
@@ -28,6 +25,13 @@ function measure(kit,document,file,dependency=()=>{}) {
       } else throw Error('Use a .json sculpt or a .js/.cjs field module for SDF sections');
     }
   } else if (location!==undefined||sculpt!==undefined) throw Error('Contour sections use embedded profiles or paired banks');
-  return K.procedural.pathSections.measure({...options,source:{...source,kind}});
+  return {...source,kind};
 }
-module.exports={measure,format};
+
+function measure(kit,document,file,dependency) {
+  if (document?.format!==format || document.version!==1 || !document.source)
+    throw Error('Expected a version 1 path section plan');
+  const {format:_,version,source,...options}=document;
+  return kit.KIT.procedural.pathSections.measure({...options,source:resolveSource(kit,source,file,dependency)});
+}
+module.exports={measure,resolveSource,format};
