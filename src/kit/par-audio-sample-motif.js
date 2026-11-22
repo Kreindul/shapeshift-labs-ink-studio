@@ -17,7 +17,7 @@
   }
 
   function plan(input,backing,settings={}) {
-    check(fields(settings,['map','range','seed','tonic',...order]) &&
+    check(fields(settings,['map','range','seed','tonic','derive',...order]) &&
       fields(settings.range ?? {},['from','to']) && Number.isSafeInteger(settings.seed ?? 0),'Invalid sample-to-motif settings');
     const source=S.instrumentAudio(input), score=scoreInput(backing), {sampleRate}=score;
     const time=S.mixerTime(sampleRate,settings.map), {from,to}=settings.range ?? {};
@@ -29,11 +29,25 @@
     const {beatAt}=time.beatClock(), origin=from===undefined ? T.read(0) : position(time,from);
     const clock=P.musicTiming.compile(settings.map);
     const span=beatAt(end)-beatAt(first);
+    let gesture, projection, relative=0;
+    if (settings.derive!==undefined) {
+      const derive=settings.derive;
+      check(fields(derive,['analysis','projection','at']) && finite(derive.at ?? 0,0,span-.125) &&
+        !(settings.lead?.shape && settings.lead?.notes===undefined),
+      'Derived notes need a valid placement and the original audio coordinates');
+      relative=derive.at ?? 0;
+      gesture=S.timbreGesture.extract(source,derive.analysis);
+      projection=S.timbreGesture.project(gesture,{beats:Math.min(2,(span-relative)*.54),
+        tailBeats:Math.min(1,(span-relative)*.28),...(settings.tonic!==undefined && {tonic:settings.tonic}),...derive.projection});
+      check(relative+projection.beats<=span+.000001,'The derived gesture exceeds the score window');
+    }
     const {takes:{source:analysis}}=A.sampleInstrument.analyze({source});
     const rawRoot=settings.lead?.root, detected=analysis.root?.confidence>=.4 ? analysis.root : null;
     const anchor=settings.tonic===undefined ? detected?.suggestedNote ?? 60 : H.midi(settings.tonic);
-    const root=rawRoot===undefined ? detected?.midi ?? anchor : H.midi(rawRoot);
-    const originOfRoot=rawRoot!==undefined ? 'authored' : detected ? 'detected' : 'reference';
+    const measured=projection?.origin;
+    const root=rawRoot===undefined ? measured!==null && measured!==undefined ? Math.min(127,measured) :
+      detected?.midi ?? anchor : H.midi(rawRoot);
+    const originOfRoot=rawRoot!==undefined ? 'authored' : detected || measured!==null && measured!==undefined ? 'detected' : 'reference';
     const defaults={raw:{gainDb:-10,pan:-.23,at:span*.16},lead:{gainDb:-9,pan:.07},
       accent:{gainDb:-10,pan:.23},texture:{gainDb:-14,pan:-.12,at:0}};
     function boundary(point,last=frames-1) {
@@ -76,10 +90,20 @@
       check(fields(options,['gainDb','pan',...allowed[id]]) &&
         finite(options.gainDb ?? defaults[id].gainDb,-60,6) && finite(options.pan ?? defaults[id].pan,-1,1),
       'Invalid '+id+' motif settings');
-      const {gainDb,pan,at}={...defaults[id],...options};
+      const projectedAt=id==='texture' && projection ? relative+projection.motifs.tail.events[0].beat : defaults[id].at;
+      const {gainDb,pan,at}={...defaults[id],at:projectedAt,...options};
       const pitched=id==='lead', gated=pitched || id==='accent';
-      const hits=options.notes ?? options.hits ?? (pitched ? defaultLead : id==='accent' ? defaultHits : [{beat:at,velocity:1}]);
-      check(Array.isArray(hits) && integer(hits.length,1,128) &&
+      const derivedHits=projection && (pitched || id==='accent') ?
+        (projection.motifs[pitched ? 'contour' : 'attacks']?.events ?? []).map(row=>{
+          const point=pitched ? gesture.pitchTrack.find(point=>'pitch-'+point.sample===row.id) :
+            gesture.attacks.find(point=>point.id===row.id);
+          const tune=pitched && rawRoot===undefined ? Math.max(-1200,Math.min(1200,(root-point.midi)*100)) : 0;
+          return {beat:relative+row.beat,duration:row.duration,velocity:row.velocity,
+            ...(pitched && {note:row.midi}),play:{startSample:point.sample,tune}};
+        }) : null;
+      const hits=options.notes ?? options.hits ?? derivedHits ??
+        (pitched ? defaultLead : id==='accent' ? defaultHits : [{beat:at,velocity:1}]);
+      check(Array.isArray(hits) && integer(hits.length,derivedHits && pitched && options.notes===undefined ? 0 : 1,128) &&
         (!pitched || Array.from(hits).every(row=>row?.note!==undefined)),'Supply editable lead notes or accent hits');
       const events=Array.from(hits,(row,i)=>hit(id+'-'+(i+1),row,gated));
       let transform=null, kitRoot=root;
@@ -98,7 +122,7 @@
         check(fields(options.grains ?? {},['grainMs','density','semitones','sprayMs','spread','reverse','jitterCents']),
           'Invalid texture controls');
         transform={kind:'granular',frames:stop-begin,grains:{grainMs,density,semitones,sprayMs,spread,reverse,jitterCents,
-          seed:(settings.seed ?? 0)|0}};
+          seed:(settings.seed ?? 0)|0},...(projection && {range:projection.tail})};
       }
       const noteRoot=Math.round(kitRoot), take={asset:'material',
         ...(pitched && {root:noteRoot,tune:100*(noteRoot-kitRoot)})};
@@ -107,12 +131,13 @@
       return {id,kit,performance:{events,options:{sampleRate,duration:ratio(frames,sampleRate),stems:false}},transform};
     });
     return {format,version:1,source:shapeOf(source),score:shapeOf(score),firstSample:first,endSample:end,
-      ...(settings.map!==undefined && {map:settings.map}),root:{midi:root,kind:originOfRoot,analysis:analysis.root},roles};
+      ...(settings.map!==undefined && {map:settings.map}),root:{midi:root,kind:originOfRoot,analysis:analysis.root},
+      ...(projection && {gesture:projection}),roles};
   }
 
   function ready(plan,input,backing) {
     const source=S.instrumentAudio(input), score=scoreInput(backing), rate=score.sampleRate;
-    check(fields(plan,['format','version','source','score','firstSample','endSample','map','root','roles']) &&
+    check(fields(plan,['format','version','source','score','firstSample','endSample','map','root','roles','gesture']) &&
       plan.format===format && plan.version===1 && ['source','score'].every(key=>{
         const actual=key==='source' ? shapeOf(source) : shapeOf(score);
         return fields(plan[key],Object.keys(actual)) && Object.keys(actual).every(name=>plan[key][name]===actual[name]);
@@ -133,6 +158,14 @@
     const {value}=A.mixer.render(mixer,{source});
     return {...value,samples:value.samples.subarray(0,frames*value.channels)};
   }
+  function texture(source,rate,settings) {
+    const {range}=settings;
+    if (!range) return grains(source,rate,settings);
+    const {fromSample,toSample}=range;
+    check(fields(range,['fromSample','toSample']) && integer(fromSample,0,length(source)-1) &&
+      integer(toSample,fromSample+1,length(source)),'Invalid gesture tail coordinates');
+    return grains({...source,samples:source.samples.slice(fromSample*source.channels,toSample*source.channels)},rate,settings);
+  }
 
   function take(plan,context,id) {
     check(order.includes(id),'Choose a raw, lead, accent or texture role');
@@ -141,12 +174,12 @@
       role.performance.options?.sampleRate===rate &&
       T.compare(T.read(role.performance.options.duration),T.read(ratio(frames,rate)))===0 &&
       (role.transform===null || id==='lead' && fields(role.transform,['kind','settings']) && role.transform.kind==='shape' ||
-        id==='texture' && fields(role.transform,['kind','frames','grains']) && role.transform.kind==='granular' &&
+        id==='texture' && fields(role.transform,['kind','frames','grains','range']) && role.transform.kind==='granular' &&
         integer(role.transform.frames,32,frames) &&
         fields(role.transform.grains,['grainMs','density','semitones','sprayMs','spread','reverse','jitterCents','seed'])),
     'Sample motif role uses an invalid performance or transform');
     const material=role.transform===null ? source : role.transform.kind==='shape' ?
-      A.shapeInstrumentSample(source,role.transform.settings).value : grains(source,rate,role.transform);
+      A.shapeInstrumentSample(source,role.transform.settings).value : texture(source,rate,role.transform);
     const {value,report}=A.sampleKit.render(role.kit,{material},role.performance.events,{...role.performance.options,stems:false});
     return {stem:value,material,role,events:report.events,kitHeadroom:report.gain};
   }
@@ -185,8 +218,9 @@
     });
     const {value,report}=A.gestureBank.audition(clips,{...options,sampleRate:context.rate,levelMatch:'shared'});
     return {value,report:{...report,headroom,firstSample:plan.firstSample,endSample:plan.endSample,root:plan.root,
-      roles:Object.fromEntries(rows.map(({id,events})=>[id,events]))}};
+      ...(plan.gesture && {gesture:plan.gesture}),roles:Object.fromEntries(rows.map(({id,events})=>[id,events]))}};
   }
 
   A.sampleMotif=Object.freeze({plan,render,audition});
+  S.stretchMotifTexture=texture;
 })(KIT.procedural);

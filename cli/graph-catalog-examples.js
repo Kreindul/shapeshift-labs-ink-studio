@@ -18,6 +18,11 @@ const sampleCapture = {op:'audio.captureSample',inputs:{source:audio,settings:{
   source:{kind:'graph',name:'oscillator'},firstSample:16,endSample:48
 }}};
 const sampleMotifPlan={op:'music.planSampleMotif',inputs:{source:audio,score:audio}};
+const timbreGesture={op:'music.extractTimbreGesture',inputs:{source:audio,options:{id:'tone'}}};
+const timbreComparison={format:'ink-studio/timbre-gesture',version:1,id:'second',
+  source:{sampleRate:8000,channels:1,frames:128},active:{fromSample:0,toSample:128},peakRms:.35,pitchTrack:[],
+  attacks:[{id:'hit-0',sample:0,strength:.8,range:{fromSample:0,toSample:54}}],
+  tail:{fromSample:72,toSample:128,midi:null},timeline:[{fromSample:0,toSample:128,rms:.35,brightness:.4}]};
 const atmosphereReference={sampleRate:8000,frames:128,events:{lead:[]}};
 const atmosphereSettings={layers:[{id:'drift',kind:'bed',assets:['tone']}]};
 const atmospherePlan={op:'music.planAtmosphere',inputs:{source:atmosphereReference,assets:{tone:audio},settings:atmosphereSettings}};
@@ -341,6 +346,12 @@ const specifications = {
   'music.planSampleMotif': {inputs:sampleMotifPlan.inputs},
   'music.renderSampleMotif': {nodes:{plan:sampleMotifPlan},inputs:{source:audio,score:audio,plan:link('plan'),role:'lead'}},
   'music.auditionSampleMotif': {nodes:{plan:sampleMotifPlan},inputs:{source:audio,score:audio,plan:link('plan')}},
+  'music.extractTimbreGesture': {inputs:timbreGesture.inputs},
+  'music.projectTimbreGesture': {nodes:{profile:timbreGesture},inputs:{source:link('profile')}},
+  'music.matchTimbreGesture': {nodes:{profile:timbreGesture},inputs:{source:link('profile'),candidates:[timbreComparison]}},
+  'music.timbrePalette': {inputs:{name:'broken-beat',options:{sampleRate:8000}}},
+  'music.planTimbreOrchestration': {inputs:{source:audio,production,settings:{placements:[{section:'opening'}],
+    takes:[{id:'air',tail:{part:'lead'}}]}}},
   'music.inspectEditSession': {inputs:{source:editSession}},
   'music.editSession': {inputs:{source:editSession,edits:[{op:'pin',lane:'lead',mode:'pitch'}]}},
   'music.renderEditSession': {inputs:{source:editSession,options:{preview:{from:{beat:0},to:{beat:1}}}}},

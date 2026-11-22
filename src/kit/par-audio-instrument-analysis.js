@@ -41,12 +41,15 @@
 
   function analyzeTake(source,settings) {
     const {sampleRate,channels,samples}=input(source), frames=samples.length/channels;
-    check(fields(settings,['lowHz','highHz','threshold','detect','attackMs']) &&
-      finite(settings.lowHz ?? 55,35,250) && finite(settings.highHz ?? 1100,300,2000) &&
+    check(fields(settings,['lowHz','highHz','threshold','detect','attackMs','probeRate','windowMs','hopMs']) &&
+      finite(settings.lowHz ?? 55,35,4000) && finite(settings.highHz ?? 1100,300,8000) &&
+      finite(settings.probeRate ?? 8000,8000,24000) && finite(settings.windowMs ?? 30,8,80) &&
+      finite(settings.hopMs ?? 18,4,50) &&
       finite(settings.threshold ?? .18,.04,.3) && finite(settings.attackMs ?? 32,0,180),
     'Invalid pitch analysis or attack settings');
-    const {lowHz=55,highHz=1100,threshold=.18,attackMs=32}=settings;
-    const stride=Math.max(1,Math.floor(sampleRate/8000)), rate=sampleRate/stride;
+    const {lowHz=55,highHz=1100,threshold=.18,attackMs=32,probeRate=8000,windowMs=30,hopMs=18}=settings;
+    const stride=Math.max(1,Math.floor(sampleRate/probeRate)), rate=sampleRate/stride;
+    check(highHz>lowHz && highHz<=rate*.4,'Pitch bounds need to fit the analysis sampling rate');
     const probeLength=Math.floor(frames/stride), mono=new Float64Array(probeLength), power=new Float64Array(probeLength+1);
     let channel=0, peak=0, level=0;
     if (channels===2) {
@@ -61,8 +64,8 @@
     }
     for (let i=0;i<probeLength;i++) power[i+1]=power[i]+mono[i]**2;
     const min=Math.max(2,Math.floor(rate/highHz)), max=Math.ceil(rate/lowHz);
-    const width=Math.max(max*2,Math.round(rate*.030)), diff=new Float64Array(max+2);
-    const hop=Math.max(Math.round(rate*.018),Math.ceil(probeLength/224));
+    const width=Math.max(max*2,Math.round(rate*windowMs/1000)), diff=new Float64Array(max+2);
+    const hop=Math.max(Math.round(rate*hopMs/1000),Math.ceil(probeLength/224));
     const active=[], voiced=[], noisy=[], ratio=threshold;
     for (let at=0;at<probeLength;at+=hop) {
       const end=Math.min(probeLength,at+hop);

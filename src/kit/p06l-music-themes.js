@@ -144,7 +144,7 @@
       return {part:lane.part,section:lane.section.id,scope:'section',
         adopt:M.motif({length:lane.section.end-lane.section.beat,events:notes})};
     });
-    const production=A.revise(source,{edits,unpin},assets), rendered=A.compile(production,assets);
+    const revision={edits,unpin}, production=A.revise(source,revision,assets), rendered=A.compile(production,assets);
     const performed=Object.fromEntries(Object.entries(rendered.events).map(([part,events])=>{
       const byBeat=new Map();
       for (const event of events)
@@ -165,7 +165,7 @@
     const sections=rendered.arrangement.sections.map(section=>({id:section.id,
       appearances:appearances.filter(row=>row.section===section.id).map(row=>row.id),
       before:tracker.at(section.time),after:tracker.at(section.endTime)}));
-    return P.data.freeze({production,themeMap,report:{sections}});
+    return P.data.freeze({production,themeMap,revision,report:{sections}});
   }
 
   function createHistory(maps,duration,compiled) {
