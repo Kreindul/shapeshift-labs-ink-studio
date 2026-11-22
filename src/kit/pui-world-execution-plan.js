@@ -128,7 +128,7 @@
   }
 
   function describe(plan,{tick,world,states,delays,sampling,chunkState,partitioned,observers}) {
-    const {order,systems,schedule,rates,chunks,transfers} = plan, {subdivision} = schedule;
+    const {order,systems,schedule,rates,chunks,transfers,couplings} = plan, {subdivision} = schedule;
     const phases = rates?.phases ?? [{slice:1,names:order}];
     const T = K.procedural.takeTime;
     const hostHz = world.takeClock?.simulationRate === undefined ? 1/world.dt : T.seconds(T.read(world.takeClock.simulationRate));
@@ -188,6 +188,8 @@
       clock:{dtSeconds:world.dt,hz:finite(hostHz),subdivision,mode:rates ? 'multi-rate' : 'fixed'},
       phases:phases.map(({slice,names}) => ({slice,at:slice/subdivision,candidates:names})),
       systems:lanes,postStep:{observers,transferProducers:transfers.producers},
+      ...(couplings.length&&{transferCouplings:couplings.map(({name,describe})=>({id:name,...describe,
+        phase:'after ordinary transfers, before system steps',latest:states[name]}))}),
       samplingPolicies:policies,signals:connections,feedback:feedback(plan,connections),assets:baked,
       resources:{
         memory:{

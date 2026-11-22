@@ -259,6 +259,7 @@
       }
     }
     const schedule = W.rates.schedules(world,systems,chunks,timedInputs.length>0);
+    const couplings = W.transferCoupling.bind(systems,transfers,schedule);
     for (const [name,system] of Object.entries(systems)) if (system.processingLimit) {
       const {every,substeps}=schedule.rates[name];
       check(every===1 && substeps===1 && !chunks?.managed.has(name),
@@ -327,7 +328,7 @@
     const interactions = W.interactionRuntime.bind({world,systems,chunks,transfers,ports,incoming,portValue});
     const influence = W.influenceRuntime.bind({systems,transfers,chunks});
     const population = W.populationRuntime.bind({systems,transfers,chunks});
-    const plan = {world,systems,ports,incoming,order,names,transfers,dependencies,schedule,rates,timedSolvers,chunks,aggregates,reservations,worksites,
+    const plan = {world,systems,ports,incoming,order,names,transfers,couplings,dependencies,schedule,rates,timedSolvers,chunks,aggregates,reservations,worksites,
       interactions,influence,population,causePolicy,contracts,phaseEdges,navigationSources};
     if (world.eventActions !== undefined) plan.eventActions = K.eventActions.compile(world.eventActions, {
       dt: world.dt, validateAction: command => actionCheck(command, plan),
@@ -454,7 +455,7 @@
       world=result.world;
     }
     const {plan, weather = weatherProgram(world), timeline = W.sceneTimeline(world)}=result;
-    const {systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,aggregates,reservations,worksites,
+    const {systems,ports,incoming,order,names,transfers,couplings,dependencies,rates,chunks,aggregates,reservations,worksites,
       interactions,influence,population,causePolicy,contracts,phaseEdges,eventActions,navigationSources} = plan;
     let composition, inspection;
     const regions=regionRevisions===undefined?null:W.regionRevisions.capture(world,regionRevisions,systems);
@@ -930,6 +931,14 @@
       });
       for(const [name,confirmed] of confirmations??[])
         drafts[name]=rootedState(systems[name].receiveTransfers(drafts[name],confirmed,{tick:at,emit:systemEmit(name)}));
+      for (const {name,solve} of couplings) {
+        const {enabled}=currentValues(name,nextManual,{},outputs,delays);
+        const {requests,report}=solve(drafts,{tick:at,dt:nextWorld.dt,requester:name,root:rootedState,enabled});
+        check(receipts.length+requests.length<=W.transfers.limit,'Transfer coupling exceeds the tick receipt budget');
+        const emit=makeEmit(name);
+        for (const request of requests) receipts.push(settleTransfer(request,name,emit));
+        drafts[name]=rootedState(report);
+      }
       function lateTransfer(source,request){
         if(receipts.length>=W.transfers.limit)return undefined;
         const receipt=rootedState(settleTransfer(request,source,systemEmit(source)));

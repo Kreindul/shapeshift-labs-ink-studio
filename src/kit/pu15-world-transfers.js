@@ -48,10 +48,11 @@
         check(id(key) && record(spec) && id(spec.resource) && typeof spec.units === 'string' &&
           spec.units.trim().length > 0 && own(sizes,spec.type) &&
           (spec.ownerOnly===undefined||typeof spec.ownerOnly==='boolean')&&
+          (spec.observe===undefined||typeof spec.observe==='function')&&
           typeof spec.read === 'function' && typeof spec.write === 'function','Invalid transfer account '+name);
-        const {resource,units,type,read,write,at,ownerOnly} = spec;
+        const {resource,units,type,read,write,observe,at,ownerOnly} = spec;
         check(at===undefined||W.worksites.target(at),'Invalid transfer endpoint '+name);
-        accounts.set(name,{system,name,type,resource,units,read,write,...(at!==undefined&&{at}),...(ownerOnly&&{ownerOnly})});
+        accounts.set(name,{system,name,type,resource,units,read,write,observe,...(at!==undefined&&{at}),...(ownerOnly&&{ownerOnly})});
       }
     }
     const summary = ({name,type,resource,units,at,ownerOnly}) => ({name,type,resource,units,...(at!==undefined&&{at}),
@@ -77,6 +78,13 @@
       const account = accounts.get(name);
       if (!account || !own(states,account.system)) return null;
       return {...summary(account),...quote(account,states[account.system]).report};
+    }
+
+    function observe(states,name,timing) {
+      const result=inspect(states,name), account=accounts.get(name);
+      check(result,'Unknown coupling account '+name);
+      const values=account.observe?.(states[account.system],timing);
+      return values===undefined?result:{...result,values:copy(values)};
     }
 
     function settle(states, raw, tick, requester, rooted) {
@@ -136,7 +144,7 @@
       }
     }
 
-    const plan = Object.freeze({size:accounts.size,producers:Object.freeze([...producers,...queued]),validate,inspect,settle,validateReceipts,
+    const plan = Object.freeze({size:accounts.size,producers:Object.freeze([...producers,...queued]),validate,inspect,observe,settle,validateReceipts,
       validateBalances(states) {
         for (const account of accounts.values()) quote(account,states[account.system]);
       },

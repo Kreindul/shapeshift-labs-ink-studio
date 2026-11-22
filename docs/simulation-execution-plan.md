@@ -98,3 +98,6 @@ integrates at 100 Hz internally. A 6.25 Hz meter averages displacement
 through four host ticks. The demo exports the plan, a checkpoint plan,
 and a visual walkthrough that compares the planned cadence with the
 runtime's observed visit counts.
+
+[Transfer coupling groups](simulation-transfer-coupling.md) also list their
+exchange links, account participants, trial budget and latest residual.

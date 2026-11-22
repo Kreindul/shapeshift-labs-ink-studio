@@ -390,6 +390,11 @@ values available at the start of the tick. Solvers step from the
 settled snapshot. A failed endpoint write aborts the tick, including
 any earlier transfers. Checkpoints and replay preserve receipts.
 
+Use [two-way transfer coupling](simulation-transfer-coupling.md) when
+multiple exchanges depend on the balances they change within the same tick.
+Coupling groups publish bounded iteration and residual reports and post the
+selected exchanges through the same ledger.
+
 The [transfer station](../examples/world-transfers.json) requests
 five cubic world units from a shallow-water basin. The cistern has
 room for two, so the basin drops from eight to six while the tank
