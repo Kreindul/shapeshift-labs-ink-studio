@@ -733,13 +733,39 @@ same JSON with `K.curveSplats.world(recipe)`.
 ```sh
 node cli/ink-studio.js render examples/curve-splat-scene.json --raw --w 192 --h 96 --out crossing.png
 node cli/ink-studio.js clip examples/curve-splat-scene.json --raw --w 192 --h 96 --fps 12 --to 3 --camera-orbit 30 --out crossing-orbit.png
-node cli/ink-studio.js render examples/curve-splat-scene.json --curve-splats off --raw --w 192 --h 96 --out gaussian-carriers.png
+node cli/ink-studio.js render examples/curve-splat-scene.json --curve-mode splats --raw --w 192 --h 96 --px 1 --out gaussian-carriers.png
 node examples/curve-splat-gallery.cjs studio/out/curve-splats
 ```
 
+`--curve-mode splats|curves` selects the ordinary Gaussian carriers or the
+finite-curve kernel for `render` and `clip`. Both named modes evaluate timed
+reveal and trail controls, and use the same scene depth and atmosphere
+compositing. Curve-only coverage profiles, caps, tangent lighting, and
+distance proxies apply in `curves` mode.
+
+```sh
+node cli/ink-studio.js compare examples/curve-mode-signal-coil.js --curve-modes \
+  --w 176 --h 112 --from 0 --to 4 --fps 12 --camera-orbit 28 --out studio/out/coil-modes
+```
+
+Use `--t 1.5` for a still. The comparison poses one world per sample, uses
+the same camera, palette and lighting inputs, and keeps each renderer's temporal
+history independent. Each PNG under `splats/` and `curves/` is exactly the
+requested size in art pixels. The preview places splats on the left and curves
+on the right, with a native APNG for sequences. `manifest.json` records the
+sampled time, resolved camera, and number of pixels that changed for each frame.
+Graphs with feedback use the usual CLI feedback clock, so the manifest records
+both the requested time and the sampled time.
+
+In Node, use `render(world, { curveMode: 'splats' })` for one renderer.
+`compareCurveModes(world, { width, height, time, frame }, receive)` returns
+the report and calls `receive({ index, time, camera, splats, curves, changedPixels })`
+for each matched frame. `frame` holds shared render options. Supply
+`from`, exclusive `to`, and `fps` in place of `time` for a sequence.
+`writeCurveComparison(world, options, directory)` writes the same assets as the CLI.
+
 `--curve-splats off` or `render(world, { curveSplats: false })` shows the
-ordinary Gaussian row for each span. These rows also provide a fallback in
-WebGL. The integrated coverage path is headless and works in perspective and
+legacy Gaussian fallback used in WebGL. The matched comparison is headless and works in perspective and
 orthographic views. Use `--fragment-budget` when a large export with overlapping
 strands needs more depth-sorted fragments.
 

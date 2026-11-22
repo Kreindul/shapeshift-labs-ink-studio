@@ -1104,6 +1104,64 @@ test('timed reveal clips a directed segment exactly and supports independent sta
   assert.ok(read(.85).alpha.filter(value => value > 0).length > early.alpha.filter(value => value > 0).length);
 });
 
+test('matched render modes share each sampled pose and camera at native art size', () => {
+  const world = C.world(scene([source(straight.slice().reverse(), {
+    edge: 'hard', section: 'elliptical', aspect: .62, width: .2,
+    reveal: { end: [[0, 0], [1, 1]], width: [[0, .5], [1, 1.4]] }
+  })]));
+  const data = world.data.slice(), poses = [], cameraPhases = [], frames = [];
+  world.look.pixelSize = 3;
+  world.anim = { update(dt, time) { poses.push(time); } };
+  const report = ink.compareCurveModes(world, {
+    width: 101, height: 63, frame: { ortho: true, transparent: true, renderStats: true },
+    from: 0, to: 1, fps: 4,
+    camera(phase) { cameraPhases.push(phase); return { yaw: phase * .2 }; }
+  }, frame => frames.push(frame));
+  assert.deepEqual(poses, [0, .25, .5, .75]);
+  assert.deepEqual(cameraPhases, [0, 1 / 3, 2 / 3, 1]);
+  assert.deepEqual(world.data, data);
+  assert.equal(report.frames[0].changedPixels, 0);
+  assert.notDeepEqual(report.frames[0].camera.view, report.frames[3].camera.view);
+  for (const mode of report.modes) {
+    assert.ok(frames[0][mode].alpha.every(value => value === 0));
+    const early = frames[1][mode];
+    assert.deepEqual([early.w, early.h], [101, 63]);
+    assert.equal(early.alpha[31 * 101 + 50], 0);
+    assert.ok(early.alpha.subarray(31 * 101 + 51, 32 * 101).some(value => value > 64));
+  }
+  assert.equal(frames[1].splats.renderStats.curveSegments, 0);
+  assert.ok(frames[1].curves.renderStats.curveSegments > 0);
+  assert.ok(report.frames[1].changedPixels > 0);
+  assert.ok(ink.render(world, { ...imageOptions, t: 0, transparent: true, curveSplats: false }).alpha.some(Boolean));
+});
+
+test('curve compare CLI writes both modes without resampling the individual PNGs', () => {
+  const root = path.resolve(__dirname, '..'), cli = path.join(root, 'cli', 'ink-studio.js');
+  const target = path.join(root, 'examples', 'curve-splat-scene.json');
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'ink-curve-modes-'));
+  try {
+    const run = (...args) => {
+      const result = spawnSync(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr);
+    };
+    run('compare', target, '--curve-modes', '--w', '81', '--h', '49', '--raw',
+      '--from', '0', '--to', '1', '--fps', '2', '--out', folder);
+    const report = JSON.parse(fs.readFileSync(path.join(folder, 'manifest.json')));
+    assert.equal(report.frames.length, 2);
+    assert.equal(report.frames[1].time, .5);
+    assert.ok(fs.readFileSync(path.join(folder, report.preview)).includes(Buffer.from('acTL')));
+    for (const mode of report.modes) {
+      const single = path.join(folder, mode + '-single.png');
+      run('render', target, '--curve-mode', mode, '--w', '81', '--h', '49', '--px', '1', '--raw', '--t', '.5', '--out', single);
+      const image = PNG.read(path.join(folder, report.frames[1].files[mode]));
+      assert.deepEqual([image.w, image.h], [81, 49]);
+      assert.deepEqual(image, PNG.read(single));
+    }
+  } finally {
+    fs.rmSync(folder, { recursive: true, force: true });
+  }
+});
+
 test('timestamped trails clip the birth front and expiry tail and vary width and opacity by age', () => {
   const source = { kind: 'trail', samples: [{ time: 0, point: straight[0] }, { time: 2, point: straight[1] }] };
   const view = { ...imageOptions, ortho: true, transparent: true };

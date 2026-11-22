@@ -200,6 +200,7 @@ module.exports = {
   reviewPaletteWeather: require('./cli/palette-weather.js').reviewPaletteWeather,
   reviewPaletteStages: require('./cli/palette-stages.js').reviewPaletteStages,
   compareShotPalettes: require('./cli/palette-compare.js').compareShotPalettes,
+  ...require('./cli/curve-compare.js'),
   checkPaletteShot: require('./cli/palette-checks.js').checkPaletteShot,
   approveShot: require('./cli/shot-approval.js').approveShot,
   exportLayers: require('./cli/export-layers.js').exportLayers,

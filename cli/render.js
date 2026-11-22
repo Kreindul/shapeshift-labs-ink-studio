@@ -153,6 +153,8 @@ function sequenceHistory(kit) {
 
 function render(world, o, preparedPalettes) {
   o = RenderContract.options(world, o, (w, frame) => require('../index.js').load().KIT.timeDomains.frame(w, frame));
+  if (o.curveMode !== undefined && o.curveMode !== 'splats' && o.curveMode !== 'curves')
+    throw new RangeError('curveMode expects splats or curves');
   if (o.strictContract) RenderContract.requirePortable(world, o);
   if (o[matteScope] === undefined && o.objectMattes !== undefined) o[matteScope] = ObjectMattes.settings(o.objectMattes);
   if (o[shutterPlan] === undefined && (o.shutter ?? world.look?.shutter) !== undefined) {
@@ -352,10 +354,12 @@ function renderFrame(world, o, preparedPalettes) {
   const transparency = SplatOrder.transparency(o.stableTransparency ?? look.stableTransparency);
   const blendDepth = transparency?.mode === 'blend' ? transparency.depthTolerance : 0;
   const planarFootprints=(o.splatFootprints??look.splatFootprints)!==false&&world.splatFootprints?.styles?.some(p=>p.depth==='plane');
-  const curves = world.curveSplats && (o.curveSplats ?? look.curveSplats ?? true);
+  const curves = world.curveSplats && (o.curveMode === undefined ? (o.curveSplats ?? look.curveSplats ?? true) : o.curveMode === 'curves');
+  const matchedCarriers = world.curveSplats && o.curveMode === 'splats';
+  const curveScene = curves || matchedCarriers;
   const curveWidthAt = CurveWidth.prepare(o.curveWidth ?? look.curveWidth)?.bind(world);
   const deepPlan = o[deepScope];
-  const sortedSurfaces = curves || Boolean(deepPlan) || orderMode === 'surface' || blendDepth > 0 || planarFootprints;
+  const sortedSurfaces = curveScene || Boolean(deepPlan) || orderMode === 'surface' || blendDepth > 0 || planarFootprints;
   const fragmentBudget = o.fragmentBudget ?? 500000;
   if (!['center', 'surface'].includes(orderMode) ||
       ((sortedSurfaces || useSdf || areaLights.length) && (!Number.isSafeInteger(fragmentBudget) || fragmentBudget < 1 || fragmentBudget > 2e6)))
@@ -792,7 +796,7 @@ function renderFrame(world, o, preparedPalettes) {
   const curveCamera = curves && { view: V, near, focal, width: W, height: H, ortho, artScale: o.artGridScale || 1 };
   const curveLightSample = curves && [1, 0, 0];
   const curvePigmentSample = curves && [1];
-  const curveFrames = curves && (world.curveClips || world.curveTiming || world.curvePattern || shutterRows) &&
+  const curveFrames = (curves && (world.curveClips || world.curvePattern) || curveScene && (world.curveTiming || shutterRows)) &&
     (world.anim?.rig || world.anim?.bones || world.reconstructionPose) &&
     sampleFrames(world, t);
   const ditherView = anchorSpaces.has('view') ? ArtStability.viewProjection(V) : undefined;
@@ -1218,8 +1222,15 @@ function renderFrame(world, o, preparedPalettes) {
     wet = new Float32Array(N);
   const sampleWithdrawal = SampleCoverage.amount(o.sampleWithdrawal ?? world.sampleWithdrawal ?? 0);
   const sceneMotion = motion;
-  const curveWindows = curves && (world.curveTiming || shutterRows) && new Array(baseCount);
-  const timePrograms = curveWindows && new Map();
+  const timePrograms = curveScene && (world.curveTiming || shutterRows) && new Map();
+  const curveWindows = curves && timePrograms && new Array(baseCount);
+  let carrierDataCopied = d !== baseData;
+  function posedWindow(window, frame) {
+    if (!window || !frame || window.first === 0 && window.last === 1) return window;
+    const { direction } = window, m = frame.basis().anchor;
+    return { ...window, direction: [0, 3, 6].map(k =>
+      m[k] * direction[0] + m[k + 1] * direction[1] + m[k + 2] * direction[2]) };
+  }
   for (let i = 0, q = 0; i < N; i++, q += 16) {
     if (qualityRows && !qualityRows.keep[i] || geometryMask && spriteLOD.hidden(geometryMask.codes[i])) continue;
     const motion = shutterRows?.clock(i) ?? sceneMotion, t = motion.scene;
@@ -1329,7 +1340,7 @@ function renderFrame(world, o, preparedPalettes) {
       if (gs <= 0) al = 0;
       sc *= gs * (2 - gs);
     } else if (kraw & 1024) wet[i] = Math.min(1, Math.max(0, (t * ((world.grow || {}).rate || 1) - ex) / 2));
-    if (curveWindows && i < baseCount && al > 0) {
+    if (timePrograms && i < baseCount && al > 0) {
       const carrier = shutterRows?.pose(i) ?? world, rows = carrier.curveTiming;
       const at = i * CurveSplat.timingStride, program = rows?.[at] && carrier.curveTimePrograms?.[rows[at] - 1];
       if (program) {
@@ -1339,7 +1350,22 @@ function renderFrame(world, o, preparedPalettes) {
         const window = CurveSplat.timeWindow(rows, at, samples.get(t), program.trail, t);
         if (window) {
           al = CurveSplat.timedOpacity(al, window.fade, ex);
-          curveWindows[i] = window;
+          if (curveWindows) curveWindows[i] = window;
+          else if (window.first > 0 || window.last < 1 || window.width !== 1) {
+            const trimmed = CurveSplat.timedCarrier(d, q, sc, posedWindow(window, curveFrames ? curveFrames(i) : null));
+            if (trimmed) {
+              if (!carrierDataCopied) {
+                d = d.slice();
+                carrierDataCopied = true;
+              }
+              const { offset, covariance } = trimmed;
+              x += offset[0];
+              y += offset[1];
+              z += offset[2];
+              d.set(covariance.slice(0, 3), q + 4);
+              d.set(covariance.slice(3), q + 8);
+            } else al = 0;
+          }
         } else al = 0;
       }
     }
@@ -1353,12 +1379,7 @@ function renderFrame(world, o, preparedPalettes) {
   function prepareCurve(i, camera, carrier, forShadow = false, replacement) {
     const position = replacement?.center ?? [X[i], Y[i], Z[i]], frame = curveFrames ? curveFrames(i) : null;
     const clips = CurveSplat.clipPlanes(carrier.curveClips, i, position, SC[i], frame);
-    let window = curveWindows?.[i];
-    if (window && frame && (window.first > 0 || window.last < 1)) {
-      const { direction } = window, m = frame.basis().anchor;
-      window = { ...window, direction: [0, 3, 6].map(k =>
-        m[k] * direction[0] + m[k + 1] * direction[1] + m[k + 2] * direction[2]) };
-    }
+    const window = posedWindow(curveWindows?.[i], frame);
     const pattern = CurvePattern.attach(carrier, i, frame, camera, forShadow);
     return CurveSplat.prepare(replacement?.data ?? d, replacement ? 0 : i * 16, position, replacement ? 1 : SC[i], AL[i], camera, clips, window,
       forShadow ? undefined : curveWidthAt?.(i), pattern);
@@ -1447,7 +1468,7 @@ function renderFrame(world, o, preparedPalettes) {
         sameSpan });
     } else SplatOrder.stabilize(order, tolerance, depthAt, transparentAt, undefined, sameSpan);
   }
-  const mediaOptions = (water || aerial || cloudView || (curves || deep || blendDepth) && volumes.length) && atmosphereOptions();
+  const mediaOptions = (water || aerial || cloudView || (curveScene || deep || blendDepth) && volumes.length) && atmosphereOptions();
   const hazeCoverage = effectRules?.ramps.get('fog')?.geometry && world.fog.max > 0 && new Float32Array(W * H);
   const rayMedia = mediaOptions ? mediaSampler(volumes, water, rayAt, W, mediumHorizon, {
     ...mediaOptions, reflection, reflectionBackground: bg, reflectionDetail:o.reflectionDetail, waterTransition: blendDepth,
@@ -1557,8 +1578,8 @@ function renderFrame(world, o, preparedPalettes) {
   let deferred = sortedSurfaces || sdf || emitterHits ? new Map() : null, deferredCount = 0, orderFallback = false;
   let curveCoverageQueued = false;
   function countDeferred() {
-    if (curves && deferredCount >= fragmentBudget)
-      throw new RangeError('Curve splat rendering exceeded the fragment budget. Raise fragmentBudget or reduce resolution.');
+    if (curveScene && deferredCount >= fragmentBudget)
+      throw new RangeError('Curve scene rendering exceeded the fragment budget. Raise fragmentBudget or reduce resolution.');
     if(planarFootprints&&deferredCount>=fragmentBudget)throw new RangeError('Surface-plane rendering exceeded the fragment budget. Raise fragmentBudget or reduce resolution.');
     if (deep && deferredCount >= fragmentBudget)
       throw new RangeError('Deep compositing exceeded the fragment budget. Raise fragmentBudget or reduce resolution.');
@@ -1715,7 +1736,7 @@ function renderFrame(world, o, preparedPalettes) {
     while (spriteIndex<sprites.length && sprites[spriteIndex].z>=through) {
       const sprite=sprites[spriteIndex++], sample=spriteSample(sprite);
       if (deferred && (queued || sdf?.hits[sprite.p] || emitterHits?.[sprite.p])) {
-        if (deep || blendDepth || curves) countDeferred();
+        if (deep || blendDepth || curveScene) countDeferred();
         if (!deferred.has(sprite.p)) deferred.set(sprite.p,[]);
         deferred.get(sprite.p).push({ sort:sprite.z,index:spriteIndex-sprites.length-1,center:sprite.z,sample });
       } else composite(sprite.p,...sample);
@@ -1766,7 +1787,7 @@ function renderFrame(world, o, preparedPalettes) {
   // Carriers are below the original color fragments at the same traced depth.
   for (const sample of sdf?.samples ?? []) {
     if (sample.z > surfaceDepth[sample.p]+1e-5) continue;
-    if (deep || blendDepth || curves) countDeferred();
+    if (deep || blendDepth || curveScene) countDeferred();
     deferred.set(sample.p,[{sort:sample.z,center:sample.z,index:-1e9,transparent:false,sample:spriteSample(sample)}]);
   }
   for (let n = 0; n < order.length; n++) {
@@ -2365,7 +2386,7 @@ function renderFrame(world, o, preparedPalettes) {
           sampledDepth(rayAt(ix + .5, iy + .5), probeNormal, probeCenter, -cz, probeReach) : -cz);
         if (preciseDepth && surfaceDepth && surfaceZ>surfaceDepth[p]+1e-5) continue;
         if (probe && !curveFootprint?.depths) probe(p, i, -cz, surfaceZ, pr, pg, pb, a);
-        if (!deep && !blendDepth && !planarFootprints && !curves && deferred && deferredCount >= fragmentBudget) {
+        if (!deep && !blendDepth && !planarFootprints && !curveScene && deferred && deferredCount >= fragmentBudget) {
           playFragments(false,-cz);
           orderFallback = true;
         }

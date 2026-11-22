@@ -176,6 +176,24 @@ const CurveSplat = (() => {
     return hardGroup(tag) ? value * fade : -Math.expm1(Math.log1p(-Math.min(.999, value)) * fade);
   }
 
+  function spanBounds(axis, window) {
+    if (!window) return [0, 1];
+    return dot(window.direction, axis) < 0 ? [1 - window.last, 1 - window.first] : [window.first, window.last];
+  }
+
+  function timedCarrier(data, at, scale, window) {
+    const section = sectionOf(data[at + 15]);
+    const shape = dimensions(data, at, 1, section);
+    if (!shape) return null;
+    const { axis, half, radius, major } = shape;
+    const [begin, end] = spanBounds(axis, window);
+    const endpoint = u => axis.map(value => (2 * u - 1) * half * value);
+    const profile = major && { major, aspect: data[at + 14] };
+    const trimmed = carrier(endpoint(begin), endpoint(end), radius * window.width, profile);
+    if (!trimmed) return null;
+    return { offset: trimmed.center.map(value => value * scale), covariance: trimmed.covariance };
+  }
+
   function projectWidth(policy, shape, radius, aspect, flattened, camera, ends) {
     const { view, focal, width, height, ortho, artScale = 1 } = camera;
     const inverse = ends.map(point => ortho ? 1 : -1 / point[2]);
@@ -220,9 +238,7 @@ const CurveSplat = (() => {
     if (!shape) return null;
     const group = hardGroup(packed), beta = !group && marker - packed >= 3, flattened = section === 2;
     const { axis, half } = shape, radius = shape.radius * (window?.width ?? 1);
-    const reverse = window && dot(window.direction, axis) < 0;
-    const begin = !window ? 0 : reverse ? 1 - window.last : window.first;
-    const finish = !window ? 1 : reverse ? 1 - window.first : window.last;
+    const [begin, finish] = spanBounds(axis, window);
     const cameraPoint = p => [0, 1, 2].map(i => p[0] * view[i] + p[1] * view[i + 4] + p[2] * view[i + 8] + view[i + 12]);
     const start = position.map((v, i) => v + (2 * begin - 1) * half * axis[i]);
     const end = position.map((v, i) => v + (2 * finish - 1) * half * axis[i]);
@@ -585,6 +601,6 @@ const CurveSplat = (() => {
   }
   return Object.freeze({ tag, joinGroups, axialUnits, minimum, castShadow, receiveShadow, overlapsDepth,
     clipStride, materialStride, lightingStride, timingStride, clipPlanes,
-    emissionAt, lightingAt, isRow, carrier, roundSpan, writeClips, timeWindow, timedOpacity, prepare, sample, sampleAt, specular, directional });
+    emissionAt, lightingAt, isRow, carrier, roundSpan, writeClips, timeWindow, timedOpacity, timedCarrier, prepare, sample, sampleAt, specular, directional });
 })();
 if (typeof module !== 'undefined') module.exports = CurveSplat;

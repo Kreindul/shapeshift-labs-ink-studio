@@ -791,6 +791,7 @@ const view = extra =>
       translucentSilhouettes: translucentSilhouettesOption(),
       splatFootprints: onOffOption('splat-footprints'),
       curveSplats: onOffOption('curve-splats'),
+      curveMode: opt['curve-mode'],
       curveLod: onOffOption('curve-lod'),
       curveWidth: curveWidthOption(),
       paletteSampling: onOffOption('palette-sampling'),
@@ -1058,6 +1059,7 @@ const CMD = {
         '    sim sweep <world|run> <cases.json>   use look cases to compare one fixed simulation snapshot',
         '    sim sweep <world|checkpoint|run> <observations.json>   sample scheduled observations across seeds and settings',
         '  compare <scene|run> --looks cases.json [--out sheet.png]   compare look variants on the same view',
+        '  compare <scene> --curve-modes --w 160 --h 96 [--t 0 | --from 0 --to 3 --fps 12] [--out directory]',
         '    --comparison side-by-side|swipe|difference   compose exactly two look cases into one image',
         '    --divider 0.5 --swipe-axis x|y --difference-channel luminance|red|green|blue --difference-gain 3',
         '  look inspect <scene|run|look-file> [--renderer headless|webgl]   list bindings, dependencies and targets',
@@ -1317,7 +1319,7 @@ const CMD = {
         'bounce options: --sky-bounce color|preset|off --ground-bounce color|preset|off --sky-bounce-intensity n --ground-bounce-intensity n',
         'cloud options: --cloud-field cirrus|coastal-stratus|cumulus|storm-front|file.json|off --cloud-representation auto|card|impostor|volume|off --cloud-self-shadows on|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',
         'translucent silhouette options: --translucent-silhouettes file.json|off',
-        'curve splats: render or clip a curve-splat-scene JSON. --curve-splats off shows the Gaussian carriers.',
+        'curve splats: render or clip a curve-splat-scene JSON with --curve-mode splats|curves. --curve-splats off shows the legacy carriers.',
         '    --curve-width file.json|off   art-pixel width rules for curve materials',
         '    --curve-lod on|off   authored curve distance simplification and aggregation',
         'motional pixel coverage: --motional-coverage on|off|file.json',
@@ -3577,6 +3579,21 @@ const CMD = {
   },
   compare() {
     const [id, ref] = pos;
+    if (opt['curve-modes'] !== undefined) {
+      if (opt['curve-modes'] !== true || pos.length !== 1 || opt.out === true || opt.w === undefined ||
+          opt.w === true || opt.h === undefined || opt.h === true ||
+          ['looks', 'curve-mode', 'curve-splats', 'px', 'up'].some(flag => opt[flag] !== undefined) ||
+          ['t', 'from', 'to', 'fps'].some(flag => opt[flag] === true))
+        die('Use compare <scene> --curve-modes --w WIDTH --h HEIGHT [--t TIME | --from START --to END --fps RATE] [--out directory]');
+      const world = buildPreview(), frame = view(), directory = outputFile('curve-modes');
+      const time = num('t'), from = num('from'), to = num('to');
+      const replay = feedbackReplay(world, from ?? time ?? 0, frame);
+      const result = require('./curve-compare.js').writeCurveComparison(world, {
+        kit: lib(), frame, time, from, to, fps: num('fps', 12), camera: clipCamera(world), replay, samplePose: pose
+      }, directory);
+      console.log('wrote', directory, result.frames.length, 'matched frames at', result.width + 'x' + result.height, 'art pixels per mode');
+      return;
+    }
     if (opt.looks !== undefined || /\.json$/i.test(ref ?? '')) {
       const file = opt.looks ?? ref;
       if (!id || typeof file !== 'string') die('compare needs a scene and --looks cases.json');
