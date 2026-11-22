@@ -9,7 +9,7 @@ const SplatFrames = require('../src/splat-frames.js');
 const { rows: shutterRows } = require('./programmable-exposure.js');
 let matrices;
 function sampleFrames(world, time) {
-  if (!matrices && (world.anim?.rig || world.anim?.bones)) matrices = require('../index.js').load().KIT.M;
+  if (!matrices && (world.anim?.rig || world.anim?.bones || world.reconstructionPose)) matrices = require('../index.js').load().KIT.M;
   const exposure = world[shutterRows];
   const base = SplatFrames.create(world, time, matrices);
   if (!exposure) return base;
@@ -20,7 +20,7 @@ function sampleFrames(world, time) {
     const source = alternate ?? world;
     const key = alternate ?? clock;
     if (!sources.has(key)) {
-      if (!matrices && (source.anim?.rig || source.anim?.bones)) matrices = require('../index.js').load().KIT.M;
+      if (!matrices && (source.anim?.rig || source.anim?.bones || source.reconstructionPose)) matrices = require('../index.js').load().KIT.M;
       sources.set(key, SplatFrames.create(source, clock.scene, matrices));
     }
     return sources.get(key)(index);

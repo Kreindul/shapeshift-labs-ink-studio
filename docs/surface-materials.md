@@ -59,13 +59,53 @@ For per-pixel rendering set `S.pixel = true` before baking and set `look: { pixe
 | `sheen` | Choose a grazing `color` and control its width with `power` and its grain bias with `directional`. |
 | `film` | Set `thickness` and `variation` in nanometres, `ior`, `scale` and optional `colors`. Set `flash` for an angle-limited flash or `axisBias` to steer the effect toward the grain. |
 | `diffraction` | Configure groove `spacing` and `bandwidth` in nanometres, diffraction `order` and the angular `roughness` across the effect. |
-| `directionalColor` | Blend between `color` and `crossColor` according to the grain and view. Set `width` and `bias` to tune the shift. |
+| `directionalColor` | Blend between `color` and `crossColor` according to the grain and view, or give `views` its own left, right, front and back swatches. |
 | `glints` | Set cell `scale`, candidate `density`, inset `radius`, normal `tilt`, angular `roughness` and one `color` or a list of `colors`. A lower `response` makes faint glints more visible. Glints are deterministic, fade at subpixel size, and can survive the pixel cleanup pass. |
 
 These are stylized reflectance models. The CLI resolves them into the scene palette and uses its existing baked direct-light visibility. Subtle tones can share the same palette entry, so include colours for any highlights you want visible in the final render.
 
 Bind an [authored highlight cel](highlight-cels.md) to a surface anchor
 when a light catch needs a specific pixel drawing at each size and angle.
+
+## Signed viewing directions
+
+A `directionalColor` layer with `views` uses authored colors for opposing
+directions. It projects the art-pixel camera ray into the object's or bone's
+rest frame. The default axes are +X for right and +Z for front. They follow
+a rigid part, GPU bone, or analytic orbit as it turns.
+
+```js
+const shell = K.surface.material({ r: [5, 6, 7, 8] }, {
+  layers: {
+    shell: {
+      type: 'directionalColor',
+      views: { left: '#bb4b18', right: '#248bec', front: '#38d391', back: '#e768ae' },
+      blendAngle: 9,
+      strength: .86
+    }
+  }
+});
+```
+
+- Swatches accept palette slots, named color roles, hex colors, and normalized
+  RGB triples. Omit a direction or set it to `null` to show the incoming color.
+- `blendAngle` is the half-width in degrees around each 45° transition. The
+  default of zero picks a hard sector. `strength` controls the contribution
+  from zero to one. A view directly above or below the axes keeps the incoming
+  color.
+- Supply `axes: { right: [x, y, z], front: [x, y, z] }` to orient a material
+  with a different rest frame. The renderer normalizes both vectors and makes
+  the front perpendicular to the right. A skinned splat uses the primary bone
+  that carries its shape.
+- Use one signed layer per surface. It shades after the other finish layers
+  and stepped facing colors, before the final palette resolve. Signed layers
+  share the authored swatches, blend angle and strength between CPU and
+  WebGL. The original grain-based `color`, `crossColor`, `width`, and `bias`
+  still apply when `views` is omitted or set to `false`.
+
+Use the same settings under `mat.surface.layers` in JSON. Compare with
+`directionalColors: false` in a render call or `--directional-colors off` in
+the CLI. The switch applies to signed layers.
 
 ## Stepped facing colors
 

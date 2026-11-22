@@ -1080,9 +1080,11 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         data.upload(attached.data,attached.data.length,attached.changedRows);engravingUniforms=attached.uniforms;
       }else data.upload(geometryData, world.count * 16, geometryDirty);
       let facing;
-      if (!raw && frame.facingColors !== false && facingAPI && world.surfaceData) {
+      const disabledViewColors = Number(frame.facingColors === false) | (Number(frame.directionalColors === false) << 1);
+      if (!raw && disabledViewColors !== 3 && facingAPI && world.surfaceData) {
         if (!facingPlans.has(world)) facingPlans.set(world, facingAPI.table(world,
-          (settings, ramp) => facingSurface.prepareFacing(settings, world.pal, world.paletteRoles, ramp)));
+          (settings, ramp) => facingSurface.prepareFacing(settings, world.pal, world.paletteRoles, ramp),
+          settings => facingSurface.prepareDirection(settings, world.pal, world.paletteRoles)));
         facing = facingPlans.get(world);
         if (facing) {
           facingTable ??= table(facingAPI.width, facingUnit, maxSize);
@@ -1163,7 +1165,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       const growth = world.grow ?? {};
       shader.set({
         u_data: 0, u_bones: 4, u_fine: 7,
-        ...(facing && { u_facingRows: facingUnit, u_facingCount: facing.count, u_facingPattern: patterned }), ...(spriteMask && {u_spriteLod:spriteLodUnit,u_spriteLodCount:spriteMask.codes.length}), ...(plan && { u_instances: 15 }), u_fineOn: +hasFine, u_fpal: pal, u_view: camera.view,
+        ...(facing && { u_facingRows: facingUnit, u_facingCount: facing.count, u_disabledViewColors: disabledViewColors, u_facingPattern: patterned }), ...(spriteMask && {u_spriteLod:spriteLodUnit,u_spriteLodCount:spriteMask.codes.length}), ...(plan && { u_instances: 15 }), u_fineOn: +hasFine, u_fpal: pal, u_view: camera.view,
         ...(materialStyles && { u_materialStyles: 16, u_materialPatterned: patterned, u_materialStylesOn: !raw }),
         u_proj: camera.projection, u_time: time, u_scale: scale, u_ortho: +camera.ortho,
         u_motionCadence: hasCadence, u_rainWind:rainWind,
@@ -1312,7 +1314,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         u_pixOn: +patterned, u_keyOn: +patterned, u_sprOn: +sprites,
         u_paintOn: paintOnPatterns,
         ...(styledPattern && { u_materialStyles: 16 }),
-        ...(facingPattern && { u_facingRows: facingUnit, u_facingCount: facing.count, u_facingBones: facingBoneUnit }),
+        ...(facingPattern && { u_facingRows: facingUnit, u_facingCount: facing.count, u_disabledViewColors: disabledViewColors, u_facingBones: facingBoneUnit }),
         ...(relitPattern && { u_relight: relightUnit, u_relightFog: rgb(world.pal[fog.c ?? 0] ?? 0),
           u_relightFogRange: [fog.start ?? 1, fog.max ?? 0] }),
         u_idxTex: 9,
