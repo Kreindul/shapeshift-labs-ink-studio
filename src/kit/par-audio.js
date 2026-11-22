@@ -733,6 +733,17 @@
         return {value:production,revision,reference};
       }
     },
+    'music.rememberListeningPreference': {
+      description:'Archive a kept blind result with its musical context, criterion-level votes and listening reason.',
+      inputs:{reference:'record',memory:{type:'record',default:{format:'ink-studio/listening-preference-memory',version:1,entries:[]}}},
+      outputs:{value:'record'},
+      run({reference,memory}) {return {value:P.musicProduction.critique.rememberPreference(memory,reference)};}
+    },
+    'music.recallListeningPreferences': {
+      description:'Recall context-matched blind evidence for available alternatives and a listening criterion.',
+      inputs:{memory:'record',query:'record'},outputs:{value:'record'},
+      run({memory,query}) {return {value:P.musicProduction.critique.recallPreferences(memory,query)};}
+    },
     'music.tagListeningReference': {
       description:'Keep a sample-addressed reference clip and a description of what to listen for.',
       inputs:{source:'audio',settings:'record'},outputs:{value:'record',audio:'audio'},

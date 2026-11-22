@@ -2,7 +2,9 @@
 
 Use the [audio critique workbench](music-critique-audio.md) to inspect any
 production passage, ask for a particular monitor view, and audition your
-own addressed edits. This page covers the preset and blind workflow.
+own addressed edits. This page covers the preset and blind workflow. Use
+[contextual preference memory](music-listening-preferences.md) to carry
+blind choices and their reasons into another cue.
 
 Start with a normal [music production](music-production.md), a named section,
 and something you want to hear more clearly. Ink renders the original passage
@@ -27,7 +29,8 @@ address the clips and the proposed edits.
 }
 ```
 
-Choose `kind` as `hook`, `arrival`, or `both` (the default). The focus starts
+Choose `kind` as `hook`, `arrival`, `space`, `custom`, or `both` (the default).
+Choose `custom` to supply [your own revisions](music-listening-preferences.md#record-a-choice). The focus starts
 at the named section, or `offsetBeats` into it. The context includes the
 lead-in and is limited to 30 seconds. Track names are optional. For a hook
 comparison, Ink looks for an active lead and picks the pitched layer with the
@@ -71,6 +74,7 @@ human listening judgments with automatic metrics.
 | Move register | Shifts the competing layer's new notes by an octave during the focus. Set `octave` to `12` or `-12`. |
 | Mix cut | Rides down the competing layer with a short fade at the two edges. |
 | Delay bass | Withholds the bass through the lead-in and the first `withholdBeats` of the focus, then lets its existing part resume. |
+| Dry drums | Takes playing percussion out of the shared room during the focus. Existing tails can ring out. |
 | Empty beat | Clears the last full lead-in beat, including the room, before the focus. |
 
 Each take is an ordinary producer revision over the original cue map. The plan

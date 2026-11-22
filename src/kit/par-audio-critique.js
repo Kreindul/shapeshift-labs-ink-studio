@@ -1,10 +1,10 @@
 /* Turn mix measurements into editable comparisons, then remember an explicit listening decision. */
 (function (P) {
-  const A=P.musicProduction, E=P.musicCritiqueEvidence, R=P.musicCritiqueReferences;
+  const A=P.musicProduction, E=P.musicCritiqueEvidence, R=P.musicCritiqueReferences, M=P.musicCritiqueMemory;
   const {fields,integer,finite,id,check,record}=P.musicInstruments;
   const planFormat='ink-studio/critique-plan', testFormat='ink-studio/blind-listening', keyFormat='ink-studio/blind-listening-key';
   const hookMoves=['mute-layer','move-register','mix-cut'], arrivalMoves=['delay-bass','empty-beat'];
-  const criteria=['groove','identity','shape','replay'];
+  const {criteria}=M;
   const round=value=>Number(value.toFixed(8));
   const frozen=value=>P.data.freeze(P.data.clone(value));
   const active=(score,track,range)=>score.events[track].some(row=>row.velocity>0 &&
@@ -13,14 +13,19 @@
 
   function plan(source,brief,assets={}) {
     check(fields(brief,['section','goal','kind','lead','layer','bass','leadInBeats','focusBeats',
-      'offsetBeats','withholdBeats','octave','cutDb','sampleRate','tags','references']) && id(brief.section) &&
-      R.prose(brief.goal,640) && ['hook','arrival','both'].includes(brief.kind ?? 'both') &&
+      'offsetBeats','withholdBeats','octave','cutDb','sampleRate','tags','references','listeningContext','memory',
+      'criterion','takes']) && id(brief.section) &&
+      R.prose(brief.goal,640) && ['hook','arrival','both','space','custom'].includes(brief.kind ?? 'both') &&
+      (brief.memory===undefined || brief.listeningContext!==undefined) && criteria.includes(brief.criterion ?? 'identity') &&
+      Array.isArray(brief.takes ?? []) && (brief.takes ?? []).length<=7 &&
+      (brief.kind!=='custom' || (brief.takes ?? []).length>0) &&
       finite(brief.leadInBeats ?? 2,0,16) && finite(brief.focusBeats ?? 4,.25,16) &&
       finite(brief.offsetBeats ?? 0,0,64) && finite(brief.withholdBeats ?? 1,.125,8) &&
       [-12,12].includes(brief.octave ?? -12) && finite(brief.cutDb ?? -3,-12,-.25) &&
       integer(brief.sampleRate ?? 24000,8000,48000),'Invalid mix critique brief');
     const {section:name,goal,kind='both',leadInBeats=2,focusBeats=4,offsetBeats=0,
       withholdBeats=1,octave=-12,cutDb=-3,sampleRate=24000}=brief;
+    const listeningContext=brief.listeningContext===undefined ? undefined : M.context(brief.listeningContext);
     const tags=R.tags(brief.tags ?? []), score=A.compile(source,assets);
     const references=R.search(brief.references ?? [],{tags,limit:8})
       .map(({entry,kind})=>({id:entry.id,title:entry.title,kind,tags:entry.tags,
@@ -45,9 +50,17 @@
     const competing=Object.fromEntries(rivals.filter(name=>pitched(role(name))).map(name=>[name,
       focusRows.reduce((total,row)=>total+(row.masking.find(candidate=>candidate.track===name)?.overlap ?? 0),0)]));
     const layer=brief.layer ?? Object.keys(competing).sort((a,b)=>competing[b]-competing[a] || a.localeCompare(b))[0];
-    const moves=[...(kind==='arrival' ? [] : hookMoves),...(kind==='hook' ? [] : arrivalMoves)];
-    const preferred=references.find(row=>moves.includes(row.move))?.move;
-    if (preferred) moves.unshift(...moves.splice(moves.indexOf(preferred),1));
+    const moves={hook:hookMoves,arrival:arrivalMoves,both:[...hookMoves,...arrivalMoves],space:['dry-drums'],custom:[]}[kind].slice();
+    const custom=Array.from(brief.takes ?? [],row=>{
+      check(fields(row,['id','hypothesis','revision']) && id(row.id) && row.id!=='reference' &&
+        !moves.includes(row.id) && R.prose(row.hypothesis,640) && record(row.revision),
+      'Custom blind takes need a portable move ID, listening hypothesis and production revision');
+      return row;
+    });
+    check(new Set(custom.map(row=>row.id)).size===custom.length && moves.length+custom.length<=7,
+      'Blind critique needs distinct moves and up to seven alternatives');
+    const prior=brief.memory===undefined ? references.find(row=>moves.includes(row.move))?.move : undefined;
+    if (prior) moves.unshift(...moves.splice(moves.indexOf(prior),1));
     const blocked=[], takes=[];
     const bounds={from:fromBeat,to:toBeat};
     const expect=(track,range)=>track && active(score,track,E.address(score,sampleRate,range.from,range.to));
@@ -72,6 +85,17 @@
           lane='level'; row={...bounds,parts:[layer],gainDb:cutDb,fadeSeconds:.025};
           hypothesis='Reduce '+layer+' by '+Math.abs(cutDb)+' dB during the focus.';
         }
+      } else if (move==='dry-drums') {
+        const drums=names.filter(name=>role(name)==='percussion' && expect(name,bounds) &&
+          score.tracks[name].mix.send>0 &&
+          !(score.cue?.perTrack[name].depth ?? []).some(span=>span.send!==undefined && span.from<toBeat && span.to>fromBeat));
+        if (!drums.length) {
+          blocked.push({move,reason:'The focus needs playing drums with a shared-room send.'});
+          continue;
+        }
+        lane='room';
+        row={...bounds,parts:drums,send:0};
+        hypothesis='Lower the shared room on the drums to bring the attacks closer.';
       } else if (move==='delay-bass') {
         track=bass;
         lane='silence'; row={from:context.fromBeat,to:round(Math.min(toBeat,fromBeat+withholdBeats)),parts:[bass],mode:'ring'};
@@ -106,9 +130,26 @@
         blocked.push({move,track,reason:error.message});
       }
     }
+    for (const row of custom) {
+      try {
+        A.revise(source,row.revision,assets);
+        takes.push({id:row.id,hypothesis:row.hypothesis,
+          components:[{id:row.id,summary:row.hypothesis,revision:row.revision}]});
+      } catch (error) {
+        if (!(error instanceof RangeError)) throw error;
+        blocked.push({move:row.id,reason:error.message});
+      }
+    }
+    const preference=brief.memory===undefined ? undefined : M.recall(brief.memory,
+      {context:listeningContext,criterion:brief.criterion ?? 'identity',moves:['reference',...takes.map(row=>row.id)]});
+    if (preference?.preferred && preference.preferred!=='reference') {
+      const index=takes.findIndex(take=>take.id===preference.preferred);
+      if (index>0) takes.unshift(...takes.splice(index,1));
+    }
     const session=A.planProducer(source,{section:name,goal,strategies:[],takes},assets);
     return frozen({format:planFormat,version:1,session,tracks:{lead:lead ?? null,layer:layer ?? null,bass:bass ?? null,rivals},
-      tags,references,blocked,evidence:measurement.report});
+      tags,references,blocked,evidence:measurement.report,...(listeningContext && {listeningContext}),
+      ...(preference && {preference})});
   }
 
   function shuffle(rows,seed) {
@@ -147,19 +188,21 @@
     const keys=Object.keys(labels), pairs=keys.flatMap((first,i)=>keys.slice(i+1).map(second=>[first,second]));
     const trials=shuffle(pairs,seed^0x44f9d9).map((pair,i)=>({id:'pair-'+(i+1),takes:shuffle(pair,seed+i*307+19)}));
     const signature=R.assetSignature(assets);
-    const stamp=JSON.stringify([name,seed,planned.session,context,focus,sampleRate,target,ceiling,signature]);
+    const listeningContext=planned.listeningContext===undefined ? undefined : M.context(planned.listeningContext);
+    const stamp=JSON.stringify([name,seed,planned.session,context,focus,sampleRate,target,ceiling,signature,...(listeningContext ? [listeningContext] : [])]);
     const token='test-'+P.data.hash(stamp).toString(36)+'-'+P.data.hash(stamp,0x9e3779b9).toString(36);
     const audio=Object.fromEntries(keys.map((label,i)=>[label,order[i].value]));
     const measured=E.measure(score,context,focus,lead,rivals,sampleRate);
     const evidence=E.snippets(measured,lead,layer,bass);
     const test=frozen({format:testFormat,version:1,id:name,token,range,focus:observed,sampleRate,
       lufs:report.target,criteria,trials,labels:keys});
-    const key=frozen({format:keyFormat,version:1,test,labels,session:planned.session,tags:planned.tags,assets:signature});
+    const key=frozen({format:keyFormat,version:1,test,labels,session:planned.session,tags:planned.tags,assets:signature,
+      ...(listeningContext && {listeningContext})});
     return {test,key,audio,evidence:{...evidence,report:measured.report}};
   }
 
   function keep(source,key,selection,assets={}) {
-    check(fields(key,['format','version','test','labels','session','tags','assets']) && key.format===keyFormat &&
+    check(fields(key,['format','version','test','labels','session','tags','assets','listeningContext']) && key.format===keyFormat &&
       key.version===1 && key.test?.format===testFormat && key.test.version===1 && record(key.labels) &&
       R.prose(key.session?.goal,640) && Array.isArray(key.session.takes) &&
       Array.isArray(key.test.trials) && key.test.trials.length<=28 && key.test.trials.every(row=>
@@ -167,29 +210,19 @@
         row.takes.every(label=>Object.hasOwn(key.labels,label))),
     'Open the private key from a blind listening test');
     const title=selection?.title ?? key.session.goal.slice(0,160);
-    check(fields(selection,['token','take','reason','votes','tags','id','title']) && selection.token===key.test.token &&
+    check(fields(selection,['token','take','reason','votes','tags','id','title','listeningContext']) && selection.token===key.test.token &&
       Object.hasOwn(key.labels,selection.take) && R.prose(selection.reason,2000) &&
       Array.isArray(selection.votes) && integer(selection.votes.length,1,256) &&
       id(selection.id ?? key.test.id) && R.prose(title,160),
     'Record the test token, chosen label, votes and a listening reason');
     check(JSON.stringify(key.assets)===JSON.stringify(R.assetSignature(assets)),'Recorded listening decision needs its original audio assets');
     const tags=R.tags(selection.tags ?? key.tags ?? []);
-    const counts=Object.fromEntries(Object.keys(key.labels).map(label=>[label,Object.fromEntries(criteria.map(name=>[name,0]))]));
-    const ballots=new Set();
-    const votes=Array.from(selection.votes,row=>{
-      check(fields(row,['trial','listener','preferences']) && id(row.trial) && id(row.listener) &&
-        fields(row.preferences,criteria) && Object.keys(row.preferences).length,
-      'A vote needs a trial, listener and at least one preference');
-      const trial=key.test.trials.find(trial=>row.trial===trial.id);
-      const mark=row.listener+':'+row.trial;
-      check(trial && !ballots.has(mark),'Vote once per listener and trial');
-      ballots.add(mark);
-      for (const [criterion,label] of Object.entries(row.preferences)) {
-        check(label==='tie' || trial.takes.includes(label),'Vote for either take in this pair or a tie');
-        if (label!=='tie') counts[label][criterion]++;
-      }
-      return row;
-    });
+    const contextFromKey=key.listeningContext===undefined ? undefined : M.context(key.listeningContext);
+    const contextFromDecision=selection.listeningContext===undefined ? undefined : M.context(selection.listeningContext);
+    check(!contextFromKey || !contextFromDecision || JSON.stringify(contextFromKey)===JSON.stringify(contextFromDecision),
+      'The listening context is fixed by the blind test');
+    const listeningContext=contextFromKey ?? contextFromDecision;
+    const {counts,votes,pairs}=M.ballots(key.labels,key.test.trials,selection.votes);
     check(Object.values(counts[selection.take]).some(value=>value>0),'The selected take needs at least one recorded preference');
     const move=key.labels[selection.take], chosen=key.session.takes.find(row=>row.id===move);
     check(chosen,'The chosen blind label has no producer take');
@@ -197,9 +230,12 @@
       reason:selection.reason,listened:[key.test.id]},assets);
     const reference=frozen({format:R.decisionFormat,version:1,id:selection.id ?? key.test.id,
       title,tags,reason:selection.reason,range:key.test.range,focus:key.test.focus,
-      token:selection.token,move,take:selection.take,hypothesis:chosen.hypothesis,revision:result.revision,votes,counts});
+      token:selection.token,move,take:selection.take,hypothesis:chosen.hypothesis,revision:result.revision,votes,counts,
+      ...(listeningContext && {listening:{context:listeningContext,test:key.test.id,pairs,
+        labels:key.labels,trials:key.test.trials}})});
     return {...result,producerReference:result.reference,reference};
   }
 
-  P.musicProduction=Object.freeze({...A,critique:Object.freeze({plan,blind,keep,openAudio:P.musicCritiqueWorkbench.open,applyEdit:P.musicCritiqueWorkbench.apply,tagReference:R.tag,findReferences:R.search})});
+  P.musicProduction=Object.freeze({...A,critique:Object.freeze({plan,blind,keep,openAudio:P.musicCritiqueWorkbench.open,applyEdit:P.musicCritiqueWorkbench.apply,tagReference:R.tag,findReferences:R.search,
+    rememberPreference:M.remember,recallPreferences:M.recall})});
 })(KIT.procedural);

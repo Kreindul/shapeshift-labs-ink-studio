@@ -5,16 +5,43 @@ const read=file=>JSON.parse(fs.readFileSync(file,'utf8'));
 const relative=(file,ref)=>path.resolve(path.dirname(path.resolve(file)),ref);
 const audio=(file,value)=>write(file,WAV.encode(value,{encoding:'pcm24'}));
 
+const listeningFile=/^test-[a-z0-9]+-[a-z0-9]+\.json$/;
+function readMemory(file,check) {
+  if (!fs.statSync(file).isDirectory()) return read(file);
+  const names=fs.readdirSync(file).filter(name=>listeningFile.test(name)).sort();
+  check(names.length<=256,'Listening preference memory exceeds its test budget');
+  const entries=names.map(name=>{
+    const entry=read(path.join(file,name));
+    check(name===entry?.token+'.json','A preference record must match its test token');
+    return entry;
+  });
+  return {format:'ink-studio/listening-preference-memory',version:1,entries};
+}
+
 module.exports=function command([mode,file,config,settingsFile],opt,kit) {
   const C=kit.KIT.music.production.critique,{check,fields}=kit.KIT.procedural.musicInstruments;
-  check(typeof file==='string' && ['plan','listen','keep','tag','find','inspect','compare','apply','foreground'].includes(mode),
-    'Use music critique inspect, compare, apply, foreground, plan, listen, keep, tag or find');
+  check(typeof file==='string' && ['plan','listen','keep','tag','find','inspect','compare','apply','foreground','remember','recall'].includes(mode),
+    'Use music critique inspect, compare, apply, foreground, plan, listen, keep, remember, recall, tag or find');
   const out=typeof opt.out==='string' ? path.resolve(opt.out) : undefined;
   const output=(result,target)=>{
     if (target) json(target,result);
     else process.stdout.write(JSON.stringify(result,null,2)+'\n');
     return result;
   };
+  if (mode==='remember') {
+    check(config,'Supply a memory directory and a kept blind reference');
+    const directory=path.resolve(file), {entries:[entry]}=C.rememberPreference(undefined,read(config));
+    const target=path.join(directory,entry.token+'.json');
+    check(!fs.existsSync(directory) || fs.existsSync(target) ||
+      fs.readdirSync(directory).filter(name=>listeningFile.test(name)).length<256,
+      'Listening preference memory exceeds its test budget');
+    publishJson(target,entry,'This blind test is already archived with a different decision');
+    return output({memory:directory,entry:target});
+  }
+  if (mode==='recall') {
+    check(config,'Supply a listening context query');
+    return output(C.recallPreferences(readMemory(file,check),read(config)),out);
+  }
   if (mode==='tag') {
     check(out && config,'Tag a source WAV with a settings file and output directory');
     const {reference,value}=C.tagReference(WAV.read(file),read(config));
@@ -76,6 +103,7 @@ module.exports=function command([mode,file,config,settingsFile],opt,kit) {
   if (mode==='plan') {
     check(config,'Supply a critique brief');
     const brief=read(config);
+    if (typeof brief.memory==='string') brief.memory=readMemory(relative(config,brief.memory),check);
     if (typeof brief.references==='string') {
       const indexed=relative(config,brief.references), notes=read(indexed);
       check(Array.isArray(notes) && notes.length<=512,'Reference index needs an array of entries or JSON paths');
