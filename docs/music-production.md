@@ -15,6 +15,9 @@ try independent inner lines around a locked melody and bass.
 Use [patch gestures](music-gestures.md) to rehearse different performances
 of the written notes.
 
+The [sample instrument builder](sample-instrument-builder.md) creates a
+portable sampler patch and its WAV assets from a bank of recorded gestures.
+
 ## Instruments and performance
 
 A production is a JSON record with an `arrangement`, a `patches` table, and a

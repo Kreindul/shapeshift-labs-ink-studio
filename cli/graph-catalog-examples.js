@@ -301,6 +301,10 @@ const specifications = {
   'audio.renderEditorial': {inputs:{source:editorial,assets:{tone:audio},options:{stems:true}}},
   'audio.reconformEditorial': {inputs:{source:editorial,assets:{tone:audio},revision:{
     picture:{fps:25,shots:[{id:'insert',frames:1},{id:'door',frames:2}]}}}},
+  'audio.shapeInstrumentSample': {inputs:{source:audio,options:{attackFrames:8}}},
+  'audio.analyzeInstrumentSamples': {inputs:{assets:{tone:audio}}},
+  'audio.auditionInstrumentRange': {inputs:{assets:{tone:audio},options:{offsets:[0]}}},
+  'audio.buildSampleInstrument': {inputs:{assets:{tone:audio},source:{zones:[{id:'tiny',takes:['tone'],low:60,high:60,root:null}]}}},
   'audio.warp': {nodes:{edited:{op:'audio.renderSampleEdit',inputs:{source:audio,edit:slicedAudio}}},
     inputs:{source:link('edited'),options:{mode:'repitch',speed:.8}}},
   'music.renderSampleKit': {nodes:{
