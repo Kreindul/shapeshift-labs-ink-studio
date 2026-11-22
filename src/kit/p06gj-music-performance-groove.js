@@ -45,7 +45,8 @@
     const lanes=new Map(), measured=[];
     let outside=0, unmatched=0;
     for (const row of points) {
-      check(fields(row,['lane','beat','time','velocity','durationBeats','duration']) && id(row.lane) &&
+      check(fields(row,['lane','beat','time','velocity','durationBeats','duration','articulation','midi']) && id(row.lane) &&
+        (row.articulation===undefined || id(row.articulation)) && (row.midi===undefined || integer(row.midi,0,127)) &&
         (row.beat===undefined)!==(row.time===undefined) &&
         (row.duration===undefined || row.time!==undefined && row.durationBeats===undefined) &&
         (row.velocity===undefined || finite(row.velocity,1e-7,1)), 'Invalid measured groove note');
@@ -67,7 +68,8 @@
       lane.cells.get(slot).push({offset,velocity:row.velocity,gate});
       if (row.velocity!==undefined) lane.velocities.push(row.velocity);
       measured.push({lane:row.lane,beat:round(beat),slot,cycle,offset:round(offset),
-        ...(row.velocity!==undefined && {velocity:row.velocity}),...(gate!==undefined && {length:round(gate)})});
+        ...(row.velocity!==undefined && {velocity:row.velocity}),...(gate!==undefined && {length:round(gate)}),
+        ...(row.articulation!==undefined && {articulation:row.articulation}),...(row.midi!==undefined && {midi:row.midi})});
     }
     const value={format,version:1,id:key,step,length,lanes:Object.fromEntries(Array.from(lanes,([lane,{velocities,cells}])=>{
       const center=velocities.length ? median(velocities) : 1;
@@ -79,18 +81,20 @@
           ...(gate.length && {length:round(median(gate))})};
       }).sort((a,b)=>a.slot-b.slot)];
     }))};
-    return {value:P.data.freeze(template(value)),report:{step,length,cycles,startBeat,tolerance,outside,unmatched,measured}};
+    return {value:P.data.freeze(template(value)),take:P.musicEnsemble.snapshot(measured,{id:key,step,length,cycles}),report:{step,length,cycles,startBeat,tolerance,outside,unmatched,measured}};
   }
 
-  function compile(raw,plan,names) {
-    check(fields(raw,['template','startBeat','anchors','tracks','roles','links']),'Invalid production groove transfer');
-    const model=template(raw.template), slots=grid(model.step,model.length);
+  function compile(raw,plan,names,articulations) {
+    check(fields(raw,['template','startBeat','anchors','tracks','roles','links','ensemble']) &&
+      (raw.template!==undefined || raw.ensemble!==undefined),'Invalid production groove transfer');
+    const model=raw.template===undefined ? null : template(raw.template), slots=model && grid(model.step,model.length);
+    const ensemble=raw.ensemble===undefined ? null : P.musicEnsemble.compile(raw.ensemble,plan,names,articulations);
     const {startBeat=0,anchors=[],links=[]}=raw;
     check(finite(startBeat,0,65536) && Array.isArray(anchors) && anchors.length<=1024 &&
       Array.from(anchors).every(beat=>finite(beat,0,plan.sections.at(-1).end)) &&
       Array.isArray(links) && links.length<=8,'Invalid groove phase, anchors or links');
     const pin=new Set(anchors.map(round));
-    const cells=Object.fromEntries(Object.entries(model.lanes).map(([name,rows])=>[name,new Map(rows.map(row=>[row.slot,row]))]));
+    const cells=Object.fromEntries(Object.entries(model?.lanes ?? {}).map(([name,rows])=>[name,new Map(rows.map(row=>[row.slot,row]))]));
     const knobs=['lane','timing','accent','length'];
     function route(settings,defaults={}) {
       check(fields(settings,knobs),'Invalid groove route');
@@ -190,7 +194,7 @@
         return time+(first.time+offset-time)*link.strength;
       };
     }
-    return {order,style,driver,anchor:beat=>pin.has(round(beat))};
+    return {order,style,driver,ensemble,anchor:beat=>pin.has(round(beat))};
   }
 
   P.performanceGroove=Object.freeze({fit,compile});

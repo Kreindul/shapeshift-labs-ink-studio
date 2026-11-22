@@ -11,8 +11,9 @@ function importNotes(input,folder,P) {
   const lanes=input.lanes ?? [{lane:'mix'}];
   check(Array.isArray(lanes) && integer(lanes.length,1,32),'Use one to thirty-two MIDI lane selectors');
   for (const row of lanes) {
-    const {channel,track,notes,velocity}=row ?? {};
-    check(fields(row,['lane','channel','track','notes','velocity']) && id(row.lane) &&
+    const {channel,track,notes,velocity,articulation}=row ?? {};
+    check(fields(row,['lane','channel','track','notes','velocity','articulation']) && id(row.lane) &&
+      (articulation===undefined || id(articulation)) &&
       (channel===undefined || integer(channel,1,16)) && (track===undefined || integer(track,0,source.tracks-1)) &&
       (notes===undefined || Array.isArray(notes) && integer(notes.length,1,128) &&
         Array.from(notes).every(pitch=>integer(pitch,0,127))) &&
@@ -26,7 +27,8 @@ function importNotes(input,folder,P) {
         selector.notes && !selector.notes.includes(pitch) ||
         selector.velocity && !finite(note.velocity,...selector.velocity)) continue;
     check(events.length<16384,'MIDI groove routing exceeds its note budget');
-    events.push({lane:selector.lane,...note});
+    events.push({lane:selector.lane,...note,midi:pitch,
+      ...(selector.articulation!==undefined && {articulation:selector.articulation})});
   }
   return {source,events};
 }
@@ -40,14 +42,16 @@ function extract(file,kit) {
   let result;
   if (input.kind==='audio') {
     check(fields(input,['kind','lanes']) && record(input.lanes) &&
-      Object.keys(input.lanes).length<=32 && Object.entries(input.lanes).every(([key,file])=>id(key) && filename(file)),
+      Object.keys(input.lanes).length<=32 && Object.entries(input.lanes).every(([key,row])=>id(key) &&
+        (filename(row) || fields(row,['file','lane','articulation']) && filename(row.file))),
       'Provide named WAV lanes in the audio recipe');
     let samples=0;
-    const sources=Object.fromEntries(Object.entries(input.lanes).map(([lane,file])=>{
+    const sources=Object.fromEntries(Object.entries(input.lanes).map(([key,row])=>{
+      const tagged=record(row), file=tagged ? row.file : row;
       const audio=WAV.read(path.resolve(folder,file));
       samples+=audio.samples.length;
       check(samples<=32e6,'Audio groove sources exceed their sample budget');
-      return [lane,audio];
+      return [key,tagged ? {audio,lane:row.lane,articulation:row.articulation} : audio];
     }));
     result=P.mediaGraph.extractGroove(sources,{grid,detect,gate});
   } else {
@@ -62,7 +66,7 @@ function extract(file,kit) {
       result.report.source='events';
     }
   }
-  return {template:result.value,report:result.report};
+  return {template:result.value,take:result.take,report:result.report};
 }
 
 module.exports=function grooveCommand([mode,file],opt,kit) {

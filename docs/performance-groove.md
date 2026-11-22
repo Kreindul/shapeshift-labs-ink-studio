@@ -120,3 +120,81 @@ This builds a 98 BPM reference break from
 synthesized kick, and writes a short authored MIDI take. It exports the
 measured lanes, the editable transfer, and three 112 BPM renders of the same
 cue. Compare the grid, timing only, and the full transfer.
+
+## Ensemble performance
+
+Use `grooveMap.ensemble` to shape how players move through a cue. The
+production renderer, edit session, and graph operation `music.applyGroove`
+all use the same performance. A cyclic `template` can be layered underneath
+the ensemble or omitted.
+
+An ensemble can carry three kinds of performance instructions.
+
+- `pulse` moves everyone together. `players` adds independent offsets,
+  velocity multipliers, and gate multipliers. Curves are piecewise linear at
+  absolute written beats and hold their end values. Offsets have explicit
+  `beats` or `seconds` units. Top-level `anchors` pin attacks to picture or
+  score time and leave velocity and articulation editable.
+- `partners` matches the nearest unused written attack between two named
+  tracks, within `within` beats. A chord counts as one attack. An offset of
+  −20 ms for `["kick","bass"]` puts the bass 20 ms ahead of the kick on a
+  shared written beat. For two different written beats it adds the offset to
+  their written separation. `mobility` splits the correction between players.
+  `[1,1]` shares it equally and `[0,1]` fixes the kick. `strength` controls how
+  much of the correction to apply. For overlapping partnerships Ink blends
+  the corrections computed from the original proposed attacks. Directed
+  `links`, if supplied, run after the reciprocal adjustments.
+- `transfers` place a recorded phrasing span onto written events. The source
+  range is relative to the exported take, and the destination range is in
+  absolute beats. Both are half-open. Ink maps the two ranges proportionally,
+  then finds the nearest observed attack within `within` source beats (by
+  default 0.49 of a source grid step). Use `byPitch: true` for pitch-specific
+  matching of MIDI or measured events. The transfer keeps written pitches
+  and rhythm addresses, and independently blends attack timing, velocity
+  relative to the source span's median, observed gate, and articulation.
+  Written note ties keep their gate across the transfer. A player can use
+  different takes on disjoint ranges.
+
+```json
+{
+  "anchors": [0, 8],
+  "ensemble": {
+    "id": "quartet",
+    "pulse": {"unit": "seconds", "points": [[0, 0], [4, 0.012], [8, 0]]},
+    "players": {
+      "bass": {"offset": {"unit": "seconds", "points": [[0, 0.009]]}, "length": [[0, 0.9], [6, 1.1]]}
+    },
+    "takes": {"drummer": "groove.json"},
+    "transfers": [
+      {"track": "hat", "take": "drummer", "lane": "hat", "from": 0, "to": 8,
+       "sourceFrom": 0, "sourceTo": 8, "timing": 0.8, "accent": 0.9, "length": 0,
+       "articulations": {"loose-hat": "open"}}
+    ],
+    "partners": [
+      {"tracks": ["kick", "bass"], "mobility": [0.35, 1], "within": 0.04,
+       "offset": {"unit": "seconds", "points": [[0, -0.018], [4, 0.024]]}}
+    ]
+  }
+}
+```
+
+`music groove extract` writes a `take` alongside the repeating `template`.
+Use the extraction file path in a CLI mapping, as above, or embed the
+`take` record directly in a production or graph. Graph nodes
+`music.fitGroove` and `audio.extractGroove` expose it on their `take` port.
+The take keeps stable hit addresses within the exported file and each pass's
+attack, level, and length. MIDI `lanes` selectors can set `articulation` by
+note, channel, or velocity range. WAV lanes can use
+`{"file":"open-hat.wav","lane":"hat","articulation":"loose-hat"}` to combine
+labeled aligned stems. For graph inputs use `audio` in place of `file`.
+WAV levels and gates estimate the audible envelope. WAV articulation labels
+come from the source metadata. If a destination patch lacks a mapped
+articulation, it retains its own articulation and the report records the
+unapplied label. Set `articulation: false` to audition timing and dynamics
+separately.
+
+Use `music production groove score.json mapping.json --out played.json`, then
+inspect or render `played.json`. The ensemble report lists reference hit IDs,
+articulation assignments, and the proposed, target, and realized offsets
+for paired attacks. Edge clamping, overlapping partnerships and later
+directed links can affect realized offsets.

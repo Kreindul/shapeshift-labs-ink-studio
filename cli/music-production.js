@@ -229,7 +229,16 @@ module.exports=function command([mode,file,config],opt,kit) {
     if (!map) throw new TypeError('Provide a groove transfer settings file');
     let template=map.template;
     if (config && typeof template==='string') template=read(path.resolve(path.dirname(config),template));
-    value={...P.mapGroove(production,{...map,template:template?.template ?? template},assets),
+    let ensemble=map.ensemble;
+    if (config && kit.KIT.procedural.musicInstruments.record(ensemble?.takes)) {
+      const takes=Object.fromEntries(Object.entries(ensemble.takes).map(([name,entry])=>{
+        const model=typeof entry==='string' ? read(path.resolve(path.dirname(config),entry)) : entry;
+        return [name,model?.take ?? model];
+      }));
+      ensemble={...ensemble,takes};
+    }
+    value={...P.mapGroove(production,{...map,...(template!==undefined && {template:template?.template ?? template}),
+      ...(ensemble!==undefined && {ensemble})},assets),
       ...(recipe.assets && {assets:paths}),...(recipe.options && {options:recipe.options})};
   }
   else if (mode==='analyze') value=P.analyze(production,assets,config ? read(config) : recipe.options);

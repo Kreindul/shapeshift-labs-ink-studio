@@ -75,8 +75,8 @@ test('audio extraction measures attacks, relative accents and envelope lengths o
     }
     return {sampleRate:rate,channels:1,samples};
   };
-  const {value,report}=P.mediaGraph.extractGroove({
-    kick:wave([[.041,.74,.082],[.48,.51,.141]]),foley:wave([[.753,.48,.044],[1.485,.64,.076]])
+  const {value,take,report}=P.mediaGraph.extractGroove({
+    kick:wave([[.041,.74,.082],[.48,.51,.141]]),foley:{audio:wave([[.753,.48,.044],[1.485,.64,.076]]),articulation:'heel'}
   },{grid:settings,detect:{size:128,hop:24,minGap:.065,minStrength:.012,sensitivity:1}});
   assert.deepEqual(Object.keys(value.lanes),['kick','foley']);
   const [first,second]=value.lanes.kick;
@@ -85,6 +85,7 @@ test('audio extraction measures attacks, relative accents and envelope lengths o
   near(second.offset,-.04,.01);
   assert(first.accent>second.accent && second.length>first.length+.09);
   assert.equal(report.source,'audio');
+  assert(take.lanes.foley.every(hit=>hit.articulation==='heel' && hit.length>0));
 });
 
 test('groove transfer is tempo-relative, leaves unmatched notes alone and links bass to the actual kick',()=>{
@@ -123,13 +124,15 @@ test('CLI extracts a MIDI take by role and applies it as an ordinary production 
   const save=(file,value)=>fs.writeFileSync(path.join(root,file),JSON.stringify(value));
   fs.writeFileSync(path.join(root,'take.mid'),midiFile());
   save('recipe.json',{input:{kind:'midi',file:'take.mid',lanes:[
-    {lane:'low',track:1,channel:10,notes:[36]},{lane:'rim',notes:[38]}
+    {lane:'low',track:1,channel:10,notes:[36]},{lane:'rim',notes:[38],articulation:'edge'}
   ]},grid:settings});
   const cli=(...args)=>execFileSync(process.execPath,[path.resolve(__dirname,'../cli/ink-studio.js'),'music',...args],
     {cwd:root,encoding:'utf8'});
   cli('groove','extract','recipe.json','--out','groove.json');
   const fit=JSON.parse(fs.readFileSync(path.join(root,'groove.json')));
   assert.equal(fit.report.midi.ppq,480);
+  assert.equal(fit.take.lanes.rim[0].articulation,'edge');
+  assert.equal(fit.take.lanes.rim[0].midi,38);
   near(fit.template.lanes.low[0].length,1/6);
   save('source.json',{production:makeSource(),options:{sampleRate:rate,end:.45}});
   save('map.json',{template:'groove.json',tracks:{kick:{lane:'low',timing:1,length:1}}});
@@ -141,4 +144,74 @@ test('CLI extracts a MIDI take by role and applies it as an ordinary production 
   const mix=WAV.read(path.join(root,'render','mix.wav'));
   assert.equal(mix.sampleRate,rate);
   assert.equal(mix.samples.length/mix.channels,.45*rate);
+  save('ensemble.json',{ensemble:{takes:{recorded:'groove.json'},transfers:[
+    {track:'kick',take:'recorded',lane:'low',from:0,to:4}
+  ]}});
+  cli('production','groove','source.json','ensemble.json','--out','players.json');
+  const ensemble=JSON.parse(cli('production','inspect','players.json'));
+  near(ensemble.events.kick[0].time,inspect.events.kick[0].time);
+  assert.equal(ensemble.ensemble.references.kick[0].hit,'hit-1');
+});
+
+test('ensemble transfers individual reference passes and reports actual articulation selection',()=>{
+  const source=makeSource();
+  source.patches.snare.articulations={rim:{decay:.12}};
+  const {take}=P.performanceGroove.fit([
+    {...note('drummer',1.06,.4,.12),articulation:'edge',midi:38},
+    {...note('drummer',5.09,.8,.32),articulation:'brush',midi:38}
+  ],{...settings,cycles:2});
+  assert.deepEqual(take.lanes.drummer,[
+    {id:'hit-1',beat:1,offset:.06,velocity:.4,length:.12,articulation:'edge',midi:38},
+    {id:'hit-2',beat:5,offset:.09,velocity:.8,length:.32,articulation:'brush',midi:38}
+  ]);
+  const result=A.mapGroove(source,{ensemble:{id:'players',takes:{ref:take},transfers:[
+    {track:'snare',take:'ref',lane:'drummer',from:0,to:8,articulations:{edge:'rim'}}
+  ]}});
+  const {events,ensemble}=A.inspect(result.production);
+  const hit=beat=>events.snare.find(row=>row.beat===beat);
+  near(hit(1).time,.795);
+  near(hit(5).time,3.8175);
+  near(hit(1).velocity,.69*2/3);
+  near(hit(5).velocity,.69*4/3);
+  near(hit(1).gate,.09);
+  near(hit(5).gate,.24);
+  assert.equal(hit(1).play.articulation,'rim');
+  assert.equal(hit(5).play.articulation,undefined);
+  assert.deepEqual(ensemble.references.snare.map(row=>[row.hit,row.articulation,row.applied]),
+    [['hit-1','rim',true],['hit-2','brush',false]]);
+  const cropped=A.mapGroove(source,{ensemble:{takes:{ref:take},transfers:[
+    {track:'snare',take:'ref',lane:'drummer',from:0,to:2,sourceFrom:3,sourceTo:7,timing:.5,accent:0}
+  ]}});
+  near(A.inspect(cropped.production).events.snare.find(row=>row.beat===1).time,.766875);
+});
+
+test('shared pulse and player phrasing combine with balanced lead and lag and protected anchors',()=>{
+  const source=makeSource();
+  delete source.tracks.bass.groove;
+  const seconds=points=>({unit:'seconds',points});
+  const ensemble={pulse:seconds([[0,.02]]),players:{
+    kick:{offset:seconds([[0,-.01]]),accent:[[0,.5]]},bass:{offset:seconds([[0,.03]]),length:[[0,1.5]]}
+  },partners:[{tracks:['kick','bass'],offset:seconds([[1,-.04],[2,.06]])}]};
+  const grooveMap={anchors:[0,4],ensemble}, {events,ensemble:report}=A.inspect({...source,grooveMap});
+  const at=(name,beat)=>events[name].find(row=>row.beat===beat);
+  near(at('kick',0).time,0);
+  near(at('bass',4).time,3);
+  near(at('kick',1).time,.80);
+  near(at('bass',1).time,.76);
+  near(at('kick',2).time,1.50);
+  near(at('bass',2).time,1.56);
+  near(at('bass',2.5).time,1.925);
+  near(at('kick',1).velocity,.36);
+  near(at('bass',1).gate,.225);
+  assert.deepEqual(report.matches.slice(0,2).map(row=>row.realizedSeconds),[-.04,.06]);
+
+  ensemble.partners[0].mobility=[0,1];
+  const fixed=A.inspect({...source,grooveMap}).events;
+  near(fixed.kick[1].time,.76);
+  near(fixed.bass[1].time,.72);
+  const reordered={...source,tracks:{snare:source.tracks.snare,bass:source.tracks.bass,kick:source.tracks.kick}};
+  assert.deepEqual(A.inspect({...reordered,grooveMap}).events,fixed);
+  assert.throws(()=>A.inspect({...source,grooveMap:{ensemble:{...ensemble,partners:[
+    ...ensemble.partners,{tracks:['bass','kick']}
+  ]}}}),/duplicated ensemble partnership/);
 });

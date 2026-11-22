@@ -46,11 +46,16 @@
       finite(gate.max,.02,10) && gate.hold<=gate.max,'Invalid audible-length measurement settings');
     const notes=[];
     let samples=0;
-    for (const [lane,input] of Object.entries(sources)) {
-      const audio=A.audio(input);
+    for (const [key,input] of Object.entries(sources)) {
+      const tagged=record(input) && Object.hasOwn(input,'audio');
+      const lane=tagged ? input.lane ?? key : key, articulation=tagged ? input.articulation : undefined;
+      check(!tagged || fields(input,['audio','lane','articulation']) && id(lane) &&
+        (articulation===undefined || id(articulation)),'Invalid audio performance lane or articulation');
+      const audio=A.audio(tagged ? input.audio : input);
       samples+=audio.samples.length;
       check(samples<=32e6,'Audio groove source exceeds its sample budget');
-      notes.push(...observe(audio,lane,settings.detect,gate));
+      notes.push(...observe(audio,lane,settings.detect,gate).map(row=>
+        articulation===undefined ? row : {...row,articulation}));
       check(notes.length<=16384,'Groove extraction exceeds its note budget');
     }
     const result=P.performanceGroove.fit(notes,settings.grid);
