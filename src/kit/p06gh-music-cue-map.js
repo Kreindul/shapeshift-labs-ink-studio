@@ -2,9 +2,10 @@
 (function (P) {
   const {fields,record,finite,integer,id,check,hash}=P.musicInstruments;
   const eps=1e-8, round=n=>Number(n.toFixed(9));
-  const names=['density','register','harmony','silence','room','level','eq'];
+  const names=['density','register','harmony','silence','room','level','eq','tail','depth'];
   const fieldsFor={density:['parts','value','keep'],register:['parts','semitones'],
-    harmony:['chords','every'],silence:['parts','mode'],room:['parts','send'],level:['parts','gainDb','fadeSeconds'],eq:['parts','hz','q','gainDb','fadeSeconds']};
+    harmony:['chords','every'],silence:['parts','mode'],room:['parts','send'],level:['parts','gainDb','fadeSeconds'],eq:['parts','hz','q','gainDb','fadeSeconds'],
+    tail:['parts','seconds','fadeSeconds'],depth:['parts','cutoffHz','send','fadeSeconds']};
   const byStart=(a,b)=>a.from-b.from;
   function list(raw,max,label) {
     check(Array.isArray(raw) && raw.length<=max,'Invalid cue '+label+' list');
@@ -16,7 +17,7 @@
   }
 
   function compile(spec,plan,tracks,clock,seed) {
-    check(fields(spec,['groups','landmarks',...names]) && record(tracks),'Invalid cue map');
+    check(fields(spec,['groups','landmarks','foreground',...names]) && record(tracks),'Invalid cue map');
     const beats=plan.sections.at(-1).end, time=beat=>clock.timeAt({beat:round(beat)});
     const trackNames=Object.keys(tracks);
     const pitched=trackNames.filter(name=>plan.parts[name] && plan.parts[name].role!=='percussion');
@@ -48,6 +49,14 @@
       return {...row,...(row.parts!==undefined && {parts:scope(row.parts)}),time:time(row.beat),
         groups:groups.filter(span=>row.beat>=span.from && row.beat<span.to).map(span=>span.id)};
     }),'landmark').sort((a,b)=>a.beat-b.beat);
+    const foreground=unique(Array.from(list(spec.foreground ?? [],128,'foreground'),raw=>{
+      check(fields(raw,['id','label','from','to','parts','protect']) && id(raw.id) && text(raw.label) &&
+        Array.isArray(raw.parts) && raw.parts.length>0,'A foreground needs a name, beat range and playable parts');
+      const row=window(raw), parts=scope(raw.parts);
+      const protect=raw.protect===undefined || Array.isArray(raw.protect) && !raw.protect.length ? [] : scope(raw.protect);
+      check(protect.every(part=>!parts.includes(part)),'Foreground and protected parts must be distinct');
+      return {...row,parts,protect};
+    }),'foreground').sort(byStart);
     const lanes=Object.fromEntries(names.map(key=>[key,Array.from(list(spec[key] ?? [],128,key),raw=>{
       check(fields(raw,['from','to',...fieldsFor[key]]),'Invalid cue '+key+' range');
       const row=window(raw);
@@ -74,6 +83,16 @@
         check(values.length===2 && values.every(value=>finite(value,0,1)),'Cue room needs a send level or pair of levels');
         row.send=values;
       }
+      if (key==='tail') {
+        check(finite(raw.seconds,.005,8) && finite(raw.fadeSeconds ?? .025,.001,1),'Cue tail needs a release cap and fade in seconds');
+        row.fadeSeconds=Math.min(raw.fadeSeconds ?? .025,row.seconds);
+      }
+      if (key==='depth') {
+        check((raw.cutoffHz!==undefined || raw.send!==undefined) &&
+          finite(raw.cutoffHz ?? 24000,100,24000) && finite(raw.send ?? 0,0,1) &&
+          finite(raw.fadeSeconds ?? .06,0,2),'Cue depth needs a cutoff or room send and an optional fade');
+        row.fadeSeconds=Math.min(raw.fadeSeconds ?? .06,(row.endTime-row.startTime)*.5);
+      }
       if (key==='level' || key==='eq') {
         const fade=raw.fadeSeconds ?? .02;
         check(finite(fade,0,2) && (key==='level' ? finite(raw.gainDb,-60,18) :
@@ -86,6 +105,7 @@
     const disjoint=(rows,key)=>check(rows.every((row,i)=>i===0 || row.from>=rows[i-1].to),
       'Cue '+key+' windows overlap on the same track');
     disjoint(lanes.harmony,'harmony');
+    disjoint(foreground,'foreground');
     const perTrack=Object.fromEntries(trackNames.map(name=>{
       const local=Object.fromEntries(names.filter(key=>key!=='harmony').map(key=>{
         const rows=lanes[key].filter(row=>row.parts.includes(name));
@@ -100,7 +120,7 @@
     const roomCuts=cutEdges.slice(0,-1).flatMap((startTime,i)=>trackNames.every(name=>
       perTrack[name].cuts.some(row=>startTime>=row.startTime && startTime<row.endTime)) ?
       [{startTime,endTime:cutEdges[i+1]}] : []);
-    return {beats,seed,groups,landmarks,lanes,perTrack,roomCuts,time};
+    return {beats,seed,groups,landmarks,foreground,lanes,perTrack,roomCuts,time};
   }
 
   function harmonize(cue,score) {
@@ -201,6 +221,18 @@
     };
   }
 
+  // Release-only edits address tails already ringing when a new moment begins.
+  function tailLimit(rows,release,end) {
+    if (end<=release) return null;
+    for (const row of rows) {
+      if (row.endTime<=release) continue;
+      if (row.startTime>=end) break;
+      const trigger=Math.max(release,row.startTime), stop=trigger+row.seconds;
+      if (stop<end) return {stop,fade:row.fadeSeconds};
+    }
+    return null;
+  }
+
   function report(music) {
     const cue=music.cue,{events,program}=music;
     const audible=Object.entries(events).map(([name,rows])=>[name,rows.filter(row=>row.velocity>0 &&
@@ -213,8 +245,9 @@
     }));
     return P.data.freeze(P.data.clone({beats:cue.beats,duration:music.end,seed:cue.seed,
       groups:cue.groups.map(row=>({...row,tracks:summary(row.startTime,row.endTime)})),landmarks:cue.landmarks,
+      ...(cue.foreground.length && {foreground:cue.foreground.map(row=>({...row,tracks:summary(row.startTime,row.endTime)}))}),
       lanes:cue.lanes,harmony:program.events.map(({id,harmony,beat,time})=>({id,harmony,beat:round(beat),time})),
       tracks:summary(0,music.end),roomCuts:cue.roomCuts}));
   }
-  P.musicCueMap=Object.freeze({compile,harmonize,shape,cursor,equalizer,report});
+  P.musicCueMap=Object.freeze({compile,harmonize,shape,cursor,equalizer,tailLimit,report});
 })(KIT.procedural);

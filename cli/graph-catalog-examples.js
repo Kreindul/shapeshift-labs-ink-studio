@@ -69,6 +69,10 @@ const producerPlan = {op:'music.planProducer',inputs:{source:production,brief:{
 }}};
 const critiquePlan={op:'music.planCritique',inputs:{source:production,brief:{section:'opening',kind:'arrival',
   goal:'Make space before the pluck answers.',offsetBeats:1,focusBeats:2,sampleRate:8000}}};
+const foregroundScore={...production,arrangement:{...arrangement,parts:{
+  ...arrangement.parts,keys:{role:'pad',material:'melody'}}},tracks:{...production.tracks,keys:{patch:'pluck',gain:-7}}};
+const foregroundMix={source:foregroundScore,settings:{sampleRate:8000,moments:[
+  {id:'signal',from:0,to:1,parts:['lead']},{id:'answer',from:1,to:2,parts:['keys']}] }};
 const critiqueProbe={range:{from:{beat:0},to:{beat:1}},context:{beforeBeats:0,afterBeats:.5},sampleRate:8000};
 const critiqueCompare={op:'music.compareCritiqueEdits',inputs:{source:production,request:{...critiqueProbe,
   candidates:[{id:'trim',edits:[{op:'level',parts:['lead'],gainDb:-4}]}]}}};
@@ -402,6 +406,8 @@ const specifications = {
     source:production,session:link('plan'),options:{end:.25,sampleRate:8000,focus:[{id:'lead',tracks:['lead']}]}}},
   'music.keepProducer': {nodes:{plan:producerPlan},inputs:{source:production,session:link('plan'),
     selection:{keep:[{take:'echo',component:'room-send'}],reason:'Give the held notes a trailing reflection.'}}},
+  'music.planForegroundMix': {inputs:foregroundMix},
+  'music.auditionForegroundMix': {inputs:foregroundMix},
   'music.inspectCritiqueAudio': {inputs:{source:production,request:critiqueProbe}},
   'music.compareCritiqueEdits': {inputs:critiqueCompare.inputs},
   'music.applyCritiqueEdit': {nodes:{comparison:critiqueCompare},inputs:{source:production,key:link('comparison','key'),

@@ -295,7 +295,8 @@
         const moments=[...base.program.events,...program.events,...written.cues.filter(row=>row.part===name)];
         check(tracks[name] ? JSON.stringify(base.events[name])===JSON.stringify(events[name]) &&
           (!cue || cue.perTrack[name].room.every(row=>row.send.every(value=>value===tracks[name].mix.send)) &&
-          !cue.perTrack[name].cuts.length && [...cue.perTrack[name].level,...cue.perTrack[name].eq]
+          !cue.perTrack[name].cuts.length && !cue.perTrack[name].tail.length && !cue.perTrack[name].depth.length &&
+          [...cue.perTrack[name].level,...cue.perTrack[name].eq]
             .every(row=>row.gainDb===0)) :
           moments.every(row=>JSON.stringify(base.program.pitch(name,row.time))===JSON.stringify(program.pitch(name,row.time))),
         (cue ? 'Cue map or groove changes pinned part ' : 'Groove changes pinned part ')+name);
@@ -382,7 +383,8 @@
     const data=new Float32Array(stop*2);
     const fadeDuration=tail ? 0 : music.arrangement.score.endFade ?? .09;
     for (const name of names) {
-      const track=music.tracks[name];
+      const track=music.tracks[name], local=music.cue?.perTrack[name];
+      const tails=local?.tail;
       data.fill(0);
       const onset=note=>note.start ?? note.time;
       const events=track.performance ? music.events[name].slice().sort((a,b)=>onset(a)-onset(b)) : music.events[name];
@@ -395,13 +397,16 @@
         const nativeGate=note.start===undefined ? Math.min(note.gate,gateEnd-note.time) : gate;
         const cropped=note.performance?.release && gateEnd<note.time+note.gate-1e-8;
         const sound=track.play.prepare(cropped ? {...note,suppressRelease:true} : note,sampleRate,nativeGate);
-        const endTime=Math.min(note.choke ?? Infinity,start+sound.duration);
+        const naturalEnd=Math.min(note.choke ?? Infinity,start+sound.duration);
+        const shortened=tails?.length ? Q.tailLimit(tails,note.time+note.gate,naturalEnd) : null;
+        const endTime=shortened?.stop ?? naturalEnd;
         const last=Math.min(stop,Math.ceil(endTime*sampleRate));
         for (let at=first;at<last;at++) {
           const t=Math.max(0,at/sampleRate-start);
           const remaining=endTime-at/sampleRate;
-          const fade=note.choke!==endTime ? 1 : note.chokeFade ?
-            Math.sin(clamp(remaining/note.chokeFade)*Math.PI/2) : clamp(remaining*250);
+          const fade=shortened ? Math.sin(clamp(remaining/shortened.fade)*Math.PI/2) :
+            note.choke!==endTime ? 1 : note.chokeFade ?
+              Math.sin(clamp(remaining/note.chokeFade)*Math.PI/2) : clamp(remaining*250);
           const frame=at-first;
           const left=sound.signal(t,frame,0)*fade;
           data[2*at]+=left;
@@ -411,16 +416,17 @@
       const desk=track.mix, panL=Math.sqrt((1-desk.pan)/2), panR=Math.sqrt((1+desk.pan)/2);
       const automation=G.automate(track.gestures,{gain:0,pan:desk.pan,cutoff:desk.lowpass,echo:track.echo?.send ?? 0},sampleRate);
       let echo=sessionSource ? null : G.tapeEcho(track.echo,sampleRate), cutting=false;
-      const cut=Q.cursor(music.cue?.perTrack[name].cuts ?? []);
-      const roomSend=Q.cursor(music.cue?.perTrack[name].room ?? []);
-      const level=Q.cursor(music.cue?.perTrack[name].level ?? []);
-      const eq=Q.equalizer(music.cue?.perTrack[name].eq ?? [],sampleRate);
+      const cut=Q.cursor(local?.cuts ?? []);
+      const roomSend=Q.cursor(local?.room ?? []);
+      const level=Q.cursor(local?.level ?? []);
+      const eq=Q.equalizer(local?.eq ?? [],sampleRate), depth=Q.cursor(local?.depth ?? []);
       const coefficient=frequency=>1-Math.exp(-2*Math.PI*Math.min(sampleRate*.49,frequency)/sampleRate);
       const high=coefficient(desk.highpass), low=coefficient(desk.lowpass);
       const dry=stems ? new Float32Array(n*2) : null;
-      const roomLevel=sessionSource && roomSend ? new Float32Array(n) : null;
+      const roomLevel=sessionSource && (roomSend || depth) ? new Float32Array(n) : null;
       const echoLevel=sessionSource && track.echo && automation ? new Float32Array(n) : null;
       let lowL=0,lowR=0,highL=0,highR=0, hit=0;
+      let depthRow, farL=0, farR=0, farCutoff=1;
       const anchors=desk.duck && music.events[desk.duck.from].filter(note=>note.time<end);
       const gain=desk.gain*music.gain*(layers[name] ?? 1);
       for (let i=0;i<stop;i++) {
@@ -430,6 +436,7 @@
             cutting=true;
             lowL=lowR=highL=highR=0;
             eq?.reset();
+            depthRow=null;
             if (!sessionSource) echo=G.tapeEcho(track.echo,sampleRate);
           }
           continue;
@@ -459,13 +466,28 @@
         }
         const shaped=eq?.tick(l,r,i,time);
         if (shaped) [l,r]=shaped;
+        const space=depth?.(time);
+        let amount=0;
+        if (space) {
+          const edge=Math.min(time-space.startTime,space.endTime-time);
+          amount=space.fadeSeconds ? clamp(edge/space.fadeSeconds) : 1;
+          if (space.cutoffHz!==undefined) {
+            if (depthRow!==space) {
+              depthRow=space;
+              farL=l; farR=r; farCutoff=coefficient(space.cutoffHz);
+            }
+            farL+=(l-farL)*farCutoff; farR+=(r-farR)*farCutoff;
+            l+=(farL-l)*amount; r+=(farR-r)*amount;
+          }
+        }
         if (echo) {
           const wet=echo(i,l,r,settings?.echo ?? track.echo.send);
           l+=wet[0]; r+=wet[1];
         }
         const span=roomSend?.(time);
-        const send=span ? span.send[0]+(span.send[1]-span.send[0])*
+        let send=span ? span.send[0]+(span.send[1]-span.send[0])*
           clamp((time-span.startTime)/(span.endTime-span.startTime)) : desk.send;
+        if (space?.send!==undefined) send+=(space.send-send)*amount;
         if (sessionSource) {
           const fade=fadeDuration ? clamp((music.end-time)/fadeDuration) : 1;
           dry[index]=l*fade; dry[index+1]=r*fade;

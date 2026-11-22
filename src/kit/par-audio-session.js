@@ -48,7 +48,8 @@
       const {roomCuts,perTrack}=score.cue ?? {};
       const duck=track.mix.duck?.from;
       const patch=source.patches[track.patch], events=score.events[lane];
-      const hasRoom=track.mix.send>0 || perTrack?.[lane].room.some(row=>row.send.some(level=>level>0));
+      const hasRoom=track.mix.send>0 || perTrack?.[lane].room.some(row=>row.send.some(level=>level>0)) ||
+        perTrack?.[lane].depth.some(row=>row.send>0);
       const key=signature([live ? 'live-score' : 'score',lane,plan.rate,plan.map,score.end,source.tracks[lane],patch,score.gain,hasRoom && score.room,
         score.arrangement.score.endFade,perTrack?.[lane],roomCuts,events,duck && score.events[duck]]);
       return reuse(key,()=>{

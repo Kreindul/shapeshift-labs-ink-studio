@@ -5,7 +5,8 @@
   const {check,fields,finite,integer,id,db}=I;
   const keyFormat='ink-studio/audio-critique-comparison', eps=1e-8;
   const lanes={level:['gainDb','fadeSeconds'],eq:['hz','q','gainDb','fadeSeconds'],
-    silence:['mode'],register:['semitones'],density:['value','keep'],room:['send']};
+    silence:['mode'],register:['semitones'],density:['value','keep'],room:['send'],
+    tail:['seconds','fadeSeconds'],depth:['cutoffHz','send','fadeSeconds']};
   const scope=['range','context','lead','sampleRate'];
   const round=(n,digits=9)=>Number(n.toFixed(digits));
   const canon=value=>JSON.stringify(value,(_,entry)=>I.record(entry) ?
@@ -149,7 +150,7 @@
         continue;
       }
       check(typeof op==='string' && Object.hasOwn(lanes,op) && fields(edit,['op','range','parts',...lanes[op]]),
-        'Use an addressed level, EQ, silence, register, density, room or note edit');
+        'Use an addressed level, EQ, silence, register, density, room, tail, depth or note edit');
       const where=range===undefined ? review.focus : placement(score,review.rate,range);
       check(where.firstSample>=review.span.firstSample && where.endSample<=review.span.endSample,
         'A critique edit must stay inside the audition context');
@@ -159,6 +160,40 @@
       changedCue=true;
     }
     return {id:raw.id,...(changedCue && {cueMap}),...(Object.keys(tracks).length && {tracks})};
+  }
+
+  function targets(raw,score,review) {
+    check(Array.isArray(raw) && raw.length<=8,'Compare up to eight foreground moments');
+    const known=Object.keys(score.tracks), seen=new Set();
+    const parts=list=>Array.isArray(list) && list.length<=known.length &&
+      new Set(list).size===list.length && Array.from(list).every(part=>known.includes(part));
+    return Array.from(raw,row=>{
+      check(fields(row,['id','range','parts','rivals']) && id(row.id) && !seen.has(row.id) && parts(row.parts) &&
+        row.parts.length>0 && parts(row.rivals ?? []) && (row.rivals ?? []).every(part=>!row.parts.includes(part)),
+      'A comparison moment needs distinct named foreground and rival tracks');
+      seen.add(row.id);
+      const range=placement(score,review.rate,row.range);
+      check(range.firstSample>=review.span.firstSample && range.endSample<=review.span.endSample,
+        'A comparison moment must fit the audition context');
+      return {id:row.id,range,parts:row.parts,rivals:row.rivals ?? []};
+    });
+  }
+
+  function momentMeters(rendered,span,moments) {
+    const dbfs=power=>power>0 ? round(10*Math.log10(power),3) : null;
+    return moments.map(({id,range,parts,rivals})=>{
+      const from=2*(range.firstSample-span.firstSample), to=2*(range.endSample-span.firstSample);
+      const power=names=>names.reduce((sum,name)=>{
+        const {samples}=rendered.stems[name];
+        let energy=0;
+        for (let i=from;i<to;i++) energy+=samples[i]**2;
+        return sum+energy/(to-from);
+      },0);
+      const foreground=power(parts), competing=power(rivals);
+      return {id,range,parts,rivals,foregroundDbFS:dbfs(foreground),rivalDbFS:dbfs(competing),
+        foregroundOverRivalsDb:foreground>0 && competing>0 ? dbfs(foreground/competing) : null,
+        roomDbFS:dbfs(power(['room']))};
+    });
   }
 
   const sourceStamp=(source,assets)=>digest([source,Object.keys(source.tracks ?? {}),R.assetSignature(assets)]);
@@ -189,21 +224,21 @@
     }
 
     function compare(raw) {
-      check(fields(raw,[...scope,'candidates','level','target','ceiling']) &&
+      check(fields(raw,[...scope,'candidates','level','target','ceiling','targets']) &&
         ['matched','fixed'].includes(raw.level ?? 'matched') && finite(raw.target ?? -18,-35,-9) &&
-        finite(raw.ceiling ?? -1,-12,-.1) && Array.isArray(raw.candidates) && integer(raw.candidates.length,1,6) &&
+        finite(raw.ceiling ?? -1,-12,-.1) && Array.isArray(raw.candidates) && integer(raw.candidates.length,0,6) &&
         new Set(Array.from(raw.candidates,row=>row?.id)).size===raw.candidates.length,'Invalid audio critique comparison');
       const review=requestRange(score,raw);
       check((review.span.endSample-review.span.firstSample)*(raw.candidates.length+1)*(review.rivals.length+3)*2<=48e6,
         'Critique comparison exceeds the combined listening sample budget');
-      const rows=[], blocked=[];
+      const rows=[], blocked=[], moments=targets(raw.targets ?? [],score,review);
       function analyze(compiled,rendered,entry) {
         const measured=evidence(compiled,review,rendered);
         const clip=slice(rendered.value,review.span,review.focus);
         const focusWindows=measured.windows.filter(({range})=>
           range.firstSample>=review.focus.firstSample && range.endSample<=review.focus.endSample);
         return {...entry,pcm:rendered.value,mix:measured.mix,focus:stats(clip,review.focus),focusWindows,
-          issues:issues(measured,review.lead)};
+          issues:issues(measured,review.lead),...(moments.length && {moments:momentMeters(rendered,review.span,moments)})};
       }
       const original=baseline(review);
       rows.push(analyze(score,original,{id:'reference',label:'Original'}));

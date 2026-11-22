@@ -688,6 +688,24 @@
         return {value:production,reference,revision};
       }
     },
+    'music.planForegroundMix': {
+      description:'Score foreground moments and propose contrasting mix, release, depth and arrangement moves.',
+      inputs:{source:'record',settings:'record',assets:options},outputs:{value:'record',request:'record',report:'record'},
+      run({source,settings,assets}) {
+        const {production,request,report}=P.musicProduction.foregroundMix.plan(source,settings,assets);
+        return {value:production,request,report};
+      }
+    },
+    'music.auditionForegroundMix': {
+      description:'Audition four types of foreground mix edits against the original across selected moments.',
+      inputs:{source:'record',settings:'record',assets:options},
+      outputs:{value:'record',production:'record',plan:'record',audio:'record',original:'audio',key:'record',token:'string'},
+      run({source,settings,assets}) {
+        const {comparison,production,report,request}=P.musicProduction.foregroundMix.audition(source,settings,assets);
+        return {value:comparison.report,production,plan:{...report,request},audio:comparison.audio,
+          original:comparison.audio.reference,key:comparison.key,token:comparison.key.token};
+      }
+    },
     'music.inspectCritiqueAudio': {
       description:'Probe actual production audio with context, solo and mono previews plus addressed issues and notes.',
       inputs:{source:'record',request:'record',assets:options},outputs:{value:'record',clip:'audio',audio:'record'},
