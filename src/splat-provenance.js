@@ -2,6 +2,8 @@
 const SplatProvenance = (() => {
   const tables = [['objectIds', 'objects'], ['materialIds', 'materials'], ['targetIds', 'targets']];
   const channels = [['normals', 3, Float32Array], ['muteEmission', 1, Uint8Array]];
+  const curveLod = (records, indexAt) => records?.length ?
+    (typeof CurveLod === 'undefined' ? require('./curve-lod.js') : CurveLod).remap(records, indexAt) : [];
   const perSplat = [['data', 16, Float32Array], ['attr', 4, Float32Array], ['fine', 12, Float32Array],
     ['pix', 8, Float32Array], ['surfaceData', 8, Float32Array], ['materialAlbedo', 1, Uint32Array],
     ['opticalSplats', 12, Float32Array], ['curveClips', 12, Float32Array], ['curveMaterials', 4, Float32Array],
@@ -109,8 +111,10 @@ const SplatProvenance = (() => {
       ['curveTiming', 'curveTimePrograms', 8, []],
       ['curvePattern', 'curvePatternPrograms', 16, []]
     ];
+    const curveDetail = [];
     const curveAPI = result.curveSplats && (typeof CurveSplat === 'undefined' ? require('./curve-splat.js') : CurveSplat);
     for (const part of parts) {
+      if (part.curveLod) curveDetail.push(...curveLod(part.curveLod, i => offset + i));
       if (curveAPI && part.curveSplats) curveAPI.joinGroups(result.data, offset, part.count, () => ++curveGroups);
       for (const [rows, name, stride, programs] of curvePrograms) {
         if (!part[rows]?.length || !part[name]?.length) continue;
@@ -154,6 +158,7 @@ const SplatProvenance = (() => {
       offset += part.count;
     }
     for (const [, name, , programs] of curvePrograms) if (programs.length) result[name] = programs;
+    if (curveDetail.length) result.curveLod = curveDetail;
     if (result.surfaceData) result.surfaces = surfaces;
     if (result.pix) Object.assign(result, { ramps, rampOff, pats });
     if (withIds) result.splatIds = Object.freeze(splatIds);
@@ -176,6 +181,7 @@ const SplatProvenance = (() => {
     if (result.renderSdfs && (indices.length !== world.count || indices.some((index,i)=>index !== i)))
       delete result.renderSdfs;
     const remap = new Map(indices.map((source, i) => [source, i]));
+    if (world.curveLod) result.curveLod = curveLod(world.curveLod, i => remap.get(i));
     function take(source, stride, Type) {
       const out = new Type(indices.length * stride);
       for (let i = 0; i < indices.length; i++) out.set(source.subarray(indices[i] * stride, (indices[i] + 1) * stride), i * stride);

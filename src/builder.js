@@ -1059,6 +1059,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
   }
   let hasCurveSplats = false, curveGroups = 0, curveClips, curveMaterials, curveLighting, curveTiming, curvePattern, curveShadows;
   const curveTimePrograms = [], curvePatternPrograms = [];
+  const curveLod = [];
   function writeCurveRow(storage, stride, values, Type = Float32Array) {
     if (!storage || storage.length < n * stride) {
       const next = new Type(Math.max(n * stride, storage ? storage.length * 2 : 256 * stride));
@@ -1124,6 +1125,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
         ...(curveTiming && { curveTiming: curveTiming.slice(0, n * CurveSplat.timingStride), curveTimePrograms: curveTimePrograms.slice() }),
         ...(curvePattern && { curvePattern: curvePattern.slice(0, n * CurvePattern.stride), curvePatternPrograms: curvePatternPrograms.slice() }),
         ...(curveShadows && { curveShadows: curveShadows.slice(0, n) }),
+        ...(curveLod.length && { curveLod: curveLod.slice() }),
         ...(curveClips && { curveClips: curveClips.slice(0, n * CurveSplat.clipStride) }),
         ...(paintDecals.length && { paintDecals }),
         ...(correctionRows.length && { paintCorrections: PaintCorrections.bind(correctionRows) }),
@@ -1206,6 +1208,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     curveGroups = 0;
     curveClips = curveMaterials = curveLighting = curveTiming = curvePattern = curveShadows = undefined;
     curveTimePrograms.length = curvePatternPrograms.length = 0;
+    curveLod.length = 0;
     fine = null;
     attr = null;
     attrN = null;
@@ -1314,6 +1317,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     curveSplat,
     registerCurveTiming: program => curveTimePrograms.push(program),
     registerCurvePattern: program => curvePatternPrograms.push(program),
+    registerCurveLod: plan => curveLod.push(plan),
     reserveCurveGroups(count) {
       const first = curveGroups + 1;
       CurveSplat.tag(0, 'hard', curveGroups + count);

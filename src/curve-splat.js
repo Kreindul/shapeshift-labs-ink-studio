@@ -121,6 +121,14 @@ const CurveSplat = (() => {
       radius: radius * size, half: half * size };
   }
 
+  function roundSpan(data, at, scale, center) {
+    if (!isRow(data, at) || sectionOf(data[at + 15]) !== 0) return;
+    const shape = dimensions(data, at, scale, 0);
+    if (!shape) return;
+    const { axis, half, radius } = shape;
+    return { radius, from: center.map((v, i) => v - half * axis[i]), to: center.map((v, i) => v + half * axis[i]) };
+  }
+
   function erf(x) {
     const t = 1 / (1 + .3275911 * Math.abs(x));
     return Math.sign(x) * (1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t -
@@ -577,6 +585,6 @@ const CurveSplat = (() => {
   }
   return Object.freeze({ tag, joinGroups, axialUnits, minimum, castShadow, receiveShadow, overlapsDepth,
     clipStride, materialStride, lightingStride, timingStride, clipPlanes,
-    emissionAt, lightingAt, isRow, carrier, writeClips, timeWindow, timedOpacity, prepare, sample, sampleAt, specular, directional });
+    emissionAt, lightingAt, isRow, carrier, roundSpan, writeClips, timeWindow, timedOpacity, prepare, sample, sampleAt, specular, directional });
 })();
 if (typeof module !== 'undefined') module.exports = CurveSplat;

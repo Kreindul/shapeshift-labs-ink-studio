@@ -58,6 +58,7 @@ const { footprint, exportOffsets, coverageOffsets, sampledDepth } = require('./s
 const CurveCoverage = require('./curve-coverage.js');
 const CurveWidth = require('../src/curve-width.js');
 const CurvePattern = require('../src/curve-pattern.js');
+const CurveLod = require('./curve-lod.js');
 const { createMaskResolve, applyMasks } = require('./look-mask-resolve.js');
 const PalettePixel = require('./palette-pixel.js');
 const PaletteComposition = require('./palette-composition.js');
@@ -296,7 +297,7 @@ function render(world, o, preparedPalettes) {
   const start = performance.now();
   const counters = {
     rasterPasses:0, reflectionProbeFaces:0, fragments:0, translucentFragments:0, peakDeferredFragments:0, deferredFlushes:0,
-    planarCaptures:0, planarPixels:0, reflectionProbePixels:0, splatRows:0, omittedBackgroundRows:0, omittedParticleRows:0,
+    planarCaptures:0, planarPixels:0, reflectionProbePixels:0, splatRows:0, omittedBackgroundRows:0, omittedParticleRows:0, curveSegments:0,
     volume:{ traces:0, boundsTests:0, boundsCacheHits:0, mediaQueries:0, mediaCacheHits:0, fullFogCacheHits:0, emptyFogIntervals:0, raySamples:0,
       analyticSegments:0, marchSteps:0, densitySamples:0, skipTests:0, skippedSteps:0,
       cloudTraces:0, cloudSamples:0, cloudShadowRays:0, cloudShadowSamples:0 }
@@ -1349,8 +1350,8 @@ function renderFrame(world, o, preparedPalettes) {
     SC[i] = sc;
     depth[i] = V[2] * x + V[6] * y + V[10] * z + V[14];
   }
-  function prepareCurve(i, camera, carrier, forShadow = false) {
-    const position = [X[i], Y[i], Z[i]], frame = curveFrames ? curveFrames(i) : null;
+  function prepareCurve(i, camera, carrier, forShadow = false, replacement) {
+    const position = replacement?.center ?? [X[i], Y[i], Z[i]], frame = curveFrames ? curveFrames(i) : null;
     const clips = CurveSplat.clipPlanes(carrier.curveClips, i, position, SC[i], frame);
     let window = curveWindows?.[i];
     if (window && frame && (window.first > 0 || window.last < 1)) {
@@ -1359,7 +1360,7 @@ function renderFrame(world, o, preparedPalettes) {
         m[k] * direction[0] + m[k + 1] * direction[1] + m[k + 2] * direction[2]) };
     }
     const pattern = CurvePattern.attach(carrier, i, frame, camera, forShadow);
-    return CurveSplat.prepare(d, i * 16, position, SC[i], AL[i], camera, clips, window,
+    return CurveSplat.prepare(replacement?.data ?? d, replacement ? 0 : i * 16, position, replacement ? 1 : SC[i], AL[i], camera, clips, window,
       forShadow ? undefined : curveWidthAt?.(i), pattern);
   }
   const probes = ProbeLighting.create(world,o.bounceProbes,baseSky,sun,o[reconstructionSource]);
@@ -1402,6 +1403,15 @@ function renderFrame(world, o, preparedPalettes) {
     return [color>>16,(color>>8)&255,color&255].map(n=>n/255);
   }
   const relight = relative && SplatRelighting.rows(world, relative, sampleFrames(world, t), { x: X, y: Y, z: Z, alpha: AL });
+  const curveLod = curves && (o.curveLod ?? look.curveLod) !== false && !shutterRows && !reflectionPlane?.select && !probeView?.allow &&
+    CurveLod.frame(world.curveLod, curveCamera, { data:d, x:X, y:Y, z:Z, alpha:AL, scale:SC, windows:curveWindows,
+      rig:world.anim?.rig });
+  if (counters && curveLod) {
+    counters.curveLod ??= {};
+    for (const [key, value] of Object.entries(curveLod.stats)) {
+      counters.curveLod[key] = (counters.curveLod[key] ?? 0) + value;
+    }
+  }
   let mn = Infinity;
   for (let i = 0; i < N; i++) if ((!qualityRows || qualityRows.keep[i]) && (i < baseCount || AL[i] > 0) && depth[i] < mn) mn = depth[i];
   const mediumHorizon = aerial ? Math.max(horizon, -mn + R) : horizon;
@@ -1410,7 +1420,8 @@ function renderFrame(world, o, preparedPalettes) {
   const orderRows = new Uint32Array(qualityRows?.submitted ?? N);
   let orderCount = 0;
   for (let i = 0; i < N; i++)
-    if ((!qualityRows || qualityRows.keep[i]) && !(geometryMask && spriteLOD.hidden(geometryMask.codes[i]))) orderRows[orderCount++] = i;
+    if ((!qualityRows || qualityRows.keep[i]) && !(geometryMask && spriteLOD.hidden(geometryMask.codes[i])) &&
+        !curveLod?.hidden?.has(i)) orderRows[orderCount++] = i;
   const order = orderRows.subarray(0,orderCount);
   order.sort((a, b) => depth[a] - depth[b]);
   if (transparency && !blendDepth && !deep) {
@@ -1762,11 +1773,12 @@ function renderFrame(world, o, preparedPalettes) {
     const i = order[n];
     const motion = shutterRows?.clock(i) ?? sceneMotion, t = motion.scene;
     if ((!sortedSurfaces || !deferred) && spriteIndex<sprites.length) playSprites(-depth[i],false);
+    const coarse = curveLod?.geometry?.get(i), representation = curveLod?.choices?.get(i);
     const q = i * 16,
       al = AL[i],
-      x = X[i],
-      y = Y[i],
-      z = Z[i];
+      x = coarse?.center[0] ?? X[i],
+      y = coarse?.center[1] ?? Y[i],
+      z = coarse?.center[2] ?? Z[i];
     const opt = i * OpticalMaterials.STRIDE, opticalActive = optical?.[opt + 3];
     if (al <= 0 || y < -30 || opticalActive && !optical[opt]) continue;
     if (probeView?.allow && (i >= baseCount || !probeView.allow(i))) continue;
@@ -1779,12 +1791,13 @@ function renderFrame(world, o, preparedPalettes) {
     let curve, curveStrength, curveMargin = 0, roughness, curveEmission, curveLight, curveReceives;
     if (curveCamera && CurveSplat.isRow(d, q)) {
       const curveWorld = shutterRows?.pose(i) ?? world;
-      curve = prepareCurve(i, curveCamera, curveWorld);
+      curve = prepareCurve(i, curveCamera, curveWorld, false, coarse);
       if (!curve) continue;
       curveStrength = !opticalActive && edgeStrengthAt && edgeStrengthAt(i);
       if (curveStrength) curveMargin = CurveCoverage.margin;
       if (curve.bounds[0] - curveMargin >= W || curve.bounds[1] - curveMargin >= H ||
           curve.bounds[2] + curveMargin <= 0 || curve.bounds[3] + curveMargin <= 0) continue;
+      if (counters) counters.curveSegments++;
       const finish = curveWorld.curveMaterials;
       const encoded = finish?.[i * CurveSplat.materialStride];
       if (encoded) roughness = encoded - 1;
@@ -2100,6 +2113,7 @@ function renderFrame(world, o, preparedPalettes) {
       const dy = iy + 0.5 - sy;
       for (let ix = x0; ix <= x1; ix++) {
         if (geometryCode && !spriteLOD.geometry(geometryCode,ix,iy)) continue;
+        if (representation && !CurveLod.visible(representation, ix, H - 1 - iy, artScale)) continue;
         const dx = ix + 0.5 - sx,
           pw = -0.5 * (k0 * dx * dx + k2 * dy * dy) - k1 * dx * dy;
         const planeRay=planeFrame&&rayAt(ix+.5,iy+.5);

@@ -679,6 +679,49 @@ default to false and can be set independently.
 Run `node examples/curve-depth-crossings.cjs studio/out/curve-depth-crossings`
 to render the woven crossings, the mist pass, and the shadow switches.
 
+## Simplify strands at a distance
+
+Set `lod` on a strand appearance or a grouped source such as a bundle or
+textile plan. It applies to the headless view. The source paths stay
+editable and the physical strands still cast their authored shadows.
+
+```json
+{
+  "lod": {
+    "simplify": [0.16, 0.38],
+    "aggregate": {
+      "transition": [0.48, 1.35],
+      "color": "#c58655",
+      "samples": 20
+    }
+  }
+}
+```
+
+- `simplify: [merge, full]` measures chord error in art pixels, including
+  the projected equivalent of depth error. Contiguous round spans with the
+  same appearance can merge below `merge`. Their intermediate vertices
+  ease toward the chord up to `full`. Tight bends, section changes, patterned
+  spans and authored cuts retain their detail. `lod: true` uses the default
+  simplification range `[0.16, 0.38]`.
+- `aggregate.transition: [coarse, detail]` measures the projected pitch
+  of neighboring strands. Above `detail`, draw the individual strands.
+  Below `coarse`, draw one larger strand on their shared centreline.
+  In between, an ordered art-pixel pattern selects one representation per
+  pixel, preserving depth and avoiding double opacity.
+- Group threads that run in the same direction. The representative follows
+  their mean centreline and takes its width and pigment from the group.
+  Supply `pitch` or `width` in world units, an explicit `color` or
+  `opacity`, or `samples` from 4 to 64 to art-direct that shape.
+  Bound groups update their centreline and measured spacing as they pose.
+  A group with partially revealed or inactive strands keeps the detail view.
+
+Use `render(world, { curveLod: false })` or `--curve-lod off` for a matched
+comparison. Render statistics include `curveSegments` and, for active LODs,
+counts for removed spans, selected aggregate groups, and groups in transition.
+The [distance demo](../examples/curve-distance-simplification.cjs) shows
+the same bands and bends in both modes during a zoom out.
+
 ## Render and compare
 
 The [editable example](../examples/curve-splat-scene.json) uses

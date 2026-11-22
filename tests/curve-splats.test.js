@@ -116,6 +116,94 @@ const profileFrame = style => ink.render(C.world(scene([{ source: straight, ...s
 
 const patternView = { ...imageOptions, ortho: true, transparent: true, fov: 2 * Math.atan(76 / 240) };
 
+const sampledBend = Array.from({ length: 81 }, (_, i) => {
+  const u = i / 80;
+  return [-2.5 + 5 * u, .57 * Math.sin(2 * Math.PI * u) + .14 * Math.sin(24 * u), .12 * u];
+});
+function parallelThreads(points, spacing) {
+  return { kind: 'textile', plan: { threads: Array.from({ length: 5 }, (_, i) => ({
+    id: 'thread-' + i, radius: .016, stations: points.map(([x,y,z]) =>
+      ({ p:[x,y+spacing*(i-2),z], uv:[0,0], n:[0,0,1] }))
+  })) } };
+}
+
+test('curve simplification budgets projected bends and leaves detailed patterns alone', () => {
+  const settings = { lod: { simplify:[.16,.40] }, edge:'hard', width:.085 };
+  const recipe = scene([{ source: sampledBend, ...settings }]);
+  const world = C.world(recipe);
+  for (const ortho of [true, false]) {
+    const opts = { ...imageOptions, ortho, transparent:true, renderStats:true, edgeFilter:true };
+    const near = ink.render(world, { ...opts, dist:6 });
+    const far = ink.render(world, { ...opts, dist:17 });
+    const reference = ink.render(world, { ...opts, dist:17, curveLod:false });
+    assert.ok(near.renderStats.curveSegments > far.renderStats.curveSegments);
+    assert.ok(far.renderStats.curveSegments < reference.renderStats.curveSegments / 2);
+    assert.ok(far.renderStats.curveLod.removedSegments > 40);
+    assert.equal(reference.renderStats.curveSegments, 80);
+    assert.ok(far.alpha.some(n => n > 40));
+    assert.ok(far.alpha.reduce((sum, n, i) => sum + Math.abs(n-reference.alpha[i]), 0) <
+      .45 * reference.alpha.reduce((sum,n) => sum+n,0));
+  }
+  const patterned = C.world(scene([{ source: sampledBend, ...settings, pattern: { dash:{ spacing:.24 } } }]));
+  const opt = { ...imageOptions, dist:15, renderStats:true };
+  assert.deepEqual(ink.render(patterned,opt).rgb, ink.render(patterned,{...opt,curveLod:false}).rgb);
+  assert.throws(() => C.world(scene([{ ...recipe.strands[0], lod:{ simplify:[1, .1] } }])), /increasing art-pixel/);
+});
+
+test('fine strands transition to one selectable pigment shape without double opacity', () => {
+  const threads = parallelThreads(K.curve.line([-2,0,0],[2,0,0],20), .073);
+  const lod = { aggregate:{ width:.32, color:'#f3b56b', samples:10, transition:[.49,1.50] } };
+  const recipe = scene([{ source:threads, edge:'hard', width:.041, color:'#76d6ae', lod }]);
+  const world = C.world(recipe), full = C.world(scene([{ ...recipe.strands[0], lod:false }]));
+  const render = (dist, extra) => ink.render(world,{ ...patternView, dist, renderStats:true,...extra });
+  const near = render(4), mid = render(8), far = render(20), disabled = render(20,{curveLod:false});
+  assert.equal(near.renderStats.curveLod.aggregateGroups,0);
+  assert.equal(mid.renderStats.curveLod.blendingGroups,1);
+  assert.ok(mid.alpha.every(alpha => alpha === 0 || alpha === 255));
+  assert.equal(far.renderStats.curveLod.aggregateGroups,1);
+  assert.equal(far.renderStats.curveLod.blendingGroups,0);
+  assert.equal(far.renderStats.curveSegments,10);
+  assert.deepEqual(at(far,64,37),[243,181,107]);
+  assert.equal(disabled.renderStats.curveSegments,100);
+  assert.deepEqual(disabled.rgb,ink.render(full,{ ...patternView, dist:20 }).rgb);
+  const tighter = C.world(scene([{ ...recipe.strands[0], lod:{ aggregate:{ ...lod.aggregate, transition:[.15,.40] } } }]));
+  assert.equal(ink.render(tighter,{ ...patternView, dist:20, renderStats:true }).renderStats.curveLod.aggregateGroups,0);
+});
+
+test('a bound aggregate follows its members and updates spacing, and complete groups survive joining', () => {
+  const B = kit.makeBuilder(1,palette);
+  const source = parallelThreads(K.curve.line([-1.7,0,0],[1.7,0,0],12),.061);
+  const lod = { simplify:[.16,.4], aggregate:{ width:.31, color:'#f3b56b', samples:8, transition:[.50,1.10] } };
+  let lift = 0, stretch = 1;
+  const bound = C.bind(B,source,({points}) => points.map(([x,y,z]) => [x, lift + y * stretch, z]), {
+    width:.027, edge:'hard', color:'#76d6ae', lod,
+  });
+  const world = host(B), options = { ...patternView, dist:18, renderStats:true };
+  const nearOrigin = ink.render(world,options);
+  assert.deepEqual(at(nearOrigin,64,37),[243,181,107]);
+  lift = .9;
+  bound.pose(world);
+  const lifted = ink.render(world,options);
+  assert.equal(lifted.renderStats.curveLod.aggregateGroups,1);
+  assert.equal(lifted.alpha[37*lifted.w+64],0);
+  assert.deepEqual(at(lifted,64,32),[243,181,107]);
+  stretch = 4;
+  bound.pose(world);
+  assert.equal(ink.render(world,options).renderStats.curveLod.aggregateGroups,0);
+
+  const Solid = kit.makeBuilder(1,palette);
+  C.draw(Solid,source,{width:.027,edge:'hard',lod});
+  const chunk = host(Solid);
+  const provenance = require('../src/splat-provenance.js');
+  const Empty = kit.makeBuilder(1,palette);
+  Empty.curveSplat([-1,0,0],[1,0,0],.1,Empty.P[1],0);
+  const joined = provenance.join([host(Empty),chunk],
+    {cam:chunk.cam,fog:chunk.fog,radius:chunk.radius,dither:0});
+  assert.deepEqual(ink.render(joined,options).rgb, nearOrigin.rgb);
+  const broken = provenance.subset(joined,[1,2,3,4,5,6,7]);
+  assert.equal(broken.curveLod[0]?.aggregate, undefined);
+});
+
 test('separate depths of a translucent self-crossing survive hard strand coverage union', () => {
   const points = [[-1.65,0,-.78], [1.65,0,-.78], [1.65,1.32,.68], [0,1.32,.68], [0,-1.32,.68]];
   const style = { edge: 'hard', width: .22, opacity: .5,

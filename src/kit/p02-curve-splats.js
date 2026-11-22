@@ -537,6 +537,77 @@
     };
   }
 
+  function aggregateGuide(parts, settings) {
+    const tracks = parts.map(({ points }) => {
+      const knots = points.filter((point, i) => !i || K.V.dist(point, points[i - 1]) > 1e-7);
+      return knots.length > 1 ? K.curve.resample(knots, settings.samples) : null;
+    });
+    if (tracks.some(path => !path)) return;
+    let radius = 0, pitch = 0;
+    const points = Array.from({ length: settings.samples + 1 }, (_, i) => {
+      const locations = tracks.map(stations => stations[i]);
+      const center = K.V.mul(locations.reduce((sum, point) => K.V.add(sum, point), [0,0,0]), 1 / locations.length);
+      for (let j = 0; j < locations.length; j++)
+        radius = Math.max(radius, K.V.dist(center, locations[j]) + parts[j].radius);
+      // Use the largest local nearest-neighbour pitch, so an isolated strand
+      // can hold the detailed representation even if the rest are clustered.
+      if (settings.pitch === undefined && (i === settings.samples || i % Math.ceil(settings.samples / 5) === 0)) {
+        for (let j = 0; j < locations.length; j++) {
+          let nearest = Infinity;
+          for (let k = 0; k < locations.length; k++) if (j !== k) nearest = Math.min(nearest, K.V.dist(locations[j], locations[k]));
+          pitch = Math.max(pitch, nearest);
+        }
+      }
+      return center;
+    });
+    if (points.some((point, i) => i && K.V.dist(point, points[i - 1]) < 1e-7)) return;
+    if (settings.width !== undefined) radius = settings.width / 2;
+    if (!finite(radius, 1e-6, 100)) return;
+    return { points, radius, pitch: settings.pitch ?? Math.max(1e-6, pitch) };
+  }
+
+  function aggregatePlan(plan, settings, colors, maxSegments) {
+    const parts = plan.strands.filter(strand => strand.rows.length);
+    check(parts.length >= 2 && parts.length <= 256, 'an aggregate needs 2 to 256 nonempty strands in the same source');
+    const coarse = aggregateGuide(parts.map(strand => ({ points: strand.knots, radius: strand.maxRadius })), settings);
+    check(coarse, 'cannot form a continuous aggregate; group strands along the same direction');
+    let area = 0, opacity = 0, weight = 0;
+    const pigment = [0,0,0];
+    for (const { rows } of parts) for (const row of rows) {
+      const footprint = K.V.dist(row.from, row.to) * row.radius;
+      area += footprint;
+      opacity += row.opacity * footprint;
+      weight += row.opacity * footprint;
+      for (let k = 0; k < 3; k++) pigment[k] += row.shade[k] * row.opacity * footprint;
+    }
+    const color = settings.color ?? pigment.map(value => Math.round(value / (weight || 1)));
+    const proxy = prepare({ kind: 'path', id: 'aggregate', points: coarse.points }, {
+      radius: coarse.radius, color, opacity: 0, edge: 'hard', object: plan.object,
+      material: plan.material, target: plan.target, maxSegments
+    }, colors, true);
+    return { ...coarse, settings, plan: proxy, opacity: settings.opacity ?? opacity / area };
+  }
+
+  function simplificationRuns(strands, ranges) {
+    const runs = [];
+    const eligible = row => !row.profile && !row.clips && !row.timeRange && !row.pattern;
+    function same(a, b) {
+      return b && eligible(b) && a.radius === b.radius && a.opacity === b.opacity &&
+        sameValue(a.shade, b.shade) && (a.finish === b.finish || a.finish && b.finish && sameValue(a.finish, b.finish)) &&
+        (a.lighting === b.lighting || a.lighting && b.lighting && sameValue(a.lighting, b.lighting));
+    }
+    for (const [i, { rows }] of strands.entries()) {
+      const offset = ranges[i].first;
+      for (let start = 0; start < rows.length;) {
+        let end = start + 1;
+        if (eligible(rows[start])) while (same(rows[start], rows[end]) && sameValue(rows[end - 1].to, rows[end].from)) end++;
+        if (end - start > 1) runs.push([offset + start, offset + end]);
+        start = end;
+      }
+    }
+    return runs;
+  }
+
   function prepare(source, options = {}, palette, retain = false) {
     const link = source?.kind === 'routed' ? source.link : undefined;
     const { radius, width, taper = 1, twist = 0, section = source?.kind === 'surface' ? 'flattened' : undefined,
@@ -567,6 +638,7 @@
     const fixedColor = typeof color === 'function' ? null : rgb(color);
     const timing = timingProgram(source, options);
     const pattern = CurvePattern.prepare(options.pattern, palette, options.paletteRoles);
+    const lod = CurveLod.prepare(options.lod);
     let shadows = 0;
     if (options.shadow !== undefined && options.shadow !== false) {
       const shadow = options.shadow;
@@ -718,9 +790,15 @@
         } while (previous < 1);
         distance += length;
       }
-      return { id, rows, rest, followNormals: Boolean(chartNormals) };
+      return { id, rows, rest, followNormals: Boolean(chartNormals), ...(lod?.aggregate && { knots,
+        maxRadius: rows.reduce((best, row) => Math.max(best, row.radius), 0) }) };
     });
-    return { object, material, target, edge, strands, segments, examined, timing, pattern, shadows };
+    const plan = { object, material, target, edge, strands, segments, examined, timing, pattern, shadows, lod };
+    if (lod?.aggregate) {
+      plan.proxy = aggregatePlan(plan, lod.aggregate, palette, maxSegments - examined);
+      plan.examined += plan.proxy.plan.examined;
+    }
+    return plan;
   }
 
   function emit(builder, plan) {
@@ -742,7 +820,23 @@
       });
       threads.push({ id, first: start, end });
     }
-    return { first, end: builder.count(), threads, segments: plan.segments };
+    let proxy, record;
+    if (plan.lod) {
+      const runs = plan.lod.simplify ? simplificationRuns(plan.strands, threads) : [];
+      let aggregate;
+      if (plan.proxy) {
+        proxy = emit(builder, plan.proxy.plan);
+        aggregate = { detail: threads.filter(thread => thread.end > thread.first).map(thread => [thread.first, thread.end]),
+          proxy: [proxy.first, proxy.end], pitch: plan.proxy.pitch, opacity: plan.proxy.opacity,
+          transition: plan.proxy.settings.transition };
+        if (plan.lod.simplify) runs.push(...simplificationRuns(plan.proxy.plan.strands, proxy.threads));
+      }
+      if (runs.length || aggregate) {
+        record = { runs, simplify: plan.lod.simplify, aggregate };
+        builder.registerCurveLod(record);
+      }
+    }
+    return { first, end: builder.count(), threads, segments: plan.segments + (proxy?.segments ?? 0), ...(record && { lod: record }) };
   }
 
   function draw(builder, source, options) {
@@ -778,7 +872,7 @@
         const frames = needsFrames ? K.curve.frames(current, up) : null;
         return { current, normals, active, ends, lengths, frames, followNormals };
       });
-      for (let i = ranges.first; i < ranges.end; i++)
+      for (let i = ranges.first; i < (ranges.lod?.aggregate?.proxy[0] ?? ranges.end); i++)
         check(CurveSplat.isRow(data, i * 16) && !stage?.rig?.bid?.[i],
           'bound row must keep its curve payload and use only its curve driver');
       plan.strands.forEach(({ rows: entries }, index) => {
@@ -831,6 +925,28 @@
           if (rows) rows[indexOfRow >> 9] = 1;
         });
       });
+      if (plan.proxy) {
+        const descriptor = ranges.lod.aggregate;
+        const parts = posed.flatMap(({ current }, i) => plan.strands[i].rows.length ?
+          [{ points: current, radius: plan.strands[i].maxRadius }] : []);
+        const coarse = aggregateGuide(parts, plan.proxy.settings);
+        if (coarse) descriptor.pitch = coarse.pitch;
+        const [start, end] = descriptor.proxy;
+        for (let i = start; i < end; i++) {
+          const { segment, first, last } = plan.proxy.plan.strands[0].rows[i - start].attachment;
+          const q = i * 16;
+          const from = coarse && K.V.lerp(coarse.points[segment], coarse.points[segment + 1], first);
+          const to = coarse && K.V.lerp(coarse.points[segment], coarse.points[segment + 1], last);
+          const geometry = coarse && CurveSplat.carrier(from, to, coarse.radius);
+          data[q + 13] = geometry?.half ?? 0;
+          if (geometry) {
+            data.set(geometry.center, q);
+            for (let k = 0; k < slots.length; k++) data[q + slots[k]] = geometry.covariance[k];
+            data[q + 12] = coarse.radius;
+          }
+          if (rows) rows[i >> 9] = 1;
+        }
+      }
       return ranges;
     }
     return { ...ranges, pose, post: (dt, time, stage, clock) => pose(stage.W, { stage, time, dt, clock }) };
@@ -870,6 +986,7 @@
         for (const color of plan.pattern?.dither?.swatches ?? []) if (unique.size < 256) unique.add(packed(color));
         for (const strand of plan.strands) for (const row of strand.rows)
           if (unique.size < 256) unique.add(packed(row.shade));
+        if (plan.proxy && unique.size < 256) unique.add(packed(plan.proxy.plan.strands[0].rows[0].shade));
       }
       colors.splice(0, colors.length, ...unique);
     }
