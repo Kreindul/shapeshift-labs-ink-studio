@@ -189,14 +189,15 @@ function mount(K, makeStudy) {
     play.textContent = 'Play';
   }
   function tick(now) {
-    const step = Math.floor((now-start)*study.fps/1000) % study.frames;
+    start ??= now - frame * 1000 / study.fps;
+    const step = Math.floor((now-start)*study.fps/1000 + 1e-9) % study.frames;
     if (step!==frame) { frame=step; draw(); }
     if (playing) request=requestAnimationFrame(tick);
   }
   play.addEventListener('click',()=>{
     if (playing) return pause();
     playing=true;
-    start=performance.now()-frame*1000/study.fps;
+    start=undefined;
     play.textContent='Pause';
     request=requestAnimationFrame(tick);
   });
