@@ -1057,8 +1057,8 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
       else fallingSnowRanges.push({ first, end });
     }
   }
-  let hasCurveSplats = false, curveGroups = 0, curveClips, curveMaterials, curveLighting, curveTiming;
-  const curveTimePrograms = [];
+  let hasCurveSplats = false, curveGroups = 0, curveClips, curveMaterials, curveLighting, curveTiming, curvePattern;
+  const curveTimePrograms = [], curvePatternPrograms = [];
   function writeCurveRow(storage, stride, values, Type = Float32Array) {
     if (!storage || storage.length < n * stride) {
       const next = new Type(Math.max(n * stride, storage ? storage.length * 2 : 256 * stride));
@@ -1068,7 +1068,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     storage.set(values, (n - 1) * stride);
     return storage;
   }
-  function curveSplat(from, to, radius, color, opacity, profile, edge, group, clips, finish, lighting, timing) {
+  function curveSplat(from, to, radius, color, opacity, profile, edge, group, clips, finish, lighting, timing, pattern) {
     const { center, half, axis, normal, covariance } = CurveSplat.carrier(from, to, radius, profile);
     const section = profile ? (profile.flattened ? 2 : 1) : 0;
     push(...center, ...covariance, color, opacity,
@@ -1077,6 +1077,11 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     if (finish) curveMaterials = writeCurveRow(curveMaterials, CurveSplat.materialStride, finish);
     if (lighting) curveLighting = writeCurveRow(curveLighting, CurveSplat.lightingStride, lighting);
     if (timing) curveTiming = writeCurveRow(curveTiming, CurveSplat.timingStride, [...timing, ...axis], Float64Array);
+    if (pattern) {
+      const { program, arc, uv, side, gradient } = pattern;
+      curvePattern = writeCurveRow(curvePattern, CurvePattern.stride,
+        [program, ...arc, ...(uv ?? [0,0,0,0]), ...axis, ...(side ?? [0,0,0]), ...(gradient ?? [0,0])], Float64Array);
+    }
     if (clips) {
       const stride = CurveSplat.clipStride;
       if (!curveClips || curveClips.length < n * stride) {
@@ -1116,6 +1121,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
         ...(curveMaterials && { curveMaterials: curveMaterials.slice(0, n * CurveSplat.materialStride) }),
         ...(curveLighting && { curveLighting: curveLighting.slice(0, n * CurveSplat.lightingStride) }),
         ...(curveTiming && { curveTiming: curveTiming.slice(0, n * CurveSplat.timingStride), curveTimePrograms: curveTimePrograms.slice() }),
+        ...(curvePattern && { curvePattern: curvePattern.slice(0, n * CurvePattern.stride), curvePatternPrograms: curvePatternPrograms.slice() }),
         ...(curveClips && { curveClips: curveClips.slice(0, n * CurveSplat.clipStride) }),
         ...(paintDecals.length && { paintDecals }),
         ...(correctionRows.length && { paintCorrections: PaintCorrections.bind(correctionRows) }),
@@ -1196,8 +1202,8 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     n = 0;
     hasCurveSplats = false;
     curveGroups = 0;
-    curveClips = curveMaterials = curveLighting = curveTiming = undefined;
-    curveTimePrograms.length = 0;
+    curveClips = curveMaterials = curveLighting = curveTiming = curvePattern = undefined;
+    curveTimePrograms.length = curvePatternPrograms.length = 0;
     fine = null;
     attr = null;
     attrN = null;
@@ -1305,6 +1311,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     stick,
     curveSplat,
     registerCurveTiming: program => curveTimePrograms.push(program),
+    registerCurvePattern: program => curvePatternPrograms.push(program),
     reserveCurveGroups(count) {
       const first = curveGroups + 1;
       CurveSplat.tag(0, 'hard', curveGroups + count);

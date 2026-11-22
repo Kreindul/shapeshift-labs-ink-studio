@@ -604,6 +604,53 @@ alternate rules. Use `--curve-width off` to preview physical widths throughout.
 The [loom demo](../examples/curve-splat-minimum-width.cjs) makes three matched
 zooms and writes the editable scene and an alternate policy file.
 
+## Anchor grain, dashes, and dither
+
+Set `pattern` on a curve appearance in a JSON scene or in
+`K.curveSplats.draw` and `K.curveSplats.bind`. Each layer can use its own
+anchor and spacing. Omit a layer or set it to `false` to disable it.
+
+```json
+{
+  "pattern": {
+    "dash": { "anchor": "arc", "spacing": 0.48, "duty": 0.68, "phase": 0.03 },
+    "grain": { "anchor": "chart", "spacing": [0.04, 0.035], "seed": 11, "strength": 0.24 },
+    "dither": { "anchor": "screen", "spacing": 2, "colors": ["#b6614d", "#f4c279"], "mix": 0.5 }
+  }
+}
+```
+
+| Anchor | Coordinates |
+| --- | --- |
+| `arc` | Reference distance from the strand's authored start in world units. Use this for stripes or dashes that stretch and bend with the curve. |
+| `chart` | The surface's UV coordinates. Surface strokes extend the UVs across their width from the chart tangent. Textile paths use the UVs supplied at their stations. Periodic native charts wrap to the same UVs across a seam. |
+| `screen` | Native art pixels measured from the upper-left output corner. Use this for a print grid that stays fixed as a curve moves across it. |
+
+`dash.spacing` is the full period. `duty` is the visible fraction,
+`phase` offsets the pattern in the same units as spacing, and
+`offOpacity` defaults to 0 for an actual gap. For chart and screen
+dashes, set `axis: "v"` for the second coordinate. The default is `"u"`.
+Dashes are applied before coverage resolve, including on soft profiles.
+
+Grain gives each cell seeded brightness variation. Dither uses Ink's
+ordered Bayer thresholds to choose between two pigment colors. The
+`colors` entries can be hex colors, RGB bytes, or individual named
+palette roles. `mix` is the fraction of the second swatch. Grain and
+dither accept a single cell spacing or a pair for the two axes. The
+default spacing is .12 world units for arc, .05 for chart, and 1 for
+screen. Pigment still receives curve lighting and scene palette resolve.
+
+The headless renderer reads reference coordinates at the fragment.
+Splitting a straight span or clipping it with a reveal window preserves
+pattern phase. Bound curves carry the reference coordinates to the posed
+geometry. Hard dither selects one pigment per representative pixel hit,
+while filtered coverage can soften the rim of a dash.
+
+Run `node examples/curve-stable-pigment.cjs studio/out/curve-stable-pigment`
+to compare a bending cable with arc and screen anchors and see a
+chart-anchored band on a rotating cylinder. The demo writes the editable
+curve scenes alongside its PNG and APNG.
+
 ## Render and compare
 
 The [editable example](../examples/curve-splat-scene.json) uses

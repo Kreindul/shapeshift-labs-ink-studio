@@ -516,6 +516,27 @@
     });
   }
 
+  function chartWidthSampler(chart) {
+    const read = at => (chart.samplePointNormal ?? chart.sample).call(chart, at);
+    const contains = uv => chart.topology?.contains(uv) ??
+      uv.every((value, i) => (i ? chart.periodicV : chart.periodicU) || finite(value, 0, 1));
+    return (uv, axis) => {
+      const { n } = read(uv);
+      const side = majorAxis(K.V.cross(n, axis), axis, 0);
+      const [du, dv] = uv.map((value, i) => {
+        const step = sign => uv.map((v, j) => i === j ? value + sign * 1e-4 : v);
+        let lo = step(-1), hi = step(1);
+        if (!contains(lo)) lo = uv;
+        if (!contains(hi)) hi = uv;
+        return K.V.mul(K.V.sub(read(hi).p, read(lo).p), 1 / (hi[i] - lo[i]));
+      });
+      const aa = K.V.dot(du, du), ab = K.V.dot(du, dv), bb = K.V.dot(dv, dv);
+      const det = aa * bb - ab * ab, a = K.V.dot(side, du), b = K.V.dot(side, dv);
+      if (!(det > aa * bb * 1e-10)) return {};
+      return { side, gradient: [(a * bb - b * ab) / det, (b * aa - a * ab) / det] };
+    };
+  }
+
   function prepare(source, options = {}, palette, retain = false) {
     const link = source?.kind === 'routed' ? source.link : undefined;
     const { radius, width, taper = 1, twist = 0, section = source?.kind === 'surface' ? 'flattened' : undefined,
@@ -545,6 +566,13 @@
     const endEdits = joins.length || caps.start.type !== 'rounded' || caps.end.type !== 'rounded';
     const fixedColor = typeof color === 'function' ? null : rgb(color);
     const timing = timingProgram(source, options);
+    const pattern = CurvePattern.prepare(options.pattern, palette, options.paletteRoles);
+    const chart = pattern?.chart && source?.kind === 'surface' && surfaceChart(source.chart);
+    const chartWidth = chart && chartWidthSampler(chart);
+    if (chart) {
+      const { periodicU, periodicV, twistedU } = chart.topology ?? chart;
+      if (periodicU || periodicV) pattern.topology = { periodicU, periodicV, twistedU };
+    }
     let segments = 0, examined = 0, samples = 0;
     const strands = paths(source).map((strand, index) => {
       const baseRadius = radius ?? strand.radius ?? .03, id = strand.id ?? String(index);
@@ -555,6 +583,10 @@
         finite(time, -1e9, 1e9) && (!i || time > times[i - 1])), 'timed trail samples need increasing timestamps in each run');
       const autoClosed = strand.closed && knots.length >= 2 && K.V.dist(knots[0], knots.at(-1)) > 1e-8;
       if (autoClosed) knots.push(knots[0].slice());
+      const uvs = autoClosed && strand.uvs ? [...strand.uvs, strand.uvs[0]] : strand.uvs;
+      if (pattern?.chart) check(uvs?.length === knots.length && uvs.every(uv =>
+        array(uv) && uv.length === 2 && Array.from(uv).every(n => finite(n, -1e9, 1e9))),
+      'chart-anchored patterns need surface or textile UVs');
       samples += knots.length;
       check(samples <= 2 * segmentLimit, 'point budget exceeded');
       const lengths = knots.slice(1).map((to, i) => K.V.dist(knots[i], to));
@@ -571,7 +603,7 @@
       const chartNormals = framed && up === undefined && section !== undefined ? strand.normals : undefined;
       const initial = up ?? strand.up ?? [0, 1, 0];
       check(!framed || point(initial) && K.V.len(initial) > 1e-8, 'invalid path frame up vector');
-      const frames = framed && (!retainedFrame || retain) ? K.curve.frames(knots, Array.from(initial)) : null;
+      const frames = (framed && (!retainedFrame || retain) || chartWidth && retain) ? K.curve.frames(knots, Array.from(initial)) : null;
       const rest = retain && K.procedural.data.freeze({
         id, index: strand.index ?? index, family: strand.family, clump: strand.clump, points: knots, closed, autoClosed: Boolean(autoClosed),
         up: Array.from(initial), ...(strand.uvs && { uvs: strand.uvs.map(v => Array.from(v)) }),
@@ -582,9 +614,9 @@
       for (let i = 0; i < lengths.length; i++) {
         const from = knots[i], to = knots[i + 1], length = lengths[i];
         if (length < 1e-7) continue;
-        const axis = framed && K.V.mul(K.V.sub(to, from), 1 / length);
+        const axis = (framed || chartWidth) && K.V.mul(K.V.sub(to, from), 1 / length);
         const begin = distance / total, end = (distance + length) / total;
-        const a = strand.uvs?.[i], b = strand.uvs?.[i + 1];
+        const a = uvs?.[i], b = uvs?.[i + 1];
         const ageParts = times ? Math.max(1, Math.ceil((times[i + 1] - times[i]) / timing.trail.lifetime *
           timing.trail.ageSamples)) : 1;
         check(ageParts <= Math.max(1, maxSegments), 'trail sample interval exceeds the segment budget');
@@ -654,11 +686,25 @@
               continuesFrom(run.start, start, end)) ? run.start : null;
             const right = run?.end && ((distance + next * length) / total >= run.to - reach ||
               continuesFrom(run.end, start, end)) ? run.end : null;
+            let patternRow, patternRoll;
+            if (pattern) {
+              patternRow = { arc: [distance + previous * length, distance + next * length, total] };
+              if (pattern.chart) {
+                patternRow.uv = [mix(a[0], b[0], previous), mix(a[1], b[1], previous),
+                  mix(a[0], b[0], next), mix(a[1], b[1], next)];
+                if (chartWidth) Object.assign(patternRow, chartWidth(sample.uv, axis));
+                if (retain && patternRow.side) {
+                  const ref = majorAxis(K.V.lerp(frames[i].N, frames[i + 1].N, middle), axis, 0);
+                  patternRoll = Math.atan2(K.V.dot(axis, K.V.cross(ref, patternRow.side)), K.V.dot(ref, patternRow.side));
+                }
+              }
+            }
             rows.push({ from: start, to: end, shade, radius: size, opacity: rowOpacity, profile, finish, lighting,
               clips: left || right ? [left, right] : undefined,
+              pattern: patternRow,
               ...(timing && { timeRange: [(distance + previous * length) / total, (distance + next * length) / total,
                 times ? mix(times[i], times[i + 1], previous) : 0, times ? mix(times[i], times[i + 1], next) : 0] }),
-              ...(retain && { attachment: { segment: i, first: previous, last: next, roll, twist: twistAngle } }) });
+              ...(retain && { attachment: { segment: i, first: previous, last: next, roll, twist: twistAngle, patternRoll } }) });
           }
           previous = next;
         } while (previous < 1);
@@ -666,7 +712,7 @@
       }
       return { id, rows, rest, followNormals: Boolean(chartNormals) };
     });
-    return { object, material, target, edge, strands, segments, examined, timing };
+    return { object, material, target, edge, strands, segments, examined, timing, pattern };
   }
 
   function emit(builder, plan) {
@@ -675,12 +721,13 @@
     const groups = plan.edge === 'hard' ? plan.strands.filter(strand => strand.rows.length).length : 0;
     let nextGroup = groups ? builder.reserveCurveGroups(groups) : 0;
     const timing = plan.timing && plan.segments ? builder.registerCurveTiming(plan.timing) : undefined;
+    const program = plan.pattern && plan.segments ? builder.registerCurvePattern(plan.pattern) : undefined;
     for (const { id, rows } of plan.strands) {
       const start = builder.count();
       const group = nextGroup && rows.length ? nextGroup++ : undefined;
-      for (const { from, to, shade, radius, opacity, profile, clips, finish, lighting, timeRange } of rows)
+      for (const { from, to, shade, radius, opacity, profile, clips, finish, lighting, timeRange, pattern } of rows)
         builder.curveSplat(from, to, radius, shade, opacity, profile, plan.edge, group, clips, finish, lighting,
-          timing && [timing, ...timeRange]);
+          timing && [timing, ...timeRange], pattern && { ...pattern, program });
       const end = builder.count();
       builder.describeSplats?.(start, end, {
         object: plan.object, material: plan.material, target: { entity: plan.object, ...plan.target, surface: id }
@@ -691,13 +738,13 @@
   }
 
   function draw(builder, source, options) {
-    const palette = options?.along?.paletteRole === undefined ? undefined : builder?.P?.map(packed);
+    const palette = options?.along?.paletteRole !== undefined || options?.pattern?.dither ? builder?.P?.map(packed) : undefined;
     return emit(builder, prepare(source, options, palette));
   }
 
   function bind(builder, source, sample, options) {
     check(typeof sample === 'function', 'a bound strand needs a pose sampler');
-    const palette = options?.along?.paletteRole === undefined ? undefined : builder?.P?.map(packed);
+    const palette = options?.along?.paletteRole !== undefined || options?.pattern?.dither ? builder?.P?.map(packed) : undefined;
     const plan = prepare(source, options, palette, true);
     const ranges = emit(builder, plan), hidden = new Uint8Array(ranges.segments);
     const slots = [4, 5, 6, 8, 9, 10];
@@ -718,7 +765,9 @@
           'invalid posed normals, up vector or active spans');
         const ends = current.slice(1).map((p, i) => K.V.sub(p, current[i]));
         const lengths = ends.map(v => K.V.len(v));
-        const frames = rowsOfStrand.some(row => row.profile) && !(normals && followNormals) ? K.curve.frames(current, up) : null;
+        const needsFrames = rowsOfStrand.some(row => row.profile) && !(normals && followNormals) ||
+          !normals && rowsOfStrand.some(row => row.pattern?.side);
+        const frames = needsFrames ? K.curve.frames(current, up) : null;
         return { current, normals, active, ends, lengths, frames, followNormals };
       });
       for (let i = ranges.first; i < ranges.end; i++)
@@ -756,6 +805,17 @@
             for (let k = 0; k < slots.length; k++) data[q + slots[k]] = geometry.covariance[k];
             data[q + 13] = geometry.half;
             if (row.timeRange) world.curveTiming.set(geometry.axis, indexOfRow * CurveSplat.timingStride + 5);
+            if (row.pattern) {
+              const at = indexOfRow * CurvePattern.stride;
+              world.curvePattern.set(geometry.axis, at + CurvePattern.axisOffset);
+              if (row.pattern.side) {
+                const blend = (first + last) / 2;
+                const facing = normals ? K.V.cross(K.V.lerp(normals[segment], normals[segment + 1], blend), geometry.axis) :
+                  K.V.lerp(frames[segment].N, frames[segment + 1].N, blend);
+                const side = majorAxis(facing, geometry.axis, normals ? 0 : row.attachment.patternRoll);
+                world.curvePattern.set(side, at + CurvePattern.sideOffset);
+              }
+            }
             if (hidden[h] && data[q + 3] <= 0) data[q + 3] = row.opacity;
             hidden[h] = 0;
             if (row.clips) CurveSplat.writeClips(world.curveClips, indexOfRow, geometry.center, row.clips.map(clip));
@@ -797,8 +857,11 @@
     });
     if (!palette.length) {
       const unique = new Set(colors);
-      for (const plan of plans) for (const strand of plan.strands) for (const row of strand.rows)
-        if (unique.size < 256) unique.add(packed(row.shade));
+      for (const plan of plans) {
+        for (const color of plan.pattern?.dither?.swatches ?? []) if (unique.size < 256) unique.add(packed(color));
+        for (const strand of plan.strands) for (const row of strand.rows)
+          if (unique.size < 256) unique.add(packed(row.shade));
+      }
       colors.splice(0, colors.length, ...unique);
     }
     const builder = makeBuilder(seed, colors);

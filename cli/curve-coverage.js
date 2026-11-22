@@ -14,7 +14,8 @@ function footprint(strand, rayAt, x, y, near, normal, strength) {
   const soft = !strand.group;
   const center = CurveSplat.sampleAt(strand, rayAt, x, y, near, false, soft);
   const depths = strand.group && new Float64Array(offsets.length);
-  const opacity = depths && strand.projectedWidth?.fade && strand.projectedWidth.weight && new Float64Array(offsets.length);
+  const variableOpacity = strand.projectedWidth?.fade && strand.projectedWidth.weight || strand.pattern?.dash?.offOpacity > 0;
+  const opacity = depths && variableOpacity && new Float64Array(offsets.length);
   if (depths && center) depths[0] = center.depth;
   if (opacity && center) opacity[0] = center.alpha;
   let representative = center, offset = offsets[0], density = 0;

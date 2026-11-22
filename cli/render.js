@@ -57,6 +57,7 @@ const SdfRaster = require('./sdf-assist.js');
 const { footprint, exportOffsets, coverageOffsets, sampledDepth } = require('./splat-sampling.js');
 const CurveCoverage = require('./curve-coverage.js');
 const CurveWidth = require('../src/curve-width.js');
+const CurvePattern = require('../src/curve-pattern.js');
 const { createMaskResolve, applyMasks } = require('./look-mask-resolve.js');
 const PalettePixel = require('./palette-pixel.js');
 const PaletteComposition = require('./palette-composition.js');
@@ -789,7 +790,8 @@ function renderFrame(world, o, preparedPalettes) {
     baseCount = world.count;
   const curveCamera = curves && { view: V, near, focal, width: W, height: H, ortho, artScale: o.artGridScale || 1 };
   const curveLightSample = curves && [1, 0, 0];
-  const curveFrames = curves && (world.curveClips || world.curveTiming || shutterRows) &&
+  const curvePigmentSample = curves && [1];
+  const curveFrames = curves && (world.curveClips || world.curveTiming || world.curvePattern || shutterRows) &&
     (world.anim?.rig || world.anim?.bones || world.reconstructionPose) &&
     sampleFrames(world, t);
   const ditherView = anchorSpaces.has('view') ? ArtStability.viewProjection(V) : undefined;
@@ -1766,7 +1768,8 @@ function renderFrame(world, o, preparedPalettes) {
         window = { ...window, direction: [0, 3, 6].map(k =>
           m[k] * direction[0] + m[k + 1] * direction[1] + m[k + 2] * direction[2]) };
       }
-      curve = CurveSplat.prepare(d, q, position, SC[i], al, curveCamera, clips, window, curveWidthAt?.(i));
+      const pattern = CurvePattern.attach(curveWorld, i, frame, curveCamera);
+      curve = CurveSplat.prepare(d, q, position, SC[i], al, curveCamera, clips, window, curveWidthAt?.(i), pattern);
       if (!curve) continue;
       curveStrength = !opticalActive && edgeStrengthAt && edgeStrengthAt(i);
       if (curveStrength) curveMargin = CurveCoverage.margin;
@@ -2024,7 +2027,8 @@ function renderFrame(world, o, preparedPalettes) {
       if (!glassLooks.has(target)) glassLooks.set(target, optics.transform(target));
       glassLook = glassLooks.get(target);
     }
-    const coat = !retainLayers && PIX && (curveStrength || curve?.projectedWidth?.fade || opticalActive || correction || fieldParticle ||
+    const coat = !retainLayers && PIX && (curveStrength || curve?.pattern?.dash || curve?.projectedWidth?.fade ||
+      opticalActive || correction || fieldParticle ||
       hasSurface && (!writesDepth || reflectInRaster || surface.reveals(i)));
     if (coat && !surfaceOverlay) surfaceOverlay = new Float32Array(W * H * 4);
     if (audit && (r > 1 || g > 1 || b > 1)) audit.sample('splat', Math.max(0, r), Math.max(0, g), Math.max(0, b));
@@ -2158,6 +2162,22 @@ function renderFrame(world, o, preparedPalettes) {
           alpha = coverage,
           highlight = glint,
           paletteId = centerPalette;
+        let samplePaint = stageBase;
+        if (curve?.pattern?.pigment) {
+          const [u, v] = curveFootprint?.offset ?? [0, 0], sx = ix + .5 + u, sy = iy + .5 + v;
+          const ray = rayAt(sx, sy), pattern = curve.pattern;
+          const site = pattern.coordinates(ray, curveHit.depth / ray.axial, sx, sy);
+          let pigment = pattern.paint(site, curvePigmentSample);
+          if (pigment && staged?.material) pigment = stagedMaterial(i, staged.material, pigment, materialSample);
+          const haze = centerFog ? fogMix : 0, visible = 1 - haze, gain = curvePigmentSample[0];
+          pr = Math.min(1, (pigment ? pigment[0] * visible : pr - fog[0] * haze) * gain + fog[0] * haze);
+          pg = Math.min(1, (pigment ? pigment[1] * visible : pg - fog[1] * haze) * gain + fog[1] * haze);
+          pb = Math.min(1, (pigment ? pigment[2] * visible : pb - fog[2] * haze) * gain + fog[2] * haze);
+          if (paintStage) {
+            const base = pigment ?? stageBase ?? [pk % 256 / 255, (pk >> 8 & 255) / 255, (pk >> 16) / 255];
+            samplePaint = base.map(value => Math.min(1, value * gain));
+          }
+        }
         if (shadeRaster) {
           const shade = shadeFraction > MaterialPixelStyle.thresholds(shadeMode,
             Math.floor(ix / artScale), Math.floor(iy / artScale)) ? highStyle : lowStyle;
@@ -2203,7 +2223,7 @@ function renderFrame(world, o, preparedPalettes) {
           pg = Math.min(1, pg * exposure + (tint?.[1] ?? 0));
           pb = Math.min(1, pb * exposure + (tint?.[2] ?? 0));
         }
-        let hit, reflected = centered ? centerReflection : undefined, samplePaint=stageBase, surfaceMatte;
+        let hit, reflected = centered ? centerReflection : undefined, surfaceMatte;
         if (fragmentSurface) {
           hit = exact?.position ?? surfacePoint(rayAt(ix + 0.5, iy + 0.5), normal, x, y, z, -cz, R);
           if (stageBase && surface.paintsBase(i)) samplePaint=stageBase.slice();

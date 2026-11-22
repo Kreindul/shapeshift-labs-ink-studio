@@ -114,6 +114,110 @@ const straight = [[-2, 0, 0], [2, 0, 0]];
 const profileFrame = style => ink.render(C.world(scene([{ source: straight, ...style }])),
   { ...imageOptions, ortho: true, transparent: true });
 
+const patternView = { ...imageOptions, ortho: true, transparent: true, fov: 2 * Math.atan(76 / 240) };
+
+test('arc pigment and dash gaps agree after subdivision of a straight span', () => {
+  const pieces = Array.from({ length: 43 }, (_, i) => K.V.lerp(...straight, i / 42));
+  const pattern = {
+    grain: { anchor: 'arc', spacing: .061, strength: .3, seed: 11 },
+    dash: { anchor: 'arc', spacing: .48, duty: .68, phase: .031 },
+    dither: { anchor: 'arc', spacing: .092, colors: ['#bb5a45', '#81cfa4'] }
+  };
+  for (const edge of ['hard', 'beta']) {
+    const draw = source => C.world(scene([{ source, width: .23, edge, caps: 'blunt', pattern }]));
+    const view = { ...patternView, edgeFilter: true };
+    const a = ink.render(draw(straight), view), b = ink.render(draw(pieces), view);
+    assert.equal(a.alpha[37 * a.w + 31], 0);
+    assert.ok(a.alpha[37 * a.w + 35] > 50);
+    assert.ok(new Set(Array.from({ length: 74 }, (_, i) => at(a, i + 27, 37)[0])).size > 8);
+    assert.ok(a.alpha.every((value, i) => Math.abs(value - b.alpha[i]) <= 1));
+    for (let x = 27; x < 101; x++) if (a.alpha[37 * a.w + x] > 180)
+      assert.ok(at(a, x, 37).every((value, i) => Math.abs(value - at(b, x, 37)[i]) <= 1));
+  }
+});
+
+test('chart dither spans a ribbon and stays registered on the chart when its route is resampled', () => {
+  const recipe = scene([]);
+  recipe.charts = { face: { kind: 'plane', origin: [-2,-1,0], u: [4,0,0], v: [0,2,0] } };
+  recipe.palette = ['#c16754', '#eebc73'];
+  recipe.paletteRoles = { ink: [1, 2] };
+  const style = { edge: 'hard', section: 'flattened', aspect: .2, width: .61, caps: 'blunt',
+    pattern: { dither: { anchor: 'chart', spacing: [.07,.073], colors: ['ink.0', 'ink.1'] } } };
+  function run(controls) {
+    const world = C.world({ ...recipe, strands: [{ ...style, source: { kind: 'surface', chart: 'face', points: controls } }] });
+    return ink.render(world, patternView);
+  }
+  const a = run([[.07,.51],[.94,.51]]), b = run([[.07,.51],[.511,.51],[.94,.51]]);
+  assert.deepEqual([34, 36, 38, 40].map(y => a.alpha[y * a.w + 64]), [255,255,255,255]);
+  assert.equal(new Set([34, 36, 38, 40].map(y => at(a, 64, y).join())).size, 2);
+  for (let y = 34; y <= 41; y++) for (let x = 46; x <= 82; x++) assert.deepEqual(at(a, x, y), at(b, x, y));
+  const posed = C.world({ ...recipe, strands: [{ ...style,
+    source: { kind: 'surface', chart: 'face', points: [[.07,.51],[.94,.51]] } }] });
+  const view = { ...patternView, w: 129, h: 77, target: [.17,.18,0] };
+  const seen = [0, .72, -.73].map(pitch => ink.render(posed, { ...view, pitch }));
+  assert.ok(seen.every(frame => frame.alpha[38 * frame.w + 64] === 255));
+  assert.deepEqual(at(seen[0], 64, 38), at(seen[1], 64, 38));
+  assert.deepEqual(at(seen[0], 64, 38), at(seen[2], 64, 38));
+  const B = kit.makeBuilder(1, palette);
+  assert.throws(() => C.draw(B, straight, { pattern: { grain: { anchor: 'chart' } } }), /chart-anchored patterns need/);
+  assert.equal(B.count(), 0);
+});
+
+test('equivalent lifts of a periodic chart resolve the same pigment and gaps', () => {
+  const charts = { drum: { kind: 'cylinder', origin: [0,-1,0], height: 2, radius: 1.2 } };
+  const render = lap => {
+    const source = { kind: 'surface', chart: 'drum', points: [[lap+.12,.49],[lap+.38,.49]], coordinates: 'lifted' };
+    const pattern = {
+      grain: { anchor: 'chart', spacing: [.023,.034], seed: 73 },
+      dash: { anchor: 'chart', spacing: .091, duty: .7 },
+      dither: { anchor: 'chart', spacing: [.042,.071], colors: ['#84482c', '#edac66'] }
+    };
+    return ink.render(C.world({ ...scene([{ source, edge: 'hard', width: .45, pattern }]), charts }), patternView);
+  };
+  const a = render(0), b = render(1);
+  assert.ok(a.alpha.includes(255));
+  assert.deepEqual(a.alpha, b.alpha);
+  for (let y = 34; y <= 41; y++) for (let x = 49; x <= 79; x++) assert.deepEqual(at(a, x, y), at(b, x, y));
+});
+
+test('screen dither stays on the output grid and arc paint stretches with a bound curve', () => {
+  const dither = { anchor: 'screen', spacing: 1, colors: ['#f3b56b', '#76d6ae'] };
+  const world = C.world(scene([{ source: straight, width: .5, edge: 'hard', pattern: { dither } }]));
+  const a = ink.render(world, patternView), b = ink.render(world, { ...patternView, target: [.35,0,0] });
+  const scaled = ink.render(world, { ...patternView, w: 384, h: 228, px: 3 });
+  assert.deepEqual(a.rgb, scaled.rgb);
+  assert.notDeepEqual(at(a, 64, 37), at(a, 65, 37));
+  for (let x = 46; x < 81; x++) assert.deepEqual(at(a, x, 37), at(b, x, 37));
+
+  const B = kit.makeBuilder(1, palette);
+  const binding = C.bind(B, straight, ({ points }) => points.map(([x,y,z]) => [3 * x + .4, y, z]), {
+    width: .24, edge: 'hard', reveal: { start: .25, end: .8 },
+    pattern: { dither: { ...dither, anchor: 'arc', spacing: .162 }, dash: { spacing: .39, phase: .031, duty: .75 } }
+  });
+  const bound = host(B), rest = ink.render(bound, patternView);
+  binding.pose(bound);
+  const posed = ink.render(bound, patternView);
+  assert.notDeepEqual(rest.alpha, posed.alpha);
+  for (let x = 48; x < 78; x++) assert.deepEqual(at(rest, x, 37), at(posed, (x - 64) * 3 + 73, 37));
+});
+
+test('assembled and subset splats retain the curve pattern program and its coordinates', () => {
+  const provenance = require('../src/splat-provenance.js');
+  const draw = (y, color) => {
+    const B = kit.makeBuilder(1, palette);
+    C.draw(B, straight.map(([x]) => [x,y,0]), { width: .29, edge: 'hard',
+      pattern: { dither: { mix: 1, colors: ['#ffffff', color] } } });
+    return host(B);
+  };
+  const a = draw(.38, '#f3b56b'), b = draw(-.38, '#76d6ae');
+  const joined = provenance.join([a,b], { cam: a.cam, radius: a.radius, fog: a.fog, dither: 0 });
+  const frame = ink.render(joined, patternView), subset = ink.render(provenance.subset(joined, [1]), patternView);
+  assert.deepEqual(at(frame, 64, 30), [243,181,107]);
+  assert.deepEqual(at(frame, 64, 45), [118,214,174]);
+  assert.deepEqual(at(subset, 64, 45), at(frame, 64, 45));
+  assert.equal(subset.alpha[30 * subset.w + 64], 0);
+});
+
 test('material edge filtering keeps a half-pixel curve visible through a camera pan', () => {
   const wire = source([[-1.5, 0, 0], [1.5, 0, 0]], { width: .019, edge: 'hard', material: 'wire' });
   const mark = source([[-.42,.56,.08], [0,.72,.08], [.42,.56,.08]], {

@@ -202,7 +202,7 @@ const CurveSplat = (() => {
     } };
   }
 
-  function prepare(data, at, position, scale, opacity, camera, clips, window, widthPolicy) {
+  function prepare(data, at, position, scale, opacity, camera, clips, window, widthPolicy, pattern) {
     const { view, near, focal, width, height, ortho } = camera;
     const packed = data[at + 15], section = sectionOf(packed);
     if (section < 0) return null;
@@ -245,7 +245,8 @@ const CurveSplat = (() => {
     const fixed = projectedWidth?.constant ?? 1, fixedFade = projectedWidth?.fade ? fixed : 1;
     return { from, axis, radius: projectedWidth?.fade ? radius : radius * fixed, length, bounds, middle,
       major: shape.major, minor: shape.minor, flattened, group, beta, opacity: opacity * fixedFade, clips,
-      projectedWidth, tau: -Math.log1p(-Math.min(.999, opacity)) * fixedFade };
+      projectedWidth, pattern: pattern?.(axis, position, half, scale),
+      tau: -Math.log1p(-Math.min(.999, opacity)) * fixedFade };
   }
 
   // The integral is optical depth per unit strength, with the nearest point on the sampled axis.
@@ -552,7 +553,20 @@ const CurveSplat = (() => {
     const section = weight === 1 ? strand : style.fade ?
       { ...strand, opacity: strand.opacity * weight, tau: strand.tau * weight } :
       { ...strand, radius: strand.radius * weight };
-    return sample(section, rayAt(x, y), near, wantNormal, wantDensity);
+    const ray = rayAt(x, y), dash = section.pattern?.dash;
+    const hit = sample(section, ray, near, wantNormal, wantDensity || dash && !section.group);
+    if (!hit || !dash) return hit;
+    const site = section.pattern.coordinates(ray, hit.depth / ray.axial, x, y);
+    const gain = section.pattern.opacity(site);
+    if (gain === 0) return null;
+    if (gain < 1) {
+      if (section.group) hit.alpha *= gain;
+      else {
+        hit.density *= gain;
+        hit.alpha = -Math.expm1(-hit.density);
+      }
+    }
+    return hit.alpha >= minimum ? hit : null;
   }
   return Object.freeze({ tag, joinGroups, axialUnits, minimum, clipStride, materialStride, lightingStride, timingStride, clipPlanes,
     emissionAt, lightingAt, isRow, carrier, writeClips, timeWindow, timedOpacity, prepare, sample, sampleAt, specular, directional });
