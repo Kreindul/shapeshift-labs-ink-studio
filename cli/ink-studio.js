@@ -1158,6 +1158,7 @@ const CMD = {
         '  music timbre evolve recipe.json [settings.json] --out directory   hand off one measured sound across playable instruments',
         '  music timbre audition|arrange <recipe.json> [settings.json] --out directory   play or keep a timbre orchestration',
         '  music timbre palette <coastal|metal-breath|broken-beat> --out directory   export playable patches and PCM',
+        '  music critique foreground <recipe.json> <settings.json> --out directory   compare arrangement-aware mix moves',
         '  music critique inspect <recipe.json> <request.json> --out directory   listen to and measure an addressed passage',
         '  music critique compare <recipe.json> <edits.json> --out directory   audition exact repairs against the original',
         '  music critique apply <recipe.json> <comparison.json> <decision.json> --out directory   keep the chosen edit and reason',

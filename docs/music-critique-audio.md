@@ -84,7 +84,7 @@ the surrounding context. Up to six alternatives can be compared at once.
 ```
 
 Time-scoped operations are `eq`, `level`, `silence`, `register`,
-`density` and `room`, with the usual [cue-map settings](music-cue-map.md).
+`density`, `room`, `tail` and `depth`, with the usual [cue-map settings](music-cue-map.md).
 Omit `parts` to use the normal scope of that cue lane.
 `note` edits a written clip note's beat, duration, MIDI, velocity,
 expression or tie. Use note addresses from the probe. Edits are validated
@@ -121,3 +121,6 @@ node's `clip` port carries the first requested view directly as audio.
 The comparison node's `original` and `candidate` ports carry the
 original and first valid edited audio. Its `audio` port holds the whole
 comparison and `value.blocked` explains unavailable alternatives.
+
+Use [foreground mixing](music-foreground-mix.md) to propose moves that follow
+a sequence of foreground tracks and compare rendered balance per moment.

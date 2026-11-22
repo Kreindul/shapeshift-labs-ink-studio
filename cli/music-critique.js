@@ -7,8 +7,8 @@ const audio=(file,value)=>write(file,WAV.encode(value,{encoding:'pcm24'}));
 
 module.exports=function command([mode,file,config,settingsFile],opt,kit) {
   const C=kit.KIT.music.production.critique,{check,fields}=kit.KIT.procedural.musicInstruments;
-  check(typeof file==='string' && ['plan','listen','keep','tag','find','inspect','compare','apply'].includes(mode),
-    'Use music critique inspect, compare, apply, plan, listen, keep, tag or find');
+  check(typeof file==='string' && ['plan','listen','keep','tag','find','inspect','compare','apply','foreground'].includes(mode),
+    'Use music critique inspect, compare, apply, foreground, plan, listen, keep, tag or find');
   const out=typeof opt.out==='string' ? path.resolve(opt.out) : undefined;
   const output=(result,target)=>{
     if (target) json(target,result);
@@ -37,20 +37,31 @@ module.exports=function command([mode,file,config,settingsFile],opt,kit) {
   }
   const recipe=read(file), source=recipe.production ?? recipe, paths=assetPaths(recipe,file);
   const assets=Object.fromEntries(Object.entries(paths).map(([id,at])=>[id,WAV.read(at)]));
-  if (mode==='inspect' || mode==='compare') {
-    check(config && out,'Supply a listening request and output directory');
-    const result=C.openAudio(source,assets)[mode](read(config));
+  function publishPreview(result,folder) {
     const files=Object.fromEntries(Object.entries(result.audio).map(([id,value])=>{
       const name=id+'.wav';
-      audio(path.join(out,name),value);
+      audio(path.join(folder,name),value);
       return [id,name];
     }));
-    const report=path.join(out,'report.json');
+    const report=path.join(folder,'report.json');
     json(report,{...result.report,files});
-    if (!result.key) return output({report,files});
-    const key=path.join(out,'comparison.json');
+    if (!result.key) return {report,files};
+    const key=path.join(folder,'comparison.json');
     json(key,result.key);
-    return output({report,files,key,token:result.key.token});
+    return {report,files,key,token:result.key.token};
+  }
+  if (mode==='inspect' || mode==='compare') {
+    check(config && out,'Supply a listening request and output directory');
+    return output(publishPreview(C.openAudio(source,assets)[mode](read(config)),out));
+  }
+  if (mode==='foreground') {
+    check(config && out,'Supply foreground mix settings and an output directory');
+    const result=kit.KIT.music.production.foregroundMix.audition(source,read(config),assets);
+    const production=path.join(out,'production.json'), plan=path.join(out,'foreground.json');
+    json(production,{production:result.production,assets:Object.fromEntries(Object.entries(paths)
+      .map(([name,at])=>[name,path.relative(out,at)])),...(recipe.options && {options:recipe.options})});
+    json(plan,{...result.report,request:result.request});
+    return output({production,plan,...publishPreview(result.comparison,path.join(out,'comparison'))});
   }
   if (mode==='apply') {
     check(config && settingsFile && out,'Supply a comparison, decision and output directory');

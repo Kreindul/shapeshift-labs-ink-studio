@@ -73,6 +73,13 @@ on one lane cannot overlap. Different lanes can act simultaneously.
 | `room` | Set a constant room send or ramp between two send levels across the window. The dry performance stays available on its own stem. |
 | `level` | Apply a track gain in dB across a beat range, with fades at the boundaries. For example, `{"from":24,"to":28,"parts":["keys"],"gainDb":-3,"fadeSeconds":0.025}`. The default fade is 20 ms. |
 | `eq` | Apply a bell EQ to the named tracks over the beat range. Choose `hz`, `q`, `gainDb` and optional `fadeSeconds`. The processor feeds the patch echo and room. |
+| `tail` | Cap the released portion of a voice at `seconds` after its note-off or the start of the window, whichever comes later. `fadeSeconds` controls the fade into the new cutoff. A release that is already shorter keeps its duration. Shared room and echo decay normally. |
+| `depth` | Fade toward an authored `cutoffHz`, `send`, or both. A low cutoff darkens the track before the patch echo. The send moves from the current room level to the authored value. `fadeSeconds` defaults to 60 ms. |
+
+Use `foreground` to name who owns the attention in a beat range.
+These declarations are editable score metadata used by the
+[foreground mix planner](music-foreground-mix.md). They can name more
+than one foreground part and protect other parts from generated moves.
 
 Density selects existing material. To add new material, change the motif
 or add a [theme appearance](music-themes.md). Apply theme development to a
