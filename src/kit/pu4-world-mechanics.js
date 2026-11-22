@@ -1199,5 +1199,5 @@
     }};
   }
   W.runtime.register('mechanics',mechanics);
-  W.mechanics=Object.freeze({distance,column,changedBounds,raycast});
+  W.mechanics=Object.freeze({create:mechanics,distance,column,changedBounds,raycast});
 })(KIT);

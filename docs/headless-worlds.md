@@ -737,6 +737,10 @@ dependency reports include water changes beyond the brush where a
 connection opens or closes. Checkpoints save the ordered edits and
 reconstruct the same solid, material and water state on restore.
 
+[Two-way material conversion](material-conversion.md) lets a connected
+patch of material cells become a moving, heated rigid piece and return to
+the lattice on impact.
+
 The [spillway quarry](../examples/world-live-volumes.json) opens a
 copper-lined passage at tick 2, applies a limestone layer at tick 4,
 and closes the passage with a fill at tick 6.
