@@ -147,6 +147,10 @@ frame start. Supply `options.tick` for an explicit model tick. It supports
 backward seeks using the same checkpoint cache as
 `W.models.session(model, { commands, checkpoint })`.
 
+Use [common output adapters](simulation-output-adapters.md) to convert named
+probes into typed field, trace, point, geometry, and media ports. `sim.model.events`
+publishes the committed events at the selected tick.
+
 ## Run the same model four ways
 
 The [sample graph](../examples/simulation-models/sluice.graph.json) and
@@ -157,7 +161,7 @@ frame 12, its embedded world and graph both reach model tick 12.
 ```sh
 ink-studio sim run examples/simulation-models/sluice.json --ticks 12
 ink-studio probe examples/simulation-models/sluice.world.json --field sluice/outletFlow --ticks 6
-ink-studio graph run examples/simulation-models/sluice.graph.json --time 0.6
+ink-studio graph run examples/simulation-models/sluice.graph.json --at 0.6
 ink-studio take sample examples/simulation-models/sluice.take.json --frame 12
 ```
 

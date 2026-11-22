@@ -75,6 +75,13 @@ const diorama = { id: 'node-catalog', seed: 1, style: 'slate', solids: [
 ] };
 
 const link = (node, port = 'value') => ({ node, port });
+const outputGrid={format:'ink-studio/grid-field',version:1,shape:[2,2],components:1,origin:[0,0],
+  spacing:[1,1],unit:'m',frame:'world',data:[0,.2,.3,.1]};
+const outputTrace={format:'ink-studio/sample-trace',version:1,sampleRate:8000,startSample:5,frames:3,
+  channels:{bell:{unit:'Pa',samples:[0,.2,-.1]}}};
+const outputPoints={format:'ink-studio/point-buffer',version:1,count:1,positions:[1,2,3],frame:'world',unit:'m'};
+const outputEvents={format:'ink-studio/event-log',version:1,dropped:0,entries:[{at:.1,event:{kind:'hit'}}]};
+
 const motionSoundMeasurements={format:'ink-studio/sound-measurements',version:1,unit:'m/s',
   points:[{at:0,value:0},{at:.5,value:.6}]};
 const motionSoundPlan={format:'ink-studio/motion-sound-plan',version:1,id:'wheel',sampleRate:24000,
@@ -241,6 +248,18 @@ const specifications = {
   'anim.datamosh': { inputs: { source: rgba, motion,
     options: { halfLife: 1, blockSize: [2, 2], blockMemory: { recovery: { groupSize: [1, 1], every: 4 } } } } },
   'anim.frameBank': { inputs: { source: rgba, options: { tiles: { size: [2, 2], every: 4 } } } },
+  'sim.outputField': {inputs:{source:{width:2,height:2,data:[0,.2,.3,.1]}}},
+  'sim.outputTrace': {inputs:{source:outputTrace}},
+  'sim.outputPoints': {inputs:{source:[{id:'left',point:[0,1,2]},{id:'right',point:[1,2,3]}]}},
+  'sim.outputMesh': {inputs:{source:mesh}},
+  'sim.outputRaster': {inputs:{source:rgba}},
+  'sim.outputAudio': {inputs:{source:outputTrace,options:{channels:['bell'],gain:.5}}},
+  'sim.outputEvents': {inputs:{source:outputEvents}},
+  'sim.fieldRaster': {inputs:{source:outputGrid}},
+  'sim.fieldMesh': {inputs:{source:outputGrid}},
+  'sim.traceWindow': {inputs:{source:outputTrace,options:{from:6,to:8}}},
+  'sim.pointRecords': {inputs:{source:outputPoints}},
+  'sim.eventWindow': {inputs:{source:outputEvents,options:{from:0,to:.2}}},
   'sim.define': { inputs: { kind: 'particles' } },
   'sim.run': { nodes: { recipe: { op: 'sim.define', inputs: { kind: 'particles' } } }, inputs: { recipe: link('recipe') } },
   'audio.soundMeasurements': {inputs:{rows:[{at:0,value:[0,0]},{at:.5,value:[.6,0]}],

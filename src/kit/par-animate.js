@@ -19,7 +19,7 @@
       run({ kind, settings, clock }, { seed }) { return { value: S.define(kind, settings, { seed, ...clock }) }; }
     },
     'sim.run': {
-      inputs: { recipe: options, checkpoint: options, options }, outputs, time: true,
+      inputs: { recipe: options, checkpoint: options, options }, outputs:{...outputs,grid:'gridField',pointBuffer:'pointBuffer'}, time: true,
       instantiate() {
         let current, priorRecipe, priorCheckpoint, priorEvery, priorCache;
         return ({ recipe, checkpoint, options }, { time, take }) => {
@@ -29,7 +29,9 @@
               { checkpoint: Object.keys(checkpoint).length ? checkpoint : undefined, every, cache });
             [priorRecipe, priorCheckpoint, priorEvery, priorCache] = [recipe, checkpoint, every, cache];
           }
-          return current.seekTick(tickAt(selected, current.recipe.dt, options.time === undefined ? take : undefined));
+          const result=current.seekTick(tickAt(selected, current.recipe.dt, options.time === undefined ? take : undefined));
+          const adapters=K.world.outputAdapters;
+          return {...result,grid:adapters.field(result.field),pointBuffer:adapters.points(result.points,{frame:'art-pixels',unit:'art-px'})};
         };
       }
     },
@@ -45,7 +47,7 @@
           checkpointCache:{type:'number', unit:'checkpoints', constraints:{integer:true,min:0,max:128}}
         }}
       },
-      outputs: {value:'record', outputs:'record', probes:'record', checkpoint:'record'}, time: true,
+      outputs: {value:'record', outputs:'record', probes:'record', checkpoint:'record', events:'eventLog'}, time: true,
       instantiate() {
         let current, prior;
         return ({model, commands, checkpoint, options}, {time, take}) => {
@@ -61,7 +63,8 @@
           }
           current.seek(tick === undefined ? tickAt(time, current.view().world.dt, take) : tick);
           const value = K.world.models.sample(current);
-          return {value, outputs:value.outputs, probes:value.probes, checkpoint:current.checkpoint()};
+          const events=K.world.outputAdapters.events(current.events(),{dt:current.view().world.dt});
+          return {value, outputs:value.outputs, probes:value.probes, checkpoint:current.checkpoint(),events};
         };
       }
     },
