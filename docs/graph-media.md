@@ -198,6 +198,9 @@ event APIs. Node hosts can append timestamped rows to `mediaGraph.recorder`
 or call `ink.recordInputEvents(iterable, { initial, signal })` for a device
 source that provides a finite event stream.
 
+[Input compilers](input-compilers.md) turn captures, MIDI, text, IPA,
+and cues into shared editable events and curves.
+
 ## Recordable live modulation
 
 Create `KIT.procedural.mediaGraph.modulationCapture(options)` when

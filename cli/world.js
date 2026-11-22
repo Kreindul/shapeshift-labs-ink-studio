@@ -525,6 +525,22 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
           'Simulation diagnostics reached '+report.status);
         return;
       }
+      case 'input-compile': {
+        ensure(typeof file==='string'&&other===undefined,'Use sim input-compile <plan.json> [--out score.json]');
+        return respond(require('./input-compiler.js').load(kit,read(file),file,shot?.dependency));
+      }
+      case 'input-edit': {
+        ensure(typeof file==='string'&&typeof other==='string','Use sim input-edit <score.json> <edits.json> [--out score.json]');
+        return respond(W.inputCompilers.edit(read(file),read(other)));
+      }
+      case 'input-export': {
+        const kind=opt.kind;
+        ensure(typeof file==='string'&&['recording','events','gesture'].includes(kind)&&
+          (kind==='gesture'?typeof other==='string':other===undefined),
+        'Use sim input-export <score.json> --kind recording|events, or sim input-export <score.json> <bindings.json> --kind gesture');
+        const score=W.inputCompilers.prepare(read(file));
+        return respond(kind==='gesture'?score.gestures(read(other)):kind==='events'?score.events():score.recording());
+      }
       case 'gesture-score': {
         const point=opt.t!==undefined||opt.tick!==undefined;
         const range=['from-tick','to-tick','every'].some(key=>opt[key]!==undefined);

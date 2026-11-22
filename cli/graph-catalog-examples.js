@@ -234,6 +234,10 @@ const specifications = {
   'anim.frameBank': { inputs: { source: rgba, options: { tiles: { size: [2, 2], every: 4 } } } },
   'sim.define': { inputs: { kind: 'particles' } },
   'sim.run': { nodes: { recipe: { op: 'sim.define', inputs: { kind: 'particles' } } }, inputs: { recipe: link('recipe') } },
+  'input.compile': { inputs: { plan: {
+    format:'ink-studio/input-compile-plan',version:1,id:'spoken-cue',
+    sources:{voice:{kind:'ipa',text:'a m',targets:{a:{jaw:.8},m:{jaw:.1}}}}
+  } } },
   'sim.gesture-score': { inputs: { score: {
     format:'ink-studio/gesture-score', version:1, id:'shutter', revision:1, rate:120,
     channels:{opening:{type:'number',base:0,limits:{min:0,max:1,maxSpeed:2}}},

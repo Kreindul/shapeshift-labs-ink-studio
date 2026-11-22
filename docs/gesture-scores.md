@@ -133,6 +133,9 @@ named control. By default it follows the graph or exact take frame
 clock. Set `options.tick` to sample a specific score tick. An optional
 checkpoint sets the earliest tick the node can visit.
 
+Use [input compilers](input-compilers.md) to turn imported control
+curves into named gesture-score channels.
+
 ## Demos
 
 ```sh
