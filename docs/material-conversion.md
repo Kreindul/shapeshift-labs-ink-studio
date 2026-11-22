@@ -79,3 +79,65 @@ for total mass, total thermal energy, applied energy, and ambient exchange.
 Successful `material-lift` and `material-crumble` events link the body
 and parcel IDs. The lattice and pieces share one checkpoint and replay
 as part of a normal [world recording](simulation-checkpoints.md).
+
+## Break a piece in stages
+
+Add `fracture` to a lift to bond the face-neighbor parcels independently.
+A bond retains its damage until it breaks. A broken seam draws a dark
+hairline, and a newly exposed hot face uses the parcel's heat palette.
+
+```json
+{
+  "tick": 11,
+  "action": "forge/lift",
+  "args": {
+    "body": "charge",
+    "cells": [[4, 6, 3], [5, 6, 3], [6, 6, 3], [4, 7, 3], [5, 7, 3]],
+    "velocity": [5.3, 1.6, 0],
+    "angular": [0.6, 0.48, 1.85],
+    "fracture": {
+      "strength": 240,
+      "impact": 1,
+      "thermal": 0.21,
+      "minCoolingRate": 245,
+      "seams": [
+        { "cells": [[4, 6, 3], [5, 6, 3]], "strength": 6.5 },
+        { "cells": [[5, 6, 3], [6, 6, 3]], "strength": 0.46 }
+      ]
+    }
+  }
+}
+```
+
+- `strength` is the damage a bond can take. Override it on a shared face
+  with `seams`, using the cells' grid addresses at lift.
+- `impact` scales damage from measured swept collisions. Ink apportions
+  the closing-speed energy over intact bonds, with greater weight near
+  the struck parcel. `thermal` adds damage per degree of cooling above
+  `minCoolingRate` in degrees per second. The stronger chill of the two
+  endpoints drives each seam. Set either multiplier to zero to disable it.
+- To quench a specific carried parcel, use `forge/heat` with both
+  `{ "body": "charge", "at": [4, 6, 3], "energy": -24 }`. The address refers
+  to the parcel at lift. Cooling also works through the normal ambient
+  exchange. Heat can continue conducting through intact neighbors.
+- When the intact bond network separates, each component becomes a
+  compound with its own center of mass and the inherited angular and
+  tangential motion. The largest component keeps the old body ID.
+  Detached single parcels enter the lattice when a cell is free. A parcel
+  that cannot deposit yet keeps moving and tries again. With `settle: true`,
+  its loose cell then settles normally. The 32-piece budget still applies.
+- Probe `pieces` for the bonds, their strengths, accumulated damage,
+  and broken flags. `material-crack` records each failed seam and its
+  cause. `material-fracture` names the new components only when the
+  piece physically separates. A detached parcel that reaches the
+  lattice emits `material-crumble` with `detached: true`.
+- `breakSpeed` remains available for whole-body crumble and takes
+  precedence if both behaviors are enabled.
+
+[Staged Cinder Foundry](../examples/staged-fracture.cjs) quenches one
+part of a glass shell in flight. One seam cracks, a later impact sheds
+a glowing corner, and the main piece keeps turning.
+
+```sh
+node examples/staged-fracture.cjs ./cinder-fracture
+```

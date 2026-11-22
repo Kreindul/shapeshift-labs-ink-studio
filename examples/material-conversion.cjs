@@ -103,9 +103,9 @@ function sequence(kit,end,visit){
   return {source,recording:run.recording(),impact,lift};
 }
 
-function render(kit,run){
+function render(kit,run,options={}){
   const world=kit.KIT.world.visual(kit,run.view(),run.query());
-  return ink.render(world,{w:340,h:184,px:1,ortho:true,zoom:1.34,raw:true,t:0});
+  return ink.render(world,{w:340,h:184,px:1,ortho:true,zoom:1.34,raw:true,t:0,...options});
 }
 
 if(require.main===module){

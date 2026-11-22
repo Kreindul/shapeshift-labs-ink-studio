@@ -121,3 +121,94 @@ test('optional loose parcels settle after deposition and preserve their thermal 
   assert(records(run).some(row=>row.at[1]===0));
   assert.deepEqual(W.runtime.replay(json(run.recording())).checkpoint(),run.checkpoint());
 });
+
+test('an impact breaks the weak seam, deposits a single parcel and leaves the remaining body moving',()=>{
+  const blocker={at:[5,4,1],material:'ore'};
+  const source=world({gravity:[0,0,0],drag:0,settle:true,initial:[...built,blocker]},[
+    lift(1,{velocity:[5,.25,0],angular:[0,0,0],fracture:{
+      strength:1000,seams:[{cells:[split[1],split[2]],strength:.1}]}})
+  ]);
+  const run=W.runtime.create(source);
+  let struck, survivingY;
+  run.advance(10,{onTick(view){
+    if(!run.events.some(event=>event.kind==='material-fracture'))return;
+    struck=view.tick;
+    survivingY=piece(run).body.position[1];
+  }});
+  assert(struck>1);
+  const failure=run.history.find(event=>event.kind==='material-crack');
+  assert.deepEqual(failure.seams.map(seam=>[seam.cells,seam.cause]),[[[split[1],split[2]],'impact']]);
+  const closed=run.history.find(event=>event.kind==='material-fracture');
+  assert.deepEqual(closed.fragments.map(item=>item.parcels.length),[2,1]);
+  const loosened=run.history.find(event=>event.kind==='material-crumble');
+  assert(loosened.detached && loosened.cells.length===1);
+  assert.equal(loosened.cells[0].parcel,closed.fragments[1].parcels[0]);
+  assert(piece(run).body.position[1]>survivingY);
+  assert.equal(piece(run).cells.length,2);
+  assert.equal(records(run).length,2);
+  close(read(run,'balance').value.energyError,0);
+  close(read(run,'balance').value.massError,0);
+});
+
+test('successive quenches open a hairline and then split two independently moving hot chunks',()=>{
+  const a=[2,4,1],b=[3,4,1],c=[2,5,1],d=[3,5,1], cells=[a,b,c,d];
+  const initial=cells.map((at,i)=>({at,material:i%2?'ore':'slag',temperature:540+i*10,wetness:i*.1}));
+  const source=world({gravity:[0,0,0],drag:0,initial},[
+    lift(1,{cells,velocity:[1,.4,0],angular:[0,0,2],fracture:{strength:1000,impact:0,
+      thermal:1,minCoolingRate:10,seams:[{cells:[a,b],strength:1},{cells:[c,d],strength:1}]} }),
+    action(2,'heat',{body:'charge',at:a,energy:-20})
+  ]);
+  const run=W.runtime.create(source);
+  run.advance(2);
+  const hairline=run.events.find(event=>event.kind==='material-crack');
+  assert.equal(hairline.seams[0].cause,'cooling');
+  assert.deepEqual(piece(run).bonds.filter(row=>row.broken).map(row=>row.cells),[[a,b]]);
+  assert.equal(read(run,'balance').value.pieces,1);
+  assert(kit.KIT.world.visual(kit,run.view(),run.query()).splatIds.some(id=>id?.includes('/crack/')));
+  const saved=json(run.checkpoint()), control=W.runtime.create(source,{checkpoint:saved});
+  const second=action(4,'heat',{body:'charge',at:c,energy:-20});
+  run.schedule([second]);
+  control.advance(4);
+  run.advance(4);
+  const after=Object.values(read(run,'pieces').value), event=run.events.find(row=>row.kind==='material-fracture');
+  assert.deepEqual(event.fragments.map(item=>item.parcels.length),[2,2]);
+  assert.equal(after.length,2);
+  const carried=piece(control);
+  const momentum=[0,0,0];
+  for(const chunk of after){
+    assert.deepEqual(chunk.body.angular,carried.body.angular);
+    for(let i=0;i<3;i++)momentum[i]+=chunk.body.velocity[i]*chunk.body.mass;
+    for(const row of chunk.cells){
+      const previous=carried.cells.find(prior=>prior.id===row.id);
+      row.point.forEach((n,i)=>close(n,previous.point[i]));
+      assert.equal(row.wetness,previous.wetness);
+      if(row.at.join()===c.join())close(row.energy,previous.energy-20);
+      else close(row.energy,previous.energy);
+    }
+  }
+  momentum.forEach((n,i)=>close(n,carried.body.mass*carried.body.velocity[i]));
+  assert(after.some(chunk=>chunk.body.velocity.some((n,i)=>Math.abs(n-carried.body.velocity[i])>.1)));
+  close(read(run,'balance').value.energyError,0);
+  assert.deepEqual(W.runtime.replay(json(run.recording())).checkpoint(),run.checkpoint());
+  const restored=W.runtime.create(source,{checkpoint:saved});
+  restored.schedule([second]);restored.advance(4);
+  assert.deepEqual(restored.checkpoint(),run.checkpoint());
+  assert.throws(()=>run.schedule([lift(5,{cells,fracture:{seams:[{cells:[a,d],strength:1}]}})]),/shared faces/);
+});
+
+test('detached parcels retain rigid motion if there is no free lattice landing site',()=>{
+  const cells=split.slice(0,2), source=world({gravity:[0,0,0],drag:0,initial:built.slice(0,2)},[
+    lift(1,{cells,velocity:[50,0,0],angular:[0,0,0],fracture:{strength:1,impact:0,thermal:1}}),
+    action(4,'heat',{body:'charge',at:cells[0],energy:-10})
+  ]);
+  const run=W.runtime.create(source);
+  run.advance(5);
+  assert(run.history.some(event=>event.kind==='material-fracture'));
+  assert(!run.history.some(event=>event.kind==='material-crumble'));
+  const pieces=Object.values(read(run,'pieces').value);
+  assert.equal(pieces.length,2);
+  assert(pieces.every(row=>row.cells.length===1&&row.body.velocity[0]===50));
+  assert.equal(read(run,'balance').value.carried,2);
+  close(read(run,'balance').value.energyError,0);
+  assert.deepEqual(W.runtime.replay(json(run.recording())).checkpoint(),run.checkpoint());
+});
