@@ -120,4 +120,5 @@
   }
 
   Object.assign(S,{instrumentAudio:input,analyzeInstrumentBank:bank});
+  A.yinPitchLag=yin;
 })(KIT.procedural);

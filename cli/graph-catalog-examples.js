@@ -256,9 +256,11 @@ const specifications = {
   'anim.frameBank': { inputs: { source: rgba, options: { tiles: { size: [2, 2], every: 4 } } } },
   'sim.measure': {inputs:{
     plan:{format:'ink-studio/simulation-measurement-plan',version:1,id:'tap',
-      measurements:{arrival:{kind:'arrival',source:'trace',threshold:.1}},
-      assertions:{timing:{measurement:'arrival',min:.0005,max:.001}}},
-    sources:{trace:outputTrace}
+      measurements:{arrival:{kind:'arrival',source:'trace',threshold:.1},
+        pitch:{kind:'signal-compare',source:'note',metric:'pitch',band:[800,1200]}},
+      assertions:{timing:{measurement:'arrival',min:.0005,max:.001},tuning:{measurement:'pitch',max:.1}}},
+    sources:{trace:outputTrace,note:{sampleRate:8000,channels:1,
+      samples:Array.from({length:128},(_,i)=>.5*Math.sin(i*Math.PI/4))}}
   }},
   'sim.outputField': {inputs:{source:{width:2,height:2,data:[0,.2,.3,.1]}}},
   'sim.outputTrace': {inputs:{source:outputTrace}},

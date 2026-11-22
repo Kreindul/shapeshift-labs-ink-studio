@@ -48,48 +48,61 @@
     return unavailable('s','threshold-not-reached',evidence);
   }
 
+  function centered({samples,start,end,count}){
+    let scale=0;
+    for(let i=start;i<end;i++)scale=Math.max(scale,Math.abs(samples[i]));
+    const signal=new Float64Array(count);
+    if(!scale)return {signal,scale,rms:0};
+    let mean=0;
+    for(let i=start;i<end;i++)mean+=samples[i]/scale;
+    mean/=count;
+    let power=0;
+    for(let i=0;i<count;i++){
+      const value=samples[start+i]/scale-mean;
+      power+=value*value;
+      signal[i]=value;
+    }
+    return {signal,scale,rms:scale*Math.sqrt(power/count)};
+  }
+
+  function spectrum(signal,fftSize,taper){
+    const real=new Float64Array(fftSize), imag=new Float64Array(fftSize);
+    for(let i=0;i<signal.length;i++)real[i]=signal[i]*(taper?(.5-.5*Math.cos(i*2*Math.PI/(signal.length-1))):1);
+    InkFFT.axis(fftSize)(real,imag,0,1,-1);
+    return Float64Array.from({length:fftSize/2+1},(_,i)=>Math.hypot(real[i],imag[i]));
+  }
+
+  function peakOffset(left,center,right){
+    const a=Math.log(left),b=Math.log(center),c=Math.log(right);
+    const curve=a-2*b+c, vertex=.5*(a-c)/curve;
+    return finite(vertex)&&curve<0?Math.max(-.5,Math.min(.5,vertex)):0;
+  }
+
   function frequency(trace,spec){
     check(fields(spec,[...common,'band','minRms']),'Invalid frequency measurement options');
-    const range=withChannel(trace,spec), {samples,start,end,count,sampleRate}=range;
+    const range=withChannel(trace,spec), {count,sampleRate}=range;
     const {band=[0,sampleRate/2],minRms=0}=spec;
     check(Array.isArray(band)&&band.length===2&&band.every(finite)&&band[0]>=0&&band[1]>band[0]&&
       band[1]<=sampleRate/2&&finite(minRms)&&minRms>=0&&count<=65536,
     'Frequency needs an increasing band within Nyquist and at most 65536 samples');
     const evidence={...range.evidence,band,minRms};
     if(count<16)return unavailable('Hz','frequency-window-too-short',evidence);
-    let scale=0;
-    for(let i=start;i<end;i++)scale=Math.max(scale,Math.abs(samples[i]));
+    const {signal,scale,rms}=centered(range);
     if(!scale)return unavailable('Hz','no-ac-signal',evidence);
-    let mean=0;
-    for(let i=start;i<end;i++)mean+=samples[i]/scale;
-    mean/=count;
-    const fftSize=2**Math.ceil(Math.log2(count)), real=new Float64Array(fftSize), imag=new Float64Array(fftSize);
-    let power=0;
-    for(let i=0;i<count;i++){
-      const value=samples[start+i]/scale-mean;
-      power+=value*value;
-      real[i]=value*(.5-.5*Math.cos(i*2*Math.PI/(count-1)));
-    }
-    const rms=scale*Math.sqrt(power/count), binHz=sampleRate/fftSize;
+    const fftSize=2**Math.ceil(Math.log2(count)), binHz=sampleRate/fftSize;
     if(!finite(rms))return unavailable('Hz','measurement-overflow',evidence);
     Object.assign(evidence,{fftSize,binHz,rms});
     if(rms<=minRms)return unavailable('Hz','no-ac-signal',evidence);
     const lo=Math.max(1,Math.ceil(band[0]/binHz)), hi=Math.floor(band[1]/binHz);
     if(lo>hi)return unavailable('Hz','no-fft-bin-in-band',evidence);
-    InkFFT.axis(fftSize)(real,imag,0,1,-1);
-    const bin=i=>Math.hypot(real[i],imag[i]);
-    let strongest=lo, peak=bin(lo);
+    const bins=spectrum(signal,fftSize,true);
+    let strongest=lo, peak=bins[lo];
     for(let i=lo+1;i<=hi;i++){
-      const value=bin(i);
+      const value=bins[i];
       if(value>peak){strongest=i;peak=value;}
     }
     if(peak===0)return unavailable('Hz','no-spectral-peak',evidence);
-    let offset=0;
-    if(strongest>lo&&strongest<hi){
-      const a=Math.log(bin(strongest-1)),b=Math.log(peak),c=Math.log(bin(strongest+1));
-      const curvature=a-2*b+c, vertex=.5*(a-c)/curvature;
-      if(finite(vertex)&&curvature<0)offset=Math.max(-.5,Math.min(.5,vertex));
-    }
+    const offset=strongest>lo&&strongest<hi?peakOffset(bins[strongest-1],peak,bins[strongest+1]):0;
     return measured((strongest+offset)*binHz,'Hz',{...evidence,bin:strongest,binOffset:offset});
   }
 
@@ -131,5 +144,6 @@
     return measured(output==='rate'?rate:Math.log(1000)/rate,unit,evidence);
   }
 
-  W.traceMeasurements=Object.freeze({arrival,frequency,decay,window,withChannel,measured,unavailable});
+  W.traceMeasurements=Object.freeze({arrival,frequency,decay,window,withChannel,measured,unavailable,
+    centered,spectrum,peakOffset});
 })(KIT);

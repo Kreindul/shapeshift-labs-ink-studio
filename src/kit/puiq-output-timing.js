@@ -35,6 +35,14 @@
         channels=Object.fromEntries(['x','y','z'].map((axis,i)=>[axis,{unit:units[measure],
           samples:Float64Array.from({length:frames},(_,sample)=>raw[sample*3+i])}]));
       }
+    }else if(format===undefined&&Number.isSafeInteger(channels)&&list(data.samples)){
+      const pcm=P.mediaGraph.audio(data);
+      check(pcm.sampleRate<=192000&&pcm.samples.length<=8000000&&options.measure===undefined&&options.track===undefined,
+        'Audio traces need at most 8 million samples and a clock up to 192 kHz');
+      frames=pcm.samples.length/pcm.channels;
+      channels=Object.fromEntries(Array.from({length:pcm.channels},(_,channel)=>['ch'+(channel+1),{
+        unit:options.unit??'FS',samples:Float64Array.from({length:frames},(_,i)=>pcm.samples[i*pcm.channels+channel])
+      }]));
     }else{
       check((format===undefined||format===formats.trace&&version===1)&&options.measure===undefined&&options.track===undefined,
         'Expected a native or authored integer-sample trace');

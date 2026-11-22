@@ -127,6 +127,7 @@
       }
       let result;
       if(['arrival','frequency','decay'].includes(spec.kind))result=M[spec.kind](trace(),spec);
+      else if(spec.kind==='signal-compare')result=W.signalComparison.compare(trace(),spec);
       else if(spec.kind==='steady-state')result=steady(source,spec,trace);
       else if(spec.kind==='conservation')result=conservation(source,spec);
       else if(spec.kind==='contact-force')result=contact(source,spec,trace);
@@ -158,7 +159,7 @@
 
   W.simulationMeasurements=Object.freeze({format,reportFormat,run});
   P.graph.operations=Object.freeze({...P.graph.operations,'sim.measure':Object.freeze({
-    cacheVersion:1,description:'Measure named physical evidence and evaluate authored CI bounds.',
+    cacheVersion:2,description:'Measure named physical evidence, compare time and frequency estimates, and evaluate CI bounds.',
     inputs:{plan:'record',sources:'record'},
     outputs:{value:'record',measurements:'record',assertions:'record',passed:'boolean'},
     run({plan,sources}){

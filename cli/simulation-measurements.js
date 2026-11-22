@@ -2,7 +2,8 @@
 const fs=require('node:fs'),path=require('node:path');
 
 const runFormat='ink-studio/simulation-measurement-run';
-const read=file=>JSON.parse(fs.readFileSync(file,'utf8'));
+const read=file=>path.extname(file).toLowerCase()==='.wav'?require('./wav.js').decode(fs.readFileSync(file)):
+  JSON.parse(fs.readFileSync(file,'utf8'));
 const nativeRunners={
   'ink-studio/wave-run':'./wave-network.js',
   'ink-studio/resonant-mode-run':'./modal-resonator.js',
