@@ -210,7 +210,7 @@
           ()=>Math.min(rate*.48,row.hz),()=>row.q ?? 1,()=>row.gainDb);
         filter(left,right,frame,pair);
         if (time<row.startTime-eps) return null;
-        const edge=Math.min(time-row.startTime,row.endTime-time);
+        const edge=Math.min(time-(row.fadeFrom ?? row.startTime),(row.fadeTo ?? row.endTime)-time);
         if (row.fadeSeconds) {
           const wet=Math.max(0,Math.min(1,edge/row.fadeSeconds));
           pair[0]=left+(pair[0]-left)*wet;
@@ -236,7 +236,7 @@
   function report(music) {
     const cue=music.cue,{events,program}=music;
     const audible=Object.entries(events).map(([name,rows])=>[name,rows.filter(row=>row.velocity>0 &&
-      music.tracks[name].play.prepare(row,48000,row.gate).duration>0)]);
+      (music.tracks[name].external || music.tracks[name].play.prepare(row,48000,row.gate).duration>0))]);
     const summary=(from,to)=>Object.fromEntries(audible.map(([name,rows])=>{
       const sounding=rows.filter(row=>row.time>=from-eps && row.time<to-eps);
       const low=music.arrangement.parts[name].role==='percussion' ? [] : sounding.map(row=>row.midi);

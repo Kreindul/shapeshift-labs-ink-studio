@@ -26,13 +26,22 @@
     const tuning=12*Math.log2(note.frequency/(440*2**((note.midi-69)/12)))+(play.bend ?? 0)/100;
     const glide=play.glide>0 && note.fromFrequency>0 ? 12*Math.log2(note.fromFrequency/note.frequency) : 0;
     const pitch=curves.pitchCents || Math.abs(tuning)>1e-7 || glide!==0;
-    const volume=curves.gainDb || curves.amplitude;
+    const placement=note.renderGain ?? 1, fade=note.renderFade;
+    const onset=note.start ?? note.time;
+    const volume=curves.gainDb || curves.amplitude || placement!==1 || fade;
     const channels=[];
     if (pitch) channels.push(['tuning',phase=>Math.max(-120,Math.min(120,tuning+
       value(curves.pitchCents,phase,0)/100+(glide ? glide*(1-clamp(phase*gate/play.glide)) : 0))),
       [curves.pitchCents],glide ? [play.glide/gate] : []]);
-    if (volume) channels.push(['volume',phase=>Math.max(.000001,Math.min(4,
-      db(value(curves.gainDb,phase,0))*value(curves.amplitude,phase,1))),[curves.gainDb,curves.amplitude],[]]);
+    if (volume) {
+      const gain=phase=>{
+        const attack=fade ? Math.sin(Math.PI*.5*clamp((onset+phase*gate-fade.at)/fade.duration)) : 1;
+        return Math.max(.000001,Math.min(4,placement*attack*
+          db(value(curves.gainDb,phase,0))*value(curves.amplitude,phase,1)));
+      };
+      channels.push(['volume',gain,[curves.gainDb,curves.amplitude],
+        fade ? [clamp((fade.at+fade.duration-onset)/gate)] : []]);
+    }
     if (play.vibrato) channels.push(['vibrato',()=>play.vibrato/100,[],[]]);
     for (const name of ['breath','brightness','pressure']) if (curves[name] || play[name]!==undefined)
       channels.push([name,phase=>value(curves[name],phase,play[name]),[curves[name]],[]]);

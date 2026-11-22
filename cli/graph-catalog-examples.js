@@ -433,7 +433,7 @@ const specifications = {
   'music.findListeningReferences': {inputs:{references:[{format:'ink-studio/critique-reference',version:1,...referenceSettings}],
     options:{tags:['short tail']}}},
   'music.renderTransitions': { inputs:{sources:{score:production},
-    timeline:{entry:'opening',end:.25,segments:{opening:{source:'score'}}},options:{sampleRate:8000}} },
+    timeline:{entry:'opening',end:.25,segments:{opening:{source:'score'}},performers:{tracks:['lead']}},options:{sampleRate:8000}} },
   'music.captureScoreTrace': {inputs:{score:{entry:'wait',sections:{wait:{resource:'wait'}}},
     settings:{id:'short',end:1.4}}},
   'music.rehearseTransitions': {inputs:{sources:{score:production},timeline:rehearsalTimeline,traces:[rehearsalTrace],

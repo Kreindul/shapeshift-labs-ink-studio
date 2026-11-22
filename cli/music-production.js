@@ -284,11 +284,11 @@ module.exports=function command([mode,file,config],opt,kit) {
       write(path.join(folder,'manifest.json'),{...result.report,takes:entries});
       value={manifest:path.join(folder,'manifest.json'),takes:result.takes.map(take=>take.id)};
     } else {
+      const host=opt['clap-host']===undefined ? undefined : require('./clap-adapter').load(opt['clap-host']);
       const result=mode==='timeline' ?
-        P.renderTimeline(sources,timeline,adaptiveIntents(kit.KIT,recipe),assets,{...recipe.options,stems:true}) :
+        P.renderTimeline(sources,timeline,adaptiveIntents(kit.KIT,recipe),assets,{...recipe.options,stems:true},host) :
         recipe.lockedArrangement ? P.renderLockedArrangement(recipe.lockedArrangement,assets,recipe.options) :
-          P.render(production,assets,{stems:true,...recipe.options},
-            opt['clap-host']===undefined ? undefined : require('./clap-adapter').load(opt['clap-host']));
+          P.render(production,assets,{stems:true,...recipe.options},host);
       writeTake(folder,result.value,result.stems,result.report,mode==='render' && !recipe.lockedArrangement ? production : undefined,paths);
       if (mode==='render' && recipe.lockedArrangement)
         write(path.join(folder,'production.json'),{...recipe,assets:relativeAssets(folder,paths)});

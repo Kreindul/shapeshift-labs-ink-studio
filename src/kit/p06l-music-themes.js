@@ -6,7 +6,7 @@
   const epsilon=1e-8, round=v=>Number(v.toFixed(9));
   const pc=v=>((v%12)+12)%12;
   const before=(a,b)=>a.time-b.time || a.part.localeCompare(b.part);
-  const audible=(track,event)=>track?.mix.gain>0 && event.velocity>0 && track.play.prepare(event,48000,event.gate).duration>0;
+  const audible=(track,event)=>track?.mix.gain>0 && event.velocity>0 && (track.external || track.play.prepare(event,48000,event.gate).duration>0);
 
   function named(raw,max,label) {
     check(record(raw) && Object.keys(raw).length<=max && Object.keys(raw).every(id),'Invalid '+label+' table');

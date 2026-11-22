@@ -45,7 +45,8 @@ module.exports=function command([mode,file,config,traceFile],opt,kit) {
     settings.traces.length<=12,'Use a rehearsal request with up to twelve traces');
   const traces=settings.traces.map(row=>typeof row==='string' ? read(relative(config,row)) : row);
   const variants=settings.variants ?? [];
-  const {audio,report}=R.run(sources,timeline,traces,variants,assets,settings.options);
+  const host=opt['clap-host']===undefined ? undefined : require('./clap-adapter').load(opt['clap-host']);
+  const {audio,report}=R.run(sources,timeline,traces,variants,assets,settings.options,host);
   const listing=report.listening.map(take=>{
     const key=take.trace+':'+take.id;
     const takes=take.takes.map(change=>{

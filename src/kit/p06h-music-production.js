@@ -370,10 +370,11 @@
   }
   function renderCompiled(music,options={},sessionSource=false,performanceEnd) {
     check(fields(options,['start','end','sampleRate','stems','tail','layers']),'Invalid production render options');
-    const {start=0,end=music.end,sampleRate=48000,stems=false,tail=0,layers={}}=options;
+    const {start:beginPoint=0,end:endPoint=music.end,sampleRate=48000,stems=false,tail=0,layers={}}=options;
+    const start=T.seconds(T.read(beginPoint)),end=T.seconds(T.read(endPoint));
     check(finite(start,0,music.end) && finite(end,start,music.end) && end>start &&
       integer(sampleRate,8000,96000) && typeof stems==='boolean' && finite(tail,0,8), 'Invalid production export range');
-    const begin=sampleAt(start,sampleRate), stop=sampleAt(end+tail,sampleRate), n=stop-begin;
+    const begin=sampleAt(beginPoint,sampleRate), stop=sampleAt(tail ? end+tail : endPoint,sampleRate), n=stop-begin;
     const gateEnd=performanceEnd ?? end, names=Object.keys(music.tracks);
     check(record(layers) && Object.entries(layers).every(([name,level])=>names.includes(name) &&
       finite(level,0,1)), 'Invalid production layer levels');
@@ -407,6 +408,7 @@
         const shortened=tails?.length ? Q.tailLimit(tails,note.time+note.gate,naturalEnd) : null;
         const endTime=shortened?.stop ?? naturalEnd;
         const last=Math.min(stop,Math.ceil(endTime*sampleRate));
+        const placementGain=note.renderGain ?? 1, entryFade=note.renderFade;
         for (let at=first;at<last;at++) {
           const t=Math.max(0,at/sampleRate-start);
           const remaining=endTime-at/sampleRate;
@@ -414,9 +416,11 @@
             note.choke!==endTime ? 1 : note.chokeFade ?
               Math.sin(clamp(remaining/note.chokeFade)*Math.PI/2) : clamp(remaining*250);
           const frame=at-first;
-          const left=sound.signal(t,frame,0)*fade;
+          const placement=entryFade ? placementGain*Math.sin(Math.PI*.5*
+            clamp((at/sampleRate-entryFade.at)/entryFade.duration)) : placementGain;
+          const left=sound.signal(t,frame,0)*fade*placement;
           data[2*at]+=left;
-          data[2*at+1]+=sound.stereo ? sound.signal(t,frame,1)*fade : left;
+          data[2*at+1]+=sound.stereo ? sound.signal(t,frame,1)*fade*placement : left;
         }
       }
       const desk=track.mix, panL=Math.sqrt((1-desk.pan)/2), panR=Math.sqrt((1+desk.pan)/2);
@@ -452,7 +456,7 @@
         let l=data[index],r=data[index+1], volume=gain;
         const ride=level?.(time);
         if (ride) {
-          const edge=Math.min(time-ride.startTime,ride.endTime-time);
+          const edge=Math.min(time-(ride.fadeFrom ?? ride.startTime),(ride.fadeTo ?? ride.endTime)-time);
           volume*=db(ride.gainDb*(ride.fadeSeconds ? clamp(edge/ride.fadeSeconds) : 1));
         }
         highL+=(l-highL)*high; highR+=(r-highR)*high;
@@ -475,7 +479,7 @@
         const space=depth?.(time);
         let amount=0;
         if (space) {
-          const edge=Math.min(time-space.startTime,space.endTime-time);
+          const edge=Math.min(time-(space.fadeFrom ?? space.startTime),(space.fadeTo ?? space.endTime)-time);
           amount=space.fadeSeconds ? clamp(edge/space.fadeSeconds) : 1;
           if (space.cutoffHz!==undefined) {
             if (depthRow!==space) {
