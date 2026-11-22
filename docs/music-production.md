@@ -16,6 +16,8 @@ Use [note clips and voice-leading search](music-voice-leading.md) to
 try independent inner lines around a locked melody and bass.
 Use [patch gestures](music-gestures.md) to rehearse different performances
 of the written notes.
+Use [arrangement search with locks](music-locked-arrangement.md) to replace
+a passage while keeping selected lines and the rest of the render fixed.
 Start with [whole-piece composition](music-whole-piece.md) to generate
 competing full-length scores around a shared hook from an empty brief.
 Load the [stock performance instruments](music-playable-instruments.md)

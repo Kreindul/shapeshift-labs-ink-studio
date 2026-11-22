@@ -329,13 +329,13 @@
       return out;
     };
   }
-  function renderCompiled(music,options={},sessionSource=false) {
+  function renderCompiled(music,options={},sessionSource=false,performanceEnd) {
     check(fields(options,['start','end','sampleRate','stems','tail','layers']),'Invalid production render options');
     const {start=0,end=music.end,sampleRate=48000,stems=false,tail=0,layers={}}=options;
     check(finite(start,0,music.end) && finite(end,start,music.end) && end>start &&
       integer(sampleRate,8000,96000) && typeof stems==='boolean' && finite(tail,0,8), 'Invalid production export range');
     const begin=sampleAt(start,sampleRate), stop=sampleAt(end+tail,sampleRate), n=stop-begin;
-    const names=Object.keys(music.tracks);
+    const gateEnd=performanceEnd ?? end, names=Object.keys(music.tracks);
     check(record(layers) && Object.entries(layers).every(([name,level])=>names.includes(name) &&
       finite(level,0,1)), 'Invalid production layer levels');
     const stereoFrames=sessionSource ? stop+n*2 : stop*2+n*(stems ? names.length+2 : 1);
@@ -353,9 +353,9 @@
         if (start>=end) break;
         const first=Math.ceil(start*sampleRate-1e-7);
         if (first>=stop) break;
-        const gate=Math.min(note.gate,end-note.time)+note.time-start;
-        const nativeGate=note.start===undefined ? Math.min(note.gate,end-note.time) : gate;
-        const cropped=note.performance?.release && end<note.time+note.gate-1e-8;
+        const gate=Math.min(note.gate,gateEnd-note.time)+note.time-start;
+        const nativeGate=note.start===undefined ? Math.min(note.gate,gateEnd-note.time) : gate;
+        const cropped=note.performance?.release && gateEnd<note.time+note.gate-1e-8;
         const sound=track.play.prepare(cropped ? {...note,suppressRelease:true} : note,sampleRate,nativeGate);
         const endTime=Math.min(note.choke ?? Infinity,start+sound.duration);
         const last=Math.min(stop,Math.ceil(endTime*sampleRate));

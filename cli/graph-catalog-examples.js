@@ -51,6 +51,8 @@ const rehearsalTrace={format:'ink-studio/adaptive-score-trace',version:1,id:'sho
   intents:[{kind:'music-transition',from:'wait',to:'reveal',time:.7}]};
 const rehearsalEdit={id:'tail',transitions:[{from:'wait',to:'reveal',tail:.1}]};
 const editSession={format:'ink-studio/music-edit-session',version:1,id:'bench',sampleRate:8000,production};
+const lockedSearch={op:'music.searchLockedArrangement',
+  inputs:{source:production,brief:{range:{from:0,to:2},locks:{tracks:{lead:'all'}},kinds:['counterline']}}};
 const padPattern = {op:'music.programPads',inputs:{
   source:{id:'bench-roll',length:1,steps:[{id:'tap',beat:0,pad:'metal',play:{sample:'hit'},
     roll:{count:2,spacing:.25,velocity:[1,.7]}}]},options:{render:{sampleRate:8000}}
@@ -322,6 +324,11 @@ const specifications = {
   'music.instrumentLibrary': {inputs:{}},
   'music.loadInstrumentPack': {inputs:{name:'cinder-flute',options:{sampleRate:8000}}},
   'music.instrumentPresets': {inputs:{}},
+  'music.searchLockedArrangement': {inputs:lockedSearch.inputs},
+  'music.keepLockedArrangement': {nodes:{search:lockedSearch},inputs:{search:link('search'),take:'reference'}},
+  'music.renderLockedArrangement': {nodes:{search:lockedSearch,
+    pick:{op:'music.keepLockedArrangement',inputs:{search:link('search'),take:'reference'}}},
+    inputs:{source:link('pick'),options:{sampleRate:8000}}},
   'music.composeWholePiece': {inputs:{brief:{duration:90,palette:'electric',forms:['afterimage']}}},
   'music.planPocket': {inputs:{source:production,brief:{
     rhythm:{edits:[{part:'lead',section:'opening',scope:'section',adopt:{length:4,events:[

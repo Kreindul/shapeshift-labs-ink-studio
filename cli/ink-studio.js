@@ -1123,6 +1123,8 @@ const CMD = {
         '  music production <mode> <recipe.json> [config.json]   arrange, mix, audition and render adaptive music',
         '  music production cue-map <recipe.json> [map.json]   apply or inspect a cue-wide arrangement map',
         '  music production voice-lead <recipe.json> <settings.json>   search inner lines around locked outer tracks',
+        '  music production search-locked <recipe.json> <brief.json> --out DIR [--render]   search scoped arrangement edits',
+        '  music production keep-locked <search.json> <selection.json> --out recipe.json   keep an editable locked take',
         '  music production compose-piece [brief.json] --out DIR [--render]   create competing 90–120 second scores',
         '  music production search <recipe.json> <brief.json>   shortlist distinct cue, phrase and note revisions',
         '  music production pocket <recipe.json> <brief.json>   compare written rhythm and microtiming independently',
