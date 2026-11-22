@@ -52,6 +52,8 @@
     return {state:boundary.states?.[system],outputs:portsFor(boundary.outputs,system),
       inputs:portsFor(boundary.manual,system),signals:portsFor(boundary.signals,system),
       delays:portsFor(boundary.delays,system),sampling:portsFor(boundary.sampling,system),
+      ...(boundary.sampling?.[W.signalCrossings.historyKey] && {
+        crossingHistory:portsFor(boundary.sampling[W.signalCrossings.historyKey],system)}),
       events:(boundary.events??[]).filter(row=>row.system===system||row.solver===system),
       invalidations:(boundary.dependencyWrites??[]).filter(row=>row.writer===system),
       ...(own(boundary.simulationChunks?.clocks,system)&&{clock:boundary.simulationChunks.clocks[system]})};

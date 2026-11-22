@@ -238,6 +238,7 @@
     const schedule = W.rates.schedules(world,systems,chunks);
     physicalRates(world,ports,schedule);
     const incoming = new Map(), edges = new Map(), indegree = new Map();
+    let filters;
     const {contracts,edges:phaseEdges} = W.systemComposition.compile(world,systems);
     const names = ordered(systems);
     for (const name of names) {
@@ -251,16 +252,18 @@
       const source = ports.outputs[edge.from], target = ports.inputs[edge.to];
       check(source && target && source.type === target.type, 'Incompatible or missing ports: ' + edge.from + ' -> ' + edge.to);
       const delay = edge.delay ?? 0;
-      check(Number.isSafeInteger(delay) && delay >= 0 && delay <= 3600, 'Invalid connection delay');
+      const {sample,signal} = W.rates.policy(edge,source.type,schedule.active);
+      const advanced = W.signalCrossings.isAdvanced(sample);
+      if (!advanced) check(Number.isSafeInteger(delay) && delay >= 0 && delay <= 3600, 'Invalid connection delay');
       check(!incoming.has(edge.to), 'More than one connection feeds ' + edge.to);
-      const sample = W.rates.policy(edge,source.type,schedule.active);
+      const crossing = advanced ? W.signalCrossings.compile({...edge,sample},schedule,from,to,systems[from].combinational,filters ??= W.signalCrossings.filterBank()) : undefined;
       const varying = source.sampleRates || target.sampleRates;
-      U.assertLink(source.quantity,target.quantity,edge.from,edge.to,{sampled:edge.sample !== undefined || !!varying});
-      if (target.quantity && varying && edge.sample === undefined)
+      U.assertLink(source.quantity,target.quantity,edge.from,edge.to,{sampled:edge.sample !== undefined || edge.signal==='accumulated' || !!varying});
+      if (target.quantity && varying && edge.sample === undefined && edge.signal!=='accumulated')
         throw Error('Incompatible physical ports ' + edge.from + ' -> ' + edge.to +
           ': variable sample rates need an explicit world sampling policy');
-      incoming.set(edge.to,{from:edge.from,to:edge.to,delay,sample});
-      if (delay === 0 && sample !== 'average' && systems[from].combinational)
+      incoming.set(edge.to,{from:edge.from,to:edge.to,delay,sample,signal,...(crossing && {crossing})});
+      if (crossing?.immediate || !crossing && delay === 0 && sample !== 'average' && systems[from].combinational)
         phaseEdges.push({kind:'signal',from,to,output:edge.from,input:edge.to});
     }
     if (world.simulationModel) W.models.checkInterface(world,ports,incoming,systems);
@@ -290,7 +293,7 @@
       'Same-phase simulation dependency cycle prevents scheduling: '+names.filter(name=>indegree.get(name)>0).join(', ') :
       'Instantaneous signal cycle; use a delay or a stateful system');
     const causePolicy = W.causality.policy(world.causality);
-    const rates = schedule.active ? W.rates.bind(schedule,systems,ports,incoming,order) : null;
+    const rates = schedule.active ? W.rates.bind(schedule,systems,ports,incoming,order,Boolean(causePolicy)) : null;
     const interactions = W.interactionRuntime.bind({world,systems,chunks,transfers,ports,incoming,portValue});
     const influence = W.influenceRuntime.bind({systems,transfers,chunks});
     const population = W.populationRuntime.bind({systems,transfers,chunks});
@@ -441,7 +444,7 @@
       .map(({id})=>[id,rates.rates[id].every]) : []);
     const rootInputs = Object.fromEntries(Object.entries(ports.inputs).map(([name,port]) => [name,port.default]));
     const rootOutputs = Object.fromEntries(Object.entries(ports.outputs).map(([name,port]) => [name,port.default]));
-    const rootDelays = Object.fromEntries([...incoming.values()].filter(edge => edge.delay).map(edge =>
+    const rootDelays = Object.fromEntries([...incoming.values()].filter(edge => edge.delay && !edge.crossing).map(edge =>
       [edge.to,Array(edge.delay).fill(W.rates.buffered(edge)?W.rates.zero(ports.outputs[edge.from].type):rootOutputs[edge.from])]));
     const metrics = new Map();
     const scheduled = new Map();
@@ -450,7 +453,7 @@
     const historyLimit = world.history?.limit ?? 10000;
     let tick = 0, states = {}, outputs = rootOutputs, manual = rootInputs, delays = rootDelays,
       history = [], dropped = 0, lastEvents = [], scenario = {status:'running',score:0,matched:{},metrics:{}};
-    let pendingWrites = [], lastDependencies = null, sampling = rates?.initial, spatialSampling = {};
+    let pendingWrites = [], lastDependencies = null, sampling, spatialSampling = {};
     let causalState, weatherTrackState, chunkState;
     let currentQuery, lastTransfers = [], lastSignals = {...rootInputs,...rootOutputs};
     let lastCheckpoint, eventActionCounts = freeze({}), asyncActive=false, inFlightTick=0;
@@ -659,6 +662,7 @@
         undefined,undefined,undefined,phaseReader(name,states)),initialOutputs);
       outputs = freeze(initialOutputs);
       if (causePolicy) causalState = W.causality.initial(ports,incoming,outputs,causePolicy);
+      sampling = rates?.seed(outputs,causalState?.outputs);
       lastSignals = freeze({...manual,...outputs});
       const past=world.history?.enabled===false?[]:(world.history?.past??[]).filter(event=>Q.condition(world.history?.where,event));
       history=freeze(copy(past.slice(-historyLimit)));
@@ -1070,7 +1074,7 @@
         publishedSignals = {...observed,...nextOutputs};
       }
       if(reservations)nextStates=reservations.run(nextStates,{tick:at,emit:makeEmit});
-      const nextDelays = Object.fromEntries([...incoming.values()].filter(edge => edge.delay).map(edge =>
+      const nextDelays = Object.fromEntries([...incoming.values()].filter(edge => edge.delay && !edge.crossing).map(edge =>
         [edge.to,[...delays[edge.to].slice(1),delayedSamples?.[edge.to] ?? nextOutputs[edge.from]]]));
       publishedSignals = freeze(publishedSignals);
       const routed = eventActions?.route(eventActionCounts, events, at);

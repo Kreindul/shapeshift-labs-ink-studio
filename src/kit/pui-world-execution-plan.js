@@ -5,7 +5,10 @@
     hold:'Latest available level at the consumer boundary.',
     average:'Time-weighted held levels over the consumer window.',
     sum:'Sum of publications since the consumer last ran.',
-    events:'Ordered events queued until the consumer runs.'
+    events:'Ordered events queued until the consumer runs.',
+    interpolate:'Causal linear interpolation one source interval behind the receiver clock.',
+    decimate:'Low-pass FIR filtering followed by sampling at the slower receiver clock.',
+    'fractional-delay':'Linear reconstruction at an explicitly delayed, possibly fractional tick.'
   };
   const finite = value => Number.isFinite(value) ? value : null;
   const sum = values => values.reduce((total,value) => total+value,0);
@@ -15,15 +18,20 @@
     const shape = name => cadences[name].map(({every,substeps}) => every+'/'+substeps).join(',');
     const signatures = new Map(plan.order.map(name => [name,shape(name)]));
     return Array.from(incoming.values()).sort((a,b) => a.to < b.to ? -1 : a.to > b.to ? 1 : 0).map(edge => {
-      const {from,to,delay,sample} = edge, [source] = endpoint(from), [target] = endpoint(to);
+      const {from,to,delay,sample,signal,crossing} = edge, [source] = endpoint(from), [target] = endpoint(to);
       const type = ports.outputs[from].type, sourceChunk = chunks?.managed.get(source)?.chunk;
       const targetChunk = chunks?.managed.get(target)?.chunk;
       const buffered = schedule.active && (sample === 'average' || W.rates.buffered(edge));
-      return {...edge,type,source,target,
+      return {from,to,delay,sample,signal,type,source,target,
         crossRate:signatures.get(source) !== signatures.get(target) || sourceChunk !== targetChunk,
-        publication:delay ? 'delayed-tick' : sample === 'average' ? 'elapsed-interval' :
+        publication:crossing && !crossing.immediate ? 'source-history' : crossing ? 'same-phase-if-due' :
+          delay ? 'delayed-tick' : sample === 'average' ? 'elapsed-interval' :
           systems[source].combinational ? 'same-phase-if-due' : 'after-source-phase',
         ...(delay && {delaySeconds:delay*plan.world.dt}),
+        ...(crossing && {crossing:{
+          ...W.signalCrossings.describe(edge),latencySeconds:crossing.latencyTicks*plan.world.dt,
+          retainedSamples:sampling[W.signalCrossings.historyKey][from].values.length
+        }}),
         ...(buffered && {buffer:{mode:sample,
           ...(sample === 'average' && {pendingQuanta:sampling[to].quanta}),
           ...(type === 'event' && {maxEvents:W.rates.maxEvents,pendingEvents:sampling[to].length})
@@ -180,7 +188,8 @@
           systemStateJsonBytes:sum(entries.map(lane => lane.resources.stateJsonBytes)),
           typedStateBytes:sum(entries.map(lane => lane.resources.typedStateBytes ?? nestedMemory(lane)?.typedStateBytes ?? 0)),
           samplingJsonBytes:bytes(sampling),delayJsonBytes:bytes(delays),
-          delaySlots:sum(connections.map(edge => edge.delay)),eventBuffers:eventBuffers.sort(),
+          delaySlots:sum(connections.map(edge => edge.crossing ? 0 : edge.delay)),
+          ...(rates?.historySlots && {crossingHistorySlots:rates.historySlots}),eventBuffers:eventBuffers.sort(),
           maxEventsPerBuffer:W.rates.maxEvents,
           declaredWorkspaceBytes:sum(entries.map(lane => (lane.resources.workspaceBytes ?? 0) +
             (nestedMemory(lane)?.declaredWorkspaceBytes ?? 0))),

@@ -502,7 +502,10 @@ A stateful publication is visible at the following boundary.
 Combinational connections can deliver values at a shared boundary
 in dependency order.
 
-A connection's `sample` sets the crossing rule.
+A connection's `sample` sets the crossing rule. Use `signal` to declare
+an instantaneous level, accumulated increment, or event stream. See
+[explicit rate crossings](simulation-rate-crossings.md) for linear
+interpolation, anti-aliased decimation, and fractional delay.
 
 | Rule | Behavior |
 | --- | --- |

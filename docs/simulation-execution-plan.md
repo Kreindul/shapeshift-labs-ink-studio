@@ -41,7 +41,9 @@ output becomes available after its source phase. Delays count whole base
 ticks. Average, sum, and events keep a window or queue for the receiving
 system. The plan reports pending averaged phase quanta and queued event
 counts at the inspected tick. A delayed sum or event wire also retains
-its per-tick batches.
+its per-tick batches. [Explicit rate crossings](simulation-rate-crossings.md)
+add the signal semantics, filter settings, effective latency, and
+retained source history.
 
 `feedback` identifies strongly connected groups of signal wires and
 declared state reads, including a stateful self-wire. Within a group,

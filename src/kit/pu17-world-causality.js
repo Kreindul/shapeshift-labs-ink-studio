@@ -48,7 +48,8 @@
     }
     function input(name,port,value,sample,location) {
       const parents=sample.parents, before=retained.get(inputHeads[port]);
-      const data={value,source:sample.source??null,delay:sample.delay??0,sample:sample.mode??'hold'};
+      const data={value,source:sample.source??null,delay:sample.delay??0,sample:sample.mode??'hold',
+        ...(sample.latencyTicks!==undefined && {latencyTicks:sample.latencyTicks})};
       if (before?.type==='input' && equal(before.data,data) && equal(before.parents,parents)) return before.id;
       const ref=add('input',name,'signal-sampled',data,parents,{port,...location});
       inputHeads[port]=ref;
@@ -140,7 +141,7 @@
       completePhase();
       for (const [port,descriptor] of Object.entries(ports.inputs))
         if (descriptor.type==='event') delete manual[port];
-      for (const edge of incoming.values()) if (edge.delay) {
+      for (const edge of incoming.values()) if (edge.delay && !edge.crossing) {
         const parents=W.rates.buffered(edge)?delayed[edge.to]??[]:
           outputHeads[edge.from]?[outputHeads[edge.from]]:[];
         delays[edge.to]=[...delays[edge.to].slice(1),parents];
@@ -151,7 +152,7 @@
         outputs:outputHeads,inputs:inputHeads,manual,delays,buffers,actions});
     }
 
-    return {scope,output,completePhase,publish,collect,consume,held,delayedRefs,finish,...(inspection&&{balance}),
+    return {scope,output,completePhase,publish,collect,consume,held,delayedRefs,finish,publication:port=>staged[port],...(inspection&&{balance}),
       ran:name=>{delete actions[name];},
       action(system,ref) {actions[system]=refs([...(own(actions,system)?actions[system]:[]),ref]);},
       manual(port,ref,append) {manual[port]=append?refs([...(manual[port]??[]),ref]):[ref];},
@@ -172,7 +173,7 @@
       if (!incoming.has(port)) manual[port]=[inputs[port]];
     }
     for (const port of Object.keys(ports.outputs)) outputs[port]=root('output',port,values[port]);
-    for (const edge of incoming.values()) if (edge.delay) {
+    for (const edge of incoming.values()) if (edge.delay && !edge.crossing) {
       const value=ports.outputs[edge.from].default;
       const parents=W.rates.buffered(edge)?[]:[equal(value,values[edge.from])?outputs[edge.from]:
         defaults[edge.from]??=root('default',edge.from,value)];
@@ -184,8 +185,7 @@
   function validate(state,tick,ports,incoming,systems,{limit}) {
     check(record(state) && Array.isArray(state.nodes) && state.nodes.length<=limit &&
       Number.isSafeInteger(state.dropped) && state.dropped>=0,'Malformed causal checkpoint');
-    const before='c.'+(tick+1)+'.0';
-    const reference=value=>validRef(value)&&earlier(value,before);
+    const reference=value=>savedReference(value,tick);
     const references=list=>Array.isArray(list)&&list.length<=fanIn&&list.every(reference);
     let prior;
     for(const row of state.nodes) {
@@ -200,7 +200,7 @@
       [state.actions,systems,references,false]
     ]) check(record(bag) && (!complete||Object.keys(bag).length===Object.keys(keys).length) &&
       Object.entries(bag).every(([key,value])=>own(keys,key)&&match(value)),'Invalid saved causal references');
-    const delayed=[...incoming.values()].filter(edge=>edge.delay);
+    const delayed=[...incoming.values()].filter(edge=>edge.delay && !edge.crossing);
     check(record(state.delays) && Object.keys(state.delays).length===delayed.length && delayed.every(edge=>
       Array.isArray(state.delays[edge.to]) && state.delays[edge.to].length===edge.delay &&
       state.delays[edge.to].every(references)),'Invalid saved delayed causal references');
@@ -239,5 +239,6 @@
     return {status:gaps.length?'partial':'complete',nodes,edges,
       gaps:[...new Map(gaps.map(row=>[row.id,row])).values()],dropped:state.dropped};
   }
-  W.causality=Object.freeze({policy,begin,initial,validate,trace,walk});
+  const savedReference = (value,tick) => validRef(value) && earlier(value,'c.'+(tick+1)+'.0');
+  W.causality=Object.freeze({policy,begin,initial,validate,trace,walk,savedReference});
 })(KIT);

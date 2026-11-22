@@ -59,7 +59,9 @@ world ports have different schedules, choose an explicit sampling policy
 such as `"sample":"hold"` or `"sample":"average"` on the connection. The
 existing policy determines which values the receiver sees. World plans
 list possible active rates for systems with variable simulation detail,
-which also require an explicit policy on physical links.
+which also require an explicit policy on physical links. See
+[explicit rate crossings](simulation-rate-crossings.md) for the signal
+semantics and available filters and delays.
 
 To change unit scale or offset within a world, insert a
 `quantity-convert` system. Set `config.from` and `config.to` to the quantity
