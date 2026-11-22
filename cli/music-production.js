@@ -65,8 +65,10 @@ function writeRecipe(folder,production,paths) {
 function sessionConfig(file) {
   const data=read(file);
   if (data?.format==='ink-studio/producer-session') return {session:data};
+  if (data?.format==='ink-studio/composition-search') return {session:data.session};
   const {session,...settings}=data;
-  return {...settings,session:typeof session==='string' ? read(path.resolve(path.dirname(file),session)) : session};
+  const source=typeof session==='string' ? read(path.resolve(path.dirname(file),session)) : session;
+  return {...settings,session:source?.format==='ink-studio/composition-search' ? source.session : source};
 }
 function writeReview(folder,result,paths) {
   fs.mkdirSync(folder,{recursive:true});
@@ -111,6 +113,7 @@ module.exports=function command([mode,file,config],opt,kit) {
   }
   else if (mode==='analyze') value=P.analyze(production,assets,config ? read(config) : recipe.options);
   else if (mode==='suggest') value=P.suggest(production,config ? read(config) : recipe.options,assets);
+  else if (mode==='search') value=P.searchComposition(production,config ? read(config) : recipe.brief,assets);
   else if (mode==='plan-audition') value=P.planProducer(production,config ? read(config) : recipe.brief,assets);
   else if (mode==='revise' && config) {
     const document=read(config);
