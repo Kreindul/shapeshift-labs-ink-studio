@@ -160,6 +160,13 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
     const qualityPlans = new WeakMap();
     let detailTable, uploadedDetailFlags;
     let materialStyleTable, materialStyleUpload;
+    const facingUnit = 24, facingPlans = new WeakMap();
+    // Optical splat rows are only sampled during geometry, so the resolve can
+    // use that unit for bones without replacing its glass and depth inputs.
+    const facingBoneUnit = opticalUnit;
+    const facingSurface = toolkit.SurfaceLook ?? toolkit.KIT?.surface;
+    const facingAPI = facingSurface?.facingColors;
+    let facingTable, uploadedFacing;
     let paintOverlay, paintData, lastPaintView;
     const data = table(2048, 0, maxSize), bones = table(768, 4, maxSize);
     const fine = table(1536, 7, maxSize), pattern = table(2048, 10, maxSize);
@@ -600,6 +607,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         u_portalCoverPlane: options.u_portalCoverPlane ?? zero,
         u_paintPass: !!options.u_paintPass,
         u_materialGridScale: options.u_materialGridScale ?? 1,
+        u_facingGridScale: options.u_materialGridScale ?? 1,
         u_spriteLodGrid: options.spriteGrid ?? [1,1],
         u_viewport: [width, height], u_lookViewport: [width,height],
         ...(options.lookGrid && { u_lookViewportScale: [options.lookGrid[0]/width,options.lookGrid[1]/height] }),
@@ -1071,6 +1079,20 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         const attached=engravingBinding(world,geometryData,geometryDirty,frame.engravingLight??[-.45,.8,.55]);
         data.upload(attached.data,attached.data.length,attached.changedRows);engravingUniforms=attached.uniforms;
       }else data.upload(geometryData, world.count * 16, geometryDirty);
+      let facing;
+      if (!raw && frame.facingColors !== false && facingAPI && world.surfaceData) {
+        if (!facingPlans.has(world)) facingPlans.set(world, facingAPI.table(world,
+          (settings, ramp) => facingSurface.prepareFacing(settings, world.pal, world.paletteRoles, ramp)));
+        facing = facingPlans.get(world);
+        if (facing) {
+          facingTable ??= table(facingAPI.width, facingUnit, maxSize);
+          const posed = facingAPI.pose(facing, world, time, (source, t) =>
+            toolkit.KIT.splatFrames.create(source, t, toolkit.KIT.M));
+          if (facing !== uploadedFacing || posed) facingTable.upload(facing.data);
+          else facingTable.bind();
+          uploadedFacing = facing;
+        }
+      }
       if (materialStyles) bindMaterialStyles(world, group, plan, dirty);
       if (hasFine && (isNew || fineValues !== fineTiles)) {
         const fineDirty = incremental && !detail && fineValues === lastWorld.fine ? frame.changedFineRows : undefined;
@@ -1134,13 +1156,14 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       const shader = pipeline.programFor({
         water: !!wet, airPockets: wet?.airPockets, layered: wet?.layered, atlas: wet?.atlas, portal: plane !== zero || !!cover,
         instances: !!plan, contributions:coverage && !!constraints, masked, textured:constraints?.textured, layeredGlass,
-        engraving:engraved, footprints, materialStyles, environment:env?.media,emitterFog:!!env?.lit, relighting, optical:opticalMaterials, cutaway:!!section, spriteReconstruction:!!spriteMask
+        engraving:engraved, footprints, materialStyles, facingColors:facing && facingAPI, environment:env?.media,emitterFog:!!env?.lit, relighting, optical:opticalMaterials, cutaway:!!section, spriteReconstruction:!!spriteMask
       });
       shader.footprints=footprints;
       gl.useProgram(shader.p);
       const growth = world.grow ?? {};
       shader.set({
-        u_data: 0, u_bones: 4, u_fine: 7, ...(spriteMask && {u_spriteLod:spriteLodUnit,u_spriteLodCount:spriteMask.codes.length}), ...(plan && { u_instances: 15 }), u_fineOn: +hasFine, u_fpal: pal, u_view: camera.view,
+        u_data: 0, u_bones: 4, u_fine: 7,
+        ...(facing && { u_facingRows: facingUnit, u_facingCount: facing.count, u_facingPattern: patterned }), ...(spriteMask && {u_spriteLod:spriteLodUnit,u_spriteLodCount:spriteMask.codes.length}), ...(plan && { u_instances: 15 }), u_fineOn: +hasFine, u_fpal: pal, u_view: camera.view,
         ...(materialStyles && { u_materialStyles: 16, u_materialPatterned: patterned, u_materialStylesOn: !raw }),
         u_proj: camera.projection, u_time: time, u_scale: scale, u_ortho: +camera.ortho,
         u_motionCadence: hasCadence, u_rainWind:rainWind,
@@ -1249,18 +1272,18 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       const presentation = finishArt ? artPixelFinish.buffer.framebuffer : output;
       const destination = damping ? finished.framebuffer : presentation;
       let resolve;
-      const styledPattern = patterned && materialStyles;
+      const styledPattern = patterned && materialStyles, facingPattern = patterned && facing;
       const relitPattern = patterned && relighting;
       if (simpleOnly) {
         resolve = simple;
-      } else if (coverage || constraints || styledPattern || relitPattern || env?.media && patterned) {
+      } else if (coverage || constraints || styledPattern || facingPattern || relitPattern || env?.media && patterned) {
         const cache = coverage ? contributionPost : constrainedPosts;
         const mode = (wet ? 1+Number(wet.airPockets)+2*Number(wet.layered)+4*Number(wet.atlas) : 0) +
           16*Number(masked) + 32*Number(layeredGlass) + 64*Number(styledPattern) + 128*Number(!!constraints) +
-          256*Number(!!env?.media) + 512*Number(relitPattern)+1024*Number(!!env?.lit);
+          256*Number(!!env?.media) + 512*Number(relitPattern)+1024*Number(!!env?.lit)+2048*Number(!!facingPattern);
         if (!cache.has(mode)) cache.set(mode,program(pixelSources({
           water:!!wet,airPockets:wet?.airPockets,layered:wet?.layered,atlas:wet?.atlas,
-          paletteConstraints:!!constraints && !coverage,masked,contributions:coverage,layeredGlass,materialStyles:styledPattern,
+          paletteConstraints:!!constraints && !coverage,masked,contributions:coverage,layeredGlass,materialStyles:styledPattern, facingColors:facingPattern && facingAPI,
           environment:!!env?.media,emitterFog:!!env?.lit,relighting:relitPattern
         }).POST_FS));
         resolve = cache.get(mode);
@@ -1278,6 +1301,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         textureUnit(7, geometry.textures[at + 1]);
         textureUnit(8, glassBoundary.textures[0]);
       }
+      if (facingPattern) bones.bind(facingBoneUnit);
       fullscreen(resolve, cleaning ? cleaned.framebuffer : destination, width, height, {
         ...patternedUniforms, ...glassUniforms, ...bindTone(frameTone), ...water, ...env?.uniforms, u_waterMask: 11,
         ...(layeredGlass&&{u_glassBoundary:8,u_glassBack:4,u_glassThrough:7,
@@ -1288,6 +1312,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         u_pixOn: +patterned, u_keyOn: +patterned, u_sprOn: +sprites,
         u_paintOn: paintOnPatterns,
         ...(styledPattern && { u_materialStyles: 16 }),
+        ...(facingPattern && { u_facingRows: facingUnit, u_facingCount: facing.count, u_facingBones: facingBoneUnit }),
         ...(relitPattern && { u_relight: relightUnit, u_relightFog: rgb(world.pal[fog.c ?? 0] ?? 0),
           u_relightFogRange: [fog.start ?? 1, fog.max ?? 0] }),
         u_idxTex: 9,

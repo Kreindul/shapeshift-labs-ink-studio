@@ -67,6 +67,53 @@ These are stylized reflectance models. The CLI resolves them into the scene pale
 Bind an [authored highlight cel](highlight-cels.md) to a surface anchor
 when a light catch needs a specific pixel drawing at each size and angle.
 
+## Stepped facing colors
+
+Add `facingColors` to a surface finish to give its geometric planes distinct
+colors as they turn. The renderer measures the acute angle between the posed
+surface normal and the camera ray at each art pixel. The first band whose
+`maxAngle` includes that angle wins. List up to eight bands in increasing
+order and end at 90°. Normal maps do not move the bands.
+
+```js
+const cloak = K.surface.material({ r: [5, 6, 7, 8] }, {
+  facingColors: {
+    bands: [
+      { maxAngle: 38, color: 7 },
+      { maxAngle: 72, color: 9 },
+      { maxAngle: 90, color: 11 }
+    ]
+  }
+});
+```
+
+In replace mode, `color` accepts a palette slot, a named color role, a hex
+color, or a normalized RGB triple. Use `null` to keep the incoming color in a
+band. The scene's final palette and grading still apply.
+
+In shift mode, use `steps` instead of `color`. The renderer finds the closest
+swatch in the material's dark-to-light ramp, adds that many steps, and clamps
+to the ends. A zero shift preserves the incoming color. Sculpted materials
+inherit their baked ramp. Supply a `ramp` explicitly to override it or when
+using a low-level surface binding without a sculpt ramp.
+
+```js
+const cloth = K.surface.material({ r: [5, 6, 7, 8] }, {
+  facingColors: {
+    mode: 'shift',
+    bands: [
+      { maxAngle: 38, steps: 0 },
+      { maxAngle: 72, steps: -1 },
+      { maxAngle: 90, steps: 2 }
+    ]
+  }
+});
+```
+
+Set the same object on `mat.surface.facingColors` in JSON. The CPU and standard
+WebGL renderers both support perspective and orthographic views. Compare with
+`facingColors: false` in a render call or `--facing-colors off` in the CLI.
+
 ## Surface detail kits
 
 Add named `detailKit` layers to a surface finish in JavaScript or diorama JSON. A finish can travel with its material definition or be shared between several solids. Layer order matters. Put plaster above brick to expose brick through chips, or put moss above stone joints to grow it in the mortar. The headless renderer samples the patterns at the visible surface in its rest frame and filters details against the native art-pixel footprint.

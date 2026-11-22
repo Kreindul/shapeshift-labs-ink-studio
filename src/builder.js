@@ -289,14 +289,16 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
   const surfaces = [],
     surfaceIds = new Map(),
     surfaceRow = new Float32Array(SurfaceLook.STRIDE);
-  function surfaceNext(settings, nx, ny, nz, light, visibility = 1, tangent, bevelDistance) {
+  function surfaceNext(settings, nx, ny, nz, light, visibility = 1, tangent, bevelDistance, facingRamp) {
     let ids = surfaceIds.get(settings);
     if (!ids) surfaceIds.set(settings, (ids = new Map()));
     if (bevelDistance && !bevelIds.has(bevelDistance)) bevelIds.set(bevelDistance, surfaces.length + 1);
-    const key = light.join(',') + (bevelDistance ? '/' + bevelIds.get(bevelDistance) : '');
+    const key = light.join(',') + (bevelDistance ? '/' + bevelIds.get(bevelDistance) : '') +
+      (facingRamp ? ':facing:' + facingRamp.join(',') : '');
     let id = ids.get(key);
     if (id === undefined) {
-      id = surfaces.push({ settings, light: Array.from(light), ...(bevelDistance && { bevelDistance }) });
+      id = surfaces.push({ settings, light: Array.from(light), ...(bevelDistance && { bevelDistance }),
+        ...(facingRamp && { facingRamp: Array.from(facingRamp) }) });
       ids.set(key, id);
     }
     surfaceRow.set([id, nx, ny, nz, visibility, tangent?.[0] ?? 0, tangent?.[1] ?? 0, tangent?.[2] ?? 0]);

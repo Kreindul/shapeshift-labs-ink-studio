@@ -1,6 +1,7 @@
 /* View-dependent surface finishes for splats. The shader works on a surface sample
    in world space and is shared by the software renderer and script bundle. */
 const SurfaceLook = (() => {
+  const facing = typeof FacingColors === 'undefined' ? require('./facing-colors.js') : FacingColors;
   const optics = typeof SceneOptics === 'undefined' ? require('./scene-optics.js') : SceneOptics;
   const detail = typeof StableDetail === 'undefined' ? require('./stable-detail.js') : StableDetail;
   const kits = typeof SurfaceDetailKits === 'undefined' ? require('./surface-detail-kits.js') : SurfaceDetailKits;
@@ -549,10 +550,13 @@ const SurfaceLook = (() => {
 
   function prepare(settings, palette = [], lightDirection = [-0.55, 0.72, 0.43], context = {},
     { colorCurves = true, colorLut = true, colorStack = true, paletteConstraints = true, paletteRoles, blueNoise, onPaletteClip,
-      transmission = true, detailKits = true, paintShadowBands = true, validateOnly = false, skipMasks = false, ditherSpaceOverride } = {}) {
+      transmission = true, detailKits = true, paintShadowBands = true, validateOnly = false, skipMasks = false, ditherSpaceOverride, facingRamp, facingColors = true } = {}) {
     if (!isRecord(settings)) throw new TypeError('Surface settings must be an object');
     const roles = pixelLook.bindRoles(palette, paletteRoles, settings.paletteRoles);
     const resolveColor = value => color(value, palette, WHITE, roles);
+    const facingProfile = facingColors && facing.prepare(settings.facingColors, palette, {
+      inheritedRamp: facingRamp, validateOnly, resolveColor
+    });
     if (validateOnly && settings.renderStages !== undefined) {
       const stages = typeof RenderStages === 'undefined' ? require('./render-stages.js') : RenderStages;
       stages.prepare(settings.renderStages, { palette, roles, blueNoise, context, validateOnly });
@@ -772,10 +776,10 @@ const SurfaceLook = (() => {
     const hasKits = layers.some(layer=>layer.kit);
     const kitExposure = layers.some(layer=>layer.kit?.exposure);
     return {
-      settings, normal, layers, driven, weather, thin, thinLocal, hasKits, kitExposure, paintsBase,
+      settings, normal, layers, facingProfile, driven, weather, thin, thinLocal, hasKits, kitExposure, paintsBase,
       captureDetail: layers.some(layer=>(layer.type==='planarReflection'||layer.type==='localReflection') && layer.detail),
       needsDistance: layers.some(layer=>layer.type==='bevel' || layer.kit?.recipe==='crevice-moss' && layer.kit.crevices!=='joints'),
-      finishBeforeFog: thin || driven || hasKits || paintsBase || layers.some(layer => layer.type === 'tint' || layer.shadowBand), sun: unit(vector(lightDirection, AXES.y)),
+      finishBeforeFog: Boolean(facingProfile) || thin || driven || hasKits || paintsBase || layers.some(layer => layer.type === 'tint' || layer.shadowBand), sun: unit(vector(lightDirection, AXES.y)),
       paletteConstraint: paletteConstraints && settings.paletteConstraint !== undefined
         ? pixelLook.prepareLookPolicy(settings.paletteConstraint, { palette, roles, blueNoise, context, validateOnly, onPaletteClip,
           skipMaskedStacks: !colorStack, skipMasks, ditherSpaceOverride }) : null,
@@ -994,9 +998,18 @@ const SurfaceLook = (() => {
     }
     if (prepared.paletteConstraint) output[5] = prepared.paletteConstraint.swatches;
     if (unlit) reapplyLight();
+    if (prepared.facingProfile)
+      facing.shade(prepared.facingProfile, output, sample.facingNormal ?? geometricNormal, sample.facingView ?? v);
     return output;
   }
 
-  return { shadowBandPaint, basePaint, STRIDE, hasBevel, needsDistance, material, merge, prepare, shade, prepareLightTrack, lightRamps, withLightRamps };
+  function prepareFacing(settings, palette, paletteRoles, inheritedRamp, validateOnly) {
+    const roles = pixelLook.bindRoles(palette, paletteRoles, settings.paletteRoles);
+    return facing.prepare(settings.facingColors, palette, {
+      inheritedRamp, validateOnly, resolveColor: value => color(value, palette, WHITE, roles)
+    });
+  }
+
+  return { facingColors: facing, prepareFacing, shadowBandPaint, basePaint, STRIDE, hasBevel, needsDistance, material, merge, prepare, shade, prepareLightTrack, lightRamps, withLightRamps };
 })();
 if (typeof module !== 'undefined') module.exports = SurfaceLook;
