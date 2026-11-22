@@ -4,8 +4,8 @@ const read=file=>JSON.parse(fs.readFileSync(file,'utf8'));
 
 module.exports=function command([mode,file,config],opt,kit) {
   const P=kit.KIT.procedural,{fields,check}=P.musicInstruments;
-  check(file && ['inspect','edit','render','preview','stream'].includes(mode),
-    'Use music session inspect, edit, render, preview or stream');
+  check(file && ['inspect','edit','render','preview','stream','play'].includes(mode),
+    'Use music session inspect, edit, render, preview, stream or play');
   const recipe=read(file);
   check(fields(recipe,['session','assets']),'Expected a music edit session and WAV asset table');
   const paths=recipe.assets ?? {}, editor=P.mediaGraph.musicSession.create(readAssets(paths,file,P));
@@ -51,6 +51,23 @@ module.exports=function command([mode,file,config],opt,kit) {
         return render(row.out,row.preview);
       default: throw new RangeError('Unknown session command');
     }
+  }
+  if (mode==='play') {
+    const port=Number(opt.port ?? 0);
+    check(Number.isInteger(port) && port>=0 && port<=65535,'Choose a session port from 0 to 65535');
+    const absolute=Object.fromEntries(Object.entries(paths).map(([name,ref])=>[name,path.resolve(path.dirname(file),ref)]));
+    const settings=config && read(config);
+    const preparer=require('./music-session-edit-worker.js')(file,paths);
+    return (async()=>{
+      try {
+        const prepared=await preparer.prepare(session);
+        const transport=editor.openPreparedTransport(prepared,settings);
+        await require('./music-session-player.js')(transport,{
+          port,prepare:preparer.prepare,recipe:value=>({session:value,assets:absolute}),
+          save:opt.out===undefined ? null : value=>save(opt.out,value)
+        });
+      } finally { await preparer.close(); }
+    })();
   }
   if (mode==='stream') {
     editor.inspect(session);

@@ -1154,6 +1154,7 @@ const CMD = {
         '  music rehearsal run <timeline.json> <suite.json> --out directory   audit and audition the same recorded traces',
         '  music rehearsal keep <timeline.json> <revision.json> [trace.json] --out recipe.json   save a timeline variant',
         '  music session inspect|edit|render|preview recipe.json [settings.json] --out output   comp and audition score and audio takes',
+        '  music session play recipe.json [settings.json] [--port N] [--out kept.json]   open the shared live audition desk',
         '  music session stream recipe.json   keep a warm session for JSON-line edits and auditions',
         '  music atmosphere plan recipe.json --out plan.json   arrange beds, calls and recurring gestures',
         '  music atmosphere render recipe.json [plan.json] --out directory   mix an editable plan and print atmosphere stems',

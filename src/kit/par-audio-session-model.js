@@ -56,6 +56,34 @@
       target[parameter]=lane;
     }
   }
+  function addressing(rate,map,frames,pins,lookup) {
+    const time=S.mixerTime(rate,map), at=value=>time.frame(time.position(value));
+    const range=(from,to)=>{
+      const start=at(from),end=at(to);
+      check(integer(start,0,frames-1) && integer(end,start+1,frames),'Choose a nonempty range within the score');
+      return {from:start,to:end};
+    };
+    function choice(raw) {
+      check(fields(raw,['lane','take','from','to','fadeSamples']) && id(raw.lane) && id(raw.take),
+        'Comp selection needs a lane, take and range');
+      const {lane,take,fadeSamples=0}=raw, span=range(raw.from,raw.to), track=lookup(lane);
+      check(track?.has(take) && integer(fadeSamples,0,Math.floor((span.to-span.from-1)/2)),
+        'Unknown take or fade exceeds the selection');
+      if (take!==track.fallback) {
+        check(pins[lane]!=='all','Lane is pinned '+lane);
+        if (pins[lane]==='pitch') {
+          const pitches=name=>track.pitches(name).filter(row=>{
+            const onset=at({beat:row.beat});
+            return onset>=span.from && onset<span.to;
+          }).sort((a,b)=>a.beat-b.beat || String(a.voice ?? '').localeCompare(String(b.voice ?? '')))
+            .map(row=>[row.voice ?? null,row.midi]);
+          check(signature(pitches(reference))===signature(pitches(take)), 'Take changes pinned pitches on '+lane);
+        }
+      }
+      return {lane,take,...span,fadeSamples};
+    }
+    return {at,range,choice};
+  }
   function compile(session,assets) {
     check(fields(session,['format','version','id','sampleRate','production','takes','audio','comp','pins','mixer','automation']) &&
       session.format===format && session.version===1 && id(session.id) && record(session.production) &&
@@ -98,32 +126,12 @@
     for (const lane of scoreNames) if (Object.hasOwn(sourceLocks,lane)) pins[lane]='all';
     for (const [lane,mode] of Object.entries(pins))
       check(lanes.includes(lane) && (mode==='all' || mode==='pitch' && scoreNames.includes(lane)), 'Invalid pin on '+lane);
-    const at=value=>time.frame(time.position(value));
-    const range=(from,to)=>{
-      const start=at(from), end=at(to);
-      check(integer(start,0,frames-1) && integer(end,start+1,frames),'Choose a nonempty range within the score');
-      return {from:start,to:end};
-    };
-    function choice(raw) {
-      check(fields(raw,['lane','take','from','to','fadeSamples']) && id(raw.lane) && id(raw.take) &&
-        lanes.includes(raw.lane),'Comp selection needs a lane, take and range');
-      const {lane,take,fadeSamples=0}=raw, span=range(raw.from,raw.to);
-      check((audio.get(lane)?.takes ?? producers).has(take) &&
-        integer(fadeSamples,0,Math.floor((span.to-span.from-1)/2)),'Unknown take or fade exceeds the selection');
-      if (take!==(audio.get(lane)?.take ?? reference)) {
-        check(pins[lane]!=='all','Lane is pinned '+lane);
-        if (pins[lane]==='pitch') {
-          const pitches=score=>score.events[lane].filter(row=>{
-            const onset=at({beat:row.beat});
-            return onset>=span.from && onset<span.to;
-          }).sort((a,b)=>a.beat-b.beat || String(a.voice ?? '').localeCompare(String(b.voice ?? '')))
-            .map(row=>[row.voice ?? null,row.midi]);
-          check(signature(pitches(baseline))===signature(pitches(producers.get(take).score)),
-            'Take changes pinned pitches on '+lane);
-        }
-      }
-      return {lane,take,...span,fadeSamples};
-    }
+    const {at,range,choice}=addressing(rate,map,frames,pins,lane=>{
+      const track=audio.get(lane);
+      if (!lanes.includes(lane)) return null;
+      const takes=track?.takes ?? producers;
+      return {fallback:track?.take ?? reference,has:take=>takes.has(take),pitches:take=>producers.get(take).score.events[lane]};
+    });
     const comp=session.comp ?? [];
     check(Array.isArray(comp) && comp.length<=512,'Invalid session comp');
     const choices=Array.from(comp,choice).sort((a,b)=>a.lane.localeCompare(b.lane) || a.from-b.from);
@@ -195,6 +203,28 @@
         const spec=row.take===reference ? next.production : get(next.takes,row.take);
         spec.tracks ??= {};
         spec.tracks[row.lane]={...get(spec.tracks,row.lane),clips};
+      } else if (row?.op==='keep-notes') {
+        check(fields(row,['op','lane','take','into','notes']) && id(row.lane) && id(row.take) &&
+          id(row.into ?? reference) && plan.producers.has(row.take) && plan.producers.get(reference).score.tracks[row.lane] &&
+          Array.isArray(row.notes) && integer(row.notes.length,1,128),'Choose a score lane, source take and written clip notes');
+        const into=row.into ?? reference, source=plan.producers.get(row.take).source;
+        const destination=(plan.producers.get(into) ?? plan.producers.get(reference)).source;
+        const clips=clone(destination.tracks[row.lane].clips ?? []), seen=new Set();
+        const voice=(clips,address)=>clips?.find(row=>row.id===address.clip)?.voices.find(row=>row.id===address.voice);
+        for (const address of row.notes) {
+          check(fields(address,['clip','voice','note']) && [address.clip,address.voice,address.note].every(id) &&
+            !seen.has(signature(address)),'Keep needs distinct clip, voice and note addresses');
+          seen.add(signature(address));
+          const pick=voice(source.tracks[row.lane].clips,address)?.notes.find(note=>note.id===address.note);
+          const target=voice(clips,address)?.notes, index=target?.findIndex(note=>note.id===address.note);
+          check(pick && target,'The written note or destination clip voice is missing');
+          if (index<0) target.push(clone(pick));
+          else target[index]=clone(pick);
+        }
+        next.takes ??= {};
+        const spec=into===reference ? next.production : (next.takes[into] ??= {});
+        spec.tracks ??= {};
+        spec.tracks[row.lane]={...get(spec.tracks,row.lane),clips};
       } else if (row?.op==='automation') {
         check(fields(row,['op','lane','point','at','value']) && id(row.lane) && id(row.point) &&
           (row.at!==undefined || Number.isFinite(row.value)), 'Invalid addressed automation edit');
@@ -210,7 +240,8 @@
       } else check(false,'Unknown session edit');
       const updated=compile(next,assets);
       // A pitch or complete pin also guards edits to the reference itself.
-      if (row.op==='note' && row.take===reference && plan.pins[row.lane]) {
+      const noteTake=row.op==='note' ? row.take : row.op==='keep-notes' ? row.into ?? reference : null;
+      if (noteTake===reference && plan.pins[row.lane]) {
         const select=score=>addressed(score,row.lane);
         const before=select(plan.producers.get(reference).score), after=select(updated.producers.get(reference).score);
         const pitches=rows=>rows.map(({address,midi})=>[address,midi]).sort((a,b)=>signature(a[0]).localeCompare(signature(b[0])));
@@ -222,5 +253,5 @@
     }
     return P.data.freeze(next);
   }
-  S.musicSessionModel=Object.freeze({compile,edits,replace,addressed,reference,room,signature,samples});
+  S.musicSessionModel=Object.freeze({compile,edits,replace,addressed,addressing,reference,room,signature,samples});
 })(KIT.procedural);
