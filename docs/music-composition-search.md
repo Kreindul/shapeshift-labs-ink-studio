@@ -1,5 +1,8 @@
 # Composition search
 
+To replace a longer passage with exact protection for an ending or
+other time windows, use [phrase and arrangement search with locks](music-locked-arrangement.md).
+
 Search around an existing cue and hear one eligible candidate per kind
 of musical decision. The search uses the production's score clock,
 instruments, and performed events. Its output is a producer session with

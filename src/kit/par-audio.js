@@ -558,6 +558,25 @@
       inputs:{source:'record',brief:'record',assets:options},outputs:{value:'record'},
       run({source,brief,assets}) {return {value:P.musicProduction.planProducer(source,brief,assets)};}
     },
+    'music.searchLockedArrangement': {
+      description:'Search inside a score range with fixed tracks or protected regions and one winner per type of musical move.',
+      inputs:{source:'record',brief:'record',assets:options},
+      outputs:{value:'record',candidates:'array<record>',report:'record'},
+      run({source,brief,assets}) {
+        const value=P.musicProduction.searchLockedArrangement(source,brief,assets);
+        return {value,candidates:value.candidates,report:value.report};
+      }
+    },
+    'music.keepLockedArrangement': {
+      description:'Keep a named arrangement take with its editable score, locks and reference context.',
+      inputs:{search:'record',take:'string'},outputs:{value:'record'},
+      run({search,take}) {return {value:P.musicProduction.keepLockedArrangement(search,take)};}
+    },
+    'music.renderLockedArrangement': {
+      description:'Render a retained arrangement and preserve the original samples in every protected range.',
+      inputs:{source:'record',assets:options,options},outputs:{value:'audio',stems:'record',report:'record'},
+      run({source,assets,options}) {return P.musicProduction.renderLockedArrangement(source,assets,options);}
+    },
     'music.composeWholePiece': {
       description:'Compose competing full-length forms, with scored hook appearances, pulse and endings, from a blank brief.',
       inputs:{brief:options},outputs:{value:'record',candidates:'array<record>',assets:'record',report:'record'},

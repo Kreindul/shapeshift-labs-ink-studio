@@ -117,6 +117,37 @@ function writeReview(folder,result,paths) {
   return {manifest,takes:takes.map(take=>take.id)};
 }
 
+function relativeAssets(folder,paths) {
+  return Object.fromEntries(Object.entries(paths).map(([name,file])=>[name,path.relative(folder,file)]));
+}
+function writeLockedSearch(folder,engine,source,brief,assets,paths,options) {
+  const plan=engine.searchLockedArrangement(source,brief,assets);
+  const bank=Object.fromEntries(Object.entries(paths).map(([name,file])=>{
+    const at=path.join(folder,'assets',name+'.wav');
+    fs.mkdirSync(path.dirname(at),{recursive:true});
+    if (at!==file) fs.copyFileSync(file,at);
+    return [name,at];
+  }));
+  fs.mkdirSync(folder,{recursive:true});
+  const search=path.join(folder,'search.json'), manifest=path.join(folder,'manifest.json');
+  write(search,{plan,options:{sampleRate:options.sampleRate,stems:false},assets:relativeAssets(folder,bank)});
+  const takes=plan.candidates.map(({id,label,evidence})=>{
+    const at=path.join(folder,id), lockedArrangement=engine.keepLockedArrangement(plan,id);
+    const settings={sampleRate:options.sampleRate,stems:false};
+    fs.mkdirSync(at,{recursive:true});
+    write(path.join(at,'production.json'),{lockedArrangement,options:settings,assets:relativeAssets(at,bank)});
+    if (options.render) {
+      const result=engine.renderLockedArrangement(lockedArrangement,assets,{...settings,...plan.report.preview});
+      const preview=path.join(at,'preview.wav');
+      fs.writeFileSync(preview,WAV.encode(result.value,{encoding:'pcm24'}));
+      write(path.join(at,'preview.json'),result.report);
+    }
+    return {id,label,evidence,production:id+'/production.json',...(options.render && {preview:id+'/preview.wav'})};
+  });
+  write(manifest,{format:plan.format,version:plan.version,report:plan.report,takes});
+  return {search,manifest,takes};
+}
+
 module.exports=function command([mode,file,config],opt,kit) {
   const P=kit.KIT.music.production;
   if (mode==='instrument-presets') {
@@ -154,7 +185,27 @@ module.exports=function command([mode,file,config],opt,kit) {
   const recipe=read(file);
   const {sources,paths,timeline}=mode==='timeline' ? timelineBank(recipe,file) : {paths:assetPaths(recipe,file)};
   const assets=Object.fromEntries(Object.entries(paths).map(([name,file])=>[name,WAV.read(file)]));
-  const production=recipe.production ?? recipe;
+  const production=recipe.lockedArrangement?.production ?? recipe.production ?? recipe;
+  if (mode==='search-locked') {
+    if (!config || typeof opt.out!=='string') throw new TypeError('Use a production, a locked brief, and --out directory');
+    const sampleRate=Number(opt['sample-rate'] ?? 48000);
+    if (!Number.isInteger(sampleRate) || sampleRate<8000 || sampleRate>48000)
+      throw new RangeError('Locked arrangement renders need a sample rate from 8000 to 48000 Hz');
+    const result=writeLockedSearch(path.resolve(opt.out),P,production,read(config),assets,paths,
+      {render:opt.render===true,sampleRate});
+    process.stdout.write(JSON.stringify(result)+'\n');
+    return result;
+  }
+  if (mode==='keep-locked') {
+    if (!config || typeof opt.out!=='string') throw new TypeError('Use a locked search, a take selection and --out file');
+    const lockedArrangement=P.keepLockedArrangement(recipe.plan,read(config).take);
+    const folder=path.dirname(path.resolve(opt.out));
+    fs.mkdirSync(folder,{recursive:true});
+    write(opt.out,{lockedArrangement,options:{stems:false,...recipe.options},assets:relativeAssets(folder,paths)});
+    const result={production:path.resolve(opt.out),take:lockedArrangement.id};
+    process.stdout.write(JSON.stringify(result)+'\n');
+    return result;
+  }
   let value;
   if (mode==='play-kit') {
     if (!config || typeof opt.out!=='string') throw new TypeError('Use a kit recipe, performance JSON and --out directory');
@@ -226,8 +277,11 @@ module.exports=function command([mode,file,config],opt,kit) {
     } else {
       const result=mode==='timeline' ?
         P.renderTimeline(sources,timeline,adaptiveIntents(kit.KIT,recipe),assets,{...recipe.options,stems:true}) :
-        P.render(production,assets,{stems:true,...recipe.options});
-      writeTake(folder,result.value,result.stems,result.report,mode==='render'?production:undefined,paths);
+        recipe.lockedArrangement ? P.renderLockedArrangement(recipe.lockedArrangement,assets,recipe.options) :
+          P.render(production,assets,{stems:true,...recipe.options});
+      writeTake(folder,result.value,result.stems,result.report,mode==='render' && !recipe.lockedArrangement ? production : undefined,paths);
+      if (mode==='render' && recipe.lockedArrangement)
+        write(path.join(folder,'production.json'),{...recipe,assets:relativeAssets(folder,paths)});
       value={mix:path.join(folder,'mix.wav'),report:path.join(folder,'report.json')};
     }
     process.stdout.write(JSON.stringify(value)+'\n');
