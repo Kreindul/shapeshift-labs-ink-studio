@@ -47,12 +47,15 @@
   });
 
   function timingOnly(groove) {
-    const {tracks,roles,...body}=P.data.clone(groove);
+    const {tracks,roles,ensemble,...body}=P.data.clone(groove);
     const trim=routes=>Object.fromEntries(Object.entries(routes).map(([name,{articulations,...route}])=>
       [name,{...route,accent:0,length:0,...(articulations && {
         articulations:Object.fromEntries(Object.entries(articulations).map(([key,value])=>[key,{...value,accent:0,length:0}]))
       })}]));
-    return {...body,...(tracks && {tracks:trim(tracks)}),...(roles && {roles:trim(roles)})};
+    if (ensemble?.players) ensemble.players=Object.fromEntries(Object.entries(ensemble.players)
+      .map(([name,{offset}])=>[name,{offset}]));
+    if (ensemble?.transfers) ensemble.transfers=ensemble.transfers.map(row=>({...row,accent:0,length:0,articulation:false}));
+    return {...body,...(tracks && {tracks:trim(tracks)}),...(roles && {roles:trim(roles)}),...(ensemble && {ensemble})};
   }
   function planPocket(source,brief,assets={}) {
     check(fields(brief,['rhythm','groove']) && fields(brief.rhythm,['edits','tracks']) && record(brief.groove) &&

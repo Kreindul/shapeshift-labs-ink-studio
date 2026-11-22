@@ -343,13 +343,13 @@
       run({ source, options }) { return A.detectTransients(source, options); }
     },
     'audio.extractGroove': {
-      description: 'Measure audio attack timing, relative accents and audible lengths into groove lanes.',
-      inputs:{sources:'record',options},outputs:{value:'record',report:'record'},
+      description: 'Measure audio attack timing, relative accents and audible lengths into groove lanes and an unfolded take.',
+      inputs:{sources:'record',options},outputs:{value:'record',take:'record',report:'record'},
       run({sources,options}) {return A.extractGroove(sources,options);}
     },
     'music.fitGroove': {
-      description: 'Fit measured or MIDI note timings, accents and lengths to a repeating reference grid.',
-      inputs:{events:'array<record>',options},outputs:{value:'record',report:'record'},
+      description: 'Fit measured or MIDI note timings, accents and lengths to a reference grid, preserving each pass in a take.',
+      inputs:{events:'array<record>',options},outputs:{value:'record',take:'record',report:'record'},
       run({events,options}) {return P.performanceGroove.fit(events,options);}
     },
     'audio.editEvents': {
@@ -495,7 +495,7 @@
       }
     },
     'music.applyGroove': {
-      description: 'Borrow timing, accents and gates by role or track, with anchor beats and linked attacks.',
+      description: 'Apply cyclic grooves or recorded ensemble phrasing, with shared pulse, player offsets and reciprocal attacks.',
       inputs:{source:'record',mapping:'record',assets:options},outputs:{value:'record',report:'record'},
       run({source,mapping,assets}) {
         const {production,report}=P.musicProduction.mapGroove(source,mapping,assets);

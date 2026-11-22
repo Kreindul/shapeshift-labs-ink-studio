@@ -269,7 +269,12 @@
       Object.values(row?.nodes ?? {}).flatMap(zones));
     return [];
   }
+  function articulationNames(patch) {
+    return new Set([...Object.keys(patch.articulations ?? {}),
+      ...sampleZones(patch).flatMap(zone=>zone.articulation ? [zone.articulation] : []),
+      ...(patch.type==='drum' && patch.kind==='hat' ? ['open'] : [])]);
+  }
   const assetNames=patch=>sampleZones(patch).flatMap(zone=>Array.isArray(zone?.samples) ? zone.samples : []);
 
-  P.musicInstruments=Object.freeze({compile,sampler,noise,sampleZones,assetNames,record,fields,finite,integer,id,check,clamp,db,hz,hash,options,envelope,level,phase});
+  P.musicInstruments=Object.freeze({compile,sampler,noise,sampleZones,articulationNames,assetNames,record,fields,finite,integer,id,check,clamp,db,hz,hash,options,envelope,level,phase});
 })(KIT);
