@@ -101,7 +101,7 @@ function sameValues(a, b) {
   return a?.length === b.length && b.every((value, i) => value === a[i]);
 }
 
-function createBackend(gl, toolkit, specialize, reuseOrder) {
+function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
   const resources = createResources(gl);
   const sampleCoverage = toolkit.KIT?.procedural?.sampleCoverage;
   const coverageRules = toolkit.ContributionRules ?? toolkit.KIT?.procedural?.contributionRules;
@@ -112,7 +112,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     const pixelSources = options => pixelShaderSources(toolkit.PixelLook, { packedTone: true, ...options });
     const sources = pixelSources();
     const program = source => resources.program(sources.POST_VS, source);
-    const post = program(sources.POST_FS), clean = program(sources.CLEAN_FS);
+    let simple = simpleOnly ? program(simpleResolve(sources.POST_FS)) : undefined;
+    const clean = program(sources.CLEAN_FS);
     // Rebirth hosts can opt into geometry specialization through the lower
     // level pipeline. The canvas path specializes its own fullscreen resolve.
     const motionAPI = toolkit.ArtDirection ?? toolkit.KIT?.artDirection;
@@ -174,7 +175,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
     let clusterRenderer;
     const clusterAPI = toolkit.KIT?.colorClusters;
     const clusterHistory = clusterAPI?.history(), portalClusterHistory = clusterAPI?.history();
-    let simple, simpleUnavailable = false, keyProgram, damp, copy, spriteProgram, spriteEnvProgram, spriteLayer, spriteTable, anchors;
+    let post, simpleUnavailable = false, keyProgram, damp, copy, spriteProgram, spriteEnvProgram, spriteLayer, spriteTable, anchors;
     let lastWorld, lastData, lastCount, lastOutput, lastDetail, lastEnvironment, lastStaged, fineValues, materials, anchorCount = 0;
     let packed = empty, historyIndex = 0, historyValid = false, previousVP, previousPalette, previousDetailRanges, previousSection, lastQualityKey;
     let toneKey, tone, uploadedTone, sorted, instanceDraw, expandInstances, lastInstances;
@@ -290,18 +291,16 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       } else materialStyleTable.bind();
     }
 
-    function resolveProgram(patterned, glass, ao, definition, grade) {
-      if (!specialize || simpleUnavailable || patterned || glass || ao || definition || grade) return post;
-      if (!simple) {
+    function resolveProgram(needsFull) {
+      if (specialize && !simpleUnavailable && !needsFull) {
         try {
-          simple = program(simpleResolve(sources.POST_FS));
+          return simple ??= program(simpleResolve(sources.POST_FS));
         } catch (error) {
           if (gl.isContextLost()) throw error;
           simpleUnavailable = true;
-          return post;
         }
       }
-      return simple;
+      return post ??= program(sources.POST_FS);
     }
 
     function fullscreen(shader, destination, width, height, values) {
@@ -791,7 +790,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const trails = !reflectionCapture && !frame.order && afterimageDefinition !== undefined && afterimageDefinition !== false;
       if (trails && !afterimagesAPI) throw new Error('Afterimages need the Ink Studio KIT');
       const rules = trails ? afterimagesAPI.prepare(afterimageDefinition) : [];
-      const normalCaptures = rules.length ? null : captureWater(world, frame, camera, width, height, 0, quality);
+      const normalCaptures = simpleOnly || rules.length ? null : captureWater(world, frame, camera, width, height, 0, quality);
       // Per-pixel material, palette, and detail rules index the expanded world.
       if (group && (materialControls.has(world) || canStage || quality?.rows || rules.length || clusters || frame[graphOwner] || frame.order || tolerance || wantsRelight || wantsShot || wantsEmitters || world.engraving || world.splatFootprints || instancePlan(group).hasSplatFootprints || world.opticalSplats || instancePlan(group).hasOpticalSplats || !raw && (constraintDefinition || look.pixel && world.pix ||
           needsDetailFlags || budget?.fineOn || budget?.fineOff))) {
@@ -812,7 +811,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
           world = afterimagesAPI.append(world, rows);
         }
       }
-      const captures = rules.length ?
+      const captures = !simpleOnly && rules.length ?
         captureWater(world, { ...frame, instances: group }, camera, width, height, trailStart, quality) : normalCaptures;
       const portableStages = canStage && contract.stagePlan(world, frame, time, { skipMasks: frame.lookMasks === false,
         blueNoise: settings => toolkit.KIT.procedural.materials.blueNoise(settings),
@@ -834,6 +833,22 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const packedDepth = Boolean(foamRows?.length || highlightPlan?.length || frame[graphOwner]?.depth);
       const owner = packedDepth ? (graphOwnership ??= target(3)) : masked && !coverage ? maskOwner : plainOwner;
       const sourceWater = frame.water !== false && world.water?.count ? world.water : null;
+      const pixel = toolkit.KIT?.pixel;
+      const patterned = !raw && !!(look.pixel && world.pix && pixel?.gpu);
+      const glass = raw ? null : world.glass;
+      const ao = world.ao ? world.ao.k ?? 0.5 : 0;
+      const paletteFrame = toolkit.PixelLook.framePalette?.(world, frame, { grading: !raw && !portableStages, tone: !raw && !coverage }) ??
+        { grade: frame.ignoreLookGrade ? undefined : world.anim?.grade };
+      const needsGrade = !raw && !portableStages && !reflectionCapture && !frameTone && !!paletteFrame.grade;
+      if (simpleOnly) {
+        const unsupported = Object.entries({
+          'per-pixel materials': patterned, 'glass beams': glass, 'ambient occlusion': !raw && !portableStages && ao > 0,
+          'tone mapping': frameTone, 'palette grading': needsGrade, 'palette constraints': constraints,
+          'coverage-aware resolve': coverage, water: sourceWater
+        }).filter(([, active]) => active).map(([feature]) => feature);
+        if (unsupported.length)
+          throw new Error(`Ink Studio WebGL simple resolve does not support ${unsupported.join(', ')}. Disable these features or use resolve: 'auto'.`);
+      }
       const drivenOptics = Array.isArray(look.optics) && look.optics.some(rule => rule.driver);
       const inputTime = drivenOptics ? frame.time ?? world.lookSnapshot?.time ?? 0 : undefined;
       if (!raw && sourceWater && (look.optics !== opticsDefinition || world !== opticsWorld || inputTime !== opticsTime)) {
@@ -879,8 +894,6 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       const geometry = waterScene ? (layeredGlass ? wetGlassGeometry : wetGeometry) :
         (layeredGlass ? dryGlassGeometry : dryGeometry), contours = waterScene ? wetContours : dryContours;
       const isNew = world !== lastWorld || world.data !== lastData || world.count !== lastCount || group !== lastInstances;
-      const pixel = toolkit.KIT?.pixel;
-      const patterned = !raw && !!(look.pixel && world.pix && pixel?.gpu);
       const materialStyles = !!(world.materialPixelStyles || group && instancePlan(group).hasMaterialPixelStyles);
       const coverageSetting = frame.splatCoverage ?? look.splatCoverage ?? 'legacy';
       const splatCoverage = coverageRules?.coverageMode?.(coverageSetting) ?? ['legacy', 'continuous', 'soft'].indexOf(coverageSetting);
@@ -1075,11 +1088,9 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         } else pattern.bind();
       }
 
-      const paletteFrame = toolkit.PixelLook.framePalette?.(world, frame, { grading: !raw && !portableStages, tone: !raw && !coverage }) ??
-        { grade: frame.ignoreLookGrade ? undefined : world.anim?.grade };
       const { colorGrade } = paletteFrame;
       let grade = null;
-      if (!raw && !portableStages && !reflectionCapture && !frameTone && paletteFrame.grade) {
+      if (needsGrade) {
         grade = pal.slice();
         for (let i = 0, n = Math.min(palCount * 3, paletteFrame.grade.length); i < n; i++)
           grade[i] = paletteFrame.grade[i];
@@ -1194,7 +1205,6 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         relighting, section);
       const lines = outline && look.lines;
       const lineIndex = world.outline?.c ?? 0;
-      const glass = raw ? null : world.glass;
       const glassUniforms = {};
       if (glass) {
         const gaps = new Float32Array(24 * 4), count = Math.min(24, glass.gaps?.length ?? 0);
@@ -1217,7 +1227,9 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
       let resolve;
       const styledPattern = patterned && materialStyles;
       const relitPattern = patterned && relighting;
-      if (coverage || constraints || styledPattern || relitPattern || env?.media && patterned) {
+      if (simpleOnly) {
+        resolve = simple;
+      } else if (coverage || constraints || styledPattern || relitPattern || env?.media && patterned) {
         const cache = coverage ? contributionPost : constrainedPosts;
         const mode = (wet ? 1+Number(wet.airPockets)+2*Number(wet.layered)+4*Number(wet.atlas) : 0) +
           16*Number(masked) + 32*Number(layeredGlass) + 64*Number(styledPattern) + 128*Number(!!constraints) +
@@ -1233,7 +1245,8 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
           textureUnit(8,constraintRows);
           if (masked) textureUnit(7, owner.textures[1]);
         }
-      } else resolve = wet ? (wet.post ??= program(wet.sources.POST_FS)) : resolveProgram(patterned, glass, world.ao, frameTone, grade);
+      } else resolve = wet ? (wet.post ??= program(wet.sources.POST_FS)) :
+        resolveProgram(patterned || glass || world.ao || frameTone || grade);
       if (water) textureUnit(11, (colored ? contours : geometry).textures[2]);
       if (layeredGlass) {
         const at = geometry.textures.length - 2;
@@ -1261,7 +1274,7 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
         u_edge: outline ? (world.outline?.edge ?? 0) / (2 * camera.radius) : 0,
         u_lines: +!!lines, u_lineGap: lines ? (lines.gap ?? 0.3) / (2 * camera.radius) : 1,
         u_lineK: lines ? (lines.k ?? 0.55) : 1, u_lineLit: lines ? (lines.lit ?? 1.15) : 1,
-        u_refract: world.refract ?? 6, u_ao: world.ao ? (world.ao.k ?? 0.5) : 0,
+        u_refract: world.refract ?? 6, u_ao: ao,
         u_aor: (world.ao?.range ?? 0.4) / (2 * camera.radius),
         u_gk: glass ? (glass.k || 0.14) : 0, u_bars: Math.min(0.45, world.anim?.bars ?? 0),
         u_grade: +!!grade, ...(grade ? { u_out: grade, u_outl: grade } : {})
@@ -1473,16 +1486,19 @@ function createBackend(gl, toolkit, specialize, reuseOrder) {
   }
 }
 
-export function createRenderer(canvas, { toolkit, specialize = true, reuseOrder = true, contextAttributes, input } = {}) {
+export function createRenderer(canvas, { toolkit, specialize = true, reuseOrder = true, resolve = 'auto', contextAttributes, input } = {}) {
   if (typeof canvas?.getContext !== 'function')
     throw new TypeError('Ink Studio needs a canvas or OffscreenCanvas');
   if (typeof toolkit?.PixelLook?.glsl !== 'string')
     throw new TypeError('Pass the Ink Studio toolkit, including PixelLook, to createRenderer');
+  if (resolve !== 'auto' && resolve !== 'simple')
+    throw new RangeError("Ink Studio WebGL resolve must be 'auto' or 'simple'");
   const gl = canvas.getContext('webgl2', {
     ...contextAttributes, alpha: false, antialias: false, depth: false, stencil: false
   });
   if (!gl) throw new Error('Ink Studio GPU rendering requires WebGL 2');
-  let backend = createBackend(gl, toolkit, specialize, reuseOrder);
+  const backendOptions = { specialize, reuseOrder, simpleOnly: resolve === 'simple' };
+  let backend = createBackend(gl, toolkit, backendOptions);
   let controls;
   if(input!==undefined&&input!==false) {
     try { controls=createViewerInput(canvas,{...input,toolkit}); }
@@ -1584,7 +1600,7 @@ export function createRenderer(canvas, { toolkit, specialize = true, reuseOrder 
         throw new TypeError('Draw target must match the frame size and use the renderer WebGL context');
       if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1)
         throw new RangeError('Ink Studio frame width and height must be positive integers');
-      backend ??= createBackend(gl, toolkit, specialize, reuseOrder);
+      backend ??= createBackend(gl, toolkit, backendOptions);
       let captures;
       const settings = frame.renderGraphCapture === undefined ? frame :
         { ...frame, [graphCapture]: value => { captures = value; } };
