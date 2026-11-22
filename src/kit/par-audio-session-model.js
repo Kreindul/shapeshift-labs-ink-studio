@@ -192,12 +192,8 @@
         check(fields(row,['op','take','lane','clip','voice','note','set']) &&
           [row.take,row.lane,row.clip,row.voice,row.note].every(id) &&
           fields(row.set,['beat','duration','midi','velocity','play','tie']),'Invalid addressed note edit');
-        const production=plan.producers.get(row.take)?.source;
-        const clips=clone(get(production?.tracks ?? {},row.lane)?.clips ?? []);
-        const notes=clips.find(clip=>clip.id===row.clip)?.voices.find(voice=>voice.id===row.voice)?.notes;
-        const note=notes?.find(note=>note.id===row.note);
-        check(note,'Unknown editable clip note');
-        Object.assign(note,clone(row.set));
+        const production=plan.producers.get(row.take)?.source, {clip,voice,note}=row;
+        const clips=P.musicNoteClips.edit(get(production?.tracks ?? {},row.lane)?.clips,{clip,voice,note},row.set);
         const spec=row.take===reference ? next.production : get(next.takes,row.take);
         spec.tracks ??= {};
         spec.tracks[row.lane]={...get(spec.tracks,row.lane),clips};

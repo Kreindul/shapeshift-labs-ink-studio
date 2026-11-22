@@ -688,6 +688,33 @@
         return {value:production,reference,revision};
       }
     },
+    'music.inspectCritiqueAudio': {
+      description:'Probe actual production audio with context, solo and mono previews plus addressed issues and notes.',
+      inputs:{source:'record',request:'record',assets:options},outputs:{value:'record',clip:'audio',audio:'record'},
+      run({source,request,assets}) {
+        const {report,audio}=P.musicProduction.critique.openAudio(source,assets).inspect(request);
+        return {value:report,clip:audio[report.clips[0].id],audio};
+      }
+    },
+    'music.compareCritiqueEdits': {
+      description:'Render explicit local score and mix edits against the original with aligned audio and editable revisions.',
+      inputs:{source:'record',request:'record',assets:options},
+      outputs:{value:'record',original:'audio',candidate:'audio',audio:'record',key:'record',token:'string'},
+      run({source,request,assets}) {
+        const {report,audio,key}=P.musicProduction.critique.openAudio(source,assets).compare(request);
+        return {value:report,original:audio.reference,candidate:audio[report.takes[1]?.id] ?? audio.reference,
+          audio,key,token:key.token};
+      }
+    },
+    'music.applyCritiqueEdit': {
+      description:'Apply one auditioned edit to its original production and retain an authored listening decision.',
+      inputs:{source:'record',key:'record',token:'string',selection:'record',assets:options},
+      outputs:{value:'record',revision:'record',reference:'record'},
+      run({source,key,token,selection,assets}) {
+        const {production,revision,reference}=P.musicProduction.critique.applyEdit(source,key,{...selection,token},assets);
+        return {value:production,revision,reference};
+      }
+    },
     'music.tagListeningReference': {
       description:'Keep a sample-addressed reference clip and a description of what to listen for.',
       inputs:{source:'audio',settings:'record'},outputs:{value:'record',audio:'audio'},

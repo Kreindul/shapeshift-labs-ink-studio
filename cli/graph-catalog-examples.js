@@ -69,6 +69,9 @@ const producerPlan = {op:'music.planProducer',inputs:{source:production,brief:{
 }}};
 const critiquePlan={op:'music.planCritique',inputs:{source:production,brief:{section:'opening',kind:'arrival',
   goal:'Make space before the pluck answers.',offsetBeats:1,focusBeats:2,sampleRate:8000}}};
+const critiqueProbe={range:{from:{beat:0},to:{beat:1}},context:{beforeBeats:0,afterBeats:.5},sampleRate:8000};
+const critiqueCompare={op:'music.compareCritiqueEdits',inputs:{source:production,request:{...critiqueProbe,
+  candidates:[{id:'trim',edits:[{op:'level',parts:['lead'],gainDb:-4}]}]}}};
 const referenceSettings={id:'tone',title:'Dry pluck',source:'Bench PCM',note:'The short tail leaves the downbeat clear.',
   tags:['short tail'],firstSample:16,endSample:112};
 const transientAudio = { sampleRate: 8000, channels: 1,
@@ -397,6 +400,10 @@ const specifications = {
     source:production,session:link('plan'),options:{end:.25,sampleRate:8000,focus:[{id:'lead',tracks:['lead']}]}}},
   'music.keepProducer': {nodes:{plan:producerPlan},inputs:{source:production,session:link('plan'),
     selection:{keep:[{take:'echo',component:'room-send'}],reason:'Give the held notes a trailing reflection.'}}},
+  'music.inspectCritiqueAudio': {inputs:{source:production,request:critiqueProbe}},
+  'music.compareCritiqueEdits': {inputs:critiqueCompare.inputs},
+  'music.applyCritiqueEdit': {nodes:{comparison:critiqueCompare},inputs:{source:production,key:link('comparison','key'),
+    token:link('comparison','token'),selection:{take:'trim',reason:'The adjusted opening leaves room for the answer.'}}},
   'music.planCritique': {inputs:critiquePlan.inputs},
   'music.blindCritique': {nodes:{plan:critiquePlan},inputs:blindCritique.inputs},
   'music.keepCritique': {nodes:{plan:critiquePlan,blind:blindCritique},inputs:{source:production,

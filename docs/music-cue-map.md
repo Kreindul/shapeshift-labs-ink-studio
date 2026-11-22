@@ -72,6 +72,7 @@ on one lane cannot overlap. Different lanes can act simultaneously.
 | `silence` | Withhold attacks for the selected tracks and shorten gates at the start of the window. The default `ring` mode lets releases and effects decay. `cut` also stops the selected tracks' sound and insert tails. When every track is cut, the shared room is cleared too. |
 | `room` | Set a constant room send or ramp between two send levels across the window. The dry performance stays available on its own stem. |
 | `level` | Apply a track gain in dB across a beat range, with fades at the boundaries. For example, `{"from":24,"to":28,"parts":["keys"],"gainDb":-3,"fadeSeconds":0.025}`. The default fade is 20 ms. |
+| `eq` | Apply a bell EQ to the named tracks over the beat range. Choose `hz`, `q`, `gainDb` and optional `fadeSeconds`. The processor feeds the patch echo and room. |
 
 Density selects existing material. To add new material, change the motif
 or add a [theme appearance](music-themes.md). Apply theme development to a
