@@ -385,3 +385,65 @@ test('textile worlds can paint with named palette roles and the yarn sample cont
   }
   assert.ok(green > 20 && amber > 20);
 });
+
+test('strand sheen and specular independently follow the posed tangent without changing coverage', () => {
+  const vertical = straight.map(([x, y, z]) => [y, x, z]);
+  const view = { ...imageOptions, w: 129, h: 77, ortho: true, transparent: true };
+  const draw = (path, lighting) => ink.render(C.world({
+    ...scene([{ source: path, edge: 'hard', radius: .54, color: '#47292c', lighting }]),
+    liveSun: { direction: [.8, 0, 1], intensity: 1, shadows: false }
+  }), view);
+  const direct = { roughness: .1, diffuse: 0, anisotropy: 1, sheen: 0, specular: .75, transmission: 0 };
+  const across = draw(vertical, direct), along = draw(straight, direct);
+  const off = draw(straight, false), iso = { ...direct, anisotropy: 0 };
+  const center = image => at(image, 64, 38)[0];
+  assert.deepEqual(along.alpha, off.alpha);
+  assert.ok(center(across) > center(along) + 35);
+  assert.equal(center(draw(vertical, iso)), center(draw(straight, iso)));
+  assert.equal(center(draw(vertical.slice().reverse(), direct)), center(across));
+
+  const sheenOnly = { ...direct, specular: 0, sheen: .8 };
+  const fibreAcross = draw(vertical, sheenOnly), fibreAlong = draw(straight, sheenOnly);
+  assert.ok(center(fibreAcross) > center(off) + 20);
+  assert.ok(center(fibreAcross) > center(fibreAlong) + 12);
+});
+
+test('backlit strands scatter directional light through the soft edge without contributing to emission', () => {
+  const source = { kind: 'path', points: straight };
+  const style = { source, edge: 'beta', radius: .27, color: '#444455',
+    lighting: { preset: 'backlit-fibre', diffuse: 0, sheen: 0, specular: 0, transmissionColor: '#ffa24c' } };
+  const view = { ...imageOptions, transparent: true, passes: ['emission'] };
+  const sun = direction => ({ direction, intensity: 1, shadows: false });
+  const world = C.world({ ...scene([style]), liveSun: sun([0, 0, 1]) });
+  for (const ortho of [true, false]) {
+    const front = ink.render(world, { ...view, ortho });
+    const back = ink.render(world, { ...view, ortho, liveSun: sun([0, 0, -1]) });
+    assert.deepEqual(back.alpha, front.alpha);
+    assert.ok(back.passes.emission.every(value => value === 0));
+    for (const y of [38, 32]) {
+      const delta = at(back, 64, y).map((value, i) => value - at(front, 64, y)[i]);
+      assert.ok(delta[0] > 45 && delta[0] > delta[1] && delta[1] > delta[2], String(delta));
+    }
+  }
+});
+
+test('directional lighting presets and keyed overrides survive native joins and subsets', () => {
+  const B = kit.makeBuilder(1, palette);
+  assert.throws(() => C.draw(B, straight, { lighting: 'unknown' }), /unknown strand lighting preset/);
+  assert.throws(() => C.draw(B, straight, { lighting: { anisotropy: 2 } }), /lighting.anisotropy/);
+  assert.equal(B.count(), 0);
+  assert.ok(Object.isFrozen(C.lightingPresets['metal-wire']));
+  const light = { preset: 'metal-wire', diffuse: 0, sheen: 0, roughness: .7,
+    specular: { keys: [[0, 0], [.5, .88]], interpolation: 'step' }, highlightColor: '#ffc060' };
+  C.draw(B, straight, { edge: 'hard', width: .64, color: '#71382a', lighting: light, along: { roughness: .24 } });
+  const world = host(B), plain = host(kit.makeBuilder(1, palette));
+  const subset = kit.SplatProvenance.subset(kit.SplatProvenance.join([plain, world]), [1, 0]);
+  assert.equal(world.curveLighting.length / world.count, 7);
+  assert.ok(Math.abs(world.curveMaterials[0] - 1.24) < 1e-6);
+  assert.deepEqual(subset.curveLighting.slice(0, 7), world.curveLighting.slice(7));
+  const frame = ink.render({ ...world, liveSun: { direction: [0, 0, 1], shadows: false } },
+    { ...imageOptions, ortho: true });
+  assert.deepEqual(at(frame, 46, 38), [113, 56, 42]);
+  const [red, green, blue] = at(frame, 82, 38);
+  assert.ok(red > 205 && green > 110 && blue < 155);
+});

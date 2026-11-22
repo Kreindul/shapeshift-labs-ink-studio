@@ -120,6 +120,9 @@
     }, n => typeof n === 'number', mix);
   }
 
+  const colorTrack = (value, name) => track(value, name, rgb, value => typeof value === 'string' ||
+    array(value) && value.length === 3 && Array.from(value).every(n => typeof n === 'number'), mixRgb);
+
   function materialTracks(along, palette, roles) {
     if (along === undefined) return {};
     check(along && Object.getPrototypeOf(along) === Object.prototype &&
@@ -135,10 +138,36 @@
       result.paletteRole = track(along.paletteRole, 'paletteRole', resolve, value => typeof value === 'string', mixRgb, 'step');
     }
     for (const key of ['pigment', 'emissionColor']) if (along[key] !== undefined)
-      result[key] = track(along[key], key, rgb, value => typeof value === 'string' ||
-        array(value) && value.length === 3 && Array.from(value).every(n => typeof n === 'number'), mixRgb);
+      result[key] = colorTrack(along[key], key);
     for (const [key, max] of [['opacity', 1], ['roughness', 1], ['emission', 8]]) if (along[key] !== undefined)
       result[key] = channel(along[key], key, 0, max);
+    return result;
+  }
+
+  const lightingPresets = Object.freeze({
+    'matte-thread': Object.freeze({ roughness: .87, diffuse: .62, anisotropy: .48, sheen: .18, specular: .04, transmission: .03 }),
+    'glossy-hair': Object.freeze({ roughness: .24, diffuse: .54, anisotropy: .94, sheen: .14, specular: .73, transmission: .13 }),
+    'metal-wire': Object.freeze({ roughness: .12, diffuse: .8, anisotropy: .62, sheen: .06, specular: 1.1, transmission: 0 }),
+    'backlit-fibre': Object.freeze({ roughness: .68, diffuse: .66, anisotropy: .8, sheen: .12, specular: .08, transmission: 1.12 })
+  });
+  const lightingChannels = { roughness: 1, diffuse: 1, anisotropy: 1, sheen: 4, specular: 4, transmission: 4 };
+  const lightingColors = ['highlightColor', 'transmissionColor'];
+
+  function lightingTracks(input) {
+    if (input === undefined || input === false) return;
+    const settings = typeof input === 'string' ? { preset: input } : input;
+    check(settings && Object.getPrototypeOf(settings) === Object.prototype && Object.keys(settings).every(key =>
+      key === 'preset' || Object.hasOwn(lightingChannels, key) || lightingColors.includes(key)),
+    'invalid strand lighting settings');
+    const name = settings.preset ?? 'matte-thread';
+    check(label(name) && Object.hasOwn(lightingPresets, name), 'unknown strand lighting preset');
+    const preset = lightingPresets[name], result = {};
+    for (const [key, limit] of Object.entries(lightingChannels)) {
+      const value = settings[key] === undefined ? preset[key] : settings[key];
+      result[key] = channel(value, 'lighting.' + key, 0, limit);
+    }
+    for (const key of lightingColors) if (settings[key] !== undefined)
+      result[key] = colorTrack(settings[key], 'lighting.' + key);
     return result;
   }
 
@@ -326,7 +355,9 @@
     const profileTwist = channel(twist, 'twist', -64 * Math.PI, 64 * Math.PI);
     const framed = aspect < .99999, flattened = section === 'flattened';
     const materials = materialTracks(options.along, palette, options.paletteRoles);
-    const profileCuts = profileStops([profileWidth, profileTaper, framed && profileTwist, ...Object.values(materials)], profileSamples);
+    const light = lightingTracks(options.lighting);
+    const profileCuts = profileStops([profileWidth, profileTaper, framed && profileTwist, ...Object.values(materials),
+      ...Object.values(light ?? {})], profileSamples);
     const caps = capStyles(capInput), joins = joinStyles(joinInput), pools = joins.filter(join => join.type === 'pool');
     const endEdits = joins.length || caps.start.type !== 'rounded' || caps.end.type !== 'rounded';
     const fixedColor = typeof color === 'function' ? null : rgb(color);
@@ -387,11 +418,17 @@
             if (role || pigment) shade = shade.map(Math.round);
             for (const [pigment, weight] of pool.tint ?? [])
               shade = shade.map((value, k) => Math.round(value + weight * (pigment[k] - value)));
-            const roughness = materials.roughness?.sample(sample);
+            const roughness = materials.roughness?.sample(sample) ?? light?.roughness.sample(sample);
             const emission = materials.emission?.sample(sample) ?? 0;
             const emissionColor = materials.emissionColor?.sample(sample) ?? shade;
             const finish = roughness !== undefined || emission > 0 ?
               [(roughness ?? -1) + 1, ...emissionColor.map(value => value * emission / 255)] : undefined;
+            const lighting = light && [
+              1 + light.anisotropy.sample(sample), light.diffuse.sample(sample), light.sheen.sample(sample),
+              light.specular.sample(sample), light.transmission.sample(sample),
+              light.highlightColor ? packed(light.highlightColor.sample(sample).map(Math.round)) : 0xffffff,
+              packed((light.transmissionColor?.sample(sample) ?? shade).map(Math.round))
+            ];
             let profile;
             if (framed) {
               const a = chartNormals?.[i], b = chartNormals?.[i + 1];
@@ -408,7 +445,7 @@
               continuesFrom(run.start, start, end)) ? run.start : null;
             const right = run?.end && ((distance + next * length) / total >= run.to - reach ||
               continuesFrom(run.end, start, end)) ? run.end : null;
-            rows.push({ from: start, to: end, shade, radius: size, opacity: rowOpacity, profile, finish,
+            rows.push({ from: start, to: end, shade, radius: size, opacity: rowOpacity, profile, finish, lighting,
               clips: left || right ? [left, right] : undefined });
           }
           previous = next;
@@ -428,8 +465,8 @@
     for (const { id, rows } of plan.strands) {
       const start = builder.count();
       const group = nextGroup && rows.length ? nextGroup++ : undefined;
-      for (const { from, to, shade, radius, opacity, profile, clips, finish } of rows)
-        builder.curveSplat(from, to, radius, shade, opacity, profile, plan.edge, group, clips, finish);
+      for (const { from, to, shade, radius, opacity, profile, clips, finish, lighting } of rows)
+        builder.curveSplat(from, to, radius, shade, opacity, profile, plan.edge, group, clips, finish, lighting);
       const end = builder.count();
       builder.describeSplats?.(start, end, {
         object: plan.object, material: plan.material, target: { entity: plan.object, ...plan.target, surface: id }
@@ -472,5 +509,5 @@
     });
   }
 
-  K.curveSplats = Object.freeze({ format, segmentLimit, draw, world });
+  K.curveSplats = Object.freeze({ format, segmentLimit, lightingPresets, draw, world });
 })(KIT);

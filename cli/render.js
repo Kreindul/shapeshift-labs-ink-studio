@@ -785,6 +785,7 @@ function renderFrame(world, o, preparedPalettes) {
     asp = W / H,
     baseCount = world.count;
   const curveCamera = curves && { view: V, near, focal, width: W, height: H, ortho };
+  const curveLightSample = curves && [1, 0, 0];
   const curveFrames = curves && world.curveClips && (world.anim?.rig || world.anim?.bones || world.reconstructionPose) &&
     sampleFrames(world, t);
   const ditherView = anchorSpaces.has('view') ? ArtStability.viewProjection(V) : undefined;
@@ -1720,7 +1721,7 @@ function renderFrame(world, o, preparedPalettes) {
         (reflectionPlane.select && !reflectionPlane.select(i, x, y, z, world)))
     )
       continue;
-    let curve, roughness, curveEmission;
+    let curve, roughness, curveEmission, curveLight;
     if (curveCamera && CurveSplat.isRow(d, q)) {
       const position = [x, y, z], curveWorld = shutterRows?.pose(i) ?? world;
       const clips = CurveSplat.clipPlanes(curveWorld.curveClips, i, position, SC[i], curveFrames ? curveFrames(i) : null);
@@ -1729,6 +1730,7 @@ function renderFrame(world, o, preparedPalettes) {
       const finish = curveWorld.curveMaterials;
       const encoded = finish?.[i * CurveSplat.materialStride];
       if (encoded) roughness = encoded - 1;
+      curveLight = CurveSplat.lightingAt(curveWorld.curveLighting, i, roughness, sun);
       if (!world.renderMetadata?.muteEmission?.[i]) curveEmission = CurveSplat.emissionAt(finish, i);
     }
     const cx = curve ? curve.middle[0] : V[0] * x + V[4] * y + V[8] * z + V[12],
@@ -2033,6 +2035,7 @@ function renderFrame(world, o, preparedPalettes) {
       return SplatFootprints.coverage(shaped,m[0]*u+m[1]*v,m[2]*u+m[3]*v);
     }
     const geometryCode = geometryMask?.codes[i];
+    const curveNormal = curveLight ? curveLight.needsNormal : roughness !== undefined;
     for (let iy = y0; iy <= y1; iy++) {
       const dy = iy + 0.5 - sy;
       for (let ix = x0; ix <= x1; ix++) {
@@ -2043,7 +2046,7 @@ function renderFrame(world, o, preparedPalettes) {
         const planeHit=planeRay&&SplatFootprints.planeSample(shapeCenter,frame,planeRay.origin,planeRay.direction);
         if(planeFrame&&!planeHit)continue;
         const curveRay = curve && rayAt(ix + .5, iy + .5);
-        const curveHit = curve && CurveSplat.sample(curve, curveRay, near, roughness !== undefined);
+        const curveHit = curve && CurveSplat.sample(curve, curveRay, near, curveNormal);
         if (curve && !curveHit) continue;
         const planeDepth = curveHit ? curveHit.depth : planeHit ? planeHit.t * planeRay.axial : undefined;
         if(planeHit&&planeDepth<near)continue;
@@ -2180,12 +2183,21 @@ function renderFrame(world, o, preparedPalettes) {
           if (directReceiver) [pr,pg,pb] = directLight(p,point,n,[pr,pg,pb],fog,centerFog ? fogMix : 0,i);
           if (localProbe) [pr,pg,pb] = probes.shade(point,n,[pr,pg,pb],fog,centerFog ? fogMix : 0,localAlbedo);
         }
-        if (curveHit?.normal || curveEmission) {
-          const shine = CurveSplat.specular(roughness, curveHit.normal, curveRay.direction, sun);
+        if (curveLight || curveHit?.normal || curveEmission) {
           const visibility = centerFog ? 1 - fogMix : 1;
-          pr = Math.min(1, pr + visibility * (shine + (curveEmission?.[0] ?? 0)));
-          pg = Math.min(1, pg + visibility * (shine + (curveEmission?.[1] ?? 0)));
-          pb = Math.min(1, pb + visibility * (shine + (curveEmission?.[2] ?? 0)));
+          let gain = 1, shine, scatter = 0;
+          if (curveLight) {
+            CurveSplat.directional(curveLight, curve.axis, curveHit.normal, curveRay.direction, curveLightSample);
+            [gain, shine, scatter] = curveLightSample;
+          } else shine = CurveSplat.specular(roughness, curveHit.normal, curveRay.direction, sun);
+          const tint = curveLight?.highlightColor, transmission = curveLight?.transmissionColor;
+          const fogKeep = (1 - gain) * (1 - visibility);
+          pr = Math.min(1, pr * gain + fog[0] * fogKeep +
+            visibility * (shine * (tint?.[0] ?? 1) + scatter * (transmission?.[0] ?? 0) + (curveEmission?.[0] ?? 0)));
+          pg = Math.min(1, pg * gain + fog[1] * fogKeep +
+            visibility * (shine * (tint?.[1] ?? 1) + scatter * (transmission?.[1] ?? 0) + (curveEmission?.[1] ?? 0)));
+          pb = Math.min(1, pb * gain + fog[2] * fogKeep +
+            visibility * (shine * (tint?.[2] ?? 1) + scatter * (transmission?.[2] ?? 0) + (curveEmission?.[2] ?? 0)));
           highlight = Math.max(highlight, shine);
         }
         const scoped = contribution?.applies(i, paletteId);

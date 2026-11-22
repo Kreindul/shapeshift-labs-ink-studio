@@ -224,6 +224,62 @@ normal render and clip commands. Run
 `node examples/curve-splat-materials.cjs studio/out/curve-splat-materials`
 to render the copper wire, woven yarn, and isolated channel studies.
 
+## Light strands along their tangent
+
+Opt into `lighting` on any strand. Give it a preset name or an object with a
+`preset` and independent overrides. The headless renderer lights the local
+section and follows the strand's posed tangent through bends and twists.
+
+| Preset | Starting appearance |
+| --- | --- |
+| `matte-thread` | Diffuse body and broad fibre sheen. |
+| `glossy-hair` | Strong tangent-aligned highlights with a little transmitted light. |
+| `metal-wire` | Tight directional glints and an opaque body. |
+| `backlit-fibre` | Strong forward scatter, with a brighter grazing rim when the key is behind the strand. |
+
+| Control | Range and effect |
+| --- | --- |
+| `diffuse` | 0 to 1. Blends the authored pigment with directional diffuse lighting. |
+| `roughness` | 0 to 1. Controls specular width. `along.roughness` takes precedence when supplied. |
+| `anisotropy` | 0 to 1. Zero gives circular specular alignment around the surface normal. Higher values align the response with the tangent. |
+| `sheen` | 0 to 4. Broad reflection strongest on grazing parts of the fibre. |
+| `specular` | 0 to 4. Strength of the tighter reflection lobe. |
+| `transmission` | 0 to 4. Strength of the light scattered toward the camera from behind. |
+| `highlightColor` | Hex or RGB bytes. Tints sheen and specular together. Defaults to white. |
+| `transmissionColor` | Hex or RGB bytes. Tints transmission. Defaults to the local pigment. |
+
+Controls support the same keys, samples, and SDK callbacks used by `along`.
+An object without a preset starts from `matte-thread`. In JavaScript,
+`K.curveSplats.lightingPresets` exposes the preset values. Set the scene's
+`liveSun` for its directional key, ambient, and intensity. Ink uses its
+default key when a live sun is absent. Transmission adjusts the lit colour.
+Use `along.opacity` for coverage and `along.emission` for emitted light.
+
+```js
+K.curveSplats.draw(builder, source, {
+  edge: 'beta',
+  lighting: {
+    preset: 'glossy-hair',
+    specular: [[0, .4], [.54, 1], [1, .2]],
+    sheen: .12,
+    highlightColor: '#d7dfff',
+    transmission: .2,
+    transmissionColor: '#e0a888'
+  }
+});
+```
+
+Use `appearance.curveProfile.lighting` for textiles and
+`visual.routedLinkProfiles.<link-id>.lighting` for routed links. The
+Gaussian carrier fallback uses the base pigment and coverage. Render all
+four presets with `node examples/curve-splat-lighting.cjs
+studio/out/curve-splat-lighting`. The script also writes editable scene JSON
+for the ordinary CLI still and clip commands.
+
+The tangent-aligned lobe draws on the same principle used in
+[Scheuermann's real-time hair shading](https://shaderwrangler.com/publications/hairsketch/).
+Ink uses a stylized forward-scatter term for transmission.
+
 ## Render and compare
 
 The [editable example](../examples/curve-splat-scene.json) uses

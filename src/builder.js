@@ -1057,8 +1057,17 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
       else fallingSnowRanges.push({ first, end });
     }
   }
-  let hasCurveSplats = false, curveGroups = 0, curveClips, curveMaterials;
-  function curveSplat(from, to, radius, color, opacity, profile, edge, group, clips, finish) {
+  let hasCurveSplats = false, curveGroups = 0, curveClips, curveMaterials, curveLighting;
+  function writeCurveRow(storage, stride, values) {
+    if (!storage || storage.length < n * stride) {
+      const next = new Float32Array(Math.max(n * stride, storage ? storage.length * 2 : 256 * stride));
+      if (storage) next.set(storage);
+      storage = next;
+    }
+    storage.set(values, (n - 1) * stride);
+    return storage;
+  }
+  function curveSplat(from, to, radius, color, opacity, profile, edge, group, clips, finish, lighting) {
     const delta = to.map((v, i) => v - from[i]), half = Math.hypot(...delta) / 2;
     const center = from.map((v, i) => v + delta[i] * .5), axis = delta.map(v => v / (2 * half));
     if (profile) {
@@ -1073,15 +1082,8 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
         { nd: true, ph: radius, sp: half, ex: CurveSplat.tag(0, edge, group) });
     }
     hasCurveSplats = true;
-    if (finish) {
-      const stride = CurveSplat.materialStride;
-      if (!curveMaterials || curveMaterials.length < n * stride) {
-        const storage = new Float32Array(Math.max(n * stride, curveMaterials ? curveMaterials.length * 2 : 256 * stride));
-        if (curveMaterials) storage.set(curveMaterials);
-        curveMaterials = storage;
-      }
-      curveMaterials.set(finish, (n - 1) * stride);
-    }
+    if (finish) curveMaterials = writeCurveRow(curveMaterials, CurveSplat.materialStride, finish);
+    if (lighting) curveLighting = writeCurveRow(curveLighting, CurveSplat.lightingStride, lighting);
     if (clips) {
       const stride = CurveSplat.clipStride, at = (n - 1) * stride;
       if (!curveClips || curveClips.length < n * stride) {
@@ -1122,6 +1124,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
         count: n,
         ...(hasCurveSplats && { curveSplats: true }),
         ...(curveMaterials && { curveMaterials: curveMaterials.slice(0, n * CurveSplat.materialStride) }),
+        ...(curveLighting && { curveLighting: curveLighting.slice(0, n * CurveSplat.lightingStride) }),
         ...(curveClips && { curveClips: curveClips.slice(0, n * CurveSplat.clipStride) }),
         ...(paintDecals.length && { paintDecals }),
         ...(correctionRows.length && { paintCorrections: PaintCorrections.bind(correctionRows) }),
@@ -1202,7 +1205,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     n = 0;
     hasCurveSplats = false;
     curveGroups = 0;
-    curveClips = curveMaterials = undefined;
+    curveClips = curveMaterials = curveLighting = undefined;
     fine = null;
     attr = null;
     attrN = null;

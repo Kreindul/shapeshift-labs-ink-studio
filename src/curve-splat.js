@@ -1,7 +1,7 @@
 /* Finite strand kernels carried by ordinary native splat rows. */
 const CurveSplat = (() => {
   // Kind zero leaves the motion payload free. Preserve the tag through native row copies.
-  const marker = -161291.375, minimum = 1e-5, clipStride = 12, materialStride = 4;
+  const marker = -161291.375, minimum = 1e-5, clipStride = 12, materialStride = 4, lightingStride = 7;
   const hardBase = 1 << 20, maxHardGroups = (1 << 20) - 1;
   const betaRadius = Math.sqrt(6), betaIntegral = 5 * Math.PI / 16;
   // Seven-point Gaussian quadrature across the flat section, with rounded Gaussian edges.
@@ -289,6 +289,52 @@ const CurveSplat = (() => {
       (.62 - .36 * roughness) * (sun?.intensity ?? 1);
   }
 
+  const unpackColor = color => [color >> 16, (color >> 8) & 255, color & 255].map(value => value / 255);
+
+  function lightingAt(rows, index, roughness, sun) {
+    const at = index * lightingStride;
+    if (!rows?.[at]) return;
+    const anisotropy = rows[at] - 1, intensity = sun?.intensity ?? 1;
+    const power = 3 + 141 * (1 - (roughness ?? .5)) ** 3;
+    const diffuse = rows[at + 1], sheen = rows[at + 2] * intensity, specular = rows[at + 3] * intensity;
+    const transmission = rows[at + 4] * intensity;
+    return {
+      light: sun?.direction ?? defaultLight, intensity, ambient: sun?.ambient ?? .42,
+      normalPower: power * (1 - .82 * anisotropy), tangentPower: .72 * power * anisotropy,
+      sheenPower: 6 * anisotropy, diffuse, sheen, specular, transmission,
+      highlightColor: unpackColor(rows[at + 5]), transmissionColor: unpackColor(rows[at + 6]),
+      needsNormal: Boolean(diffuse || sheen || specular || transmission)
+    };
+  }
+
+  function directional(profile, tangent, normal, viewRay, out) {
+    const { light, intensity, ambient, diffuse, sheen, specular, transmission } = profile;
+    const ndl = normal ? dot(normal, light) : 0, lit = Math.max(0, ndl);
+    const viewFacing = normal ? Math.max(0, Math.min(1, -dot(normal, viewRay))) : 0;
+    out[0] = 1 + diffuse * (ambient + intensity * lit - 1);
+    out[1] = out[2] = 0;
+    if (lit && viewFacing && (sheen || specular)) {
+      const hx = light[0] - viewRay[0], hy = light[1] - viewRay[1], hz = light[2] - viewRay[2];
+      const length = Math.hypot(hx, hy, hz);
+      if (length > 1e-8) {
+        const nh = Math.max(0, Math.min(1, (normal[0] * hx + normal[1] * hy + normal[2] * hz) / length));
+        const th = (tangent[0] * hx + tangent[1] * hy + tangent[2] * hz) / length;
+        // The reflection peaks when the half-vector is perpendicular to the strand.
+        const lateral = Math.max(0, 1 - th * th);
+        const glint = specular * lit * nh ** profile.normalPower * lateral ** profile.tangentPower;
+        const fibre = sheen * Math.sqrt(lit) * (.23 + .77 * (1 - viewFacing) ** 1.5) *
+          Math.sqrt(nh) * lateral ** profile.sheenPower;
+        out[1] = glint + fibre;
+      }
+    }
+    if (transmission) {
+      // Approximate forward scatter through thin fibres, including the soft kernel's halo.
+      const backlit = Math.max(0, dot(light, viewRay)), tl = dot(tangent, light);
+      const edge = .46 + .54 * (1 - viewFacing) ** 1.35;
+      out[2] = transmission * backlit ** 3 * (1 - .65 * tl * tl) * edge * (.78 + .22 * Math.max(0, -ndl));
+    }
+  }
+
   function sectionNormal(strand, start, ray, along, entrance, finiteCaps) {
     const { axis, radius, length, major, minor, flattened } = strand;
     const offset = start.map((value, i) => entrance * ray[i] - value);
@@ -399,6 +445,7 @@ const CurveSplat = (() => {
     if (wantNormal) hit.normal = softNormal(strand, start, ray, along, near / axial * scale);
     return hit;
   }
-  return Object.freeze({ tag, joinGroups, axialUnits, minimum, clipStride, materialStride, clipPlanes, emissionAt, isRow, prepare, sample, specular });
+  return Object.freeze({ tag, joinGroups, axialUnits, minimum, clipStride, materialStride, lightingStride, clipPlanes,
+    emissionAt, lightingAt, isRow, prepare, sample, specular, directional });
 })();
 if (typeof module !== 'undefined') module.exports = CurveSplat;
