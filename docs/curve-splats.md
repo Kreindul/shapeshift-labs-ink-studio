@@ -178,6 +178,52 @@ The [editable cap and join sheet](../examples/curve-splat-caps.json) uses all
 four ends and both join edits. Run `node examples/curve-splat-caps.cjs
 studio/out/curve-splat-caps` for an animated comparison.
 
+## Paint materials along the strand
+
+Set `along` on a strand to author independent material channels by normalized
+arc length. Each channel accepts a constant, `[u, value]` keys, evenly spaced
+`{ samples: [...] }`, or an SDK callback with the same sample context as width.
+Key and sample objects can opt into `interpolation: 'step'` or `'linear'`.
+Palette roles default to step interpolation. All other channels default to linear.
+
+| Channel | Meaning |
+| --- | --- |
+| `paletteRole` | Selects a named palette role with one swatch, or a stop such as `copper.highlight` or `copper.2`. Standalone scenes use the recipe's `paletteRoles` and `palette`, with background at slot 0. SDK drawing uses the builder palette and the draw option `paletteRoles`. |
+| `pigment` | Supplies paint as hex or three RGB bytes. If a palette role is also present, pigment tints its swatch by multiplying the RGB channels. White preserves the role colour. |
+| `opacity` | Sets local opacity from 0 to 1 and takes precedence over the strand's plain `opacity`. Cap fades and pigment pools still modify it. |
+| `roughness` | Controls the width and strength of a view-dependent highlight from the nominal section. 0 is polished, 1 is matte. It uses the scene's live sun direction and intensity when enabled, or a default directional key otherwise. |
+| `emission` | Adds local emitted light to the strand colour, from 0 to 8. The isolated light is available in the existing `emission` art pass. |
+| `emissionColor` | Supplies a hex or RGB emission tint. It defaults to the local paint after any palette binding and pigment pool. |
+
+```js
+const materialBuilder = makeBuilder(1, [0x142333, 0xe5a271, 0x6fbcb0]);
+K.curveSplats.draw(materialBuilder, source, {
+  paletteRoles: { warm: [1], cool: [2] },
+  along: {
+    paletteRole: [[0, 'warm'], [.4, 'cool'], [.74, 'warm']],
+    pigment: { samples: ['#ffeece', '#ffffff'] },
+    opacity: [[0, 1], [.9, 1], [1, .2]],
+    roughness: [[0, .85], [1, .16]],
+    emission: [[0, 0], [.72, 0], [.88, .7], [1, 0]],
+    emissionColor: '#ffac68'
+  }
+});
+```
+
+Material keys share the same profile resolution and segment budget as width.
+Change the source palette or role bindings and rebuild to repaint the strand.
+Use `appearance.curveProfile.along` for textiles and
+`visual.routedLinkProfiles.<link-id>.along` for routed links. A standalone
+textile world can provide the packed scene palette as `pal` and the role map as
+`paletteRoles`.
+
+The exact section highlight and the strand emission pass are available in the
+headless renderer. Gaussian carriers retain the sampled pigment and opacity.
+The [copper wire recipe](../examples/curve-splat-materials.json) works with the
+normal render and clip commands. Run
+`node examples/curve-splat-materials.cjs studio/out/curve-splat-materials`
+to render the copper wire, woven yarn, and isolated channel studies.
+
 ## Render and compare
 
 The [editable example](../examples/curve-splat-scene.json) uses

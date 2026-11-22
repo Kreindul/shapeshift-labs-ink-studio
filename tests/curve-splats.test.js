@@ -307,3 +307,81 @@ test('small breaks stay open even with soft edges and pools change only a local 
   assert.ok(closed.alpha[19 * closed.w + 64] > 180);
   assert.equal(opened.alpha[19 * opened.w + 64], 0);
 });
+
+test('distance material keys resolve scene roles, tint pigment, and control coverage independently', () => {
+  const input = {
+    ...scene([{ source: [[-2, 0, 0], [-1.75, 0, 0], [2, 0, 0]], width: .38, edge: 'hard',
+      along: { paletteRole: [[0, 'wire.shadow'], [.5, 'wire.highlight']],
+        pigment: '#ff80ff', opacity: { keys: [[0, 1], [.5, .5]], interpolation: 'step' } } }]),
+    palette: ['#b75a38', '#b75a38', '#80cc80'], paletteRoles: { wire: [1, 3] }
+  };
+  const world = C.world(input), frame = ink.render(world, { ...imageOptions, ortho: true, transparent: true });
+  assert.equal(world.count, 3);
+  assert.equal(world.pal.length, 4);
+  assert.deepEqual(at(frame, 42, 38), [183, 45, 56]);
+  assert.deepEqual(at(frame, 86, 38), [128, 102, 128]);
+  assert.equal(frame.alpha[38 * frame.w + 42], 255);
+  assert.equal(frame.alpha[38 * frame.w + 86], 128);
+  assert.equal(world.curveSplatSource, input);
+
+  const B = kit.makeBuilder(1, palette);
+  assert.throws(() => C.draw(B, straight, { along: { paletteRole: 'undefined' } }), /Unknown or empty palette role/);
+  assert.throws(() => C.draw(B, straight, { along: { roughness: ({ u }) => u < .5 ? .3 : 1.5 } }), /roughness/);
+  assert.equal(B.count(), 0);
+  C.draw(B, straight, { width: .4, edge: 'hard', along: { pigment: { samples: ['#ff0000', '#0000ff'] } } });
+  const blend = ink.render(host(B), { ...imageOptions, ortho: true });
+  const [red, green, blue] = at(blend, 64, 38);
+  assert.ok(Math.abs(red - blue) < 12 && green === 0);
+});
+
+test('strand roughness moves a highlight without changing coverage and emission has its own pass', () => {
+  const recipe = {
+    ...scene([{ source: straight, edge: 'hard', width: .62, color: '#58261e',
+      along: {
+        roughness: { keys: [[0, .08], [.5, .82]], interpolation: 'step' },
+        emission: { keys: [[0, 0], [.62, .6]], interpolation: 'step' }, emissionColor: '#2080ff'
+      } }]),
+    liveSun: { direction: [0, .55, 1], intensity: .8, shadows: false }
+  };
+  const world = C.world(recipe);
+  const opts = { ...imageOptions, ortho: true, transparent: true, passes: ['emission'] };
+  const lit = ink.render(world, opts), unlit = ink.render(world, { ...opts, liveSun: { intensity: 0 } });
+  assert.deepEqual(lit.alpha, unlit.alpha);
+  assert.deepEqual(lit.passes.emission, unlit.passes.emission);
+  const peak = x => Math.max(...Array.from({ length: lit.h }, (_, y) => at(lit, x, y)[0] - at(unlit, x, y)[0]));
+  assert.ok(peak(43) > peak(88) * 1.5);
+  const band = x => Array.from({ length: lit.h }, (_, y) => at(lit, x, y)[0] - at(unlit, x, y)[0])
+    .filter(value => value > 4).length;
+  assert.ok(band(88) > band(43));
+  const e = x => [...lit.passes.emission.slice((38 * lit.w + x) * 3, (38 * lit.w + x) * 3 + 3)];
+  assert.deepEqual(e(43), [0, 0, 0]);
+  assert.ok(e(88)[0] < .10 && e(88)[1] > .29 && e(88)[2] > .58);
+  assert.notDeepEqual(ink.render(world, { ...opts, pitch: .35 }).rgb, lit.rgb);
+
+  const B = kit.makeBuilder(1, world.pal);
+  B.disc(0, -1, 0, [0, 0, 1], .1, .02, B.P[0], 1);
+  const plain = host(B);
+  const joined = kit.SplatProvenance.join([plain, world], { cam: camera, fog: world.fog, liveSun: recipe.liveSun });
+  assert.deepEqual([...joined.curveMaterials.slice(0, 4)], [0, 0, 0, 0]);
+  assert.deepEqual(joined.curveMaterials.slice(4), world.curveMaterials);
+  assert.ok(ink.render(joined, opts).passes.emission.some(value => value > .58));
+});
+
+test('textile worlds can paint with named palette roles and the yarn sample context', () => {
+  const yarn = K.textile.weave({ size: [3, 2], columns: 4, rows: 3, radius: .06, clearance: .02 });
+  const world = K.textile.world(yarn, {
+    pal: palette, paletteRoles: { amber: [1], green: [2] },
+    appearance: { renderer: 'curve-splats', curveProfile: { profileSamples: 24,
+      along: { paletteRole: ({ u, distance, family, uv }) => {
+        assert.ok(uv.length === 2 && distance > 0);
+        return (family === 'warp') === (u < .5) ? 'amber' : 'green';
+      } } } }
+  });
+  const frame = ink.render(world, imageOptions);
+  let green = 0, amber = 0;
+  for (let i = 0; i < frame.rgb.length; i += 3) {
+    if (frame.rgb[i] > 150 && frame.rgb[i + 1] < frame.rgb[i]) amber++;
+    if (frame.rgb[i + 1] > 150 && frame.rgb[i] < frame.rgb[i + 1]) green++;
+  }
+  assert.ok(green > 20 && amber > 20);
+});

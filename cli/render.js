@@ -1521,7 +1521,7 @@ function renderFrame(world, o, preparedPalettes) {
   }
   const foregroundDepth = z => z - (eyeD-dist);
   function composite(p, i, z, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, mark,
-    opticalDepth = z, sprite, haze = 0, rule, reflected, filteredEdge = false, refraction = 1, sectionEdge = false, claim, baseColor, surfaceMatte) {
+    opticalDepth = z, sprite, haze = 0, rule, reflected, filteredEdge = false, refraction = 1, sectionEdge = false, claim, baseColor, surfaceMatte, emissionTint) {
     if (surfaceDepth && (!sprite?.surface || sdf) && opticalDepth > surfaceDepth[p]+1e-5) return;
     if (focus?.rain || fallingCoverage) {
       const kind = i < 0 ? 0 : Math.round(d[i*16+11])%16;
@@ -1561,7 +1561,7 @@ function renderFrame(world, o, preparedPalettes) {
     col[p3 + 2] = pb * a + col[p3 + 2] * ia;
     if (captured) captured[p] = a + captured[p] * ia;
     if (hazeCoverage) hazeCoverage[p] = haze*a + hazeCoverage[p]*ia;
-    const owned = art?.fragment(p, i, a, wd, z, emits, pr, pg, pb, sprite);
+    const owned = art?.fragment(p, i, a, wd, z, emits, pr, pg, pb, sprite, emissionTint);
     if (owned && paintStage) paintStage[p] = baseColor ?? 0;
     if (owned && paletteCapture) paletteCapture.claim(p,claim?.[0] ?? selectSlot(i,paletteId),claim);
     if (owned && p === paletteTrace?.bottom) paletteTrace.fragment = claim?.[4] ?? [];
@@ -1720,12 +1720,16 @@ function renderFrame(world, o, preparedPalettes) {
         (reflectionPlane.select && !reflectionPlane.select(i, x, y, z, world)))
     )
       continue;
-    let curve;
+    let curve, roughness, curveEmission;
     if (curveCamera && CurveSplat.isRow(d, q)) {
       const position = [x, y, z], curveWorld = shutterRows?.pose(i) ?? world;
       const clips = CurveSplat.clipPlanes(curveWorld.curveClips, i, position, SC[i], curveFrames ? curveFrames(i) : null);
       curve = CurveSplat.prepare(d, q, position, SC[i], al, curveCamera, clips);
       if (!curve || curve.bounds[0] >= W || curve.bounds[1] >= H || curve.bounds[2] <= 0 || curve.bounds[3] <= 0) continue;
+      const finish = curveWorld.curveMaterials;
+      const encoded = finish?.[i * CurveSplat.materialStride];
+      if (encoded) roughness = encoded - 1;
+      if (!world.renderMetadata?.muteEmission?.[i]) curveEmission = CurveSplat.emissionAt(finish, i);
     }
     const cx = curve ? curve.middle[0] : V[0] * x + V[4] * y + V[8] * z + V[12],
       cy = curve ? curve.middle[1] : V[1] * x + V[5] * y + V[9] * z + V[13],
@@ -1790,7 +1794,7 @@ function renderFrame(world, o, preparedPalettes) {
     const core = emissive?.profiles[emissive.slots[i]-1]?.core;
     if (core) [r,g,b] = EmissiveFinishes.coreRgb(core, r,g,b);
     const hasSurface = surface?.has(i);
-    const emits = art && (flags & 2) !== 0 && !world.renderMetadata?.muteEmission?.[i];
+    const emits = art && (Boolean(curveEmission) || (flags & 2) !== 0 && !world.renderMetadata?.muteEmission?.[i]);
     const automatic = kind === LightSchedule.emissionKind && d[q + 15] === LightSchedule.emissionMarker;
     const sourceScale = automatic ? LightSchedule.emissionScale(dusk) : 1;
     const scheduled = lamps.length && !(flags & 22) && al >= 1 ? LightSchedule.transfer(lamps, x, y, z) : null;
@@ -2038,7 +2042,8 @@ function renderFrame(world, o, preparedPalettes) {
         const planeRay=planeFrame&&rayAt(ix+.5,iy+.5);
         const planeHit=planeRay&&SplatFootprints.planeSample(shapeCenter,frame,planeRay.origin,planeRay.direction);
         if(planeFrame&&!planeHit)continue;
-        const curveHit = curve && CurveSplat.sample(curve, rayAt(ix + .5, iy + .5), near);
+        const curveRay = curve && rayAt(ix + .5, iy + .5);
+        const curveHit = curve && CurveSplat.sample(curve, curveRay, near, roughness !== undefined);
         if (curve && !curveHit) continue;
         const planeDepth = curveHit ? curveHit.depth : planeHit ? planeHit.t * planeRay.axial : undefined;
         if(planeHit&&planeDepth<near)continue;
@@ -2175,6 +2180,14 @@ function renderFrame(world, o, preparedPalettes) {
           if (directReceiver) [pr,pg,pb] = directLight(p,point,n,[pr,pg,pb],fog,centerFog ? fogMix : 0,i);
           if (localProbe) [pr,pg,pb] = probes.shade(point,n,[pr,pg,pb],fog,centerFog ? fogMix : 0,localAlbedo);
         }
+        if (curveHit?.normal || curveEmission) {
+          const shine = CurveSplat.specular(roughness, curveHit.normal, curveRay.direction, sun);
+          const visibility = centerFog ? 1 - fogMix : 1;
+          pr = Math.min(1, pr + visibility * (shine + (curveEmission?.[0] ?? 0)));
+          pg = Math.min(1, pg + visibility * (shine + (curveEmission?.[1] ?? 0)));
+          pb = Math.min(1, pb + visibility * (shine + (curveEmission?.[2] ?? 0)));
+          highlight = Math.max(highlight, shine);
+        }
         const scoped = contribution?.applies(i, paletteId);
         if (opticalActive) {
           const scatter = optical[opt + 1], reflection = optical[opt + 2], tint = optical[opt + 4] >= 0;
@@ -2253,7 +2266,7 @@ function renderFrame(world, o, preparedPalettes) {
             sample: [i, surfaceZ, normalizedDepth(surfaceZ), a, pr, pg, pb,
               wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, lookPass && { ...lookPass.mark },
               opticalDepth, undefined, fogMix, rule, reflected?.slice(), filteredEdge, 1, sectionTint>0, claim,
-              paintStage && paintColor(samplePaint), surfaceMatte] };
+              paintStage && paintColor(samplePaint), surfaceMatte, curveEmission] };
           if (!deferred.has(p)) deferred.set(p, []);
           const layers = deferred.get(p);
           if (entry.curveGroup) {
@@ -2268,7 +2281,7 @@ function renderFrame(world, o, preparedPalettes) {
           layers.push(entry);
         } else composite(p, i, sectionZ ?? exact?.z ?? planeDepth ?? -cz, sectionZ !== undefined || exact || planeHit ? normalizedDepth(surfaceZ) : dn,
           a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, lookPass?.mark, opticalDepth,
-          undefined, fogMix, rule, reflected, filteredEdge, 1, sectionTint>0, claim, paintStage && paintColor(samplePaint),surfaceMatte);
+          undefined, fogMix, rule, reflected, filteredEdge, 1, sectionTint>0, claim, paintStage && paintColor(samplePaint),surfaceMatte, curveEmission);
       }
     }
   }

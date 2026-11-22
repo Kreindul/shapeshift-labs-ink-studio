@@ -72,16 +72,19 @@
     }
   }
 
-  function channel(value, name, min, max) {
-    const read = value => {
-      check(finite(value, min, max), 'invalid ' + name + ' value');
-      return value;
-    };
-    if (typeof value === 'number') {
+  const packed = color => rgb(color).reduce((sum, value) => sum * 256 + value, 0);
+  const mix = (x, y, t) => x + (y - x) * t;
+  const mixRgb = (x, y, t) => x.map((v, i) => mix(v, y[i], t));
+  const sameValue = (a, b) => Array.isArray(a) ? a.every((value, i) => value === b[i]) : a === b;
+
+  function track(value, name, read, isConstant, interpolate, mode = 'linear') {
+    if (isConstant(value)) {
       const constant = read(value);
       return { sample: () => constant };
     }
     if (typeof value === 'function') return { sample: at => read(value(at)), varying: true };
+    const step = (value?.interpolation ?? mode) === 'step';
+    check(step || (value?.interpolation ?? mode) === 'linear', 'invalid ' + name + ' interpolation');
     let rows = Array.isArray(value) ? value : value?.keys;
     if (value?.samples !== undefined) {
       const samples = value.samples;
@@ -105,21 +108,51 @@
         else first = middle;
       }
       const [a, x] = keys[first], [b, y] = keys[last];
-      return x + (y - x) * (u - a) / (b - a);
+      return step ? x : interpolate(x, y, (u - a) / (b - a));
     }
-    return { sample, keys, varying: keys.some(([, v]) => v !== keys[0][1]) };
+    return { sample, keys, step, varying: keys.some(([, v]) => !sameValue(v, keys[0][1])) };
+  }
+
+  function channel(value, name, min, max) {
+    return track(value, name, n => {
+      check(finite(n, min, max), 'invalid ' + name + ' value');
+      return n;
+    }, n => typeof n === 'number', mix);
+  }
+
+  function materialTracks(along, palette, roles) {
+    if (along === undefined) return {};
+    check(along && Object.getPrototypeOf(along) === Object.prototype &&
+      Object.keys(along).every(key => ['paletteRole', 'pigment', 'opacity', 'roughness', 'emission', 'emissionColor'].includes(key)),
+      'invalid along-strand material');
+    const result = {};
+    if (along.paletteRole !== undefined) {
+      const resolve = name => {
+        check(label(name) && !name.startsWith('#'), 'expected a named palette role or ramp stop');
+        const swatch = PixelLook.roleColor(name, palette, roles);
+        return [swatch >> 16, (swatch >> 8) & 255, swatch & 255];
+      };
+      result.paletteRole = track(along.paletteRole, 'paletteRole', resolve, value => typeof value === 'string', mixRgb, 'step');
+    }
+    for (const key of ['pigment', 'emissionColor']) if (along[key] !== undefined)
+      result[key] = track(along[key], key, rgb, value => typeof value === 'string' ||
+        array(value) && value.length === 3 && Array.from(value).every(n => typeof n === 'number'), mixRgb);
+    for (const [key, max] of [['opacity', 1], ['roughness', 1], ['emission', 8]]) if (along[key] !== undefined)
+      result[key] = channel(along[key], key, 0, max);
+    return result;
   }
 
   function profileStops(channels, resolution) {
     if (!channels.some(p => p?.varying)) return [];
-    const stops = new Set(Array.from({ length: resolution - 1 }, (_, i) => (i + 1) / resolution));
+    const stops = new Set(channels.some(profile => profile?.varying && !profile.step) ?
+      Array.from({ length: resolution - 1 }, (_, i) => (i + 1) / resolution) : []);
     for (const [i, profile] of channels.entries()) {
       if (!profile?.varying || !profile.keys) continue;
       for (const [j, [u, v]] of profile.keys.entries()) {
         if (u > 0 && u < 1) stops.add(u);
-        if (!j) continue;
+        if (!j || profile.step) continue;
         const [from, previous] = profile.keys[j - 1];
-        if (v === previous) continue;
+        if (sameValue(v, previous)) continue;
         const steps = i === 2 ? Math.ceil(Math.abs(v - previous) / (Math.PI / 12)) : 8;
         for (let k = 1; k < steps; k++) stops.add(from + (u - from) * k / steps);
         check(stops.size <= segmentLimit, 'profile exceeds the segment budget');
@@ -271,7 +304,7 @@
     });
   }
 
-  function prepare(source, options = {}) {
+  function prepare(source, options = {}, palette) {
     const link = source?.kind === 'routed' ? source.link : undefined;
     const { radius, width, taper = 1, twist = 0, section, edge = 'gaussian', caps: capInput, joins: joinInput = [],
       up, profileSamples = 96, opacity = edge === 'hard' ? 1 : .94, color = '#eab876', object = link?.id ?? 'curve',
@@ -292,7 +325,8 @@
     const profileTaper = channel(taper, 'taper', 0, 1);
     const profileTwist = channel(twist, 'twist', -64 * Math.PI, 64 * Math.PI);
     const framed = aspect < .99999, flattened = section === 'flattened';
-    const profileCuts = profileStops([profileWidth, profileTaper, framed && profileTwist], profileSamples);
+    const materials = materialTracks(options.along, palette, options.paletteRoles);
+    const profileCuts = profileStops([profileWidth, profileTaper, framed && profileTwist, ...Object.values(materials)], profileSamples);
     const caps = capStyles(capInput), joins = joinStyles(joinInput), pools = joins.filter(join => join.type === 'pool');
     const endEdits = joins.length || caps.start.type !== 'rounded' || caps.end.type !== 'rounded';
     const fixedColor = typeof color === 'function' ? null : rgb(color);
@@ -341,15 +375,23 @@
             const pool = ends ? poolAt(sample, pools, closed) : { spread: 1, density: 1 };
             const size = Math.min(100, (profileWidth ? profileWidth.sample(sample) / 2 : baseRadius) *
               profileTaper.sample(sample) * tip * pool.spread);
-            const rowOpacity = styledOpacity(opacity, fade, pool.density, edge);
+            const rowOpacity = styledOpacity(materials.opacity?.sample(sample) ?? opacity, fade, pool.density, edge);
             if (size < 1e-6) {
               previous = next;
               continue;
             }
             segments++;
-            let shade = fixedColor ?? rgb(color(sample));
+            const role = materials.paletteRole?.sample(sample), pigment = materials.pigment?.sample(sample);
+            let shade = role && pigment ? role.map((value, k) => value * pigment[k] / 255) :
+              role ?? pigment ?? fixedColor ?? rgb(color(sample));
+            if (role || pigment) shade = shade.map(Math.round);
             for (const [pigment, weight] of pool.tint ?? [])
               shade = shade.map((value, k) => Math.round(value + weight * (pigment[k] - value)));
+            const roughness = materials.roughness?.sample(sample);
+            const emission = materials.emission?.sample(sample) ?? 0;
+            const emissionColor = materials.emissionColor?.sample(sample) ?? shade;
+            const finish = roughness !== undefined || emission > 0 ?
+              [(roughness ?? -1) + 1, ...emissionColor.map(value => value * emission / 255)] : undefined;
             let profile;
             if (framed) {
               const a = chartNormals?.[i], b = chartNormals?.[i + 1];
@@ -366,7 +408,7 @@
               continuesFrom(run.start, start, end)) ? run.start : null;
             const right = run?.end && ((distance + next * length) / total >= run.to - reach ||
               continuesFrom(run.end, start, end)) ? run.end : null;
-            rows.push({ from: start, to: end, shade, radius: size, opacity: rowOpacity, profile,
+            rows.push({ from: start, to: end, shade, radius: size, opacity: rowOpacity, profile, finish,
               clips: left || right ? [left, right] : undefined });
           }
           previous = next;
@@ -386,8 +428,8 @@
     for (const { id, rows } of plan.strands) {
       const start = builder.count();
       const group = nextGroup && rows.length ? nextGroup++ : undefined;
-      for (const { from, to, shade, radius, opacity, profile, clips } of rows)
-        builder.curveSplat(from, to, radius, shade, opacity, profile, plan.edge, group, clips);
+      for (const { from, to, shade, radius, opacity, profile, clips, finish } of rows)
+        builder.curveSplat(from, to, radius, shade, opacity, profile, plan.edge, group, clips, finish);
       const end = builder.count();
       builder.describeSplats?.(start, end, {
         object: plan.object, material: plan.material, target: { entity: plan.object, ...plan.target, surface: id }
@@ -398,31 +440,34 @@
   }
 
   function draw(builder, source, options) {
-    return emit(builder, prepare(source, options));
+    const palette = options?.along?.paletteRole === undefined ? undefined : builder?.P?.map(packed);
+    return emit(builder, prepare(source, options, palette));
   }
 
   function world(recipe) {
     check(recipe?.format === format && recipe.version === 1 && label(recipe.id) &&
       Array.isArray(recipe.strands) && recipe.strands.length > 0 && recipe.strands.length <= 1024,
       'expected a version 1 curve splat scene with named strands');
-    const { seed = 1, background = '#172332', palette = [], camera = {}, look = {} } = recipe;
+    const { seed = 1, background = '#172332', palette = [], paletteRoles, camera = {}, look = {}, liveSun } = recipe;
     check(Number.isSafeInteger(seed) && Array.isArray(palette) && palette.length <= 255, 'invalid seed or palette');
-    const packed = color => rgb(color).reduce((sum, value) => sum * 256 + value, 0);
+    const colors = [packed(background), ...Array.from(palette, packed)];
     let remaining = segmentLimit;
     const plans = recipe.strands.map(({ source, ...appearance }, i) => {
-      const plan = prepare(source, { object: 'curve:' + i, ...appearance, maxSegments: remaining });
+      const plan = prepare(source, { object: 'curve:' + i, paletteRoles, ...appearance, maxSegments: remaining }, colors);
       remaining -= plan.examined;
       return plan;
     });
-    const colors = new Set([packed(background), ...Array.from(palette, packed)]);
     if (!palette.length) {
+      const unique = new Set(colors);
       for (const plan of plans) for (const strand of plan.strands) for (const row of strand.rows)
-        if (colors.size < 256) colors.add(packed(row.shade));
+        if (unique.size < 256) unique.add(packed(row.shade));
+      colors.splice(0, colors.length, ...unique);
     }
-    const builder = makeBuilder(seed, [...colors]);
+    const builder = makeBuilder(seed, colors);
     for (const plan of plans) emit(builder, plan);
     return builder.finish({
       id: recipe.id, curveSplatSource: recipe, cam: { target: [0, 0, 0], dist: 7, yaw: 0, pitch: 0, ...camera }, radius: 10,
+      ...(paletteRoles !== undefined && { paletteRoles }), ...(liveSun !== undefined && { liveSun }),
       fog: { c: 0, start: 1, max: 0 }, dither: 0, look: { pixelSize: 1, ...look }
     });
   }

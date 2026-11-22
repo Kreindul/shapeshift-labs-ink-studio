@@ -43,8 +43,8 @@ function createArtPasses(request, w, h, emissiveSlots, capturePartMotion) {
   const depth = needsOwner ? new Float32Array(size).fill(Infinity) : null;
 
   let atlasOwners;
-  function fragment(p, i, a, solid, z, emits, r, g, b, atlas) {
-    const tint=atlas?.emission;
+  function fragment(p, i, a, solid, z, emits, r, g, b, atlas, emissionTint) {
+    const tint=emissionTint ?? atlas?.emission;
     emits ||= Boolean(tint);
     if (coverage) coverage[p] = a + coverage[p] * (1 - a);
     if (emission) {

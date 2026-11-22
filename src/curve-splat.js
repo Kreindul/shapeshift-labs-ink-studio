@@ -1,7 +1,7 @@
 /* Finite strand kernels carried by ordinary native splat rows. */
 const CurveSplat = (() => {
   // Kind zero leaves the motion payload free. Preserve the tag through native row copies.
-  const marker = -161291.375, minimum = 1e-5, clipStride = 12;
+  const marker = -161291.375, minimum = 1e-5, clipStride = 12, materialStride = 4;
   const hardBase = 1 << 20, maxHardGroups = (1 << 20) - 1;
   const betaRadius = Math.sqrt(6), betaIntegral = 5 * Math.PI / 16;
   // Seven-point Gaussian quadrature across the flat section, with rounded Gaussian edges.
@@ -275,7 +275,69 @@ const CurveSplat = (() => {
     return true;
   }
 
-  function sample(strand, { origin, direction, axial }, near) {
+  // Approximate isotropic highlights on the strand's nominal section. The
+  // separate coverage kernel still determines opacity and fragment depth.
+  const defaultLight = unit([-.52, .64, .57]);
+  function specular(roughness, normal, viewRay, sun) {
+    if (!normal) return 0;
+    const light = sun?.direction ?? defaultLight, facing = dot(normal, light);
+    if (facing <= 0 || dot(normal, viewRay) >= 0) return 0;
+    const half = unit(light.map((value, i) => value - viewRay[i]));
+    if (!half) return 0;
+    const exponent = 3 + 141 * (1 - roughness) ** 3;
+    return Math.max(0, dot(normal, half)) ** exponent * facing *
+      (.62 - .36 * roughness) * (sun?.intensity ?? 1);
+  }
+
+  function sectionNormal(strand, start, ray, along, entrance, finiteCaps) {
+    const { axis, radius, length, major, minor, flattened } = strand;
+    const offset = start.map((value, i) => entrance * ray[i] - value);
+    const at = dot(offset, along);
+    const position = finiteCaps ? Math.max(0, Math.min(length, at)) : at;
+    const delta = offset.map((value, i) => value - along[i] * position);
+    if (flattened) {
+      const wing = radius * (1 - flatBlur) / flatBlur;
+      delta[1] -= Math.max(-wing, Math.min(wing, delta[1]));
+    }
+    const blur = flattened ? flatBlur : 1;
+    return unit(major ? axis.map((value, i) => value * delta[0] + major[i] * delta[1] / blur +
+      minor[i] * delta[2]) : delta);
+  }
+
+  function radialEntry(start, ray, along, radius, near) {
+    const shift = dot(start, along), tilt = dot(ray, along);
+    const offset = start.map((value, i) => value - along[i] * shift);
+    const direction = ray.map((value, i) => value - along[i] * tilt);
+    const a = dot(direction, direction), b = dot(offset, direction);
+    const disc = b * b - a * (dot(offset, offset) - radius * radius);
+    if (a < 1e-20 || disc < 0) return Infinity;
+    const reach = Math.sqrt(disc);
+    return (b + reach) / a < near ? Infinity : Math.max(near, (b - reach) / a);
+  }
+
+  function softNormal(strand, start, ray, along, near) {
+    const { radius, flattened } = strand;
+    if (!flattened) {
+      const t = radialEntry(start, ray, along, radius, near);
+      return Number.isFinite(t) ? sectionNormal(strand, start, ray, along, t, false) : null;
+    }
+    // Intersect the rounded band in its transverse plane for a flat ribbon.
+    const lateral = radius * (1 - flatBlur) / flatBlur;
+    const limit = Math.abs(ray[2]) > 1e-12 ? (start[2] - Math.sign(ray[2]) * radius) / ray[2] : Infinity;
+    const flat = limit >= near && Math.abs(ray[1] * limit - start[1]) <= lateral ? limit : Infinity;
+    const a = radialEntry([start[0], start[1] - lateral, start[2]], ray, along, radius, near);
+    const b = radialEntry([start[0], start[1] + lateral, start[2]], ray, along, radius, near);
+    const t = Math.min(flat, a, b);
+    return Number.isFinite(t) ? sectionNormal(strand, start, ray, along, t, false) : null;
+  }
+
+  function emissionAt(materials, index) {
+    const at = index * materialStride;
+    return materials?.[at + 1] || materials?.[at + 2] || materials?.[at + 3] ?
+      materials.subarray(at + 1, at + 4) : undefined;
+  }
+
+  function sample(strand, { origin, direction, axial }, near, wantNormal) {
     const { from, axis, radius, length, major, minor, flattened, beta, group, clips } = strand;
     if (clips && !group && !insideProjectedCaps(clips, origin, direction)) return null;
     const offsetFromEye = [from[0] - origin[0], from[1] - origin[1], from[2] - origin[2]];
@@ -294,8 +356,15 @@ const CurveSplat = (() => {
       const interval = clips ? clipInterval(clips, origin, direction, near / axial) : [near / axial, Infinity];
       if (!interval) return null;
       const t = hardEntry(start, ray, along, radius, length, flattened, interval[0] * scale);
-      return Number.isFinite(t) && t <= interval[1] * scale + 1e-9 && strand.opacity >= minimum ?
-        { alpha: strand.opacity, depth: t * axial / scale } : null;
+      if (!Number.isFinite(t) || t > interval[1] * scale + 1e-9 || strand.opacity < minimum) return null;
+      const hit = { alpha: strand.opacity, depth: t * axial / scale };
+      if (wantNormal) {
+        const clipped = clips && interval[0] > near / axial && Math.abs(t / scale - interval[0]) < 1e-8;
+        const plane = clipped && clips.find(({ point, normal }) =>
+          Math.abs(dot(normal, origin) + t / scale * dot(normal, direction) - dot(normal, point)) < 1e-8);
+        hit.normal = plane ? plane.normal.map(value => -value) : sectionNormal(strand, start, ray, along, t, true);
+      }
+      return hit;
     }
     const tau = strand.tau / scale, integrate = beta ? compactKernel : kernel;
     const rayStart = major ? dot(start, ray) : axialStart, parallel = major ? ray[0] : axialSlope;
@@ -305,7 +374,10 @@ const CurveSplat = (() => {
     if (!flattened) {
       const hit = integrate(length, radius, transverse, dx, dy, dz, px, py, pz);
       const coverage = hit && -Math.expm1(-tau * hit.amount);
-      return coverage >= minimum ? { alpha: coverage, depth: Math.max(near, axial * (axialStart + hit.at * axialSlope)) } : null;
+      if (!(coverage >= minimum)) return null;
+      const sample = { alpha: coverage, depth: Math.max(near, axial * (axialStart + hit.at * axialSlope)) };
+      if (wantNormal) sample.normal = softNormal(strand, start, ray, along, near / axial * scale);
+      return sample;
     }
 
     // Integrate parallel strips before turning optical depth into a single fragment.
@@ -322,8 +394,11 @@ const CurveSplat = (() => {
     }
     const normalization = beta ? 35 / (32 * betaRadius * flatBlur) : flatNormalization;
     const coverage = -Math.expm1(-tau * normalization * amount);
-    return coverage >= minimum ? { alpha: coverage, depth: Math.max(near, axial * weightedDepth / amount) } : null;
+    if (coverage < minimum) return null;
+    const hit = { alpha: coverage, depth: Math.max(near, axial * weightedDepth / amount) };
+    if (wantNormal) hit.normal = softNormal(strand, start, ray, along, near / axial * scale);
+    return hit;
   }
-  return Object.freeze({ tag, joinGroups, axialUnits, minimum, clipStride, clipPlanes, isRow, prepare, sample });
+  return Object.freeze({ tag, joinGroups, axialUnits, minimum, clipStride, materialStride, clipPlanes, emissionAt, isRow, prepare, sample, specular });
 })();
 if (typeof module !== 'undefined') module.exports = CurveSplat;

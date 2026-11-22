@@ -314,7 +314,7 @@
           const profiles = config.routedLinkProfiles;
           const profile = profiles && Object.hasOwn(profiles, id) ? profiles[id] : undefined;
           K.curveSplats.draw(B, { kind: 'routed', link }, {
-            ...profile, color: B.P[ramp[Math.floor(ramp.length / 2)]] ?? B.P[1], target
+            paletteRoles: config.paletteRoles, ...profile, color: B.P[ramp[Math.floor(ramp.length / 2)]] ?? B.P[1], target
           });
           continue;
         }

@@ -382,16 +382,18 @@
     return { first, end: B.count(), threads: ranges };
   }
 
-  function world(plan, { appearance, camera, background = '#182232', ...options } = {}) {
+  function world(plan, { appearance, camera, background = '#182232', pal, paletteRoles, ...options } = {}) {
     const c = rgb(background),
-      B = makeBuilder(1, [c[0] * 65536 + c[1] * 256 + c[2], 0xffffff]);
-    draw(B, plan, appearance);
+      B = makeBuilder(1, pal ?? [c[0] * 65536 + c[1] * 256 + c[2], 0xffffff]);
+    draw(B, plan, appearance?.renderer === 'curve-splats' ?
+      { ...appearance, curveProfile: { paletteRoles, ...appearance.curveProfile } } : appearance);
     return B.finish({
       cam: { target: [0, 0, 0], dist: 7, yaw: 0.12, pitch: 0.1, ...camera },
       radius: 100,
       dither: 0,
       fog: { c: 0, start: 1, max: 0 },
       look: { pixelSize: 1, clean: 1, splatCoverage: 'continuous' },
+      ...(paletteRoles !== undefined && { paletteRoles }),
       ...options
     });
   }
