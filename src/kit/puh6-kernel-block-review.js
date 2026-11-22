@@ -8,7 +8,7 @@
   const integer=(value,min,max)=>Number.isSafeInteger(value)&&value>=min&&value<=max;
   const fields=(value,names)=>record(value)&&Object.keys(value).every(key=>names.includes(key));
 
-  function setup(model,path,onBlock,retainEvents=false) {
+  function setup(model,path,onBlock,retainEvents=false,{onMeasure,clock,eventCapacity=W.rates.maxEvents}={}) {
     check(model?.format===W.models.format && ['live','offline'].includes(path),'Block playback needs a model and a valid path');
     const {world,systems,ports}=W.runtime.modelInterface(model), [name]=Object.keys(systems);
     check(world.simulationModel.blockSize!==undefined && systems[name].kernel?.block,
@@ -25,7 +25,26 @@
     const capacity=Math.min(world.simulationModel.blockSize,processor?.capacity.effectiveMaxSamples??W.kernels.maxBlockSize);
     const identity=freeze({id:world.id,revision:world.simulationModel.revision,commands});
     const emptyEvents=()=>Object.fromEntries(eventPorts.map(name=>[name,[]]));
+    const now=clock??(()=>typeof performance==='undefined'?Date.now():performance.now());
+    const peaks=Object.fromEntries(eventPorts.map(name=>[name,{peak:0,attemptedPeak:0,overflows:0}]));
+    let queueOverflows=0;
     let queued=retainEvents?emptyEvents():undefined, cursor=0,next=0,running=false;
+
+    function queues(){
+      return queued?Object.fromEntries(eventPorts.map(name=>[name,{pending:queued[name].length,capacity:eventCapacity,
+        unit:'events',...peaks[name]}])):{};
+    }
+    function report(){
+      const native=processor?.report()??null;
+      return {dt:world.dt,capacity,queueOverflows,queues:queues(),processor:native,
+        memory:{typedStateBytes:native?.memory.stateBytes??W.kernels.stateBytes(session.snapshot()),
+          preparedAllocatedBytes:native?.memory.allocatedBytes??null}};
+    }
+    function measured(start,end,began,status,error){
+      const elapsedMs=now()-began, native=processor?.report().observed;
+      onMeasure({startSample:start,endSample:end,samples:end-start,status,elapsedMs,
+        work:native?.lastWork??null,processorMs:native?.lastMs??null,...(error&&{error:error.message})});
+    }
 
     function checkpoint() {
       return freeze({format:checkpointFormat,version:1,identity,kernel:session.snapshot(),
@@ -36,7 +55,7 @@
       check(!running && saved?.format===checkpointFormat && saved.version===1 &&
         equal(saved.identity,identity) && integer(saved.kernel?.steps,0,W.runtime.maxTick) &&
         (retainEvents ? record(saved.events) && Object.keys(saved.events).length===eventPorts.length &&
-          eventPorts.every(name=>Array.isArray(saved.events[name]) && saved.events[name].length<=W.rates.maxEvents &&
+          eventPorts.every(name=>Array.isArray(saved.events[name]) && saved.events[name].length<=eventCapacity &&
             saved.events[name].every(event=>{
               const sample=event?.timing?.sample;
               return integer(sample,0,saved.kernel.steps-1) &&
@@ -46,6 +65,10 @@
       session.restore(saved.kernel);
       cursor=saved.kernel.steps;
       queued=events;
+      if(queued)for(const name of eventPorts){
+        peaks[name].peak=Math.max(peaks[name].peak,queued[name].length);
+        peaks[name].attemptedPeak=Math.max(peaks[name].attemptedPeak,queued[name].length);
+      }
       Object.assign(levels,defaults);
       next=0;
       while(commands[next]?.sample<cursor) {
@@ -67,25 +90,43 @@
           }
           const start=cursor, end=Math.min(target,cursor+capacity,commands[next]?.sample??Infinity);
           const collect=notify && queued && eventPorts.length;
+          const measuring=notify&&onMeasure, began=measuring?now():null;
           const before=collect?session.snapshot():undefined;
-          let outputs;
+          let outputs,status='ok';
           try {
             if(live) {
-              const status=processor.process(end-start);
+              status=processor.process(end-start);
               if (status!=='ok'&&status!=='deadline') throw Error('Live block playback stopped at sample '+start+' ('+status+')');
               outputs=processor.output;
-            } else outputs=session.advanceBlock({start,end,input:levels});
+            } else {
+              outputs=session.advanceBlock({start,end,input:levels});
+              if(measuring&&processor)status=processor.report().observed.status;
+            }
             if (collect) {
-              check(eventPorts.every(name=>queued[name].length+outputs[name].length<=W.rates.maxEvents),
-                'Block playback event queue is full');
-              for(const name of eventPorts) for(const event of outputs[name]) queued[name].push(event);
+              let full=false;
+              for(const name of eventPorts){
+                const proposed=queued[name].length+outputs[name].length, row=peaks[name];
+                row.attemptedPeak=Math.max(row.attemptedPeak,proposed);
+                if(proposed>eventCapacity){row.overflows++;full=true;}
+              }
+              if(full){queueOverflows++;status='event-capacity';throw Error('Block playback event queue is full');}
+              for(const name of eventPorts){
+                for(const event of outputs[name])queued[name].push(event);
+                peaks[name].peak=Math.max(peaks[name].peak,queued[name].length);
+              }
             }
           } catch(error) {
             if (before) session.restore(before);
             next=beforeCommands;
+            if(measuring){
+              if(status==='ok')status=processor?.report().observed.status;
+              if(!['sample-capacity','work-capacity','event-capacity'].includes(status))status='fault';
+              measured(start,end,began,status,error);
+            }
             throw error;
           }
           cursor=end;
+          if(measuring)measured(start,end,began,status);
           if (notify) onBlock?.(start,end,outputs,processor?.buffers);
         }
         return cursor;
@@ -93,7 +134,7 @@
     }
 
     return {
-      process,snapshot:session.snapshot,buffers:processor?.buffers,eventPorts,capacity,
+      process,snapshot:session.snapshot,buffers:processor?.buffers,eventPorts,capacity,report,queues,
       bufferLayout:processor?.report().memory.buffers,
       identity,checkpoint,install,
       reset() {
@@ -115,10 +156,12 @@
   }
 
   // Useful to a live host without the diagnostic capture or snapshot work on its process path.
-  function playback(model,{path='live',onBlock,checkpoint,retainEvents=checkpoint?.events!==undefined}={}) {
-    check((onBlock===undefined||typeof onBlock==='function')&&typeof retainEvents==='boolean',
-      'Invalid block playback observer or event retention');
-    const play=setup(model,path,onBlock,retainEvents);
+  function playback(model,{path='live',onBlock,checkpoint,retainEvents=checkpoint?.events!==undefined,
+    onMeasure,clock,eventCapacity=W.rates.maxEvents}={}) {
+    check([onBlock,onMeasure,clock].every(value=>value===undefined||typeof value==='function')&&
+      typeof retainEvents==='boolean'&&integer(eventCapacity,1,W.rates.maxEvents),
+      'Invalid block playback observer, clock or event capacity');
+    const play=setup(model,path,onBlock,retainEvents,{onMeasure,clock,eventCapacity});
     if (checkpoint!==undefined) play.install(checkpoint);
     function seek(sample,{checkpoint}={}) {
       check(integer(sample,0,W.runtime.maxTick) && (checkpoint===undefined||checkpoint?.kernel?.steps<=sample),
@@ -133,7 +176,7 @@
         throw error;
       }
     }
-    return Object.freeze({process:count=>play.process(count),snapshot:play.snapshot,buffers:play.buffers,
+    return Object.freeze({process:count=>play.process(count),snapshot:play.snapshot,buffers:play.buffers,report:play.report,queues:play.queues,
       capacity:play.capacity,cursor:play.cursor,checkpoint:play.checkpoint,restore:play.install,
       reset:play.reset,drainEvents:play.drainEvents,seek});
   }

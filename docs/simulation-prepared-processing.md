@@ -96,6 +96,8 @@ modules. The browser uses the same `processor.report()` API. Host-local
 measurements are outside deterministic replay. [Block review](simulation-block-independence.md)
 compares live and offline sample traces with exact or explicitly tolerated numerical differences.
 
+[Measured simulation budgets](simulation-performance-budgets.md) add host timing distributions, queue high-water, and deadline checks across world steps and playback requests.
+
 ## Vent network demo
 
 ```sh

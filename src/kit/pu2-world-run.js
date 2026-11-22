@@ -4,7 +4,7 @@
   const {check,record,id,vector,own,copy,equal,endpoint,portOf} = W.data;
   const factories = new Map();
   const clock = () => typeof performance === 'undefined' ? Date.now() : performance.now();
-  const maxTick = 10000000;
+  const maxTick = 10000000, maxPendingCommands=100000;
   const tickOK = value => Number.isSafeInteger(value) && value >= 0 && value <= maxTick;
   const ordered = value => Object.keys(value).sort();
   const worldActions = ['input','patch','event','transfer'];
@@ -482,6 +482,7 @@
       [edge.to,Array(edge.delay).fill(W.rates.buffered(edge)?W.rates.zero(ports.outputs[edge.from].type):rootOutputs[edge.from])]));
     const metrics = new Map();
     const scheduled = new Map();
+    let eventInputs;
     let commandTicks;
     const added = [];
     const historyLimit = world.history?.limit ?? 10000;
@@ -562,7 +563,7 @@
     }
     function enqueue(commands, log) {
       const entries=parseCommands(commands,log,Math.max(tick,inFlightTick)+1);
-      check(entries.length + packCommands().length <= 100000, 'Pending command budget exceeded');
+      check(entries.length + packCommands().length <= maxPendingCommands, 'Pending command budget exceeded');
       queue(entries,log);
       if(log)evidence?.submit(tick,entries.length);
     }
@@ -1157,12 +1158,12 @@
       publishedSignals = freeze(publishedSignals);
       const routed = eventActions?.route(eventActionCounts, events, at);
       if (routed?.commands.length) {
-        check(routed.commands.length + packCommands().length - commands.length <= 100000, 'Pending command budget exceeded');
+        check(routed.commands.length + packCommands().length - commands.length <= maxPendingCommands, 'Pending command budget exceeded');
         const emit = makeEmit('world');
         for (const row of routed.scheduled) emit('event-action-scheduled', row);
       }
       const submitted=playback?.has(at)?parseCommands(playback.get(at),true,at+1):null;
-      if(submitted)check(submitted.length+(routed?.commands.length??0)+packCommands().length-commands.length<=100000,
+      if(submitted)check(submitted.length+(routed?.commands.length??0)+packCommands().length-commands.length<=maxPendingCommands,
         'Pending command budget exceeded');
       if(observers.length){
         freeze(events);
@@ -1230,7 +1231,8 @@
       lastCheckpoint=undefined;
       for (const [name,{calls,ms}] of Object.entries(spent)) {
         const value = metrics.get(name) ?? {calls:0,ms:0,maxMs:0};
-        metrics.set(name,{...value,calls:value.calls+calls,ms:value.ms+ms,maxMs:Math.max(value.maxMs,ms)});
+        metrics.set(name,{...value,calls:value.calls+calls,ms:value.ms+ms,maxMs:Math.max(value.maxMs,ms),
+          maxCallsPerTick:Math.max(value.maxCallsPerTick??0,calls)});
       }
       if(workerBatches){
         partitionBatches+=workerBatches;
@@ -1356,10 +1358,26 @@
       return freeze({format:runFormat,version:1,origin,commands:added.slice(),end,...(trace&&{trace}),
         ...(evidence&&{evidence:evidence.document(end)})});
     }
+    function queues(){
+      let pending=0;
+      for(const entries of scheduled.values())pending+=entries.length;
+      const rows={commands:{pending,capacity:maxPendingCommands,unit:'commands'}};
+      const capacity=W.rates.maxEvents;
+      eventInputs??=Object.keys(ports.inputs).filter(port=>ports.inputs[port].type==='event');
+      for(const port of eventInputs){
+        if(Array.isArray(sampling?.[port]))rows['events/'+port]={pending:sampling[port].length,capacity,unit:'events'};
+        const slots=delays[port];
+        if(slots)rows['delay/'+port]={pending:slots.reduce((sum,slot)=>sum+slot.length,0),
+          capacity:capacity*slots.length,unit:'events'};
+      }
+      for(const name of names)for(const [port,count] of Object.entries(systems[name].childQueueDepths?.(states[name])??{}))
+        rows['bridge/'+name+'/'+port]={pending:count,capacity,unit:'events'};
+      return rows;
+    }
     return Object.freeze({view,query,projectEntities,step,advance,stepAsync,advanceAsync,...(blockSystem&&{[W.models.heldAdvance]:advanceHeld}),...(timeline&&{timeline}),...(regions&&{regions:regions.api}),
       ...(debug&&{stepFrame:debug.latest,stepAttempt:debug.attempt}),
       get scenario(){return scenario;}, get history(){return history;}, get events(){return lastEvents;},
-      schedule:commands => enqueue(commands,true),checkpoint:save,recording,
+      schedule:commands => enqueue(commands,true),checkpoint:save,recording,queues,
       commandCounts:() => {
         const all=[...origin.pending,...added];
         return {scheduled:all.length,applied:all.filter(command=>command.tick<=tick).length,pending:packCommands().length};

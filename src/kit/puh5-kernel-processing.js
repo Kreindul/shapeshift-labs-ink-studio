@@ -66,7 +66,8 @@
       {get:()=>published[name],enumerable:true}]))));
     let position=0, end=0, requests=0, completed=0, processedSamples=0,
       sampleOverruns=0, workOverruns=0, deadlines=0, faults=0,
-      peakSamples=0, peakWork=0, peakMs=null, lastMs=null, status='ready', work=0, refused=false, lastRequestedSamples=0, lastWork=null, undoCount=0;
+      peakSamples=0,peakWork=0,peakMs=null,lastMs=null,timedBlocks=0,totalMs=0,firstDeadline=null,
+      status='ready', work=0, refused=false, lastRequestedSamples=0, lastWork=null, undoCount=0;
     const context=Object.freeze({get start(){return position;},get end(){return end;},dt,input,output:staged,
       charge(units) {
         check(running && Number.isSafeInteger(units) && units>=0,'Invalid prepared work charge');
@@ -191,8 +192,11 @@
       if (Number.isFinite(elapsed) && elapsed>=0) {
         lastMs=elapsed;
         peakMs=Math.max(peakMs??0,elapsed);
+        timedBlocks++;
+        totalMs+=elapsed;
         if (capacity.deadlineMs!==undefined && elapsed>capacity.deadlineMs) {
           deadlines++;
+          firstDeadline??=Object.freeze({startSample:position-count,endSample:position,elapsedMs:elapsed,deadlineMs:capacity.deadlineMs});
           return status='deadline';
         }
       }
@@ -204,7 +208,8 @@
     const planned=Object.freeze({...capacity,effectiveMaxSamples,workPerSample,workPerBlock,clockAvailable:now!==undefined});
     const report=()=>({capacity:planned,memory,
       observed:{requests,completed,cursor:position,processedSamples,peakSamples,peakWork,peakMs,
-        lastMs,lastRequestedSamples,lastWork,status,overruns:{samples:sampleOverruns,work:workOverruns,deadline:deadlines},faults}});
+        lastMs,timedBlocks,totalMs,meanMs:timedBlocks?totalMs/timedBlocks:null,firstDeadline,
+        lastRequestedSamples,lastWork,status,overruns:{samples:sampleOverruns,work:workOverruns,deadline:deadlines},faults}});
     return Object.freeze({process,rollbackLast,reset,install,input,output:levels,buffers:Object.freeze(publicBuffers),state:Object.freeze(state),
       report,capacity:planned,position:()=>position});
   }

@@ -55,6 +55,7 @@
     return {
       inputs, outputs, fields, module:instanceInfo, shareCheckpoint:true, timedForward:true,
       childProcessing:state=>restore(state).processing(),
+      childQueueDepths:state=>state?.pending?Object.fromEntries(events.map(name=>[name,state.pending[name].length])):{},
       childPlan(state) {
         const ticksPerHostTick = T.seconds(ratio);
         return {

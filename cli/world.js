@@ -535,6 +535,15 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         ensure(other===undefined,'Use sim review <recipe.json> --out directory [--require-match]');
         return require('./aligned-simulation-review.js').command(kit,file,opt);
       }
+      case 'budget': {
+        ensure(typeof file==='string'&&other===undefined&&Object.keys(opt).every(key=>['out','json','require-budget'].includes(key))&&
+          (opt.out===undefined||typeof opt.out==='string')&&(opt['require-budget']===undefined||opt['require-budget']===true),
+        'Use sim budget <plan.json> [--out report.json --require-budget]');
+        const report=require('./simulation-performance.js').run(kit,file,{destination:opt.out,dependency:shot?.dependency});
+        respond(report);
+        if(opt['require-budget']&&!report.passed)process.exitCode=2;
+        return;
+      }
       case 'measure': {
         ensure(typeof file==='string'&&other===undefined&&Object.keys(opt).every(key=>['out','json'].includes(key)),
           'Use sim measure <run.json> [--out report.json]');

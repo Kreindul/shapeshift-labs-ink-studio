@@ -303,6 +303,8 @@
     return firstStatus==='deadline'?'deadline':secondStatus;
   }
 
+  const stateBytes=saved=>Object.values(saved.buffers).reduce((sum,{type,length})=>sum+arrays[type].BYTES_PER_ELEMENT*length,0);
+
   function worldProvider(spec) {
     return (config,{id,world}) => {
       let session;
@@ -327,8 +329,7 @@
           return run.snapshot();
         }}),
         kernel:{kind:spec.kind,revision:spec.revision,description:spec.description,...(spec.block && {block:true}),...(spec.processing && {prepared:true})},
-        typedStateBytes:saved => Object.values(saved.buffers)
-          .reduce((sum,{type,length}) => sum + arrays[type].BYTES_PER_ELEMENT*length,0),
+        typedStateBytes:stateBytes,
         ...(spec.estimate && {estimate:() => spec.estimate(config,{id,seed:world.seed,dt:world.dt})}),
         initial:() => open().snapshot(),
         validateState:saved => { open().restore(saved); },
@@ -415,6 +416,6 @@
     return name;
   }
 
-  W.kernels = Object.freeze({register,prepare,prepareStateTransfer,processPair,inspectBuffers,format,maxBlockSize,operation:name => operations.get(name),
+  W.kernels = Object.freeze({register,prepare,prepareStateTransfer,processPair,inspectBuffers,stateBytes,format,maxBlockSize,operation:name => operations.get(name),
     graphOperations:() => Object.fromEntries(operations)});
 })(KIT);
