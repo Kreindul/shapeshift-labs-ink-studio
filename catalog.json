@@ -1636,6 +1636,17 @@
       "tags": ["sprites", "pixel-art", "animation", "onion-skin"]
     },
     {
+      "id": "kit.sprite.silhouettes",
+      "kind": "api",
+      "status": "ready",
+      "title": "Silhouette tracks",
+      "what": "Hold, replace or smear a painted contour while the sprite pose changes. Register the track to moving view-local pins and inspect it in isolation at native size with onion skins.",
+      "use": "metadata.cels.silhouettes and K.sprite.celPreview.create({ atlas, silhouette })",
+      "where": "src/sprite-transitions.js",
+      "example": "examples/silhouette-tracks.js",
+      "tags": ["sprites", "pixel-art", "animation", "silhouette", "onion-skin"]
+    },
+    {
       "id": "render.spriteOverlayMasks",
       "kind": "api",
       "status": "ready",

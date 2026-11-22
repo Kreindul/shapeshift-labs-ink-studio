@@ -179,7 +179,7 @@ function readCels(definition, dir, metadata) {
   const channels = ['color','depth','normal','emission'];
   if (Array.isArray(definition.replacements)) resolved.replacements = definition.replacements.map(edit =>
     celFiles(edit,dir,celSize(edit,definition,metadata),[...channels,'effect']));
-  if (Array.isArray(definition.transitions)) resolved.transitions = definition.transitions.map(clip => {
+  for (const track of ['transitions','silhouettes']) if (Array.isArray(definition[track])) resolved[track] = definition[track].map(clip => {
     if (!Array.isArray(clip?.frames)) return clip;
     return { ...clip, frames: clip.frames.map(cel => {
       if (cel?.files === undefined) return cel;
@@ -216,7 +216,7 @@ function spriteAtlasManifest(source, emitImage) {
     const {width,height}=celSize(edit,metadata.cels,metadata);
     return {...edit,files:save(images,width,height)};
   });
-  if (metadata.cels?.transitions) metadata.cels.transitions = metadata.cels.transitions.map(clip => {
+  for (const track of ['transitions','silhouettes']) if (metadata.cels?.[track]) metadata.cels[track] = metadata.cels[track].map(clip => {
     const [, , width, height] = clip.rect;
     return { ...clip, frames: clip.frames.map(({images,...cel}) =>
       images ? { ...cel, files: save(images,width,height) } : cel) };

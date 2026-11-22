@@ -170,7 +170,7 @@ const AtlasSprites = (() => {
     function sample(view,x,y,channels,out,band,packet) {
       const rect = view.rect, inside = x >= 0 && y >= 0 && x < rect.width && y < rect.height;
       const transition = packet && edits?.transition?.read(packet,x,y);
-      if (!inside && !transition) return false;
+      if (!transition && (!inside || channels.silhouetteOnly)) return false;
       const index = inside ? ((rect.y+y)*width+rect.x+x)*4 : -4;
       const edit=edits?.edited.get(view), patch=edit?.maps, texel=inside?(y*rect.width+x)*4:-4;
       const bakedAlpha=maps.color[index+3];
@@ -217,8 +217,12 @@ const AtlasSprites = (() => {
       };
     }
     const editedDepth=edits&&Array.from(edits.edited.values()).some(edit=>edit.maps.depth||edit.extensionDepth!==undefined);
+    const transition=edits?.transition;
     return Object.freeze({[assetBrand]:true,select,sample,effect,...(edits?.fringe&&{fringe:edits.fringe}),
-      ...(edits?.transition&&{transition:edits.transition.frame}),playback:mode=>cels.playback(timing,fps,mode),
+      ...(transition&&{transition:transition.frame}),
+      ...(transition?.silhouetteIds.length&&{silhouettes:transition.silhouetteIds,
+        silhouette:(view,time,id)=>transition.silhouetteIds.includes(id) ? transition.frame(view,time,id) : null}),
+      playback:mode=>cels.playback(timing,fps,mode),
       snapshot:()=>({metadata:structuredClone(metadata),images:structuredClone(sourceMaps)}),
       width,height,normalSpace,emissionMode,swatches,largestView:frames.reduce((max,{rect})=>Math.max(max,rect.width*rect.height),0),hasDepth:Boolean(maps.depth||scenery||editedDepth||edits?.transition?.hasDepth),sceneryPlanes:scenery?.planes});
   }

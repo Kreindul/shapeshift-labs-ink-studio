@@ -344,6 +344,9 @@ that already include scene shading or compositing, pass their aligned
 native RGBA buffers to `KIT.sprite.celPreview.fromFrames({ width, height, fps, frames })`.
 Both work with `mountSpriteCelPreview(host, { preview })` from `webgl.mjs`.
 
+For an independently timed outline, use [silhouette tracks](silhouette-tracks.md).
+The preview can isolate one track and align its onion skins at the moving pin.
+
 ## Painted sprite fringes
 
 Add `fringe` to the same `cels` sidecar used for replacements and

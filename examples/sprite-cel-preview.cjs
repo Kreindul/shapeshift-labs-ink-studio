@@ -73,14 +73,22 @@ function study(K) {
 }
 
 function page(workbench) {
-  const preview = ink.load().KIT.sprite.celPreview.create(workbench), unique = [], ids = [], seen = new Map();
-  for (let i=0;i<preview.count;i++) {
-    const key=Buffer.from(preview.inspect(i,{previous:false,next:false}).rgba).toString('base64');
-    if (!seen.has(key)) { seen.set(key,unique.length); unique.push(key); }
-    ids.push(seen.get(key));
+  const { create } = ink.load().KIT.sprite.celPreview;
+  const preview = create(workbench), unique = [], seen = new Map(), variants = [];
+  for (const silhouette of [null, ...(workbench.silhouettes ?? [])]) {
+    const session = silhouette === null ? preview : create({
+      ...workbench, silhouette, origin:workbench.trackOrigin ?? workbench.origin
+    });
+    const ids = [];
+    for (let i=0;i<session.count;i++) {
+      const key=Buffer.from(session.inspect(i,{previous:false,next:false}).rgba).toString('base64');
+      if (!seen.has(key)) { seen.set(key,unique.length); unique.push(key); }
+      ids.push(seen.get(key));
+    }
+    variants.push({ label:silhouette ?? 'Composite', ids });
   }
   const data = JSON.stringify({
-    width:preview.width,height:preview.height,fps:preview.fps,start:preview.start,unique,ids,
+    width:preview.width,height:preview.height,fps:preview.fps,start:preview.start,unique,variants,
     frame:workbench.frame,title:workbench.title,note:workbench.note,zoom:workbench.zoom ?? (preview.width>200 ? 2 : 4)
   }).replace(/</g,'\\u003c');
   const source = file => fs.readFileSync(path.join(__dirname,'..',file),'utf8');
@@ -99,9 +107,13 @@ function page(workbench) {
   h1 { margin:0; font:400 clamp(30px,5.5vw,55px)/1 Georgia,serif; letter-spacing:-.035em; }
   header p { margin:7px 0 0; color:#bdc4c0; }
   #note { max-width:258px; margin:0; font-size:13px; }
+  #view-label { display:block; padding-bottom:12px; }
+  #view-label[hidden] { display:none; }
+  #view { margin-left:7px; font:inherit; padding:5px 8px; color:inherit; background:#30393b; border:1px solid #6a6d66; border-radius:4px; }
 </style>
 <main>
   <header><div><h1 id="title"></h1><p id="subtitle">Sprite cel preview</p></div><p id="note"></p></header>
+  <label id="view-label" hidden>View <select id="view"></select></label>
   <div id="preview"></div>
 </main>
 <script type="module">
@@ -113,8 +125,14 @@ document.querySelector('#title').textContent=data.title;
 document.querySelector('#note').textContent=data.note;
 document.querySelector('#note').hidden=!data.note;
 const decoded=data.unique.map(frame=>Uint8Array.from(atob(frame),ch=>ch.charCodeAt(0)));
-const preview=KIT.sprite.celPreview.fromFrames({...data,frames:data.ids.map(index=>decoded[index])});
-mountSpriteCelPreview(document.querySelector('#preview'),{preview,frame:data.frame,zoom:data.zoom});
+const previews=data.variants.map(({ids})=>KIT.sprite.celPreview.fromFrames({...data,frames:ids.map(index=>decoded[index])}));
+const host=document.querySelector('#preview'), select=document.querySelector('#view');
+const view=mountSpriteCelPreview(host,{preview:previews[0],frame:data.frame,zoom:data.zoom});
+if (previews.length>1) {
+  document.querySelector('#view-label').hidden=false;
+  data.variants.forEach(({label},i)=>select.add(new Option(label,i)));
+  select.addEventListener('change',()=>view.setPreview(previews[+select.value],+host.querySelector('[data-frame]').value));
+}
 </script>
 </html>`;
 }
@@ -122,13 +140,16 @@ mountSpriteCelPreview(document.querySelector('#preview'),{preview,frame:data.fra
 function main() {
   const { positionals, values } = parseArgs({ allowPositionals:true, options:{ atlas:{type:'string'}, width:{type:'string'},
     height:{type:'string'}, fps:{type:'string'}, frames:{type:'string'}, yaw:{type:'string'}, pitch:{type:'string'},
-    mode:{type:'string'} } });
-  if (positionals.length !== 1) throw new Error('Usage: node examples/sprite-cel-preview.cjs OUT.html [--atlas ATLAS.json]');
+    mode:{type:'string'}, silhouette:{type:'string',multiple:true}, demo:{type:'string'} } });
+  if (positionals.length !== 1 || values.demo !== undefined && (values.demo !== 'gale-signal' || values.atlas))
+    throw new Error('Usage: node examples/sprite-cel-preview.cjs OUT.html [--atlas ATLAS.json | --demo gale-signal]');
+  const makeStudy = values.demo ? require('./silhouette-tracks.js').study : study;
   const base = values.atlas ? { atlas:ink.readSpriteAtlas(values.atlas), width:128,height:128,fps:12,count:48,
-    mode:'impostor',frame:0,title:path.basename(values.atlas),note:'' } : study(ink.load().KIT);
+    mode:'impostor',frame:0,title:path.basename(values.atlas),note:'' } : makeStudy(ink.load().KIT);
   const options = { ...base, ...Object.fromEntries(Object.entries(values)
     .filter(([name])=>['width','height','fps','yaw','pitch'].includes(name)).map(([name,v])=>[name,Number(v)])),
-    count:Number(values.frames ?? base.count), mode:values.mode ?? base.mode };
+    count:Number(values.frames ?? base.count), mode:values.mode ?? base.mode,
+    silhouettes:values.silhouette ?? base.silhouettes };
   const out = path.resolve(positionals[0]);
   fs.writeFileSync(out,page(options));
   process.stdout.write(out+'\n');

@@ -84,21 +84,26 @@
 
   function create({ atlas, width = 128, height = 128, origin = [width/2,height/2],
     fps = 12, start = 0, count = 48, mode = 'impostor', yaw = 0, pitch = 0,
-    playback = 'once', viewAt } = {}) {
+    playback = 'once', viewAt, silhouette } = {}) {
     const asset = K.sprite.atlas(atlas);
     check(Array.isArray(origin) && origin.length === 2 && Array.from(origin).every(Number.isFinite) &&
       (viewAt === undefined || typeof viewAt === 'function'), 'expected an XY pivot and an optional view callback');
-    const point = origin.slice(), clock = asset.playback(playback), channels = { depth:true, emission:true };
+    const isolated = silhouette !== undefined;
+    check(!isolated || asset.silhouettes?.includes(silhouette), 'unknown silhouette track');
+    const point = origin.slice(), clock = asset.playback(playback), channels = { depth:true, emission:true, silhouetteOnly:isolated };
     return session({ width,height,fps,start,count,render(time,index) {
       const { mode: selection = mode,yaw: azimuth = yaw,pitch: elevation = pitch,frame = clock(time) } = viewAt?.(time,index) ?? {};
       check(['impostor','card'].includes(selection) && Number.isFinite(azimuth) && Number.isFinite(elevation),
         'view needs card or impostor mode and finite angles');
       const view = asset.select(frame,selection,AtlasSprites.basis(azimuth,elevation).normal);
-      const [left,top] = AtlasSprites.nativeOrigin(view,point[0],point[1]);
-      const { width:w,height:h } = view.rect;
-      const motion = asset.transition?.(view,time), fringe = asset.fringe?.(view,time), effect = asset.effect(view);
-      const texel = { color:[0,0,0], normal:[0,0,0], emission:[0,0,0] }, fx = [0,0,0], layers = [];
+      const motion = isolated ? asset.silhouette(view,time,silhouette) : asset.transition?.(view,time);
       const out = new Uint8Array(width*height*4);
+      if (isolated && !motion) return out;
+      const [left,top] = isolated ? point.map((n,i)=>Math.round(n) - motion.pin[i]) :
+        AtlasSprites.nativeOrigin(view,point[0],point[1]);
+      const { width:w,height:h } = view.rect;
+      const fringe = isolated ? null : asset.fringe?.(view,time), effect = isolated ? null : asset.effect(view);
+      const texel = { color:[0,0,0], normal:[0,0,0], emission:[0,0,0] }, fx = [0,0,0], layers = [];
       for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
         const u=x-left,v=y-top, i=(y*width+x)*4;
         layers.length=0;

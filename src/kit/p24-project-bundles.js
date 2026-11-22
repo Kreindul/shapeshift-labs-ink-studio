@@ -80,8 +80,8 @@
       Object.values(doc.files).forEach(relative);
       const celsFile = typeof doc.cels === 'string' ? resolvePath(file, doc.cels) : file;
       const cels = celsFile === file ? doc.cels : contents(io.text(celsFile));
-      const transitionFrames = (cels?.transitions ?? []).flatMap(clip => clip.frames ?? []);
-      for (const edit of [...(cels?.replacements ?? []), ...transitionFrames])
+      const tracks = [...(cels?.transitions ?? []), ...(cels?.silhouettes ?? [])];
+      for (const edit of [...(cels?.replacements ?? []), ...tracks.flatMap(clip => clip.frames ?? [])])
         for (const ref of Object.values(edit.files ?? {})) if (typeof ref === 'string')
           visitAttachment(resolvePath(celsFile, ref), io, visited);
     } else if (object(doc?.layers) && Number.isSafeInteger(doc.width) && Number.isSafeInteger(doc.height)) {
@@ -112,7 +112,7 @@
     const map = imageMap => Object.fromEntries(Object.entries(imageMap).map(([name, data]) => [name, transform(data)]));
     if (next.cels?.replacements) next.cels.replacements = next.cels.replacements.map(({ images, ...edit }) =>
       ({ ...edit, images: map(images) }));
-    if (next.cels?.transitions) next.cels.transitions = next.cels.transitions.map(clip => ({
+    for (const track of ['transitions','silhouettes']) if (next.cels?.[track]) next.cels[track] = next.cels[track].map(clip => ({
       ...clip, frames: clip.frames.map(cel => cel.images ? { ...cel, images: map(cel.images) } : cel)
     }));
     return { metadata: next, images: map(images) };
