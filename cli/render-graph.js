@@ -97,7 +97,7 @@ function runGraph(plan, frame, world, time, text, camera, resolve, options, proc
       const held = memory && (memory.capture ? new Uint8Array(work.width * work.height * 4) : memory.value);
       const raster =
         node.layer && (!feedback || memory.capture) &&
-        layer(node, w, h, world, time, text, camera, resolve, undefined, options.renderGraphInputs, procedural?.raster, extractDirections);
+        layer(node, w, h, world, time, text, camera, resolve, undefined, options.renderGraphInputs, procedural?.raster, extractDirections, options.t);
       const oldSignal = feedback &&
         memory.capture &&
         memory.decay > 0 && { data: memory.value, w, h, filter: node.filter };

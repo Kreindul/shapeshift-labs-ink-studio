@@ -32,7 +32,7 @@ Fixed legends and world-anchored labels can share a layer with drawing commands.
 
 ## Rasters and screen effects
 
-A raster `source` supplies `{ w, h, rgba }` or `{ w, h, rgb, alpha? }` with top-down byte arrays and straight alpha. The JavaScript API also accepts a synchronous source function. It receives `w`, `h`, `outputWidth`, `outputHeight`, `world`, and `time` and returns a raster matching its native dimensions. This lets animated screen effects draw directly on their own grids. The WebGL renderer uploads each layer at its native size and blends it on the GPU. Scene shading and depth-dependent media use the world grid.
+A raster `source` supplies `{ w, h, rgba }` or `{ w, h, rgb, alpha? }` with top-down byte arrays and straight alpha. The JavaScript API also accepts a synchronous source function. It receives `w`, `h`, `outputWidth`, `outputHeight`, `world`, presentation `time`, and animation `sceneTime` when supplied by the renderer. It returns a raster matching its native dimensions. This lets animated screen effects draw directly on their own grids. The WebGL renderer uploads each layer at its native size and blends it on the GPU. Scene shading and depth-dependent media use the world grid.
 
 Set `needsCamera: true` on a function-backed layer to receive the current
 renderer camera in the source function's `camera` argument. Use it to

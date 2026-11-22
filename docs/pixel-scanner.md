@@ -52,7 +52,8 @@ stage.add(marks);
   timestamps, swatches, and age bands. Use `clear()` to start a fresh scan.
   Ingesting at an earlier time also clears the history. Replay earlier
   pulses to reconstruct the same scan on a seek. Points remain in world
-  space if the object that was scanned later moves.
+  space if the object that was scanned later moves. To track the current pose,
+  bind landmarks to a [surface probe](surface-probe.md).
 
 ## Flooded Station 09
 

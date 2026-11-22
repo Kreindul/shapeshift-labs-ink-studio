@@ -270,7 +270,7 @@ const FrameComposite = (() => {
     return {width,height,channels:4,data:out};
   }
 
-  function layers(plan, world, time, text, camera, resolve, gl, extractDirections) {
+  function layers(plan, world, time, text, camera, resolve, gl, extractDirections, sceneTime) {
     return plan.layers.filter(layer => layer.opacity > 0).map(layer => {
       const { w, h } = layer;
       const layout = layer.layout && annotations.layout(layer.layout,
@@ -281,7 +281,7 @@ const FrameComposite = (() => {
       const gpu = gl && typeof layer.source === 'function' && layer.source[textureSource]?.(gl);
       const result = gpu ? { w: gpu.region[2], h: gpu.region[3], gpu } :
         draw ? drawLayer(layer, plan.w, plan.h, text, camera, draw, false, directions ? 64e6 : undefined, false) : pixels(
-          typeof layer.source === 'function' ? layer.source({ w, h, outputWidth: plan.w, outputHeight: plan.h, world, time, camera }) : layer.source);
+          typeof layer.source === 'function' ? layer.source({ w, h, outputWidth: plan.w, outputHeight: plan.h, world, time, sceneTime, camera }) : layer.source);
       if (result.w !== w || result.h !== h) throw new RangeError('Composite raster dimensions must match the layer resolution');
       return { ...result, dest: layer.dest, filter: layer.filter, blend: layer.blend, opacity: layer.opacity };
     });

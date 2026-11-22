@@ -29,7 +29,8 @@
         gl,
         inputs,
         K.procedural.raster,
-        K.directionDrawing.extract
+        K.directionDrawing.extract,
+        sceneTime
       )
   });
 })(KIT);
