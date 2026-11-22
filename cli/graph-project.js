@@ -345,7 +345,7 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     visiting.add(group);
     const spec=groupSpecs.get(group), {plan,compiled}=compile(spec,scope);
     visiting.delete(group);
-    const outputs=Object.fromEntries(Object.entries(plan.outputs).map(([key,link])=>[key,link.type]));
+    const outputs=Object.fromEntries(Object.entries(plan.outputs).map(([key,{type,quantity}])=>[key,{type,...(quantity && {quantity})}]));
     operationsIn(owner)[name]={...graph.group(spec,{operations:ops,groups:operationsIn(scope),outputs}),
       expandedNodes:plan.expandedNodes};
     preparedGroups.set(alias,{plan,scope,compiled});

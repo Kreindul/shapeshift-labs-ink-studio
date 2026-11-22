@@ -1,6 +1,6 @@
 /* A fixed-tick simulation host with registered systems and portable run state. */
 (function (K) {
-  const W = K.world, P = K.procedural, Q = W.query, freeze = P.data.freeze;
+  const W = K.world, P = K.procedural, Q = W.query, U = K.quantities, freeze = P.data.freeze;
   const {check,record,id,vector,own,copy,equal,endpoint,portOf} = W.data;
   const factories = new Map();
   const clock = () => typeof performance === 'undefined' ? Date.now() : performance.now();
@@ -100,6 +100,44 @@
     check(descriptor && types[descriptor.type]?.(value), 'Invalid value for ' + name);
     return freeze(copy(value));
   }
+  function portDeclarations(spec, system, name) {
+    const declarations = spec.portQuantities === undefined ? {} : spec.portQuantities;
+    check(record(declarations) && Object.entries(declarations).every(([direction, table]) =>
+      ['inputs','outputs'].includes(direction) && record(table) &&
+      Object.keys(table).every(port => own(system[direction],port))),
+    'Unknown port in physical quantity declarations for ' + name);
+    return declarations;
+  }
+  function physicalPort(descriptor, override, path) {
+    if (descriptor.quantity === undefined && override === undefined) return descriptor;
+    check(['number','vec3'].includes(descriptor.type), 'Physical world port ' + path + ' needs number or vec3');
+    const inherited = U.normalize(descriptor.quantity,path), added = U.normalize(override,path);
+    const quantity = {...inherited,...added};
+    U.assertLink(quantity,inherited,path,path);
+    return {...descriptor,quantity};
+  }
+  function physicalRates(world, ports, schedule) {
+    const T = P.takeTime;
+    const rate = world.takeClock?.simulationRate;
+    let base;
+    for (const table of Object.values(ports)) for (const [path, descriptor] of Object.entries(table)) {
+      if (!descriptor.quantity) continue;
+      base ??= rate === undefined ? T.div(T.read(1),T.period(world.dt)) : T.read(rate);
+      const [name] = endpoint(path);
+      const cadences = schedule.chunks?.rates(name) ?? [schedule.rates[name]];
+      const rates = [];
+      for (const {every,substeps} of cadences) {
+        const value = U.rateValue(T.mul(base,[BigInt(substeps),BigInt(every)]));
+        if (!rates.some(rate => U.equalRate(rate,value))) rates.push(value);
+      }
+      const {sampleRate, ...physical} = descriptor.quantity;
+      check(sampleRate === undefined || rates.length === 1 && U.equalRate(sampleRate,rates[0]),
+        'Declared sample rate ' + (sampleRate === undefined ? '' : U.rateText(sampleRate)) +
+        ' on ' + path + ' does not match its schedule (' + rates.map(U.rateText).join(', ') + ')');
+      table[path] = freeze({...descriptor, quantity:{...physical,...(rates.length === 1 && {sampleRate:rates[0]})},
+        ...(rates.length > 1 && {sampleRates:rates})});
+    }
+  }
   function compile(world, implementations = {}, interfacesOnly = false) {
     const systems = {};
     const catalog = W.materials.catalog(world);
@@ -110,13 +148,14 @@
       check(record(spec.config??{}),'Invalid config for '+name);
       const system = factory(spec.config ?? {},{world,id:name,catalog});
       check(record(system) && typeof system.initial === 'function', 'System needs an initial state: ' + name);
+      const declarations = portDeclarations(spec,system,name);
       for (const direction of ['inputs','outputs']) {
         for (const [key,raw] of Object.entries(system[direction] ?? {})) {
           const path = name + '/' + key;
           const descriptor = typeof raw === 'string' ? {type:raw} : raw;
           check(id(key) && record(descriptor) && own(types,descriptor.type), 'Invalid port ' + path);
           const value = portValue(descriptor,descriptor.default ?? defaults[descriptor.type],path);
-          ports[direction][path] = freeze({...descriptor,default:value});
+          ports[direction][path] = freeze({...physicalPort(descriptor,declarations[direction]?.[key],path),default:value});
         }
       }
       for (const [key,handler] of Object.entries(system.actions ?? {}))
@@ -197,6 +236,7 @@
     const transfers = W.transfers.bind(systems);
     for (const name of transfers.producers) systems[name].checkTransfers?.(transfers.validate);
     const schedule = W.rates.schedules(world,systems,chunks);
+    physicalRates(world,ports,schedule);
     const incoming = new Map(), edges = new Map(), indegree = new Map();
     const {contracts,edges:phaseEdges} = W.systemComposition.compile(world,systems);
     for (const name of ordered(systems)) {
@@ -213,6 +253,11 @@
       check(Number.isSafeInteger(delay) && delay >= 0 && delay <= 3600, 'Invalid connection delay');
       check(!incoming.has(edge.to), 'More than one connection feeds ' + edge.to);
       const sample = W.rates.policy(edge,source.type,schedule.active);
+      const varying = source.sampleRates || target.sampleRates;
+      U.assertLink(source.quantity,target.quantity,edge.from,edge.to,{sampled:edge.sample !== undefined || !!varying});
+      if (target.quantity && varying && edge.sample === undefined)
+        throw Error('Incompatible physical ports ' + edge.from + ' -> ' + edge.to +
+          ': variable sample rates need an explicit world sampling policy');
       incoming.set(edge.to,{from:edge.from,to:edge.to,delay,sample});
       if (delay === 0 && sample !== 'average' && systems[from].combinational)
         phaseEdges.push({kind:'signal',from,to,output:edge.from,input:edge.to});

@@ -496,6 +496,8 @@ Declare these types on project inputs, group ports, or library operations.
 
 ### Convert coordinates, time and colour explicitly
 
+Use [physical port quantities](physical-ports.md) to check dimensional units, coordinate frames, directions, and sample rates on numeric connections.
+
 `graph validate` and `graph plan` identify incompatible typed links by
 source and destination port and suggest a conversion when one is available.
 The named types describe ordinary arrays, numbers and raster records.

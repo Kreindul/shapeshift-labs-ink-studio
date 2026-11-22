@@ -49,7 +49,7 @@
       'Model world may supply entities, visual settings, asset packs and metadata');
 
     const systems = Object.fromEntries(entries(source.operators, 'operator').map(([name, spec]) => {
-      check(fields(spec, ['kind', 'revision', 'config', 'schedule', 'contract']) && id(spec.kind) &&
+      check(fields(spec, ['kind', 'revision', 'config', 'schedule', 'contract', 'portQuantities']) && id(spec.kind) &&
         revision(spec.revision) && record(spec.config ?? {}), 'Model operator ' + name + ' needs a kind and pinned revision');
       const {revision: operatorRevision, ...settings} = bindings(spec, source);
       return [name, {...settings, operatorRevision}];

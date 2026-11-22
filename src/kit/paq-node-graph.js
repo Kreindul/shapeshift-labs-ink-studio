@@ -1,6 +1,6 @@
 /* Headless typed graphs with exposed inputs, reusable groups and inspectable cached outputs. */
 (function (K) {
-  const P = K.procedural;
+  const P = K.procedural, U = K.quantities;
   const record = value => value && typeof value === 'object' && !Array.isArray(value);
   const id = value => typeof value === 'string' && /^[a-zA-Z][\w.-]{0,99}$/.test(value) &&
     !['constructor', 'prototype', '__proto__'].includes(value);
@@ -14,7 +14,10 @@
         throw new RangeError('Unknown graph socket ' + name);
       if (Object.hasOwn(config, 'default') && !valid(config.default))
         throw new TypeError('Wrong default type for graph socket ' + name);
-      return [name, { ...config }];
+      const quantity = U.normalize(config.quantity,'Graph socket '+name);
+      if (quantity && (config.type === 'any' || !['number','vec2','vec3'].some(type => compatible(config.type,type))))
+        throw new TypeError('Physical graph socket ' + name + ' needs a scalar or vector type');
+      return [name, { ...config, ...(quantity && {quantity}) }];
     }));
   }
 
@@ -41,13 +44,15 @@
       if (Object.hasOwn(value, 'value')) return literal(value.value);
       if (Object.hasOwn(value, 'input')) {
         if (!Object.hasOwn(specInputs, value.input)) throw new RangeError('Unknown graph input ' + value.input);
-        return { kind: 'input', id: value.input, type: specInputs[value.input].type };
+        const {type, quantity} = specInputs[value.input];
+        return { kind: 'input', id: value.input, type, quantity };
       }
       if (Object.hasOwn(value, 'node')) {
         visit(value.node);
         const config = configs.get(value.node), port = value.port || 'value';
         if (!Object.hasOwn(config.outputs, port)) throw new RangeError('Unknown graph output ' + value.node + '.' + port);
-        return { kind: 'node', id: value.node, port, type: config.outputs[port].type };
+        const {type, quantity} = config.outputs[port];
+        return { kind: 'node', id: value.node, port, type, quantity };
       }
       if (Object.hasOwn(value, 'keys')) {
         const mode = value.mode || 'number';
@@ -79,12 +84,14 @@
         if (!Object.hasOwn(given, key) && !Object.hasOwn(socket, 'default'))
           throw new RangeError('Missing graph socket ' + name + '.' + key);
         const link = binding(Object.hasOwn(given, key) ? given[key] : { value: socket.default });
+        const source = link.kind === 'node' ? link.id + '.' + link.port : link.kind === 'input' ? 'input ' + link.id : 'keyframes';
         if (link.kind !== 'value' && (link.kind !== 'track' || planOnly) && !compatible(link.type,socket.type)) {
-          const source = link.kind === 'node' ? link.id + '.' + link.port : link.kind === 'input' ? 'input ' + link.id : 'keyframes';
           const convert = conversion(link.type, socket.type);
           throw new TypeError('Incompatible graph socket ' + name + '.' + key + ': ' + source + ' provides ' +
             description(link.type) + ', expected ' + description(socket.type) + (convert ? '. Use ' + convert + '.' : '.'));
         }
+        if (link.kind === 'node' || link.kind === 'input')
+          U.assertLink(link.quantity,socket.quantity,source,name+'.'+key);
         const valid=validator(socket.type);
         if (link.kind === 'value' && !valid(link.value))
           throw new TypeError('Wrong value for graph socket ' + name + '.' + key + ': expected ' + description(socket.type));
@@ -262,11 +269,11 @@
 
     function plan({ bindings: detailed = false } = {}) {
       function describe(link) {
-        const { kind, id, port, type } = link;
+        const { kind, id, port, type, quantity } = link;
         if (kind === 'track') return { kind, type, mode:link.mode, keyCount:link.track.keys.length,
           ...(detailed && { keys:link.track.keys }) };
         if (kind === 'value') return { kind, type, ...(detailed && { value:link.value }) };
-        return { kind, type, id, ...(port !== undefined && {port}) };
+        return { kind, type, id, ...(port !== undefined && {port}), ...(quantity && {quantity}) };
       }
       return P.data.clone({
         inputs: specInputs,
@@ -274,7 +281,7 @@
           const {op,group,type,outputs,bindings,clock,seed,asset} = configs.get(name);
           return {id:name,op,...(group!==undefined && {group}),...(type!==undefined && {type}),time:clock,outputs,
             ...(detailed && seed !== undefined && {seed}), ...(detailed && asset !== undefined && {asset}),
-            inputs:Object.fromEntries(bindings.map(([key,socket,link]) => [key,{type:socket.type,source:describe(link)}]))};
+            inputs:Object.fromEntries(bindings.map(([key,socket,link]) => [key,{type:socket.type,...(socket.quantity && {quantity:socket.quantity}),source:describe(link)}]))};
         }),
         outputs: Object.fromEntries(results.map(([name,link]) => [name,describe(link)]))
       });
@@ -296,7 +303,9 @@
 
   function group(spec, { operations, groups, outputs } = {}) {
     const inputTypes = schema(spec.inputs || {});
-    const outputTypes = schema(outputs || Object.fromEntries(Object.keys(spec.outputs || {}).map(name => [name, 'any'])));
+    const inferred = outputs === undefined && create(spec,{operations,groups,planOnly:true}).plan().outputs;
+    const outputTypes = schema(outputs ?? Object.fromEntries(Object.entries(inferred).map(([name,{type,quantity}]) =>
+      [name,quantity ? {type,quantity} : 'any'])));
     return { inputs: inputTypes, outputs: outputTypes, expandedNodes:Object.keys(spec.nodes ?? {}).length, time: true, instantiate() {
       const graph = create(spec, { operations, groups });
       let latest;

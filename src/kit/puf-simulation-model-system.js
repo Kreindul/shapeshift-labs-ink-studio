@@ -9,7 +9,12 @@
       'Simulation-model system ' + id + ' needs an embedded model definition');
     const world = R.validate(config.model), model = world.simulationModel;
     const {systems, ports} = R.prefabInterfaces(world);
-    const selectPorts = (aliases, table) => Object.fromEntries(Object.entries(aliases).map(([name, port]) => [name, table[port]]));
+    const selectPorts = (aliases, table) => Object.fromEntries(Object.entries(aliases).map(([name, port]) => {
+      const descriptor = table[port];
+      if (!descriptor.quantity) return [name, descriptor];
+      const {sampleRate, ...quantity} = descriptor.quantity;
+      return [name, {...descriptor,quantity}];
+    }));
     const inputs = selectPorts(model.inputs, ports.inputs), outputs = selectPorts(model.outputs, ports.outputs);
     const explicit = config.drive ?? [];
     check(Array.isArray(explicit) && new Set(explicit).size === explicit.length && explicit.every(name => own(inputs, name)),

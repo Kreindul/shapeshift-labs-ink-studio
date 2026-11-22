@@ -66,6 +66,7 @@ const assetFixtures = {
   inputAsset: ['inputs', 'input.json'], jsonAsset: ['json', 'input.json']
 };
 const dynamic = {
+  'quantity.convert': {inputs:{value:12.5,from:{unit:'kPa'},to:{unit:'Pa'}}},
   'array.map': { inputs: { items: [1, 2, 3] }, callback: group({ item: 'number' }, 'multiply', { a: param('item'), b: 2 }) },
   'array.filter': { inputs: { items: [1, 2, 3] }, callback: group({ item: 'number' }, 'lessThan', { a: 1, b: param('item') }) },
   'array.reduce': { inputs: { items: [1, 2, 3], initial: 0 },
