@@ -95,12 +95,43 @@ module.exports=function command([mode,file,config],opt,kit) {
     else process.stdout.write(JSON.stringify(P.instrumentPresets,null,2)+'\n');
     return P.instrumentPresets;
   }
+  if (mode==='instrument-library') {
+    if (typeof opt.out==='string') write(opt.out,P.instrumentLibrary);
+    else process.stdout.write(JSON.stringify(P.instrumentLibrary,null,2)+'\n');
+    return P.instrumentLibrary;
+  }
+  if (mode==='instrument-pack') {
+    if (typeof opt.out!=='string') throw new TypeError('Use --out with an instrument pack directory');
+    const {id,guide,patches,kit:sampleKit,assets}=P.loadInstrumentPack(file,config ? read(config) : undefined);
+    const folder=path.resolve(opt.out), bank={};
+    fs.mkdirSync(path.join(folder,'assets'),{recursive:true});
+    for (const [name,audio] of Object.entries(assets)) {
+      const relative='assets/'+name+'.wav';
+      fs.writeFileSync(path.join(folder,relative),WAV.encode(audio,{encoding:'pcm24'}));
+      bank[name]=relative;
+    }
+    const patch=patches[id], manifest=path.join(folder,'instrument.json');
+    write(manifest,{format:'ink-studio/instrument-pack',version:1,id,guide,
+      ...(patch ? {patch} : {kit:sampleKit}),assets:bank});
+    const result={manifest,assets:Object.keys(bank).length};
+    process.stdout.write(JSON.stringify(result)+'\n');
+    return result;
+  }
   if (!file) throw new TypeError('Use music production with a mode and a recipe. Producer modes are plan-audition, review-audition and keep-audition');
   const recipe=read(file);
   const {sources,paths,timeline}=mode==='timeline' ? timelineBank(recipe,file) : {paths:assetPaths(recipe,file)};
   const assets=Object.fromEntries(Object.entries(paths).map(([name,file])=>[name,WAV.read(file)]));
   const production=recipe.production ?? recipe;
   let value;
+  if (mode==='play-kit') {
+    if (!config || typeof opt.out!=='string') throw new TypeError('Use a kit recipe, performance JSON and --out directory');
+    const {events,options}=read(config), folder=path.resolve(opt.out);
+    const result=kit.KIT.procedural.mediaGraph.sampleKit.render(recipe.kit,assets,events,{...options,stems:true});
+    writeTake(folder,result.value,result.stems,result.report);
+    value={mix:path.join(folder,'mix.wav'),report:path.join(folder,'report.json')};
+    process.stdout.write(JSON.stringify(value)+'\n');
+    return value;
+  }
   if (mode==='inspect-instrument') value=P.inspectInstrumentGraph(recipe.patch ?? recipe,assets);
   else if (mode==='inspect') value=P.inspect(production,assets);
   else if (mode==='performances') value=P.planPerformances(production,config ? read(config) : recipe.performances,assets);

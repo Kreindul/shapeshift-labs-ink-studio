@@ -3,7 +3,9 @@
 Use a performance map to decide how each note starts, joins its neighbor,
 or ends. A gap starts a new phrase, nearby strikes at the same pitch can
 repeat, and a nearby different pitch can connect when it fits the interval
-limit. The map is optional on any native production patch.
+limit. The map is optional on any native production patch. Start with a
+[stock performance instrument](music-playable-instruments.md) to hear these
+gestures on a flute, an electric bass, or a prepared-metal kit.
 
 ## Phrase-aware patch
 
@@ -34,7 +36,10 @@ limit. The map is optional on any native production patch.
 
 Gaps and fades are in seconds. The interval is in signed MIDI semitones
 relative to the previous note on the same voice. Select a directional or
-interval-specific rule before a catch-all legato rule. Use `glide` for a
+interval-specific rule before a catch-all legato rule. A rule's optional
+`velocity: [low, high]` matches inclusive bounds against the incoming
+normalized note velocity, before applying the rule's level. Put a
+velocity-specific rule before its general fallback. Use `glide` for a
 native synth transition. A sampler can select an authored transition
 recording instead. Connecting voices crossfade and suppress the outgoing
 key-off articulation. Authored silence and choke groups still apply.
