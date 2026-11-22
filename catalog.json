@@ -1658,6 +1658,17 @@
       "tags": ["camera", "raster", "depth", "picking", "compositing"]
     },
     {
+      "id": "render.tileRaycaster",
+      "kind": "api",
+      "status": "ready",
+      "title": "Tilemap raycaster",
+      "what": "Render a top-down tile grid with indexed walls, sliding doors, floor and ceiling paint, and clipped directional sprites. Outputs color, depth, surface IDs and UVs.",
+      "use": "K.tileRaycaster.create({ map, palette, tiles, doors, sprites })",
+      "where": "src/kit/paz-tile-raycaster.js",
+      "example": "examples/tile-raycaster.js",
+      "tags": ["tilemap", "raycasting", "sprites", "pixel-art", "perspective"]
+    },
+    {
       "id": "render.textile",
       "kind": "api",
       "status": "ready",
