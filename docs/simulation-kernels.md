@@ -110,6 +110,9 @@ Ink obtains the typed state size from the checkpoint buffers.
 For audio-rate and other sample-heavy models, optionally register an
 [`advanceBlock` kernel](simulation-blocks.md) with a preallocated sample loop.
 
+For browser or budgeted block playback, [prepared processing](simulation-prepared-processing.md)
+adds capacity-aware allocation and a reusable processor.
+
 ## Checkpoint demo
 
 ```sh

@@ -155,12 +155,14 @@
       const cadence = cadences[name].map(rate => ({...rate,...(estimateRow.workPerStep &&
         {workPerTick:Object.fromEntries(Object.entries(estimateRow.workPerStep).map(([unit,count]) =>
           [unit,finite(count*rate.visitsPerTick)]))})}));
+      const processing = system.processingReport?.();
       return [name,{
         kind:spec.kind,...(spec.operatorRevision !== undefined && {revision:spec.operatorRevision}),
         cadence,hooks,...(plan.timedSolvers.has(name) && {timedInputs:plan.timedSolvers.get(name),
           maxEventBoundaries:W.timedEvents.maxBoundaries}),worker:partitioned?.has(name) ? 'eligible' : 'host',
         ...(managed && {chunk:{id:managed.chunk,level:chunkState.entries[managed.chunk].level,sleep:chunks.levelIds.at(-1)}}),
         ...(system.childPlan && {child:system.childPlan(state)}),
+        ...(processing && {processing}),
         resources:{stateJsonBytes:bytes(state),...(system.typedStateBytes &&
           {typedStateBytes:system.typedStateBytes(state)}),...estimateRow}
       }];
@@ -178,7 +180,9 @@
       version:1, world:world.id,tick, ...(world.simulationModel &&
         {model:{id:world.simulationModel.id,revision:world.simulationModel.revision}}),
       ...(world.simulationModel?.blockSize !== undefined && {
-        blocks:{maxSamples:world.simulationModel.blockSize,range:'start-inclusive/end-exclusive',
+        blocks:{maxSamples:world.simulationModel.blockSize,
+          ...(lanes[order[0]]?.processing && {effectiveMaxSamples:Math.min(world.simulationModel.blockSize,
+            lanes[order[0]].processing.capacity.effectiveMaxSamples)}),range:'start-inclusive/end-exclusive',
           publication:'block-end',splitsAt:'input commands and requested endpoints'}
       }),
       clock:{dtSeconds:world.dt,hz:finite(hostHz),subdivision,mode:rates ? 'multi-rate' : 'fixed'},

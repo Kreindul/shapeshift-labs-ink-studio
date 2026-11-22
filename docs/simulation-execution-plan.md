@@ -29,7 +29,8 @@ samples the saved endpoint.
   completed model tick at that host boundary.
 - `blocks` shows the maximum range and publication boundary of a
   [sample-rate model](simulation-blocks.md). Its clock still reports the
-  logical sample cadence.
+  logical sample cadence. [Prepared processing](simulation-prepared-processing.md)
+  adds the effective block size, typed buffer layout and capacity counters.
 
 ## Follow a signal
 

@@ -87,13 +87,30 @@
     return spec;
   }
 
-  function prepare(kind, revision, config = {}, {id:instance = 'solver', seed = 1, dt = 1/60} = {}) {
+  function prepare(kind, revision, config = {}, {id:instance = 'solver', seed = 1, dt = 1/60, clock} = {}) {
     const spec = definition(kind,revision);
     check(record(config) && id(instance) && Number.isSafeInteger(seed) && Number.isFinite(dt) && dt > 0 && dt <= 1,
       'Invalid kernel configuration or fixed timestep');
     const settings = freeze({config:clone(config),id:instance,seed,dt});
-    const kernel = spec.prepare(settings.config,{id:instance,seed,dt});
-    check(record(kernel) && ['advance','reset','snapshot','restore'].every(key => typeof kernel[key] === 'function'),
+    const processing=spec.processing ? W.kernelProcessing.create(spec,settings,{arrays,clock,maxStateBytes:maxBytes}) : undefined;
+    function runPrepared(count,input) {
+      Object.assign(processing.input,input);
+      const status=processing.process(count);
+      check(status!=='sample-capacity' && status!=='work-capacity','Prepared kernel '+status+' exceeded');
+      return processing.output;
+    }
+    const kernel = processing ? {
+      reset(){ processing.reset(); return processing.output; },
+      advance(context){ check(context.dt===dt && context.tick===processing.position()+1,'Prepared kernel needs its fixed sample clock');
+        return runPrepared(1,context.input); },
+      advanceBlock({start,end,input}){
+        check(start===processing.position(),'Prepared block needs its fixed sample clock');
+        return runPrepared(end-start,input);
+      },
+      snapshot:()=>({buffers:processing.state})
+    } : spec.prepare(settings.config,{id:instance,seed,dt});
+    check(record(kernel) && ['advance','reset','snapshot'].every(key => typeof kernel[key] === 'function') &&
+      (processing || typeof kernel.restore==='function'),
       'Kernel prepare must return advance, reset, snapshot and restore');
     check(!spec.block || typeof kernel.advanceBlock === 'function', 'Block kernel prepare must return advanceBlock');
     const reactive = Object.values(spec.inputs).some(port=>port.timing==='split');
@@ -127,12 +144,21 @@
       return {outputs, payload:{buffers,...(saved.data !== undefined && {data:clone(saved.data)})}};
     }
 
+    function snapshot() {
+      if (processing && current && current.steps!==processing.position())
+        current=state(values(spec.outputs,processing.output,true),processing.position());
+      return current;
+    }
+    function install(saved,{outputs,payload}) {
+      if (processing) processing.install(payload.buffers,outputs,saved.steps);
+      else kernel.restore(payload);
+    }
     function transact(action) {
-      const before = current;
+      const before = snapshot();
       try { return action(); }
       catch (error) {
         if (before) {
-          try { kernel.restore(decode(before).payload); }
+          try { install(before,decode(before)); }
           catch (cause) { throw Error('Kernel rollback failed after: ' + error.message,{cause}); }
         }
         throw error;
@@ -143,7 +169,7 @@
       return transact(() => current = state(values(spec.outputs,kernel.reset(),true),0));
     }
     function advance(context = {}) {
-      const steps = current.steps+1, {tick = steps, time = tick*dt, dt:step = dt} = context;
+      const steps = snapshot().steps+1, {tick = steps, time = tick*dt, dt:step = dt} = context;
       check(Number.isSafeInteger(steps) && Number.isSafeInteger(tick) && tick > 0 &&
         Number.isFinite(time) && time >= 0 && Number.isFinite(step) && step > 0, 'Invalid kernel advance time');
       const input = values(spec.inputs,context.input ?? {},false);
@@ -164,8 +190,8 @@
       });
     }
     const eventPorts = Object.keys(spec.outputs).filter(port=>spec.outputs[port].type==='event');
-    function advanceBlock({start = current.steps, end, input:source = {}} = {}) {
-      check(start === current.steps && Number.isSafeInteger(end) && end >= start && end-start <= maxBlockSize,
+    function advanceBlock({start = snapshot().steps, end, input:source = {}} = {}) {
+      check(start === snapshot().steps && Number.isSafeInteger(end) && end >= start && end-start <= maxBlockSize,
         'Kernel block needs a contiguous integer range of at most '+maxBlockSize+' samples');
       if (end === start) return eventPorts.length ? freeze({...current.outputs,
         ...Object.fromEntries(eventPorts.map(port=>[port,[]]))}) : current.outputs;
@@ -198,17 +224,21 @@
       });
     }
     function restore(saved) {
-      if (saved === current) return current;
-      const {outputs,payload} = decode(saved);
+      if (saved === snapshot()) return current;
+      const decoded = decode(saved);
       return transact(() => {
-        kernel.restore(payload);
-        const after = state(outputs,saved.steps);
+        install(saved,decoded);
+        const after = state(decoded.outputs,saved.steps);
         check(equal(after.buffers,saved.buffers) && equal(after.data,saved.data), 'Kernel restore did not reproduce its snapshot');
         return current = after;
       });
     }
     reset();
-    return Object.freeze({advance,reset,snapshot:()=>current,restore,...(spec.block && {advanceBlock}),...(reactive && {react})});
+    const processor=processing && Object.freeze({process:processing.process,input:processing.input,
+      output:processing.output,buffers:processing.buffers,capacity:processing.capacity,report:processing.report,
+      snapshot,reset,restore});
+    return Object.freeze({advance,reset,snapshot,restore,...(spec.block && {advanceBlock}),...(reactive && {react}),
+      ...(processor && {processor})});
   }
 
   function worldProvider(spec) {
@@ -226,13 +256,15 @@
       return {
         inputs:spec.inputs, outputs:spec.outputs, shareCheckpoint:true,
         ...(spec.block && {stepBlock}),
+        ...(spec.processing && {processingReport:()=>open().processor.report(),
+          processingLimit:()=>open().processor.capacity.effectiveMaxSamples}),
         ...(Object.values(spec.inputs).some(port=>port.timing==='split') && {react(saved,context) {
           const run = open();
           run.restore(saved);
           run.react(context);
           return run.snapshot();
         }}),
-        kernel:{kind:spec.kind,revision:spec.revision,description:spec.description,...(spec.block && {block:true})},
+        kernel:{kind:spec.kind,revision:spec.revision,description:spec.description,...(spec.block && {block:true}),...(spec.processing && {prepared:true})},
         typedStateBytes:saved => Object.values(saved.buffers)
           .reduce((sum,{type,length}) => sum + arrays[type].BYTES_PER_ELEMENT*length,0),
         ...(spec.estimate && {estimate:() => spec.estimate(config,{id,seed:world.seed,dt:world.dt})}),
@@ -298,19 +330,22 @@
   }
 
   function register(kind, spec) {
-    const {revision = 1, description = 'Creator simulation kernel.', example, block = false} = spec ?? {};
+    const {revision = 1, description = 'Creator simulation kernel.', example, block = spec?.processing!==undefined} = spec ?? {};
     const name = 'kernel.' + kind + '.v' + revision;
     check(id(kind) && name.length <= 100 && positiveRevision(revision) && typeof description === 'string' &&
-      keys(spec,['revision','description','inputs','outputs','prepare','example','estimate','block']) && typeof spec.prepare === 'function' &&
+      keys(spec,['revision','description','inputs','outputs','prepare','example','estimate','block','processing']) && typeof spec.prepare === 'function' &&
       typeof block === 'boolean' && (spec.estimate === undefined || typeof spec.estimate === 'function') &&
       (example === undefined || keys(example,['config','commands','clock'])), 'Invalid simulation kernel registration ' + name);
     const versions = kernels.get(kind) ?? new Map();
     check(!versions.has(revision), 'Duplicate simulation kernel ' + name);
     const inputs = ports(spec.inputs,true), outputs = ports(spec.outputs);
+    const processing=spec.processing===undefined ? undefined : W.kernelProcessing.limits(spec.processing,maxBlockSize);
+    check(!processing || block && [...Object.values(inputs),...Object.values(outputs)]
+      .every(port=>port.type==='number' || port.type==='bool'), 'Prepared kernels need block execution and scalar level ports');
     check(!block || Object.values(inputs).every(port => port.type !== 'event'),
       'Block kernels need level input ports');
     check(!own(outputs,'checkpoint'),'Kernel output checkpoint is reserved for the graph snapshot');
-    const def = freeze({kind,revision,description,inputs,outputs,block,prepare:spec.prepare,estimate:spec.estimate,...(example && {example:clone(example)})});
+    const def = freeze({kind,revision,description,inputs,outputs,block,processing,prepare:spec.prepare,estimate:spec.estimate,...(example && {example:clone(example)})});
     R.register(kind,worldProvider(def),{revision});
     versions.set(revision,def);
     kernels.set(kind,versions);

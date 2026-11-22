@@ -292,7 +292,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
       ...(chunkLevels&&{chunkLevels}),
       ...(workerPool&&{partitions:run.partitions()}),
       systems:Object.keys(checkpoint.states),commands:run.commandCounts(),events:checkpoint.history.length,historyDropped:checkpoint.dropped,
-      scenario:run.scenario,...(world.simulationModel&&{model:W.models.sample(run)}),...(checks?{checks}:{}),...(opt.profile?{profile:run.profile()}:{})};
+      scenario:run.scenario,...(world.simulationModel&&{model:W.models.sample(run)}),...(checks?{checks}:{}),...(opt.profile?{profile:run.profile(),...processingSummary(run)}:{})};
   }
   function saveCheckpoints(sourceStore) {
     const directory=opt['checkpoint-store']==='off'?undefined:opt['checkpoint-store']??sourceStore;
@@ -305,6 +305,10 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
       write(file,{...reference,store:location});
       storage[key]={root:reference.root,...stats};
     } };
+  }
+  function processingSummary(run) {
+    const processing = run.processing();
+    return Object.keys(processing).length ? {processing} : {};
   }
   function finish(run, sourceStore) {
     const checks = opt.assert ? assert(run,read(opt.assert)) : null;

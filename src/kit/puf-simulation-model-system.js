@@ -54,6 +54,7 @@
 
     return {
       inputs, outputs, fields, module:instanceInfo, shareCheckpoint:true, timedForward:true,
+      childProcessing:state=>restore(state).processing(),
       childPlan(state) {
         const ticksPerHostTick = T.seconds(ratio);
         return {

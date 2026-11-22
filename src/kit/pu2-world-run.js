@@ -259,6 +259,11 @@
       }
     }
     const schedule = W.rates.schedules(world,systems,chunks,timedInputs.length>0);
+    for (const [name,system] of Object.entries(systems)) if (system.processingLimit) {
+      const {every,substeps}=schedule.rates[name];
+      check(every===1 && substeps===1 && !chunks?.managed.has(name),
+        'Prepared kernel needs a fixed sample clock: '+name);
+    }
     physicalRates(world,ports,schedule);
     const incoming = new Map(), edges = new Map(), indegree = new Map();
     let filters;
@@ -704,7 +709,9 @@
     }
     const origin = save();
     const evidence=recordRun===undefined||recordRun===false?null:W.runRecords.capture(recordRun,origin,rates,query);
-    const blockSize = world.simulationModel?.blockSize;
+    const authoredBlockSize = world.simulationModel?.blockSize;
+    const blockSize = authoredBlockSize===undefined ? undefined :
+      Math.min(authoredBlockSize,systems[names[0]].processingLimit?.()??authoredBlockSize);
     const blockSystem = blockSize !== undefined && !world.scenario && !weather && !timeline && !eventActions &&
       !causePolicy && !regions && !evidence && !playback && !debug ? names[0] : undefined;
     if(!skipInitialSubmission&&playback?.has(tick))enqueue(playback.get(tick),true);
@@ -1348,6 +1355,10 @@
         const all=[...origin.pending,...added];
         return {scheduled:all.length,applied:all.filter(command=>command.tick<=tick).length,pending:packCommands().length};
       },
+      processing:() => Object.fromEntries(names.flatMap(name=>{
+        const report=systems[name].processingReport?.()??systems[name].childProcessing?.(states[name]);
+        return report && Object.keys(report).length ? [[name,report]] : [];
+      })),
       profile:() => rates && profile ? Object.fromEntries(names.map(name=>[name,
         metrics.get(name)??{calls:0,ms:0,maxMs:0}])) : Object.fromEntries(metrics),
       rates:() => rates ? {subdivision:rates.subdivision,systems:rates.rates} : null,

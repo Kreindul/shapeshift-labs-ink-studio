@@ -60,6 +60,8 @@ observers can still see every host tick while child modules run blocks.
 clock ratio in its parent's. For a standalone block run,
 `sim run --profile` reports logical sample calls, block calls, and
 samples handled by blocks. Timings vary with the kernel and machine.
+[Prepared processors](simulation-prepared-processing.md) can further
+limit the block size based on the compiled model's work budget.
 
 ## Resonator demo
 
