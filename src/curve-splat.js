@@ -437,7 +437,7 @@ const CurveSplat = (() => {
       materials.subarray(at + 1, at + 4) : undefined;
   }
 
-  function sample(strand, { origin, direction, axial }, near, wantNormal) {
+  function sample(strand, { origin, direction, axial }, near, wantNormal, wantDensity) {
     const { from, axis, radius, length, major, minor, flattened, beta, group, clips } = strand;
     if (clips && !group && !insideProjectedCaps(clips, origin, direction)) return null;
     const offsetFromEye = [from[0] - origin[0], from[1] - origin[1], from[2] - origin[2]];
@@ -473,10 +473,13 @@ const CurveSplat = (() => {
     const transverse = Math.hypot(dx, dy, dz);
     if (!flattened) {
       const hit = integrate(length, radius, transverse, dx, dy, dz, px, py, pz);
-      const coverage = hit && -Math.expm1(-tau * hit.amount);
+      if (!hit) return null;
+      const density = tau * hit.amount;
+      const coverage = -Math.expm1(-density);
       if (!(coverage >= minimum)) return null;
       const sample = { alpha: coverage, depth: Math.max(near, axial * (axialStart + hit.at * axialSlope)) };
       if (wantNormal) sample.normal = softNormal(strand, start, ray, along, near / axial * scale);
+      if (wantDensity) sample.density = density;
       return sample;
     }
 
@@ -493,10 +496,12 @@ const CurveSplat = (() => {
       weightedDepth += mass * (axialStart + shift * lateral + hit.at * axialSlope);
     }
     const normalization = beta ? 35 / (32 * betaRadius * flatBlur) : flatNormalization;
-    const coverage = -Math.expm1(-tau * normalization * amount);
+    const density = tau * normalization * amount;
+    const coverage = -Math.expm1(-density);
     if (coverage < minimum) return null;
     const hit = { alpha: coverage, depth: Math.max(near, axial * weightedDepth / amount) };
     if (wantNormal) hit.normal = softNormal(strand, start, ray, along, near / axial * scale);
+    if (wantDensity) hit.density = density;
     return hit;
   }
   return Object.freeze({ tag, joinGroups, axialUnits, minimum, clipStride, materialStride, lightingStride, timingStride, clipPlanes,

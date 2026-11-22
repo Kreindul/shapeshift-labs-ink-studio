@@ -525,6 +525,41 @@ and CLI. Keep `curveSplats` enabled when rendering a timed shot. Run
 the three studies and write their editable curve-scene JSON. Render or clip
 those files with the ordinary CLI and the intended scene times.
 
+## Filter subpixel coverage by material
+
+Use `look.edgeFilter` with the strand's `material` label to choose how its
+coverage resolves. This scene filters `rigging` while keeping the deliberate
+pixel steps of `sign-paint`. Set `strength` to 0 for a single centre sample,
+1 for the full filter, or a value between them to blend. Unmatched materials
+use centre sampling unless the settings include a fallback strength.
+
+```json
+{
+  "look": {
+    "edgeFilter": {
+      "rules": [
+        { "select": { "material": "sign-paint" }, "strength": 0 },
+        { "select": { "material": "rigging" }, "strength": 1 }
+      ]
+    }
+  }
+}
+```
+
+The filter works with the curve's existing `edge` and section settings in
+both headless camera projections. It traces 16 staggered positions per
+native art pixel. Hard profiles resolve overlapping segments of a strand
+once at each sample position. Beta and Gaussian profiles average optical
+depth so dividing a path into more segments preserves its density.
+Coverage resolves before the palette. Include intermediate swatches if
+you want faint partial coverage to survive palette matching.
+
+Run `node examples/curve-splat-coverage.cjs studio/out/curve-splat-coverage`
+for matched pans, an APNG, an editable scene, and measured coverage. The
+normal CLI `--edge-filter off` switch previews centre sampling for all
+materials, and `--edge-filter file.json` previews alternate rules.
+The [edge filtering guide](edge-filter.md) lists all selectors and overrides.
+
 ## Render and compare
 
 The [editable example](../examples/curve-splat-scene.json) uses

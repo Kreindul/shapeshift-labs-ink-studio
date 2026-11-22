@@ -105,14 +105,80 @@ test('the normal render CLI opens an editable JSON curve scene and can switch to
   assert.notDeepEqual(curve.rgb, fallback.rgb);
 });
 
-const band = (frame, x) => {
+const band = (frame, x, from = 0) => {
   let result = 0;
-  for (let y = 0; y < frame.h; y++) result += frame.alpha[y * frame.w + x] / 255;
+  for (let y = from; y < frame.h; y++) result += frame.alpha[y * frame.w + x] / 255;
   return result;
 };
 const straight = [[-2, 0, 0], [2, 0, 0]];
 const profileFrame = style => ink.render(C.world(scene([{ source: straight, ...style }])),
   { ...imageOptions, ortho: true, transparent: true });
+
+test('material edge filtering keeps a half-pixel curve visible through a camera pan', () => {
+  const wire = source([[-1.5, 0, 0], [1.5, 0, 0]], { width: .019, edge: 'hard', material: 'wire' });
+  const mark = source([[-.42,.56,.08], [0,.72,.08], [.42,.56,.08]], {
+    width: .065, edge: 'hard', material: 'paint', color: '#76d6ae'
+  });
+  const world = C.world({ ...scene([wire, mark]), camera: { ...camera, dist: 4 }, look: {
+    edgeFilter: { rules: [{ select: { material: 'paint' }, strength: 0 }, { select: { material: 'wire' } }] }
+  } });
+  for (const ortho of [false, true]) {
+    const options = { w: 96, h: 64, px: 1, raw: true, transparent: true, ortho };
+    const native = [], filtered = [];
+    for (let i = 0; i <= 16; i++) {
+      const view = { ...options, target: [0, i * .043 / 16, 0] };
+      const off = ink.render(world, { ...view, edgeFilter: false }), on = ink.render(world, view);
+      native.push(band(off, 48, 24));
+      filtered.push(band(on, 48, 24));
+      const outline = 24 * on.w;
+      assert.deepEqual(off.alpha.subarray(0, outline), on.alpha.subarray(0, outline));
+      assert.ok(on.alpha.subarray(0, outline).includes(255));
+      if (i === 0) {
+        const enlarged = ink.render(world, { ...view, w: 288, h: 192, px: 3 });
+        assert.deepEqual(enlarged.alpha, on.alpha);
+      }
+    }
+    assert.ok(Math.min(...native) < .01 && Math.max(...native) > .99);
+    assert.ok(Math.min(...filtered) > .4 && Math.max(...filtered) < .61);
+  }
+});
+
+test('filtered strand coverage survives subdivision across hard and optical profiles', () => {
+  const ends = [[-1.5, .03, -.09], [1.5, -.025, .16]];
+  const pieces = Array.from({ length: 101 }, (_, i) => K.V.lerp(...ends, i / 100));
+  for (const edge of ['hard', 'beta', 'gaussian']) {
+    const draw = points => C.world(scene([{ source: points, edge, opacity: .7, width: .045 }]));
+    const options = { ...imageOptions, transparent: true, ortho: false, edgeFilter: true, target: [0, .011, 0] };
+    const a = ink.render(draw(ends), options), b = ink.render(draw(pieces), options);
+    assert.ok(a.alpha.some(value => value > 0 && value < 120));
+    assert.ok(b.alpha.every((value, i) => Math.abs(a.alpha[i] - value) <= 2), edge);
+    const half = ink.render(draw(pieces), { ...options, edgeFilter: { strength: .5 } });
+    assert.notDeepEqual(half.alpha, b.alpha);
+  }
+});
+
+test('filtered coverage blends the visible wire with opaque geometry at its local depth', () => {
+  const wire = source([[-1.6,0,-.7], [1.6,0,.7]], {
+    width: .030, edge: 'hard', material: 'wire', color: '#f3b56b'
+  });
+  const plate = source([[-1.25,0,0], [1.25,0,0]], {
+    width: .24, edge: 'hard', material: 'metal', color: '#76d6ae'
+  });
+  const look = { edgeFilter: { rules: [{ select: { material: 'wire' } }] } };
+  const options = { ...imageOptions, ortho: true, transparent: true, target: [0, .013, 0] };
+  const render = strands => ink.render(C.world({ ...scene(strands), look }), options);
+  const both = render([wire, plate]), backing = render([plate]), single = render([wire]);
+  for (const x of [49, 79]) {
+    assert.ok(single.alpha[37 * single.w + x] > 0);
+    const [r, g, b] = at(both, x, 37);
+    assert.equal(both.alpha[37 * both.w + x], 255);
+    if (x === 49) assert.deepEqual([r, g, b], at(backing, x, 37));
+    else {
+      assert.ok(r > 118 && r < 243);
+      assert.ok(g < 214 && g > 181);
+    }
+  }
+});
 
 test('width and taper use arc length, including for a path with irregular control spacing', () => {
   const fixed = profileFrame({ width: .22 });

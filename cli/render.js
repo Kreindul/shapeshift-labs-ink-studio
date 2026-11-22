@@ -55,6 +55,7 @@ const TranslucentSilhouettes = require('../src/translucent-silhouettes.js');
 const SdfAssist = require('../src/sdf-assist.js');
 const SdfRaster = require('./sdf-assist.js');
 const { footprint, exportOffsets, coverageOffsets, sampledDepth } = require('./splat-sampling.js');
+const CurveCoverage = require('./curve-coverage.js');
 const { createMaskResolve, applyMasks } = require('./look-mask-resolve.js');
 const PalettePixel = require('./palette-pixel.js');
 const PaletteComposition = require('./palette-composition.js');
@@ -1520,6 +1521,7 @@ function renderFrame(world, o, preparedPalettes) {
       (defaultFine || detailBudget?.fineOn) && world.fine && world.fine.length >= baseCount * 12 ? world.fine : null,
     FPAL = FN ? world.pal.map((h, i) => hex(i)) : null;
   let deferred = sortedSurfaces || sdf || emitterHits ? new Map() : null, deferredCount = 0, orderFallback = false;
+  let curveCoverageQueued = false;
   function countDeferred() {
     if (curves && deferredCount >= fragmentBudget)
       throw new RangeError('Curve splat rendering exceeded the fragment budget. Raise fragmentBudget or reduce resolution.');
@@ -1689,6 +1691,19 @@ function renderFrame(world, o, preparedPalettes) {
     if (sprites.length) playSprites(through,sortedSurfaces);
     if (counters && deferred.size) counters.deferredFlushes++;
     for (const [p, layers] of deferred) {
+      if (curveCoverageQueued) {
+        let count = 0;
+        for (const layer of layers) {
+          const entry = layer.lanes ? CurveCoverage.resolve(layer, edgeCoverageThreshold) : layer;
+          if (!entry) continue;
+          if (probe && layer.lanes) {
+            const [i, z,, a, r, g, b] = entry.sample;
+            probe(p, i, entry.center, z, r, g, b, a);
+          }
+          layers[count++] = entry;
+        }
+        layers.length = count;
+      }
       if (sort) {
         layers.sort((a, b) => b.sort - a.sort || a.index - b.index);
         if (blendDepth) blendLayers(layers, blendDepth);
@@ -1738,7 +1753,7 @@ function renderFrame(world, o, preparedPalettes) {
         (reflectionPlane.select && !reflectionPlane.select(i, x, y, z, world)))
     )
       continue;
-    let curve, roughness, curveEmission, curveLight;
+    let curve, curveStrength, curveMargin = 0, roughness, curveEmission, curveLight;
     if (curveCamera && CurveSplat.isRow(d, q)) {
       const position = [x, y, z], curveWorld = shutterRows?.pose(i) ?? world;
       const frame = curveFrames ? curveFrames(i) : null;
@@ -1750,7 +1765,11 @@ function renderFrame(world, o, preparedPalettes) {
           m[k] * direction[0] + m[k + 1] * direction[1] + m[k + 2] * direction[2]) };
       }
       curve = CurveSplat.prepare(d, q, position, SC[i], al, curveCamera, clips, window);
-      if (!curve || curve.bounds[0] >= W || curve.bounds[1] >= H || curve.bounds[2] <= 0 || curve.bounds[3] <= 0) continue;
+      if (!curve) continue;
+      curveStrength = !opticalActive && edgeStrengthAt && edgeStrengthAt(i);
+      if (curveStrength) curveMargin = CurveCoverage.margin;
+      if (curve.bounds[0] - curveMargin >= W || curve.bounds[1] - curveMargin >= H ||
+          curve.bounds[2] + curveMargin <= 0 || curve.bounds[3] + curveMargin <= 0) continue;
       const finish = curveWorld.curveMaterials;
       const encoded = finish?.[i * CurveSplat.materialStride];
       if (encoded) roughness = encoded - 1;
@@ -1993,17 +2012,17 @@ function renderFrame(world, o, preparedPalettes) {
       writesDepth = !opticalActive && solid && coverage === 1 && (!(flags & 1) || curve?.group) &&
         mode !== ContributionRules.softCoverage,
       glass = (flags & 16) !== 0,
-      x0 = Math.max(0, Math.floor(curve ? curve.bounds[0] : sx - ex)),
-      x1 = Math.min(W - 1, Math.ceil(curve ? curve.bounds[2] : sx + ex)),
-      y0 = Math.max(0, Math.floor(curve ? curve.bounds[1] : sy - ey)),
-      y1 = Math.min(H - 1, Math.ceil(curve ? curve.bounds[3] : sy + ey));
+      x0 = Math.max(0, Math.floor(curve ? curve.bounds[0] - curveMargin : sx - ex)),
+      x1 = Math.min(W - 1, Math.ceil(curve ? curve.bounds[2] + curveMargin : sx + ex)),
+      y0 = Math.max(0, Math.floor(curve ? curve.bounds[1] - curveMargin : sy - ey)),
+      y1 = Math.min(H - 1, Math.ceil(curve ? curve.bounds[3] + curveMargin : sy + ey));
     let glassLook;
     if (glass && glassIndex) {
       const target = glassIndex.row(i);
       if (!glassLooks.has(target)) glassLooks.set(target, optics.transform(target));
       glassLook = glassLooks.get(target);
     }
-    const coat = !retainLayers && PIX && (opticalActive || correction || fieldParticle ||
+    const coat = !retainLayers && PIX && (curveStrength || opticalActive || correction || fieldParticle ||
       hasSurface && (!writesDepth || reflectInRaster || surface.reveals(i)));
     if (coat && !surfaceOverlay) surfaceOverlay = new Float32Array(W * H * 4);
     if (audit && (r > 1 || g > 1 || b > 1)) audit.sample('splat', Math.max(0, r), Math.max(0, g), Math.max(0, b));
@@ -2069,8 +2088,9 @@ function renderFrame(world, o, preparedPalettes) {
         const planeRay=planeFrame&&rayAt(ix+.5,iy+.5);
         const planeHit=planeRay&&SplatFootprints.planeSample(shapeCenter,frame,planeRay.origin,planeRay.direction);
         if(planeFrame&&!planeHit)continue;
-        const curveRay = curve && rayAt(ix + .5, iy + .5);
-        const curveHit = curve && CurveSplat.sample(curve, curveRay, near, curveNormal);
+        const curveFootprint = curveStrength && CurveCoverage.footprint(curve, rayAt, ix + .5, iy + .5, near, curveNormal, curveStrength);
+        const curveRay = !curveStrength && curve && rayAt(ix + .5, iy + .5);
+        const curveHit = curveStrength ? curveFootprint?.hit : curveRay && CurveSplat.sample(curve, curveRay, near, curveNormal);
         if (curve && !curveHit) continue;
         const planeDepth = curveHit ? curveHit.depth : planeHit ? planeHit.t * planeRay.axial : undefined;
         if(planeHit&&planeDepth<near)continue;
@@ -2105,7 +2125,8 @@ function renderFrame(world, o, preparedPalettes) {
           const resolved = average + .30*Math.max(0,a-average);
           a += (resolved-a)*coverageWeight;
         }
-        const filteredEdge = (edgeStrength > 0 || coverageWeight > 0) && Math.abs(a - centerAlpha) >= edgeCoverageThreshold;
+        const filteredEdge = (edgeStrength > 0 || coverageWeight > 0 || curveFootprint) &&
+          Math.abs(a - (curveFootprint ? curveFootprint.centerAlpha : centerAlpha)) >= edgeCoverageThreshold;
         a *= geometryWeight;
         if (a < minimumAlpha) continue;
         const p = iy*W+ix, sdfRow = sdf?.rows[i], sdfHit = sdf?.hits[p];
@@ -2208,12 +2229,14 @@ function renderFrame(world, o, preparedPalettes) {
           if (localProbe) [pr,pg,pb] = probes.shade(point,n,[pr,pg,pb],fog,centerFog ? fogMix : 0,localAlbedo);
         }
         if (curveLight || curveHit?.normal || curveEmission) {
+          const [u, v] = curveFootprint?.offset ?? [];
+          const curveView = curveFootprint ? rayAt(ix + .5 + u, iy + .5 + v).direction : curveRay.direction;
           const visibility = centerFog ? 1 - fogMix : 1;
           let gain = 1, shine, scatter = 0;
           if (curveLight) {
-            CurveSplat.directional(curveLight, curve.axis, curveHit.normal, curveRay.direction, curveLightSample);
+            CurveSplat.directional(curveLight, curve.axis, curveHit.normal, curveView, curveLightSample);
             [gain, shine, scatter] = curveLightSample;
-          } else shine = CurveSplat.specular(roughness, curveHit.normal, curveRay.direction, sun);
+          } else shine = CurveSplat.specular(roughness, curveHit.normal, curveView, sun);
           const tint = curveLight?.highlightColor, transmission = curveLight?.transmissionColor;
           const fogKeep = (1 - gain) * (1 - visibility);
           pr = Math.min(1, pr * gain + fog[0] * fogKeep +
@@ -2288,7 +2311,7 @@ function renderFrame(world, o, preparedPalettes) {
         const surfaceZ = sectionZ ?? exact?.z ?? planeDepth ?? (wantsDepth ?
           sampledDepth(rayAt(ix + .5, iy + .5), probeNormal, probeCenter, -cz, probeReach) : -cz);
         if (preciseDepth && surfaceDepth && surfaceZ>surfaceDepth[p]+1e-5) continue;
-        if (probe) probe(p, i, -cz, surfaceZ, pr, pg, pb, a);
+        if (probe && !curveFootprint?.depths) probe(p, i, -cz, surfaceZ, pr, pg, pb, a);
         if (!deep && !blendDepth && !planarFootprints && !curves && deferred && deferredCount >= fragmentBudget) {
           playFragments(false,-cz);
           orderFallback = true;
@@ -2307,7 +2330,17 @@ function renderFrame(world, o, preparedPalettes) {
           const layers = deferred.get(p);
           if (entry.curveGroup) {
             // A hard strand is one coverage shape even where neighboring capsules overlap.
-            const match = layers.findIndex(layer => layer.curveGroup === entry.curveGroup);
+            const match = layers.findIndex(layer => layer.curveGroup === entry.curveGroup &&
+              layer.strength === (curveFootprint?.depths ? curveStrength : undefined));
+            if (curveFootprint?.depths) {
+              const group = CurveCoverage.add(layers[match], entry, curveFootprint);
+              if (group) {
+                countDeferred();
+                if (match < 0) layers.push(group);
+                curveCoverageQueued = true;
+              }
+              continue;
+            }
             if (match >= 0) {
               if (entry.sort <= layers[match].sort) layers[match] = entry;
               continue;
