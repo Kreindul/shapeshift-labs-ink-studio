@@ -1636,6 +1636,17 @@
       "tags": ["sprites", "pixel-art", "animation", "masks", "emission"]
     },
     {
+      "id": "kit.routes.projected",
+      "kind": "api",
+      "status": "ready",
+      "title": "Projected routes",
+      "what": "Project painted ribbons and route-attached sprite cels onto a native art grid. Shared depth hides props behind crests. Supports scrolling strips and registered size-specific cels.",
+      "use": "K.procedural.routes.projected.create({ path, width, strips, props })",
+      "where": "src/kit/paz-projected-routes.js",
+      "example": "examples/projected-routes.js",
+      "tags": ["routes", "pixel-art", "sprites", "perspective", "raster"]
+    },
+    {
       "id": "render.textile",
       "kind": "api",
       "status": "ready",

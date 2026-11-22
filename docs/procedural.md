@@ -97,6 +97,7 @@ const mesh = P.geometry.toKitMesh(geometry, (owner, material) => [.6, .64, .61])
 | `traversal.create({supports, clearance, ...body})` | Ground-following body with bounded displacement, head clearance, step limits and wall sliding |
 | `supportSweep.segment(from, to, patches, options)` | Check continuous support across level footprints with height differences and cutouts |
 | `routes.follower(route, options)` | Distance-based position and a look-ahead frame for cameras or assemblies on sampled routes |
+| `routes.projected.create(options)` | [Project painted roads, tracks and flowing strips](projected-routes.md), with crest occlusion, route-distance props and hand-drawn size cels |
 | `ambientMotion.create(members, {place, move, destination?, step?})` | Seeded roaming, local avoidance, temporary attraction and habitat revalidation |
 | `layerMix.create(layers, {budget})` | Combine continuous controls into bounded per-layer gains with optional fades |
 | `inputActions.compile(contexts)` | Map physical keys and analog controls to semantic actions in named contexts |
