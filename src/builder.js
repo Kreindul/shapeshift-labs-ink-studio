@@ -1057,8 +1057,8 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
       else fallingSnowRanges.push({ first, end });
     }
   }
-  let hasCurveSplats = false;
-  function curveSplat(from, to, radius, color, opacity, profile) {
+  let hasCurveSplats = false, curveGroups = 0;
+  function curveSplat(from, to, radius, color, opacity, profile, edge, group) {
     const delta = to.map((v, i) => v - from[i]), half = Math.hypot(...delta) / 2;
     const center = from.map((v, i) => v + delta[i] * .5), axis = delta.map(v => v / (2 * half));
     if (profile) {
@@ -1067,10 +1067,10 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
         axis[2] * major[0] - axis[0] * major[2], axis[0] * major[1] - axis[1] * major[0]];
       const axial = radius * Math.sqrt(CurveSplat.axialUnits(radius, half));
       dab(...center, normal, axis, axial, radius, radius * aspect, color, opacity,
-        { nd: true, ph: radius, sp: half, rg: aspect, ex: flattened ? CurveSplat.flatMarker : CurveSplat.profileMarker });
+        { nd: true, ph: radius, sp: half, rg: aspect, ex: CurveSplat.tag(flattened ? 2 : 1, edge, group) });
     } else {
       stick(...center, axis, Math.hypot(radius, half / Math.sqrt(3)), radius, color, opacity,
-        { nd: true, ph: radius, sp: half, ex: CurveSplat.marker });
+        { nd: true, ph: radius, sp: half, ex: CurveSplat.tag(0, edge, group) });
     }
     hasCurveSplats = true;
   }
@@ -1283,6 +1283,12 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     dab,
     stick,
     curveSplat,
+    reserveCurveGroups(count) {
+      const first = curveGroups + 1;
+      CurveSplat.tag(0, 'hard', curveGroups + count);
+      curveGroups += count;
+      return first;
+    },
     axial,
     setLight,
     lit,

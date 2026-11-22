@@ -137,12 +137,13 @@
 
   function prepare(source, options = {}) {
     const link = source?.kind === 'routed' ? source.link : undefined;
-    const { radius, width, taper = 1, twist = 0, section, up, profileSamples = 96, opacity = .94, color = '#eab876', object = link?.id ?? 'curve',
+    const { radius, width, taper = 1, twist = 0, section, edge = 'gaussian', up, profileSamples = 96, opacity = edge === 'hard' ? 1 : .94, color = '#eab876', object = link?.id ?? 'curve',
       material = link?.material ?? 'strand', target, maxSegments = segmentLimit } = options;
     const defaultAspect = section === 'flattened' ? .16 : section === 'elliptical' ? .5 :
       section === 'round' || options.twist === undefined ? 1 : .35;
     const aspect = options.aspect === undefined ? defaultAspect : options.aspect;
     check(section === undefined || ['round', 'elliptical', 'flattened'].includes(section), 'expected a round, elliptical or flattened section');
+    check(['gaussian', 'beta', 'hard'].includes(edge), 'expected a gaussian, beta or hard edge');
     check(section !== 'round' || aspect === 1, 'round sections use aspect 1');
     check(section !== 'flattened' || aspect <= .99, 'flattened sections need aspect at most .99');
     check((radius === undefined || finite(radius, 1e-6, 100)) && finite(opacity, 0, 1) && label(object) && label(material) &&
@@ -209,16 +210,19 @@
       }
       return { id, rows };
     });
-    return { object, material, target, opacity, strands, segments, examined };
+    return { object, material, target, opacity, edge, strands, segments, examined };
   }
 
   function emit(builder, plan) {
     check(typeof builder?.curveSplat === 'function', 'expected a native splat builder');
     const first = builder.count(), threads = [];
+    const groups = plan.edge === 'hard' ? plan.strands.filter(strand => strand.rows.length).length : 0;
+    let nextGroup = groups ? builder.reserveCurveGroups(groups) : 0;
     for (const { id, rows } of plan.strands) {
       const start = builder.count();
+      const group = nextGroup && rows.length ? nextGroup++ : undefined;
       for (const { from, to, shade, radius, profile } of rows)
-        builder.curveSplat(from, to, radius, shade, plan.opacity, profile);
+        builder.curveSplat(from, to, radius, shade, plan.opacity, profile, plan.edge, group);
       const end = builder.count();
       builder.describeSplats?.(start, end, {
         object: plan.object, material: plan.material, target: { entity: plan.object, ...plan.target, surface: id }

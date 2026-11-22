@@ -92,7 +92,7 @@ test('the normal render CLI opens an editable JSON curve scene and can switch to
   t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
   const file = name => path.join(folder, name);
   const entry = scene([{ source: { kind: 'spline', points: [[-2,0,0],[-.8,.7,.2],[.8,-.5,-.3],[2,0,0]], samples: 5 },
-    section: 'flattened', width: { samples: [.06, .21, .10] }, twist: [[0, 0], [1, Math.PI]], color: '#f3b56b', object: 'wire' }]);
+    section: 'flattened', edge: 'beta', width: { samples: [.06, .21, .10] }, twist: [[0, 0], [1, Math.PI]], color: '#f3b56b', object: 'wire' }]);
   fs.writeFileSync(file('strand.json'), JSON.stringify(entry));
   const cli = path.resolve(__dirname, '../cli/ink-studio.js');
   for (const mode of ['on', 'off']) {
@@ -194,4 +194,56 @@ test('flattened sections follow the authored path frame and continue across subd
   assert.throws(() => C.draw(B, straight, { section: 'square' }), /round, elliptical or flattened/);
   assert.throws(() => C.draw(B, straight, { section: 'round', aspect: .5 }), /round sections use aspect 1/);
   assert.equal(B.count(), 0);
+});
+
+test('Gaussian is the default, compact Beta ends at its support, and hard coverage has a binary edge', () => {
+  const options = { width: .44, opacity: .94 };
+  const gaussian = profileFrame(options), beta = profileFrame({ ...options, edge: 'beta' });
+  assert.deepEqual(gaussian.alpha, profileFrame({ ...options, edge: 'gaussian' }).alpha);
+  const at = (frame, y) => frame.alpha[y * frame.w + 64];
+  assert.ok(Math.abs(at(beta, 38) - at(gaussian, 38)) <= 2);
+  assert.ok(at(gaussian, 50) > 0);
+  assert.equal(at(beta, 50), 0);
+  assert.ok(beta.alpha.some(value => value > 0 && value < 128));
+
+  const hard = profileFrame({ width: .44, edge: 'hard' });
+  assert.equal(at(hard, 38), 255);
+  assert.ok(hard.alpha.every(value => value === 0 || value === 255));
+  const B = kit.makeBuilder(1, palette);
+  assert.throws(() => C.draw(B, straight, { edge: 'sharp' }), /gaussian, beta or hard/);
+  assert.equal(B.count(), 0);
+});
+
+test('compact and half-opacity hard sections keep their coverage through subdivisions', () => {
+  const pieces = Array.from({ length: 32 }, (_, i) => K.V.lerp(straight[0], straight[1], i / 31));
+  const raster = (source, settings, ortho) => ink.render(C.world(scene([{ source, ...settings }])),
+    { ...imageOptions, ortho, transparent: true });
+  for (const section of ['round', 'elliptical', 'flattened']) for (const edge of ['beta', 'hard']) {
+    const style = { section, edge, width: .4, opacity: .5, twist: .31 };
+    for (const ortho of [false, true]) {
+      const a = raster(straight, style, ortho), b = raster(pieces, style, ortho);
+      assert.ok(a.alpha.some(value => value > 12));
+      assert.ok(a.alpha.every((value, i) => Math.abs(value - b.alpha[i]) <= 1), section + '/' + edge);
+      if (edge === 'hard') assert.ok(b.alpha.every(v => v === 0 || v === 128));
+    }
+  }
+  const view = { ...imageOptions, yaw: Math.PI / 2, transparent: true, ortho: true };
+  const endOn = source => ink.render(C.world(scene([{ source, width: .3, edge: 'beta', opacity: .45 }])), view);
+  const a = endOn(straight), b = endOn(pieces);
+  assert.ok(a.alpha.some(value => value > 128));
+  assert.ok(a.alpha.every((value, i) => Math.abs(value - b.alpha[i]) <= 1));
+});
+
+test('hard strand groups stay distinct when native worlds with the same local IDs are joined', () => {
+  const make = z => {
+    const B = kit.makeBuilder(1, palette);
+    C.draw(B, straight.map(([x, y]) => [x, y, z]), { edge: 'hard', width: .4, opacity: .5, object: 'cord' });
+    return host(B);
+  };
+  const front = make(.3), back = make(-.3);
+  const world = K.procedural.splatProvenance.join([front, back], front);
+  const opts = { ...imageOptions, ortho: true, transparent: true };
+  const single = ink.render(front, opts), combined = ink.render(world, opts);
+  assert.equal(single.alpha[38 * single.w + 64], 128);
+  assert.equal(combined.alpha[38 * combined.w + 64], 191);
 });

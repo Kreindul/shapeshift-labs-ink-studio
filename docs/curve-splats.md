@@ -1,6 +1,6 @@
 # Curve splat sources
 
-Ink can render a 3D path as connected Gaussian segments. The headless renderer
+Ink can render a 3D path as connected splat segments. The headless renderer
 integrates density along each finite segment and composites its colour at the
 segment's local depth. Splitting a straight span preserves its density through
 the joint. Ordinary native splats can share the frame and occlude the curves.
@@ -91,9 +91,9 @@ and twist channels.
 
 | Section | Profile |
 | --- | --- |
-| `round` | Circular Gaussian falloff around the tangent. It uses aspect 1 and keeps its shape under roll. |
-| `elliptical` | Gaussian falloff across two axes. The default minor-to-major ratio is .5. Set `aspect` from .1 to 1 for a narrower or rounder yarn. |
-| `flattened` | A ribbon with nearly uniform density across the face, rounded edges, and a Gaussian falloff through its thickness. The default thickness ratio is .16. Set `aspect` from .1 to .99. |
+| `round` | Circular section around the tangent. It uses aspect 1 and keeps its shape under roll. |
+| `elliptical` | Two transverse axes. The default minor-to-major ratio is .5. Set `aspect` from .1 to 1 for a narrower or rounder yarn. |
+| `flattened` | A ribbon with a broad face, rounded edges, and a narrower thickness axis. The default thickness ratio is .16. Set `aspect` from .1 to .99. |
 
 A compiled path supplies its transported frame. Named elliptical and flattened
 sections on textile charts use the chart normal as the thin axis. Raw polylines
@@ -110,12 +110,37 @@ K.curveSplats.draw(builder, ribbon, {
 });
 ```
 
-The headless renderer integrates the ribbon's lateral density with seven
-Gaussian quadrature samples and combines it into one fragment per segment and
-pixel. This keeps the profile continuous across straight subdivisions.
+For soft edges, the headless renderer integrates the ribbon's lateral density
+with seven quadrature samples and combines it into one fragment per segment
+and pixel. This keeps the profile continuous across straight subdivisions.
 Existing recipes also accept the implicit section chosen by `aspect` or `twist`.
 The [section comparison](../examples/curve-splat-sections.json) is editable
 and renders with the normal still and clip commands.
+
+## Choose an edge profile
+
+Set `edge` on the strand or in a textile's `curveProfile` or a routed
+link's profile. Each edge works with round, elliptical, and flattened sections.
+
+| Edge | Coverage |
+| --- | --- |
+| `gaussian` | The default soft falloff. Good for fibres, ink washes, and glowing strands. |
+| `beta` | A compact quadratic Beta kernel integrated over the finite segment. Coverage smoothly reaches zero. Its radius of support is √6 times the Gaussian section scale in the corresponding section coordinates. A flattened section integrates the bounded kernel across its band. |
+| `hard` | A binary test of the art pixel's camera ray against the swept section. Inside pixels use the strand's authored opacity, which defaults to 1 in this mode. Adjacent segments share one coverage shape and contribute once per strand per pixel. |
+
+The hard round and elliptical modes use capsules in the section's coordinates.
+Hard flattened ribbons use a rounded band. Depth comes from the first
+intersection. The hard edge is evaluated at the pixel centre, so preserve the
+intended art resolution when previewing it. The two soft modes default to
+opacity .94.
+
+```js
+K.curveSplats.draw(builder, path, { section: 'flattened', edge: 'hard', width: .18 });
+```
+
+Open the [editable edge comparison](../examples/curve-splat-edges.json) or run
+`node examples/curve-splat-edges.cjs studio/out/curve-splat-edges` to render
+the matched orbit and measured coverage plots.
 
 ## Render and compare
 

@@ -1,7 +1,9 @@
-/* Finite Gaussian strands carried by ordinary native splat rows. */
+/* Finite strand kernels carried by ordinary native splat rows. */
 const CurveSplat = (() => {
   // Kind zero leaves the motion payload free. Preserve the tag through native row copies.
-  const marker = -161291.375, profileMarker = -161292.375, flatMarker = -161293.375, minimum = 1e-5;
+  const marker = -161291.375, minimum = 1e-5;
+  const hardBase = 1 << 20, maxHardGroups = (1 << 20) - 1;
+  const betaRadius = Math.sqrt(6), betaIntegral = 5 * Math.PI / 16;
   // Seven-point Gaussian quadrature across the flat section, with rounded Gaussian edges.
   const flatBlur = .25, flatNormalization = 1 / (Math.sqrt(2 * Math.PI) * flatBlur);
   const ribbonSamples = [
@@ -10,7 +12,7 @@ const CurveSplat = (() => {
     [.405845151377397, .381830050505119], [.741531185599394, .279705391489277],
     [.949107912342759, .129484966168870]
   ];
-  const alongX = [1, 0, 0];
+  const alongX = [1, 0, 0], alongY = [0, 1, 0];
   // Keep the axial eigenvalue separate from the transverse values even for very short spans.
   const axialUnits = (radius, half) => Math.max(4, Math.min(64, 1 + (half / radius) ** 2 / 3));
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -19,11 +21,36 @@ const CurveSplat = (() => {
     const length = Math.hypot(...a);
     return length > 0 ? a.map(v => v / length) : null;
   };
-  const isRow = (data, at) => {
-    const tag = data[at + 15];
-    return (tag === marker || tag === profileMarker || tag === flatMarker) &&
-      (data[at + 11] & 15) === 0 && data[at + 12] > 0 && data[at + 13] > 0;
+  function tag(section, edge, group) {
+    if (edge === 'hard') {
+      if (!Number.isSafeInteger(group) || group < 1 || group > maxHardGroups)
+        throw new RangeError('Hard curve splat group budget exceeded');
+      return -(hardBase + group * 4 + section);
+    }
+    return marker - section - (edge === 'beta' ? 3 : 0);
+  }
+  function hardGroup(value) {
+    const packed = -value - hardBase;
+    return Number.isInteger(packed) && packed >= 4 && packed <= maxHardGroups * 4 + 2 &&
+      (packed & 3) < 3 ? packed >> 2 : 0;
+  }
+  const sectionOf = value => {
+    const code = marker - value;
+    return Number.isInteger(code) && code >= 0 && code <= 5 ? code % 3 :
+      hardGroup(value) ? (-value - hardBase) & 3 : -1;
   };
+  const isRow = (data, at) => sectionOf(data[at + 15]) >= 0 &&
+    (data[at + 11] & 15) === 0 && data[at + 12] > 0 && data[at + 13] > 0;
+
+  function joinGroups(data, first, count, nextGroup) {
+    const remap = new Map();
+    for (let i = first; i < first + count; i++) {
+      const at = i * 16 + 15, value = data[at], old = hardGroup(value);
+      if (!old || !isRow(data, at - 15)) continue;
+      if (!remap.has(old)) remap.set(old, nextGroup());
+      data[at] = tag(sectionOf(value), 'hard', remap.get(old));
+    }
+  }
 
   function profiledDimensions(radius, half, aspect, scale, xx, xy, xz, yy, yz, zz) {
     const ratio = aspect * aspect, longitudinal = axialUnits(radius, half);
@@ -48,11 +75,11 @@ const CurveSplat = (() => {
     };
   }
 
-  function dimensions(data, at, scale) {
+  function dimensions(data, at, scale, section) {
     const radius = data[at + 12], half = data[at + 13];
     const xx = data[at + 4], xy = data[at + 5], xz = data[at + 6];
     const yy = data[at + 8], yz = data[at + 9], zz = data[at + 10];
-    if (data[at + 15] !== marker)
+    if (section !== 0)
       return profiledDimensions(radius, half, data[at + 14], scale, xx, xy, xz, yy, yz, zz);
     // The carrier stores the covariance of a uniform segment convolved with a round Gaussian.
     // Its principal axis also follows native rigid transforms. Recover the uniform scale from the trace.
@@ -73,8 +100,11 @@ const CurveSplat = (() => {
   }
 
   function prepare(data, at, position, scale, opacity, { view, near, focal, width, height, ortho }) {
-    const shape = dimensions(data, at, scale);
+    const packed = data[at + 15], section = sectionOf(packed);
+    if (section < 0) return null;
+    const shape = dimensions(data, at, scale, section);
     if (!shape) return null;
+    const group = hardGroup(packed), beta = !group && marker - packed >= 3, flattened = section === 2;
     const { axis, radius, half } = shape;
     const cameraPoint = p => [0, 1, 2].map(i => p[0] * view[i] + p[1] * view[i + 4] + p[2] * view[i + 8] + view[i + 12]);
     const start = position.map((v, i) => v - half * axis[i]);
@@ -87,7 +117,8 @@ const CurveSplat = (() => {
     const length = (last - first) * 2 * half;
     if (!(length > 0)) return null;
     const from = start.map((v, i) => v + first * (end[i] - v));
-    const bounds = [Infinity, Infinity, -Infinity, -Infinity], support = 5 * radius;
+    const bounds = [Infinity, Infinity, -Infinity, -Infinity];
+    const support = radius * (group ? (flattened ? 2 : 1) : beta ? betaRadius + Number(flattened) : 5);
     for (const u of [first, last]) {
       const [x, y, z] = a.map((v, i) => v + u * (b[i] - v));
       const depth = Math.max(near, -z), magnification = ortho ? focal : focal / depth;
@@ -101,9 +132,8 @@ const CurveSplat = (() => {
       bounds[3] = Math.max(bounds[3], sy + ey);
     }
     const middle = a.map((v, i) => v + (first + last) / 2 * (b[i] - v));
-    const flattened = data[at + 15] === flatMarker;
     return { from, axis, radius, length, bounds, middle, major: shape.major, minor: shape.minor, flattened,
-      tau: -Math.log1p(-Math.min(.999, opacity)) };
+      group, beta, opacity, tau: -Math.log1p(-Math.min(.999, opacity)) };
   }
 
   // The integral is optical depth per unit strength, with the nearest point on the sampled axis.
@@ -125,46 +155,130 @@ const CurveSplat = (() => {
     return { at, amount: integral * Math.exp(-offset * offset) };
   }
 
+  function betaPrimitive(x) {
+    const square = x * x;
+    return (x * Math.sqrt(Math.max(0, 1 - square)) * (33 - 26 * square + 8 * square * square) +
+      15 * Math.asin(x)) / 48;
+  }
+
+  // A quadratic Beta ball leaves exponent 5/2 after integrating along the camera ray.
+  function compactKernel(length, radius, transverse, dx, dy, dz, px, py, pz) {
+    const limit = radius * betaRadius;
+    if (transverse * length < 1e-4 * limit) {
+      const at = length / 2;
+      const q = 1 - (Math.hypot(px + at * dx, py + at * dy, pz + at * dz) / limit) ** 2;
+      return q > 0 ? { at, amount: q ** 2.5 * length / (limit * betaIntegral) } : null;
+    }
+    const center = -(px * dx + py * dy + pz * dz) / (transverse * transverse);
+    const q = 1 - (Math.hypot(px + center * dx, py + center * dy, pz + center * dz) / limit) ** 2;
+    if (q <= 0) return null;
+    const scale = transverse / (limit * Math.sqrt(q));
+    const first = Math.max(-1, -center * scale), last = Math.min(1, (length - center) * scale);
+    if (last <= first) return null;
+    return { at: Math.max(0, Math.min(length, center)),
+      amount: q ** 3 * (betaPrimitive(last) - betaPrimitive(first)) / (transverse * betaIntegral) };
+  }
+
+  function sphereEntry(center, ray, radius, near) {
+    const at = dot(center, ray), offset = center.map((v, i) => v - at * ray[i]);
+    const disc = radius * radius - dot(offset, offset);
+    if (disc < 0) return Infinity;
+    const reach = Math.sqrt(disc);
+    return at + reach < near ? Infinity : Math.max(near, at - reach);
+  }
+
+  function capsuleEntry(start, ray, axis, length, radius, near) {
+    const shift = dot(start, axis), tilt = dot(ray, axis);
+    const end = start.map((v, i) => v + length * axis[i]);
+    let first = Math.min(sphereEntry(start, ray, radius, near), sphereEntry(end, ray, radius, near));
+    if (first === near) return near;
+    const origin = start.map((v, i) => v - shift * axis[i]);
+    const direction = ray.map((v, i) => v - tilt * axis[i]);
+    const a = dot(direction, direction), b = dot(origin, direction);
+    const c = dot(origin, origin) - radius * radius;
+    const atNear = near * tilt - shift;
+    if (atNear >= 0 && atNear <= length && a * near * near - 2 * b * near + c <= 0) return near;
+    const disc = b * b - a * c;
+    if (a > 1e-20 && disc >= 0) {
+      const t = (b - Math.sqrt(disc)) / a, along = t * tilt - shift;
+      if (t >= near && along >= 0 && along <= length) first = Math.min(first, t);
+    }
+    return first;
+  }
+
+  function boxEntry(start, ray, min, max, near) {
+    let from = near, to = Infinity;
+    for (let i = 0; i < 3; i++) {
+      const lo = start[i] + min[i], hi = start[i] + max[i];
+      if (Math.abs(ray[i]) < 1e-12) {
+        if (lo > 0 || hi < 0) return Infinity;
+      } else {
+        const a = lo / ray[i], b = hi / ray[i];
+        from = Math.max(from, Math.min(a, b));
+        to = Math.min(to, Math.max(a, b));
+        if (from > to) return Infinity;
+      }
+    }
+    return from;
+  }
+
+  function hardEntry(start, ray, along, radius, length, flattened, near) {
+    if (!flattened) return capsuleEntry(start, ray, along, length, radius, near);
+    // The band is a rounded rectangle swept along the path. Its box and four edge
+    // capsules form one solid; report the earliest hit across the union.
+    const half = radius * (1 - flatBlur) / flatBlur;
+    const lower = [start[0], start[1] - half, start[2]], upper = [start[0], start[1] + half, start[2]];
+    const end = [start[0] + length, lower[1], start[2]];
+    return Math.min(boxEntry(start, ray, [0, -half, -radius], [length, half, radius], near),
+      capsuleEntry(lower, ray, alongX, length, radius, near), capsuleEntry(upper, ray, alongX, length, radius, near),
+      capsuleEntry(lower, ray, alongY, 2 * half, radius, near), capsuleEntry(end, ray, alongY, 2 * half, radius, near));
+  }
+
   function sample(strand, { origin, direction, axial }, near) {
-    const { from, axis, radius, length, major, minor, flattened } = strand;
+    const { from, axis, radius, length, major, minor, flattened, beta, group } = strand;
     const offsetFromEye = [from[0] - origin[0], from[1] - origin[1], from[2] - origin[2]];
     const axialStart = dot(offsetFromEye, direction), axialSlope = dot(axis, direction);
-    let start = offsetFromEye, ray = direction, along = axis, tau = strand.tau;
+    let start = offsetFromEye, ray = direction, along = axis, scale = 1;
     if (major) {
       // Whiten the section and integrate the Gaussian along the transformed ray.
       const blur = flattened ? flatBlur : 1;
       start = [dot(axis, offsetFromEye), dot(major, offsetFromEye) / blur, dot(minor, offsetFromEye)];
       ray = [axialSlope, dot(major, direction) / blur, dot(minor, direction)];
-      const rayScale = Math.hypot(...ray);
-      ray = ray.map(v => v / rayScale);
+      scale = Math.hypot(...ray);
+      ray = ray.map(v => v / scale);
       along = alongX;
-      tau /= rayScale;
     }
+    if (group) {
+      const t = hardEntry(start, ray, along, radius, length, flattened, near * scale / axial);
+      return Number.isFinite(t) && strand.opacity >= minimum ? { alpha: strand.opacity, depth: t * axial / scale } : null;
+    }
+    const tau = strand.tau / scale, integrate = beta ? compactKernel : kernel;
     const rayStart = major ? dot(start, ray) : axialStart, parallel = major ? ray[0] : axialSlope;
     const px = start[0] - rayStart * ray[0], py = start[1] - rayStart * ray[1], pz = start[2] - rayStart * ray[2];
     const dx = along[0] - parallel * ray[0], dy = along[1] - parallel * ray[1], dz = along[2] - parallel * ray[2];
     const transverse = Math.hypot(dx, dy, dz);
     if (!flattened) {
-      const hit = kernel(length, radius, transverse, dx, dy, dz, px, py, pz);
+      const hit = integrate(length, radius, transverse, dx, dy, dz, px, py, pz);
       const coverage = hit && -Math.expm1(-tau * hit.amount);
       return coverage >= minimum ? { alpha: coverage, depth: Math.max(near, axial * (axialStart + hit.at * axialSlope)) } : null;
     }
 
-    // Integrate the parallel Gaussian strips before turning optical depth into a single fragment.
+    // Integrate parallel strips before turning optical depth into a single fragment.
     let amount = 0, weightedDepth = 0;
     const lateral = dot(major, direction);
     for (const [offset, weight] of ribbonSamples) {
       const shift = offset * radius, whitened = shift / flatBlur, alongRay = whitened * ray[1];
-      const hit = kernel(length, radius, transverse, dx, dy, dz,
+      const hit = integrate(length, radius, transverse, dx, dy, dz,
         px - alongRay * ray[0], py + whitened - alongRay * ray[1], pz - alongRay * ray[2]);
       if (!hit) continue;
       const mass = weight * hit.amount;
       amount += mass;
       weightedDepth += mass * (axialStart + shift * lateral + hit.at * axialSlope);
     }
-    const coverage = -Math.expm1(-tau * flatNormalization * amount);
+    const normalization = beta ? 35 / (32 * betaRadius * flatBlur) : flatNormalization;
+    const coverage = -Math.expm1(-tau * normalization * amount);
     return coverage >= minimum ? { alpha: coverage, depth: Math.max(near, axial * weightedDepth / amount) } : null;
   }
-  return Object.freeze({ marker, profileMarker, flatMarker, axialUnits, minimum, isRow, prepare, sample });
+  return Object.freeze({ tag, joinGroups, axialUnits, minimum, isRow, prepare, sample });
 })();
 if (typeof module !== 'undefined') module.exports = CurveSplat;

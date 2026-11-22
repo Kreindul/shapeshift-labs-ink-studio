@@ -102,8 +102,10 @@ const SplatProvenance = (() => {
     const moving = [], back = [], splatIds = [], surfaces = [], ramps = [], rampOff = [], pats = [], paintRows = [], paintDecals = [];
     const withIds = parts.some(part => part.splatIds ?? part.ids);
     const rampIds = new Map(), patternIds = new Map();
-    let offset = 0;
+    let offset = 0, curveGroups = 0;
+    const curveAPI = result.curveSplats && (typeof CurveSplat === 'undefined' ? require('./curve-splat.js') : CurveSplat);
     for (const part of parts) {
+      if (curveAPI && part.curveSplats) curveAPI.joinGroups(result.data, offset, part.count, () => ++curveGroups);
       const base = surfaces.length;
       for (const surface of part.surfaces ?? []) surfaces.push(surface);
       const remapRamps = part.ramps?.map((ramp, i) => {

@@ -1956,7 +1956,8 @@ function renderFrame(world, o, preparedPalettes) {
       b += (fog[2] - b) * fogMix;
     }
     const solid = al >= 1,
-      writesDepth = !opticalActive && solid && coverage === 1 && !(flags & 1) && mode !== ContributionRules.softCoverage,
+      writesDepth = !opticalActive && solid && coverage === 1 && (!(flags & 1) || curve?.group) &&
+        mode !== ContributionRules.softCoverage,
       glass = (flags & 16) !== 0,
       x0 = Math.max(0, Math.floor(curve ? curve.bounds[0] : sx - ex)),
       x1 = Math.min(W - 1, Math.ceil(curve ? curve.bounds[2] : sx + ex)),
@@ -2244,13 +2245,23 @@ function renderFrame(world, o, preparedPalettes) {
           const entry = { sort: (flags & 4 || (deep || blendDepth) && backRows?.has(i)) ? Infinity : surfaceZ, index: n, center: exact?.z ?? -cz,
             transparent: !wd && !exact && !(flags & 4) && !(blendDepth && backRows?.has(i)), opacity: a,
             pane: blendDepth && glass && bend ? renderMeta?.objectIds?.[i] || -pk - 1 : 0,
+            curveGroup: curve?.group,
             sample: [i, surfaceZ, normalizedDepth(surfaceZ), a, pr, pg, pb,
               wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, lookPass && { ...lookPass.mark },
               opticalDepth, undefined, fogMix, rule, reflected?.slice(), filteredEdge, 1, sectionTint>0, claim,
               paintStage && paintColor(samplePaint), surfaceMatte] };
-          countDeferred();
           if (!deferred.has(p)) deferred.set(p, []);
-          deferred.get(p).push(entry);
+          const layers = deferred.get(p);
+          if (entry.curveGroup) {
+            // A hard strand is one coverage shape even where neighboring capsules overlap.
+            const match = layers.findIndex(layer => layer.curveGroup === entry.curveGroup);
+            if (match >= 0) {
+              if (entry.sort <= layers[match].sort) layers[match] = entry;
+              continue;
+            }
+          }
+          countDeferred();
+          layers.push(entry);
         } else composite(p, i, sectionZ ?? exact?.z ?? planeDepth ?? -cz, sectionZ !== undefined || exact || planeHit ? normalizedDepth(surfaceZ) : dn,
           a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, lookPass?.mark, opticalDepth,
           undefined, fogMix, rule, reflected, filteredEdge, 1, sectionTint>0, claim, paintStage && paintColor(samplePaint),surfaceMatte);
