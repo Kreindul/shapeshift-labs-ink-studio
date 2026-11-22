@@ -185,6 +185,7 @@
       if (!roles) continue;
       staged(base + '.renderStages', settings.renderStages, eligible, surface, { ...context, roles });
       const layers = Object.entries(settings.layers ?? {}).filter(([id, layer]) => rgbLayer(layer?.type) ||
+        SurfaceLook.facingColors.isDirectionalLayer(layer) ||
         (id === 'lookAssetRamp' && settings.lookAssetId && layer?.lightingRamp));
       if (!layers.length && settings.paletteConstraint === undefined && !settings.facingColors) continue;
       check(base, () => SurfaceLook.prepare(settings, world.pal, undefined, world.surfaceEffects, {

@@ -32,16 +32,18 @@ const SplatFrames = (() => {
       const blend = skinned ? skinRows[q + 14] : 0;
       const second = blend ? skinRows[q + 13] : 0;
 
-      if (matrix) {
-        const key = [part ? 'rig' : 'bones', bone, second, blend].join(',');
+      function matrixFrame(secondary, weight) {
+        if (!matrix) return null;
+        const key = [part ? 'rig' : 'bones', bone, secondary, weight].join(',');
         if (!matrices.has(key)) {
           const rows = matrix.slice(bone * 12, bone * 12 + 9);
-          if (blend) for (let j = 0; j < 9; j++) rows[j] += (matrix[second * 12 + j] - rows[j]) * blend;
+          if (weight) for (let j = 0; j < 9; j++) rows[j] += (matrix[secondary * 12 + j] - rows[j]) * weight;
           const inverse = Math.abs(M.det(rows)) > 1e-8 ? M.inv(rows) : null;
           matrices.set(key, inverse && { basis: rows, inverse, normal: M.tr(inverse) });
         }
+        return matrices.get(key);
       }
-      const transform = matrix ? matrices.get([part ? 'rig' : 'bones', bone, second, blend].join(',')) : null;
+      const transform = matrixFrame(second, blend);
       const angle = kind === 5 ? time * data[q + 13] : 0;
       const c = Math.cos(angle), s = Math.sin(angle);
       if (normal && transform) normal = M.app(transform.normal, normal);
@@ -124,6 +126,17 @@ const SplatFrames = (() => {
           return { anchor: fragment?.rotation ?? (orbit && posed ? M.mul(orbit, posed) : orbit || posed || [1,0,0,0,1,0,0,0,1]),
             covariance: kind === 12 || kind === 13 ? posed : orbit };
 
+        },
+        worldCovector(axis) {
+          const local = transform ? M.app(transform.normal, axis) : axis;
+          return angle ? [c * local[0] + s * local[2], local[1], c * local[2] - s * local[0]] : local;
+        },
+        localDirection(x, y, z) {
+          const offset = [c * x - s * z, y, c * z + s * x];
+          if (fragment?.transpose) return M.app(fragment.transpose, offset);
+          // The primary bone carries the shape's local axes in the splat shader.
+          const local = skinned && blend ? matrixFrame(0, 0) : transform;
+          return local ? M.app(local.inverse, offset) : offset;
         },
         localOffset(x, y, z) {
           const offset = [c * x - s * z, y, c * z + s * x];
