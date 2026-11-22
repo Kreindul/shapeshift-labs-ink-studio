@@ -1,6 +1,7 @@
 // An orthographic depth map and hemisphere lighting for the posed splats.
 const ColorSpace = require('../src/color-space.js');
 const ShadowArt = require('../src/shadow-art.js');
+const CurveSplat = require('../src/curve-splat.js');
 const linear = ColorSpace.prepare('srgb', 'srgb-linear');
 const srgb = ColorSpace.prepare('srgb-linear', 'srgb');
 const luminance = rgb => .2126 * rgb[0] + .7152 * rgb[1] + .0722 * rgb[2];
@@ -70,18 +71,74 @@ function covariance(data, i, a, b) {
     a[2] * (data[i+6]*b[0] + data[i+9]*b[1] + data[i+10]*b[2]);
 }
 
-function shadowMap(sun, data, { x, y, z, alpha, scale }, normalAt, casts) {
+function curveLayer(layers, range, opacity, group) {
+  for (let i = layers.length - 1; i >= 0 && group; i--) {
+    const layer = layers[i];
+    if (layer.group !== group || !CurveSplat.overlapsDepth(layer.range, range)) continue;
+    if (layer.range[1] > range[1]) opacity = layer.opacity;
+    range[0] = Math.min(range[0], layer.range[0]);
+    range[1] = Math.max(range[1], layer.range[1]);
+    layers.splice(i, 1);
+  }
+  layers.push({ range, opacity, group });
+}
+
+function rasterCurves(casters, map, axes, { minU, minV, width, height, texel }) {
+  const [right, up, light] = axes, layers = new Map();
+  const ray = { origin: [0, 0, 0], direction: light.map(value => -value), axial: 1 };
+  const rayAt = () => ray;
+  let fragments = 0;
+  for (const strand of casters) {
+    const [umin, vmin, umax, vmax] = strand.bounds;
+    const eye = dot(strand.from, light) + Math.max(0, strand.length * dot(strand.axis, light)) + 6 * strand.radius + 1e-4;
+    const partial = strand.opacity < 1 || strand.pattern?.dash?.offOpacity > 0;
+    const x0 = Math.max(0, Math.ceil((umin - minU) / texel - .5)),
+      x1 = Math.min(width - 1, Math.floor((umax - minU) / texel - .5)),
+      y0 = Math.max(0, Math.ceil((vmin - minV) / texel - .5)),
+      y1 = Math.min(height - 1, Math.floor((vmax - minV) / texel - .5));
+    for (let y = y0; y <= y1; y++) {
+      const v = minV + (y + .5) * texel;
+      for (let x = x0; x <= x1; x++) {
+        const u = minU + (x + .5) * texel;
+        for (let i = 0; i < 3; i++) ray.origin[i] = u * right[i] + v * up[i] + eye * light[i];
+        const hit = CurveSplat.sampleAt(strand, rayAt, u, v, 0, false, false, !!strand.group && partial);
+        if (!hit) continue;
+        const index = y * width + x, depth = eye - hit.depth;
+        if (hit.alpha >= 1) map[index] = Math.max(map[index], depth);
+        else if (depth > map[index]) {
+          if (++fragments > 2e6) throw new RangeError('Curve shadows exceeded the translucent shadow fragment budget');
+          if (!layers.has(index)) layers.set(index, []);
+          curveLayer(layers.get(index), [eye - (hit.exitDepth ?? hit.depth), depth], hit.alpha, strand.group);
+        }
+      }
+    }
+  }
+  return layers;
+}
+
+function shadowMap(sun, data, { x, y, z, alpha, scale }, normalAt, casts, curveAt) {
   if (!sun.shadows || !sun.intensity) return null;
   const light = sun.direction;
   const right = unit(cross(Math.abs(light[1]) > .94 ? [0,0,1] : [0,1,0], light));
   const up = cross(light, right);
-  const casters = [];
+  const casters = [], strands = [];
+  const curveCamera = curveAt && { ortho: true, width: 0, height: 0, focal: 1, near: -Infinity,
+    view: [0,1,2].flatMap(i => [right[i], up[i], light[i], 0]).concat(0,0,0,1) };
   let minU = Infinity, minV = Infinity, maxU = -Infinity, maxV = -Infinity;
   for (let i = 0; i < alpha.length; i++) {
     const q = i * 16;
+    if (!Number.isFinite(alpha[i]) || alpha[i] <= 0 || y[i] < -30 || casts && !casts(i)) continue;
+    const curve = curveAt?.(i, curveCamera);
+    if (curve) {
+      minU = Math.min(minU, curve.bounds[0]);
+      minV = Math.min(minV, curve.bounds[1]);
+      maxU = Math.max(maxU, curve.bounds[2]);
+      maxV = Math.max(maxV, curve.bounds[3]);
+      strands.push(curve);
+      continue;
+    }
     // Opaque surface samples cast. Glass, backdrop art and outline-free particles are excluded.
-    if (!Number.isFinite(alpha[i]) || alpha[i] < 1 || y[i] < -30 || (Math.round(data[q + 11]) & (16 | 64 | 256)) ||
-        casts && !casts(i)) continue;
+    if (alpha[i] < 1 || (Math.round(data[q + 11]) & (16 | 64 | 256))) continue;
     const point = [x[i], y[i], z[i]], u = dot(right, point), v = dot(up, point), depth = dot(light, point);
     const s2 = scale[i] ** 2;
     const a = s2 * covariance(data, q, right, right), b = s2 * covariance(data, q, right, up),
@@ -95,7 +152,7 @@ function shadowMap(sun, data, { x, y, z, alpha, scale }, normalAt, casts) {
     maxV = Math.max(maxV, v + dv);
     casters.push({ i, u, v, depth, a, b, c, extent, reach: 2*Math.sqrt(Math.max(0, s2 * covariance(data, q, light, light))) });
   }
-  if (!casters.length) return null;
+  if (!casters.length && !strands.length) return null;
   const guard = sun.filter + 2;
   const texel = Math.max(maxU - minU, maxV - minV, 1e-6) / (sun.mapSize - 2 * guard - 1);
   const width = Math.ceil((maxU - minU) / texel) + 2 * guard;
@@ -128,6 +185,8 @@ function shadowMap(sun, data, { x, y, z, alpha, scale }, normalAt, casts) {
       }
     }
   }
+  const curveDepth = strands.length ? rasterCurves(strands, map, [right, up, light],
+    { minU, minV, width, height, texel }) : null;
 
   return (x, y, z, normal, facing) => {
     const u = (x*right[0] + y*right[1] + z*right[2] - minU) / texel;
@@ -143,7 +202,16 @@ function shadowMap(sun, data, { x, y, z, alpha, scale }, normalAt, casts) {
       for (let dx = -sun.filter; dx <= sun.filter; dx++) {
         const col = i + dx;
         const expected = depth + (col + .5 - u)*slopeU + (row + .5 - v)*slopeV;
-        if (row < 0 || row >= height || col < 0 || col >= width || map[row*width+col] <= expected + bias) clear++;
+        if (row < 0 || row >= height || col < 0 || col >= width) clear++;
+        else {
+          const index = row * width + col, cutoff = expected + bias;
+          if (map[index] <= cutoff) {
+            let through = 1;
+            const layers = curveDepth?.get(index);
+            if (layers) for (const layer of layers) if (layer.range[1] > cutoff) through *= 1 - layer.opacity;
+            clear += through;
+          }
+        }
         count++;
       }
     }
@@ -151,7 +219,7 @@ function shadowMap(sun, data, { x, y, z, alpha, scale }, normalAt, casts) {
   };
 }
 
-function create(sun, world, pose, normalAt, cloudShadow, exposure, { shadowArt, footprint, probes } = {}) {
+function create(sun, world, pose, normalAt, cloudShadow, exposure, { shadowArt, footprint, probes, curveAt } = {}) {
   // Albedo exists on opted-in sculpt bakes and explicitly described builder rows.
   // Older pixel-material bakes still carry the original material ramps.
   const fill = new Int32Array(pose.alpha.length).fill(-1);
@@ -169,7 +237,7 @@ function create(sun, world, pose, normalAt, cloudShadow, exposure, { shadowArt, 
   const art = ShadowArt.prepare(shadowArt ?? world.look?.shadowArt);
   const receives = ShadowArt.bind(art, world, 'receive');
   const coarse = ShadowArt.small(art, footprint);
-  const shadow = shadowMap(sun, world.data, pose, normalAt, ShadowArt.bind(art, world, 'cast'));
+  const shadow = shadowMap(sun, world.data, pose, normalAt, ShadowArt.bind(art, world, 'cast'), curveAt);
   const facing = new Float32Array(fill.length);
   const indirect = (sun.sky || sun.ground) && new Float32Array(fill.length * 3);
   for (let i = 0; i < normals.length; i++) {
@@ -197,6 +265,12 @@ function create(sun, world, pose, normalAt, cloudShadow, exposure, { shadowArt, 
     ), coarse) : 1;
     const [x, y, z] = point;
     return geometry * (cloudShadow?.(x, y, z) ?? 1) * (exposure?.(x, y, z) ?? 1);
+  }
+  function curveVisibility(i, point, normal = sun.direction) {
+    if (!shadow || receives && !receives(i)) return 1;
+    const cosine = dot(normal, sun.direction);
+    const toward = cosine < 0 ? normal.map(value => -value) : normal;
+    return ShadowArt.transfer(art, shadow(...point, toward, Math.abs(cosine)), coarse);
   }
   const level = (i, x, y, z) => sun.ambient + sun.intensity * facing[i] * visibility(i, x, y, z);
   const indirectScratch = [0,0,0];
@@ -228,7 +302,7 @@ function create(sun, world, pose, normalAt, cloudShadow, exposure, { shadowArt, 
     const n = fill[i];
     return n >= 0 ? [(n >> 16)/255, (n >> 8 & 255)/255, (n & 255)/255] : null;
   };
-  return { albedo, normal: i => normals[i], level, gains, rampLevel, visibility, transmissionVisibility,
+  return { albedo, normal: i => normals[i], level, gains, rampLevel, visibility, transmissionVisibility, curveVisibility,
     indirectAt, hasBounce: Boolean(indirect || probes) };
 }
 

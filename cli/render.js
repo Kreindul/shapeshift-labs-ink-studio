@@ -1349,6 +1349,19 @@ function renderFrame(world, o, preparedPalettes) {
     SC[i] = sc;
     depth[i] = V[2] * x + V[6] * y + V[10] * z + V[14];
   }
+  function prepareCurve(i, camera, carrier, forShadow = false) {
+    const position = [X[i], Y[i], Z[i]], frame = curveFrames ? curveFrames(i) : null;
+    const clips = CurveSplat.clipPlanes(carrier.curveClips, i, position, SC[i], frame);
+    let window = curveWindows?.[i];
+    if (window && frame && (window.first > 0 || window.last < 1)) {
+      const { direction } = window, m = frame.basis().anchor;
+      window = { ...window, direction: [0, 3, 6].map(k =>
+        m[k] * direction[0] + m[k + 1] * direction[1] + m[k + 2] * direction[2]) };
+    }
+    const pattern = CurvePattern.attach(carrier, i, frame, camera, forShadow);
+    return CurveSplat.prepare(d, i * 16, position, SC[i], AL[i], camera, clips, window,
+      forShadow ? undefined : curveWidthAt?.(i), pattern);
+  }
   const probes = ProbeLighting.create(world,o.bounceProbes,baseSky,sun,o[reconstructionSource]);
   function receivesDiffuse(i) {
     return i >= 0 && i < baseCount && AL[i] >= 1 && !(Math.round(d[i*16+11]) & (16 | 32 | 64 | 128 | 256 | 2048 | 32768)) &&
@@ -1359,8 +1372,14 @@ function renderFrame(world, o, preparedPalettes) {
   if (sun) {
     const frames = sampleFrames(world, t), normals = [];
     const normalAt = i => normals[i] ?? (normals[i] = frames(i).normal ?? false);
+    const curveAt = curves && (world.curveShadows || shutterRows) ? (i, camera) => {
+      if (i >= baseCount) return;
+      const carrier = shutterRows?.pose(i) ?? world;
+      if ((carrier.curveShadows?.[i] & CurveSplat.castShadow) && CurveSplat.isRow(d, i * 16))
+        return prepareCurve(i, camera, carrier, true);
+    } : undefined;
     live = LiveSun.create(sun, world, { x: X, y: Y, z: Z, alpha: AL, scale: SC }, normalAt, cloudShadow, exposure?.light,
-      { shadowArt: o.shadowArt, footprint: shadowFootprint,
+      { shadowArt: o.shadowArt, footprint: shadowFootprint, curveAt,
         probes: probes && ((i,x,y,z,n) => n && probeReceiver(i) ? probes.sample([x,y,z],n) : null) });
   }
   const contact = contactSettings && ContactDepth.create(contactSettings, world, d, { x:X, y:Y, z:Z, alpha:AL, scale:SC },
@@ -1417,7 +1436,7 @@ function renderFrame(world, o, preparedPalettes) {
         sameSpan });
     } else SplatOrder.stabilize(order, tolerance, depthAt, transparentAt, undefined, sameSpan);
   }
-  const mediaOptions = (water || aerial || cloudView || (deep || blendDepth) && volumes.length) && atmosphereOptions();
+  const mediaOptions = (water || aerial || cloudView || (curves || deep || blendDepth) && volumes.length) && atmosphereOptions();
   const hazeCoverage = effectRules?.ramps.get('fog')?.geometry && world.fog.max > 0 && new Float32Array(W * H);
   const rayMedia = mediaOptions ? mediaSampler(volumes, water, rayAt, W, mediumHorizon, {
     ...mediaOptions, reflection, reflectionBackground: bg, reflectionDetail:o.reflectionDetail, waterTransition: blendDepth,
@@ -1757,19 +1776,10 @@ function renderFrame(world, o, preparedPalettes) {
         (reflectionPlane.select && !reflectionPlane.select(i, x, y, z, world)))
     )
       continue;
-    let curve, curveStrength, curveMargin = 0, roughness, curveEmission, curveLight;
+    let curve, curveStrength, curveMargin = 0, roughness, curveEmission, curveLight, curveReceives;
     if (curveCamera && CurveSplat.isRow(d, q)) {
-      const position = [x, y, z], curveWorld = shutterRows?.pose(i) ?? world;
-      const frame = curveFrames ? curveFrames(i) : null;
-      const clips = CurveSplat.clipPlanes(curveWorld.curveClips, i, position, SC[i], frame);
-      let window = curveWindows?.[i];
-      if (window && frame && (window.first > 0 || window.last < 1)) {
-        const { direction } = window, m = frame.basis().anchor;
-        window = { ...window, direction: [0, 3, 6].map(k =>
-          m[k] * direction[0] + m[k + 1] * direction[1] + m[k + 2] * direction[2]) };
-      }
-      const pattern = CurvePattern.attach(curveWorld, i, frame, curveCamera);
-      curve = CurveSplat.prepare(d, q, position, SC[i], al, curveCamera, clips, window, curveWidthAt?.(i), pattern);
+      const curveWorld = shutterRows?.pose(i) ?? world;
+      curve = prepareCurve(i, curveCamera, curveWorld);
       if (!curve) continue;
       curveStrength = !opticalActive && edgeStrengthAt && edgeStrengthAt(i);
       if (curveStrength) curveMargin = CurveCoverage.margin;
@@ -1779,6 +1789,7 @@ function renderFrame(world, o, preparedPalettes) {
       const encoded = finish?.[i * CurveSplat.materialStride];
       if (encoded) roughness = encoded - 1;
       curveLight = CurveSplat.lightingAt(curveWorld.curveLighting, i, roughness, sun);
+      curveReceives = live && sun.shadows && sun.intensity && (curveWorld.curveShadows?.[i] & CurveSplat.receiveShadow);
       if (!world.renderMetadata?.muteEmission?.[i]) curveEmission = CurveSplat.emissionAt(finish, i);
     }
     const cx = curve ? curve.middle[0] : V[0] * x + V[4] * y + V[8] * z + V[12],
@@ -2084,7 +2095,7 @@ function renderFrame(world, o, preparedPalettes) {
       return SplatFootprints.coverage(shaped,m[0]*u+m[1]*v,m[2]*u+m[3]*v);
     }
     const geometryCode = geometryMask?.codes[i];
-    const curveNormal = curveLight ? curveLight.needsNormal : roughness !== undefined;
+    const curveNormal = curveReceives || (curveLight ? curveLight.needsNormal : roughness !== undefined);
     for (let iy = y0; iy <= y1; iy++) {
       const dy = iy + 0.5 - sy;
       for (let ix = x0; ix <= x1; ix++) {
@@ -2096,7 +2107,7 @@ function renderFrame(world, o, preparedPalettes) {
         if(planeFrame&&!planeHit)continue;
         const curveFootprint = curveStrength && CurveCoverage.footprint(curve, rayAt, ix + .5, iy + .5, near, curveNormal, curveStrength);
         const curveHit = curveStrength ? curveFootprint?.hit :
-          curve && CurveSplat.sampleAt(curve, rayAt, ix + .5, iy + .5, near, curveNormal);
+          curve && CurveSplat.sampleAt(curve, rayAt, ix + .5, iy + .5, near, curveNormal, false, !!curve.group);
         if (curve && !curveHit) continue;
         const planeDepth = curveHit ? curveHit.depth : planeHit ? planeHit.t * planeRay.axial : undefined;
         if(planeHit&&planeDepth<near)continue;
@@ -2250,15 +2261,20 @@ function renderFrame(world, o, preparedPalettes) {
           if (directReceiver) [pr,pg,pb] = directLight(p,point,n,[pr,pg,pb],fog,centerFog ? fogMix : 0,i);
           if (localProbe) [pr,pg,pb] = probes.shade(point,n,[pr,pg,pb],fog,centerFog ? fogMix : 0,localAlbedo);
         }
-        if (curveLight || curveHit?.normal || curveEmission) {
+        if (curveLight || curveHit?.normal || curveEmission || curveReceives) {
           const [u, v] = curveFootprint?.offset ?? [0, 0];
-          const curveView = rayAt(ix + .5 + u, iy + .5 + v).direction;
+          const ray = rayAt(ix + .5 + u, iy + .5 + v), curveView = ray.direction;
+          const shade = curveReceives ? live.curveVisibility(i,
+            ray.origin.map((at, k) => at + curveView[k] * curveHit.depth / ray.axial), curveHit.normal ?? undefined) : 1;
           const visibility = centerFog ? 1 - fogMix : 1;
           let gain = 1, shine, scatter = 0;
           if (curveLight) {
-            CurveSplat.directional(curveLight, curve.axis, curveHit.normal, curveView, curveLightSample);
+            CurveSplat.directional(curveLight, curve.axis, curveHit.normal, curveView, curveLightSample, shade);
             [gain, shine, scatter] = curveLightSample;
-          } else shine = CurveSplat.specular(roughness, curveHit.normal, curveView, sun);
+          } else {
+            if (shade < 1) gain = (sun.ambient + sun.intensity * shade) / (sun.ambient + sun.intensity);
+            shine = roughness === undefined ? 0 : shade * CurveSplat.specular(roughness, curveHit.normal, curveView, sun);
+          }
           const tint = curveLight?.highlightColor, transmission = curveLight?.transmissionColor;
           const fogKeep = (1 - gain) * (1 - visibility);
           pr = Math.min(1, pr * gain + fog[0] * fogKeep +
@@ -2352,22 +2368,9 @@ function renderFrame(world, o, preparedPalettes) {
           if (!deferred.has(p)) deferred.set(p, []);
           const layers = deferred.get(p);
           if (entry.curveGroup) {
-            // A hard strand is one coverage shape even where neighboring capsules overlap.
-            const match = layers.findIndex(layer => layer.curveGroup === entry.curveGroup &&
-              layer.strength === (curveFootprint?.depths ? curveStrength : undefined));
-            if (curveFootprint?.depths) {
-              const group = CurveCoverage.add(layers[match], entry, curveFootprint);
-              if (group) {
-                countDeferred();
-                if (match < 0) layers.push(group);
-                curveCoverageQueued = true;
-              }
-              continue;
-            }
-            if (match >= 0) {
-              if (entry.sort <= layers[match].sort) layers[match] = entry;
-              continue;
-            }
+            if (CurveCoverage.queue(layers, entry, curveHit, curveFootprint)) countDeferred();
+            if (curveFootprint?.depths) curveCoverageQueued = true;
+            continue;
           }
           countDeferred();
           layers.push(entry);

@@ -567,6 +567,14 @@
     const fixedColor = typeof color === 'function' ? null : rgb(color);
     const timing = timingProgram(source, options);
     const pattern = CurvePattern.prepare(options.pattern, palette, options.paletteRoles);
+    let shadows = 0;
+    if (options.shadow !== undefined && options.shadow !== false) {
+      const shadow = options.shadow;
+      check(shadow && Object.getPrototypeOf(shadow) === Object.prototype && Object.keys(shadow).every(key =>
+        ['cast', 'receive'].includes(key) && typeof shadow[key] === 'boolean'), 'shadow needs boolean cast and receive settings');
+      if (shadow.cast) shadows |= CurveSplat.castShadow;
+      if (shadow.receive) shadows |= CurveSplat.receiveShadow;
+    }
     const chart = pattern?.chart && source?.kind === 'surface' && surfaceChart(source.chart);
     const chartWidth = chart && chartWidthSampler(chart);
     if (chart) {
@@ -712,7 +720,7 @@
       }
       return { id, rows, rest, followNormals: Boolean(chartNormals) };
     });
-    return { object, material, target, edge, strands, segments, examined, timing, pattern };
+    return { object, material, target, edge, strands, segments, examined, timing, pattern, shadows };
   }
 
   function emit(builder, plan) {
@@ -727,7 +735,7 @@
       const group = nextGroup && rows.length ? nextGroup++ : undefined;
       for (const { from, to, shade, radius, opacity, profile, clips, finish, lighting, timeRange, pattern } of rows)
         builder.curveSplat(from, to, radius, shade, opacity, profile, plan.edge, group, clips, finish, lighting,
-          timing && [timing, ...timeRange], pattern && { ...pattern, program });
+          timing && [timing, ...timeRange], pattern && { ...pattern, program }, plan.shadows);
       const end = builder.count();
       builder.describeSplats?.(start, end, {
         object: plan.object, material: plan.material, target: { entity: plan.object, ...plan.target, surface: id }
@@ -832,7 +840,8 @@
     check(recipe?.format === format && recipe.version === 1 && label(recipe.id) &&
       Array.isArray(recipe.strands) && recipe.strands.length > 0 && recipe.strands.length <= 1024,
       'expected a version 1 curve splat scene with named strands');
-    const { seed = 1, background = '#172332', palette = [], paletteRoles, camera = {}, look = {}, liveSun, charts = {} } = recipe;
+    const { seed = 1, background = '#172332', palette = [], paletteRoles, camera = {}, look = {}, liveSun, charts = {},
+      atmosphere } = recipe;
     CurveWidth.prepare(look?.curveWidth);
     check(Number.isSafeInteger(seed) && Array.isArray(palette) && palette.length <= 255, 'invalid seed or palette');
     const colors = [packed(background), ...Array.from(palette, packed)];
@@ -869,6 +878,7 @@
     return builder.finish({
       id: recipe.id, curveSplatSource: recipe, cam: { target: [0, 0, 0], dist: 7, yaw: 0, pitch: 0, ...camera }, radius: 10,
       ...(paletteRoles !== undefined && { paletteRoles }), ...(liveSun !== undefined && { liveSun }),
+      ...(atmosphere !== undefined && { atmosphere }),
       fog: { c: 0, start: 1, max: 0 }, dither: 0, look: { pixelSize: 1, ...look }
     });
   }

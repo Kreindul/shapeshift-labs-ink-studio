@@ -5,7 +5,7 @@ const SplatProvenance = (() => {
   const perSplat = [['data', 16, Float32Array], ['attr', 4, Float32Array], ['fine', 12, Float32Array],
     ['pix', 8, Float32Array], ['surfaceData', 8, Float32Array], ['materialAlbedo', 1, Uint32Array],
     ['opticalSplats', 12, Float32Array], ['curveClips', 12, Float32Array], ['curveMaterials', 4, Float32Array],
-    ['curveLighting', 7, Float32Array], ['curveTiming', 8, Float64Array], ['curvePattern', 16, Float64Array],
+    ['curveLighting', 7, Float32Array], ['curveTiming', 8, Float64Array], ['curvePattern', 16, Float64Array], ['curveShadows', 1, Uint8Array],
     ['materialPixelStyles', 4, Float32Array], ['shadowLod', 6, Float32Array]];
   function targetKey(target) {
     const labels = [target.entity, target.surface, target.prefabs, target.tags, target.medium, target.mediumKind];

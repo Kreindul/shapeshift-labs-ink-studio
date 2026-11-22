@@ -651,6 +651,34 @@ to compare a bending cable with arc and screen anchors and see a
 chart-anchored band on a rotating cylinder. The demo writes the editable
 curve scenes alongside its PNG and APNG.
 
+## Depth, crossings, and shadows
+
+Author over-under crossings by separating the strands in 3D. The headless
+renderer sorts each fragment by the depth of its finite strand intersection.
+Touching spans of a hard strand share coverage at the join. Separate spans at
+a self-crossing retain independent depth and opacity. Ordinary solids and
+SDF-assisted surfaces can occlude the strand at the same pixel.
+
+Set `atmosphere` on a curve scene or a JavaScript world to place curves
+through bounded mist. Ink applies the medium up to each fragment's depth,
+including translucent spans. Use the normal `--atmosphere off` override
+for a clear comparison.
+
+Set `shadow: { cast: true, receive: true }` on a strand appearance to
+participate in headless [live sun lighting](live-sun.md). The two switches
+default to false and can be set independently.
+
+- Cast uses the posed physical section, timed reveal, and arc or chart
+  dash gaps. Translucent spans attenuate the light by their coverage.
+- Receive samples the shadow map at the fragment's position. Strand
+  lighting keeps its ambient fill and emission while direct light dims.
+- Scene `shadowArt` filters still apply. A curve's art-pixel width floor
+  and screen-anchored dash pattern are camera effects. Shadow casting
+  uses its world shape.
+
+Run `node examples/curve-depth-crossings.cjs studio/out/curve-depth-crossings`
+to render the woven crossings, the mist pass, and the shadow switches.
+
 ## Render and compare
 
 The [editable example](../examples/curve-splat-scene.json) uses

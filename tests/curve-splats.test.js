@@ -116,6 +116,63 @@ const profileFrame = style => ink.render(C.world(scene([{ source: straight, ...s
 
 const patternView = { ...imageOptions, ortho: true, transparent: true, fov: 2 * Math.atan(76 / 240) };
 
+test('separate depths of a translucent self-crossing survive hard strand coverage union', () => {
+  const points = [[-1.65,0,-.78], [1.65,0,-.78], [1.65,1.32,.68], [0,1.32,.68], [0,-1.32,.68]];
+  const style = { edge: 'hard', width: .22, opacity: .5,
+    along: { pigment: ({ distance }) => distance < 3.4 ? '#e54139' : '#3ec3bd' } };
+  for (const edgeFilter of [false, true]) {
+    const world = C.world(scene([{ source: points, ...style }]));
+    const result = ink.render(world, { ...patternView, edgeFilter });
+    assert.equal(result.alpha[37 * result.w + 51], 128);
+    assert.ok(Math.abs(result.alpha[37 * result.w + 64] - 191) <= 1);
+    const [r, g] = at(result, 64, 37);
+    assert.ok(g > r, 'the nearer teal span dominates at the crossing');
+  }
+});
+
+test('bounded mist shades translucent curve fragments at their own depth by default', () => {
+  const strands = [[.45,.95],[-.45,-1.12]].map(([y,z]) => source([[-1.75,y,z],[1.75,y,z]], {
+    edge: 'hard', width: .25, opacity: .53, color: '#ff2010'
+  }));
+  const atmosphere = [K.atmosphere.box({ min: [-4,-2,-.73], max: [4,2,.52], density:1.1, color:'#0000ff' })];
+  const world = C.world({ ...scene(strands), background:'#000000', atmosphere });
+  for (const ortho of [true, false]) {
+    const view = { ...patternView, ortho, transparent:false };
+    const clear = ink.render(world, { ...view, atmosphere:false }), fog = ink.render(world, view);
+    const red = (frame, rows) => Math.max(...rows.map(y => at(frame, 64, y)[0]));
+    const front = [26,27,28,29,30,31,32], behind = [43,44,45,46,47,48,49];
+    assert.equal(red(fog, front), red(clear, front));
+    assert.ok(red(clear, behind) > 125);
+    assert.ok(red(fog, behind) < .32 * red(clear, behind));
+  }
+});
+
+test('live sun strand casting and receiving toggle independently and respect physical dash gaps', () => {
+  function render(shadow, receive, opacity = 1, dash = false) {
+    const B = kit.makeBuilder(1, palette);
+    const first = B.count();
+    B.disc(0, 0, 0, [0,0,1], 1.5, .02, B.P[1], 2.4);
+    B.describeAlbedo(first, B.count(), '#cccccc');
+    C.draw(B, [[.4,-.95,.95],[.4,1,.95]], { edge:'hard', width:.20, opacity, color:'#76d6ae',
+      shadow: { cast:shadow }, ...(dash && { pattern: { dash: { spacing:.4, duty:.55 } } }) });
+    C.draw(B, [[-1,-.35,.29],[1,-.35,.29]], { edge:'hard', width:.16, color:'#f3b56b', shadow:{ receive } });
+    const world = host(B);
+    return ink.render(world, { ...patternView, liveSun: { direction:[1,0,1], ambient:.2, intensity:.9,
+      mapSize:192, bias:.013, filter:0 } });
+  }
+  const clear = render(false, true), shadowed = render(true, true), receiveOff = render(true, false);
+  const soft = render(true, true, .45), dash = render(true, true, 1, true);
+  const floor = frame => at(frame, 53, 28)[0], cord = frame => at(frame, 58, 44)[0];
+  assert.ok(floor(shadowed) + 65 < floor(clear));
+  assert.ok(floor(soft) > floor(shadowed) + 25 && floor(soft) < floor(clear) - 25);
+  assert.equal(floor(shadowed), floor(receiveOff));
+  assert.ok(cord(shadowed) + 65 < cord(clear));
+  assert.equal(cord(receiveOff), cord(clear));
+  assert.ok([22,26,31,35].some(y => at(dash, 53,y)[0] > at(shadowed,53,y)[0] + 65));
+  assert.ok([22,26,31,35].some(y => at(dash, 53,y)[0] === at(shadowed,53,y)[0]));
+  assert.throws(() => C.world(scene([{ source: straight, shadow:{ cast: 'on' } }])), /boolean cast and receive/);
+});
+
 test('arc pigment and dash gaps agree after subdivision of a straight span', () => {
   const pieces = Array.from({ length: 43 }, (_, i) => K.V.lerp(...straight, i / 42));
   const pattern = {

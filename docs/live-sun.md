@@ -54,6 +54,10 @@ Set `world.liveSun` in the finished scene for a default. Per-render settings can
 
 The map fits opaque scene splats independently of the viewing camera, so perspective and orthographic views can reuse the same authored light. Glass and outline-free particles do not cast shadows. Emissive colours keep their emission. Pixel-material renders sample their original ramps with the live light level. Raw renders use captured albedo with ambient and direct lighting. Highly specialized baked material effects may look different under live lighting. This version runs in the headless renderer.
 
+[Finite curve strands](curve-splats.md#depth-crossings-and-shadows) can opt into
+casting and receiving shadow independently. Their cast follows the posed curve
+and can transmit light through translucent sections and authored gaps.
+
 ## Art-directed shadows
 
 Set `finish.look.shadowArt` in a JSON diorama or pass `shadowArt` in the third argument to `makeBuilder` before sculpting. The same settings guide baked lighting and headless live sun. The CLI accepts `--shadow-art file.json` for JSON bakes and live-sun renders.

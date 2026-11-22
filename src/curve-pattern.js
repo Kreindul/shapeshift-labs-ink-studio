@@ -81,10 +81,10 @@ const CurvePattern = (() => {
     return ((hash ^ hash >>> 16) >>> 0) / 0x100000000;
   }
 
-  function attach(world, index, frame, camera) {
+  function attach(world, index, frame, camera, forShadow) {
     const rows = world.curvePattern, at = index * stride;
     const program = rows?.[at] && world.curvePatternPrograms?.[rows[at] - 1];
-    if (!program) return;
+    if (!program || forShadow && (!program.dash || program.dash.anchor === 'screen')) return;
     const row = rows.subarray(at, at + stride), matrix = frame?.basis().anchor;
     const vector = offset => {
       const [x, y, z] = row.subarray(offset, offset + 3);

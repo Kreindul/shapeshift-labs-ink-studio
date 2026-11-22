@@ -3,6 +3,8 @@ const CurveSplat = (() => {
   // Kind zero leaves the motion payload free. Preserve the tag through native row copies.
   const marker = -161291.375, minimum = 1e-5, clipStride = 12, materialStride = 4, lightingStride = 7, timingStride = 8;
   const hardBase = 1 << 20, maxHardGroups = (1 << 20) - 1;
+  const castShadow = 1, receiveShadow = 2;
+  const overlapsDepth = (a, b) => a[0] <= b[1] + 1e-6 && b[0] <= a[1] + 1e-6;
   const betaRadius = Math.sqrt(6), betaIntegral = 5 * Math.PI / 16;
   // Seven-point Gaussian quadrature across the flat section, with rounded Gaussian edges.
   const flatBlur = .25, flatNormalization = 1 / (Math.sqrt(2 * Math.PI) * flatBlur);
@@ -404,11 +406,11 @@ const CurveSplat = (() => {
     };
   }
 
-  function directional(profile, tangent, normal, viewRay, out) {
+  function directional(profile, tangent, normal, viewRay, out, visibility = 1) {
     const { light, intensity, ambient, diffuse, sheen, specular, transmission } = profile;
     const ndl = normal ? dot(normal, light) : 0, lit = Math.max(0, ndl);
     const viewFacing = normal ? Math.max(0, Math.min(1, -dot(normal, viewRay))) : 0;
-    out[0] = 1 + diffuse * (ambient + intensity * lit - 1);
+    out[0] = 1 + diffuse * (ambient + intensity * lit * visibility - 1);
     out[1] = out[2] = 0;
     if (lit && viewFacing && (sheen || specular)) {
       const hx = light[0] - viewRay[0], hy = light[1] - viewRay[1], hz = light[2] - viewRay[2];
@@ -421,14 +423,14 @@ const CurveSplat = (() => {
         const glint = specular * lit * nh ** profile.normalPower * lateral ** profile.tangentPower;
         const fibre = sheen * Math.sqrt(lit) * (.23 + .77 * (1 - viewFacing) ** 1.5) *
           Math.sqrt(nh) * lateral ** profile.sheenPower;
-        out[1] = glint + fibre;
+        out[1] = (glint + fibre) * visibility;
       }
     }
     if (transmission) {
       // Approximate forward scatter through thin fibres, including the soft kernel's halo.
       const backlit = Math.max(0, dot(light, viewRay)), tl = dot(tangent, light);
       const edge = .46 + .54 * (1 - viewFacing) ** 1.35;
-      out[2] = transmission * backlit ** 3 * (1 - .65 * tl * tl) * edge * (.78 + .22 * Math.max(0, -ndl));
+      out[2] = visibility * transmission * backlit ** 3 * (1 - .65 * tl * tl) * edge * (.78 + .22 * Math.max(0, -ndl));
     }
   }
 
@@ -480,7 +482,7 @@ const CurveSplat = (() => {
       materials.subarray(at + 1, at + 4) : undefined;
   }
 
-  function sample(strand, { origin, direction, axial }, near, wantNormal, wantDensity) {
+  function sample(strand, { origin, direction, axial }, near, wantNormal, wantDensity, wantExit) {
     const { from, axis, radius, length, major, minor, flattened, beta, group, clips } = strand;
     if (clips && !group && !insideProjectedCaps(clips, origin, direction)) return null;
     const offsetFromEye = [from[0] - origin[0], from[1] - origin[1], from[2] - origin[2]];
@@ -501,6 +503,11 @@ const CurveSplat = (() => {
       const t = hardEntry(start, ray, along, radius, length, flattened, interval[0] * scale);
       if (!Number.isFinite(t) || t > interval[1] * scale + 1e-9 || strand.opacity < minimum) return null;
       const hit = { alpha: strand.opacity, depth: t * axial / scale };
+      if (wantExit) {
+        const reverse = ray.map(value => -value);
+        const far = -hardEntry(start, reverse, along, radius, length, flattened, -Infinity);
+        hit.exitDepth = Math.max(t, Math.min(far, interval[1] * scale)) * axial / scale;
+      }
       if (wantNormal) {
         const clipped = clips && interval[0] > near / axial && Math.abs(t / scale - interval[0]) < 1e-8;
         const plane = clipped && clips.find(({ point, normal }) =>
@@ -547,14 +554,14 @@ const CurveSplat = (() => {
     if (wantDensity) hit.density = density;
     return hit;
   }
-  function sampleAt(strand, rayAt, x, y, near, wantNormal, wantDensity) {
+  function sampleAt(strand, rayAt, x, y, near, wantNormal, wantDensity, wantExit) {
     const style = strand.projectedWidth, weight = style?.weight?.(x, y) ?? 1;
     if (weight === 0) return null;
     const section = weight === 1 ? strand : style.fade ?
       { ...strand, opacity: strand.opacity * weight, tau: strand.tau * weight } :
       { ...strand, radius: strand.radius * weight };
     const ray = rayAt(x, y), dash = section.pattern?.dash;
-    const hit = sample(section, ray, near, wantNormal, wantDensity || dash && !section.group);
+    const hit = sample(section, ray, near, wantNormal, wantDensity || dash && !section.group, wantExit);
     if (!hit || !dash) return hit;
     const site = section.pattern.coordinates(ray, hit.depth / ray.axial, x, y);
     const gain = section.pattern.opacity(site);
@@ -568,7 +575,8 @@ const CurveSplat = (() => {
     }
     return hit.alpha >= minimum ? hit : null;
   }
-  return Object.freeze({ tag, joinGroups, axialUnits, minimum, clipStride, materialStride, lightingStride, timingStride, clipPlanes,
+  return Object.freeze({ tag, joinGroups, axialUnits, minimum, castShadow, receiveShadow, overlapsDepth,
+    clipStride, materialStride, lightingStride, timingStride, clipPlanes,
     emissionAt, lightingAt, isRow, carrier, writeClips, timeWindow, timedOpacity, prepare, sample, sampleAt, specular, directional });
 })();
 if (typeof module !== 'undefined') module.exports = CurveSplat;
