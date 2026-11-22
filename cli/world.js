@@ -525,6 +525,32 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
           'Simulation diagnostics reached '+report.status);
         return;
       }
+      case 'gesture-score': {
+        const point=opt.t!==undefined||opt.tick!==undefined;
+        const range=['from-tick','to-tick','every'].some(key=>opt[key]!==undefined);
+        ensure(typeof file==='string'&&other===undefined&&!(point&&range)&&
+          (opt.t===undefined||opt.tick===undefined)&&(!range||opt['to-tick']!==undefined)&&
+          ['resume','checkpoint'].every(key=>opt[key]===undefined||typeof opt[key]==='string'),
+        'Use sim gesture-score <score.json> [--t seconds | --tick N | --from-tick N --to-tick N --every N]');
+        const score=W.gestureScores.prepare(read(file));
+        const index=key=>{
+          const value=opt[key];
+          if(value===undefined)return undefined;
+          ensure(typeof value==='string'&&/^\d+$/.test(value),'--'+key+' needs an integer score tick');
+          return Number(value);
+        };
+        ensure(opt.t===undefined||typeof opt.t==='string'&&opt.t.trim(),'--t needs seconds');
+        const checkpoint=opt.resume===undefined?undefined:read(opt.resume);
+        const at=opt.t===undefined?index('tick'):score.tickAt(Number(opt.t));
+        const result=score.trace({fromTick:point?at:index('from-tick'),toTick:point?at:index('to-tick'),
+          every:index('every'),checkpoint});
+        if(opt.checkpoint!==undefined){
+          ensure(opt.out===undefined||path.resolve(opt.checkpoint)!==path.resolve(opt.out),
+            'Gesture trace and checkpoint need distinct output paths');
+          write(opt.checkpoint,result.checkpoint);
+        }
+        return respond(result);
+      }
       case 'boundaries': {
         ensure(typeof file==='string'&&other===undefined&&
           (opt.t===undefined||typeof opt.t==='string')&&(opt.dt===undefined||typeof opt.dt==='string'),

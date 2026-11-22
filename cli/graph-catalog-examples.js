@@ -233,6 +233,11 @@ const specifications = {
   'anim.frameBank': { inputs: { source: rgba, options: { tiles: { size: [2, 2], every: 4 } } } },
   'sim.define': { inputs: { kind: 'particles' } },
   'sim.run': { nodes: { recipe: { op: 'sim.define', inputs: { kind: 'particles' } } }, inputs: { recipe: link('recipe') } },
+  'sim.gesture-score': { inputs: { score: {
+    format:'ink-studio/gesture-score', version:1, id:'shutter', revision:1, rate:120,
+    channels:{opening:{type:'number',base:0,limits:{min:0,max:1,maxSpeed:2}}},
+    gestures:[{id:'open',channel:'opening',start:.2,end:.8,leadIn:.1,release:.2,target:1}]
+  }, options:{tick:40} } },
   'sim.model': { inputs: { model: require('../examples/simulation-models/sluice.json'), options: {tick:12} } },
   'anim.feedback': { inputs: { frames: [rgba, rgba] } },
   'music.clock': { inputs: { map: { tempo: 120, swing: .625, changes: [{ beat: 4, tempo: 150 }] },

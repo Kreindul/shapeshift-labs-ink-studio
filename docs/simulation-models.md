@@ -25,6 +25,9 @@ finite-volume grids, wave networks, and moving-boundary world systems.
 Use [simulation diagnostics](simulation-diagnostics.md) to check stability
 and conservation of individual solver plans.
 
+[Gesture scores](gesture-scores.md) publish overlapping timed targets
+as typed controls for model operators.
+
 ## Author a model
 
 | Property | Contents |
