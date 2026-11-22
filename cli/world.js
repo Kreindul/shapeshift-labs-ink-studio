@@ -505,6 +505,11 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
   function runSimulation([mode,file,other]) {
     switch (mode) {
       case 'model': return modelCommand(file,other);
+      case 'sections': {
+        ensure(typeof file==='string' && other===undefined,'Use sim sections <plan.json> [--out report.json]');
+        const result=require('./path-sections.js').measure(kit,read(file),file,shot?.dependency);
+        return respond(result);
+      }
       case 'run':
       case 'resume':
       case 'fork': {

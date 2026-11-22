@@ -149,3 +149,6 @@ named results in `take sample`. A graph node in a take runs its own model
 instance. To compare it with a model driven by a world, feed it the same
 input schedule. Portable take bundles keep the model files referenced
 through both the world and the graph.
+
+[Section measurements along a path](path-sections.md) provide geometry profiles
+for models of ducts, valves and variable-width channels.
