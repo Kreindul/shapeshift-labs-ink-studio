@@ -559,6 +559,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       if (hasSurfaces || hasPlanes || options.surfaceFrame?.lighting?.display) {
         const surfaceOptions = { geometryUpdatesSince: toolkit.SpriteSurface?.geometryUpdatesSince,
           updatesSince: toolkit.SpriteSurface?.updatesSince ?? toolkit.KIT?.ecology?.atlasUpdates, cutaway: cutawayAPI?.glsl,
+          projectionPlan: toolkit.SpriteSurface?.projectionPlan,
           samplingPlan: toolkit.SpriteSurface?.samplingPlan, samplingGLSL: toolkit.SpriteSurface?.samplingGLSL };
         buffer.ensureDepth();
         gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(true);

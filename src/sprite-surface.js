@@ -4,6 +4,47 @@ const SpriteSurface = (() => {
   const namedFaces = new WeakMap(), sampledAtlases = new WeakMap();
   const shells = typeof ShadowShell === 'undefined' ? require('./shadow-shell.js') : ShadowShell;
   const resampling = typeof PaletteResampling === 'undefined' ? require('./palette-resampling.js') : PaletteResampling;
+  const validSnap = n => n === 0 || Number.isFinite(n) && n >= .25 && n <= 16;
+  const validSubdivision = n => Number.isSafeInteger(n) && n >= 1 && n <= 16;
+
+  function projectionSettings(spec = {}) {
+    if (!spec || ![Object.prototype, null].includes(Object.getPrototypeOf(spec)) ||
+        Object.keys(spec).some(key => !['mapping', 'vertexSnap', 'subdivisions'].includes(key)))
+      throw new TypeError('Expected a surface projection with mapping, vertexSnap and subdivisions');
+    const { mapping = 'perspective', vertexSnap = 0, subdivisions = 1 } = spec;
+    if (!['perspective', 'affine'].includes(mapping) || !validSnap(vertexSnap) || !validSubdivision(subdivisions))
+      throw new RangeError('Surface projection needs perspective or affine mapping, a vertex snap of 0 or .25 to 16, and 1 to 16 subdivisions');
+    return { mapping, vertexSnap, subdivisions };
+  }
+
+  function projectionPlan(atlas) {
+    const rows = atlas.projectionRanges;
+    if (rows === undefined) return [];
+    if (!Array.isArray(rows)) throw new RangeError('Expected ordered surface projection ranges');
+    let previous = 0;
+    for (const row of rows) {
+      const { first, end, affine, vertexSnap, bounds } = row ?? {};
+      if (![first,end].every(Number.isSafeInteger) || first % 3 || end % 3 || first < previous || end <= first ||
+          end > atlas.vertices.length / 5 || typeof affine !== 'boolean' || !validSnap(vertexSnap) ||
+          !Array.isArray(bounds) || bounds.length !== 4 || !Array.from(bounds).every(Number.isSafeInteger) ||
+          bounds[0] < 0 || bounds[1] < 0 || bounds[2] < bounds[0] || bounds[3] < bounds[1] ||
+          bounds[2] >= atlas.width || bounds[3] >= atlas.height) throw new RangeError('Invalid surface projection range');
+      previous = end;
+    }
+    return rows;
+  }
+
+  function splitTriangles(surface, divisions, write) {
+    const { triangles } = surface;
+    for (let i = 0; i < triangles.length; i += 3) {
+      const a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
+      const emit = (s,t) => write(a,b,c,(divisions-s-t)/divisions,s/divisions,t/divisions);
+      for (let t = 0; t < divisions; t++) for (let s = 0; s < divisions - t; s++) {
+        emit(s,t); emit(s+1,t); emit(s,t+1);
+        if (s+t+2 <= divisions) { emit(s,t+1); emit(s+1,t); emit(s+1,t+1); }
+      }
+    }
+  }
 
   function make(width = 1024, limit = 4096) {
     if (!Number.isInteger(width) || width < 1 || !Number.isInteger(limit) || limit < 1)
@@ -11,7 +52,7 @@ const SpriteSurface = (() => {
     let x = 0, y = 0, shelf = 0;
     const entries = [], vertices = [];
     const regions = new WeakSet();
-    const faces = new Map(), sampling = [], shadowFaces = [];
+    const faces = new Map(), sampling = [], shadowFaces = [], projections = [];
     const geometry = typeof TexturedSurface !== 'undefined' ? TexturedSurface : require('./textured-surface.js');
     function reserve(w, h, paint) {
       if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || w > width || h < 1 ||
@@ -36,42 +77,56 @@ const SpriteSurface = (() => {
       shelf = Math.max(nextShelf, h);
       return region;
     }
-    function faceOptions(options, planar) {
-      if (options === undefined) return {};
-      const { id, sampling, shadowShell, castsShadow = shadowShell !== undefined && shadowShell !== false } = options ?? {};
+    function faceOptions(options = {}, surface, planar) {
+      const { id, sampling, projection, shadowShell, castsShadow = shadowShell !== undefined && shadowShell !== false } = options ?? {};
       if (!options || ![Object.prototype,null].includes(Object.getPrototypeOf(options)) ||
-          Object.keys(options).some(key => !['id', 'sampling', 'castsShadow', 'shadowShell'].includes(key)) ||
+          Object.keys(options).some(key => !['id', 'sampling', 'projection', 'castsShadow', 'shadowShell'].includes(key)) ||
           id !== undefined && (typeof id !== 'string' || !id.trim() || faces.has(id)))
-        throw new TypeError('A named surface needs a distinct nonempty ID and optional palette sampling');
+        throw new TypeError('A named surface needs a distinct nonempty ID and valid options');
       if (typeof castsShadow !== 'boolean' || castsShadow && !planar)
         throw new TypeError('Painted shadow casters need a planar face and boolean castsShadow');
       if (shadowShell !== undefined && shadowShell !== false && !castsShadow)
         throw new RangeError('A shadow shell needs a shadow-casting face');
       const shell = castsShadow && shells.prepare(shadowShell,planar.width,planar.height);
-      return { id, rule: resampling.settings(sampling), castsShadow, shell };
+      const style = projectionSettings(projection);
+      if (style.subdivisions > 1 && vertices.length / 15 + surface.triangles.length / 3 * style.subdivisions ** 2 > 2000000)
+        throw new RangeError('Surface projection exceeds the two-million-triangle subdivision budget');
+      return { id, rule: resampling.settings(sampling), castsShadow, shell, style };
     }
-    function writeMesh(surface, region, { id, rule, castsShadow, shell }) {
+    function writeMesh(surface, region, { id, rule, castsShadow, shell, style }) {
       const { x, y, width, height } = region;
-      const first = vertices.length / 5, count = surface.triangles.length;
+      const { mapping, vertexSnap, subdivisions } = style;
+      const first = vertices.length / 5, count = surface.triangles.length * subdivisions ** 2;
       if (id !== undefined) faces.set(id, { first, count, from: region });
       if (rule && count) sampling.push({ first, end: first + count, region, rule });
-      if (castsShadow) shadowFaces.push(Object.freeze({ first, region, ...(shell && {shell}) }));
-      for (const index of surface.triangles) {
-        vertices.push(surface.points[index * 3], surface.points[index * 3 + 1], surface.points[index * 3 + 2],
-          x + .5 + (width - 1) * surface.uvs[index * 2], y + .5 + (height - 1) * surface.uvs[index * 2 + 1]);
+      if (count && (mapping === 'affine' || vertexSnap))
+        projections.push(Object.freeze({ first, end: first + count, affine: mapping === 'affine', vertexSnap,
+          bounds: Object.freeze([x, y, x + width - 1, y + height - 1]) }));
+      if (castsShadow) shadowFaces.push(Object.freeze({ first, region, ...(shell && {shell}),
+        ...(subdivisions > 1 && {subdivisions}) }));
+      const { points, uvs, triangles } = surface;
+      if (subdivisions === 1) for (const index of triangles) {
+        vertices.push(points[index * 3], points[index * 3 + 1], points[index * 3 + 2],
+          x + .5 + (width - 1) * uvs[index * 2], y + .5 + (height - 1) * uvs[index * 2 + 1]);
+      } else {
+        splitTriangles(surface, subdivisions, (a,b,c,wa,wb,wc) => {
+          const value = (data, stride, k) => data[a * stride + k] * wa + data[b * stride + k] * wb + data[c * stride + k] * wc;
+          vertices.push(value(points,3,0),value(points,3,1),value(points,3,2),
+            x + .5 + (width - 1) * value(uvs,2,0), y + .5 + (height - 1) * value(uvs,2,1));
+        });
       }
       return surface;
     }
     function mesh(surface, w, h, paint, options) {
       geometry.validate(surface);
       if (typeof paint !== 'function') throw new RangeError('Expected a surface paint function');
-      const settings = faceOptions(options);
+      const settings = faceOptions(options, surface);
       return writeMesh(surface, reserve(w, h, paint), settings);
     }
     function meshRegion(surface, region, options) {
       geometry.validate(surface);
       if (!regions.has(region)) throw new RangeError('Reserve the surface region in this atlas first');
-      return writeMesh(surface, region, faceOptions(options));
+      return writeMesh(surface, region, faceOptions(options, surface));
     }
     function quad(origin, right, up) {
       if (![origin, right, up].every(v => v && v.length === 3 && Array.from(v).every(Number.isFinite)))
@@ -85,14 +140,14 @@ const SpriteSurface = (() => {
       const surface = quad(origin, right, up);
       geometry.validate(surface);
       if (typeof paint !== 'function') throw new RangeError('Expected a surface paint function');
-      const settings = faceOptions(options, {width:w,height:h});
+      const settings = faceOptions(options, surface, {width:w,height:h});
       writeMesh(surface, reserve(w, h, paint), settings);
     }
     function faceRegion(origin, right, up, region, options) {
       if (!regions.has(region)) throw new RangeError('Reserve the surface region in this atlas first');
       const surface = quad(origin, right, up);
       geometry.validate(surface);
-      writeMesh(surface, region, faceOptions(options, region));
+      writeMesh(surface, region, faceOptions(options, surface, region));
     }
     function finish() {
       const height = Math.max(1, y + shelf), pixels = new Uint8Array(width * height * 4);
@@ -103,6 +158,7 @@ const SpriteSurface = (() => {
       if (faces.size) namedFaces.set(atlas, new Map(faces));
       if (sampling.length) atlas.paletteSampling = sampling.slice();
       if (shadowFaces.length) atlas.shadowFaces = Object.freeze(shadowFaces.slice());
+      if (projections.length) atlas.projectionRanges = Object.freeze(projections.slice());
       return atlas;
     }
     return { face, mesh, finish, reserve, meshRegion, faceRegion };
@@ -111,10 +167,10 @@ const SpriteSurface = (() => {
     const face = namedFaces.get(atlas)?.get(id);
     const index = face && atlas.shadowFaces?.findIndex(row => row.first === face.first);
     if (index === undefined || index < 0) throw new RangeError('Shadow shell edits need a named shadow-casting face');
-    const { first, region } = atlas.shadowFaces[index];
-    const shell = shells.prepare(definition,region.width,region.height);
+    const { shell: _shell, ...faceSettings } = atlas.shadowFaces[index];
+    const shell = shells.prepare(definition,faceSettings.region.width,faceSettings.region.height);
     const faces = atlas.shadowFaces.slice();
-    faces[index]=Object.freeze({ first, region, ...(shell && {shell}) });
+    faces[index]=Object.freeze({ ...faceSettings, ...(shell && {shell}) });
     atlas.shadowFaces=Object.freeze(faces);
   }
   const updates = new WeakMap();
@@ -265,6 +321,7 @@ const SpriteSurface = (() => {
     const rows=(geometryUpdates.get(atlas)??[]).filter(r=>r.revision>revision);
     return rows[0]?.revision===revision+1&&rows.at(-1)?.revision===atlas.geometryRevision?rows.map(r=>({...r})):null;
   }
-  return Object.freeze({ make, setShadowShell, markDirty, updatesSince, update, markGeometryDirty, geometryUpdatesSince, uvSlip, samplingPlan, samplingGLSL: resampling.glsl });
+  return Object.freeze({ make, setShadowShell, markDirty, updatesSince, update, markGeometryDirty, geometryUpdatesSince,
+    uvSlip, projectionPlan, samplingPlan, samplingGLSL: resampling.glsl });
 })();
 if (typeof module !== 'undefined') module.exports = SpriteSurface;

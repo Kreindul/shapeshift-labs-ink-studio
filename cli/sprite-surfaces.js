@@ -4,10 +4,22 @@ const uvSlip=Symbol.for('ink-studio.spriteSurface.uvSlip');
 function rasterize(atlas,{V,W,H,focal,ortho,near,clip,paletteSampling,artScale=1}) {
   if(!atlas)return [];
   const fragments=new Array(W*H),eye=[0,1,2].map(k=>-(V[k*4]*V[12]+V[k*4+1]*V[13]+V[k*4+2]*V[14]));
-  const transform=(v)=>({p:v.slice(0,3),uv:v.slice(3),x:V[0]*v[0]+V[4]*v[1]+V[8]*v[2]+V[12],
-    y:V[1]*v[0]+V[5]*v[1]+V[9]*v[2]+V[13],z:-(V[2]*v[0]+V[6]*v[1]+V[10]*v[2]+V[14])});
-  const interpolate=(a,b,t)=>({p:a.p.map((n,k)=>n+(b.p[k]-n)*t),uv:a.uv.map((n,k)=>n+(b.uv[k]-n)*t),
-    x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,z:near});
+  function transform(v, step) {
+    let x=V[0]*v[0]+V[4]*v[1]+V[8]*v[2]+V[12], y=V[1]*v[0]+V[5]*v[1]+V[9]*v[2]+V[13];
+    const z=-(V[2]*v[0]+V[6]*v[1]+V[10]*v[2]+V[14]), w=ortho?1:z;
+    if (step && w > 0) {
+      const scale=focal/w;
+      x=(Math.floor((W*.5+x*scale)/step+.5)*step-W*.5)/scale;
+      y=(H*.5-Math.floor((H*.5-y*scale)/step+.5)*step)/scale;
+    }
+    return {p:v.slice(0,3),uv:v.slice(3),x,y,z};
+  }
+  function interpolate(a,b,t,affine) {
+    const lerp=(x,y)=>x+(y-x)*t;
+    // UV times clip W interpolates linearly across a clipped edge on the GPU.
+    const uv=a.uv.map((n,k)=>affine&&!ortho?lerp(n*a.z,b.uv[k]*b.z)/near:lerp(n,b.uv[k]));
+    return {p:a.p.map((n,k)=>lerp(n,b.p[k])),uv,x:lerp(a.x,b.x),y:lerp(a.y,b.y),z:near};
+  }
   const project=v=>({ ...v,sx:W*.5+v.x*focal/(ortho?1:v.z),sy:H*.5+v.y*focal/(ortho?1:v.z) });
   const edge=(a,b,x,y)=>(b.sx-a.sx)*(y-a.sy)-(b.sy-a.sy)*(x-a.sx);
   for (const layer of Array.isArray(atlas) ? atlas : [atlas]) {
@@ -19,7 +31,8 @@ function rasterize(atlas,{V,W,H,focal,ortho,near,clip,paletteSampling,artScale=1
     const plan=layer[uvSlip];
     const ranges=plan?.vertices===vertices&&plan.width===width&&plan.height===height ? plan.ranges : [];
     const filtered = paletteSampling === false ? null : SpriteSurface.samplingPlan(layer);
-    let rangeIndex=0, filterIndex=0;
+    const projections = SpriteSurface.projectionPlan(layer);
+    let rangeIndex=0, filterIndex=0, projectionIndex=0;
     for(let offset=0;offset<vertices.length;offset+=15){
       const first=offset/5;
       while(ranges[rangeIndex]?.end<=first)rangeIndex++;
@@ -27,12 +40,15 @@ function rasterize(atlas,{V,W,H,focal,ortho,near,clip,paletteSampling,artScale=1
       const shifted=range&&range.first<=first;
       while(filtered?.[filterIndex]?.end<=first)filterIndex++;
       const filter = filtered?.[filterIndex]?.filter;
-      const input=[0,1,2].map(i=>transform(Array.from(vertices.subarray(offset+i*5,offset+i*5+5))));
+      while(projections[projectionIndex]?.end<=first)projectionIndex++;
+      const style = projections[projectionIndex]?.first <= first ? projections[projectionIndex] : undefined;
+      const affine = style?.affine, linearUV = affine || ortho, step = (style?.vertexSnap ?? 0) * artScale;
+      const input=[0,1,2].map(i=>transform(Array.from(vertices.subarray(offset+i*5,offset+i*5+5)),step));
       const polygon=[];
       for(let i=0;i<3;i++){
         const a=input[i],b=input[(i+1)%3];
         if(a.z>=near)polygon.push(a);
-        if((a.z>=near)!==(b.z>=near))polygon.push(interpolate(a,b,(near-a.z)/(b.z-a.z)));
+        if((a.z>=near)!==(b.z>=near))polygon.push(interpolate(a,b,(near-a.z)/(b.z-a.z),affine));
       }
       for(let tri=1;tri+1<polygon.length;tri++){
         const [a,b,c]=[polygon[0],polygon[tri],polygon[tri+1]].map(project),area=edge(a,b,c.sx,c.sy);
@@ -44,13 +60,13 @@ function rasterize(atlas,{V,W,H,focal,ortho,near,clip,paletteSampling,artScale=1
         if(normal.reduce((sum,n,k)=>sum+n*(eye[k]-a.p[k]),0)<0)for(let k=0;k<3;k++)normal[k]=-normal[k];
         const row=[a,b,c], transform = shifted ? range.transform : [1,1,0,0];
         const bounds = shifted ? range.bounds : filter ? [filter.rect.x,filter.rect.y,
-          filter.rect.x + filter.rect.width - 1,filter.rect.y + filter.rect.height - 1] : [0,0,width-1,height-1];
+          filter.rect.x + filter.rect.width - 1,filter.rect.y + filter.rect.height - 1] : style?.bounds ?? [0,0,width-1,height-1];
         let gradients;
         if (filter) {
           const weighted = (vx, vy, vz) => {
-            const dw = [vx,vy,vz].map((n,k) => n * artScale / (area * (ortho ? 1 : row[k].z)));
+            const dw = [vx,vy,vz].map((n,k) => n * artScale / (area * (linearUV ? 1 : row[k].z)));
             return [dw.reduce((n,v,k) => n + v * row[k].uv[0], 0),
-              dw.reduce((n,v,k) => n + v * row[k].uv[1], 0), ortho ? 0 : dw[0] + dw[1] + dw[2]];
+              dw.reduce((n,v,k) => n + v * row[k].uv[1], 0), linearUV ? 0 : dw[0] + dw[1] + dw[2]];
           };
           gradients = [weighted(b.sy-c.sy,c.sy-a.sy,a.sy-b.sy), weighted(c.sx-b.sx,a.sx-c.sx,b.sx-a.sx)];
         }
@@ -60,14 +76,15 @@ function rasterize(atlas,{V,W,H,focal,ortho,near,clip,paletteSampling,artScale=1
           const w=weights.map((n,k)=>ortho?n:n/row[k].z),sum=w[0]+w[1]+w[2];
           const z=ortho?weights.reduce((s,n,k)=>s+n*row[k].z,0):1/sum,p=y*W+x;
           if(fragments[p]&&z>=fragments[p].z)continue;
-          const sample=k=>row.reduce((s,n,i)=>s+n.uv[k]*w[i]/sum,0);
+          const uvWeights = linearUV ? weights : w, uvSum = linearUV ? 1 : sum;
+          const sample=k=>row.reduce((s,n,i)=>s+n.uv[k]*uvWeights[i]/uvSum,0);
           const s=sample(0),t=sample(1);
           const S = s * transform[0] + transform[2], T = t * transform[1] + transform[3];
           let ink;
           if (filter) {
             const [[dxU, dxV, dxZ], [dyU, dyV, dyZ]] = gradients;
-            ink = filter.sample(S, T, transform[0] * (dxU - s * dxZ) / sum, transform[1] * (dxV - t * dxZ) / sum,
-              transform[0] * (dyU - s * dyZ) / sum, transform[1] * (dyV - t * dyZ) / sum);
+            ink = filter.sample(S, T, transform[0] * (dxU - s * dxZ) / uvSum, transform[1] * (dxV - t * dxZ) / uvSum,
+              transform[0] * (dyU - s * dyZ) / uvSum, transform[1] * (dyV - t * dyZ) / uvSum);
             if (ink === null) continue;
           }
           if (ink === undefined) {

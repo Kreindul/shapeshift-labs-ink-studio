@@ -6,11 +6,11 @@ import { createResources } from './resources.mjs';
 const uvSlip = Symbol.for('ink-studio.spriteSurface.uvSlip');
 
 // Opaque pixel cutouts share an atlas and depth buffer with the splat pass.
-export function createSurfacePipeline(gl, { updatesSince, geometryUpdatesSince, cutaway, samplingPlan, samplingGLSL } = {}) {
+export function createSurfacePipeline(gl, { updatesSince, geometryUpdatesSince, cutaway, samplingPlan, samplingGLSL, projectionPlan } = {}) {
   const resources = createResources(gl);
   try {
     const shaders = new Map();
-    function shaderFor(wet, section, lighting, environment, paletteSampling) {
+    function shaderFor(wet, section, lighting, environment, paletteSampling, styledProjection) {
       const key = [
         wet?.airPockets,
         wet?.layered,
@@ -20,7 +20,8 @@ export function createSurfacePipeline(gl, { updatesSince, geometryUpdatesSince, 
         !!lighting,
         !!environment?.media,
         !!environment?.lit,
-        paletteSampling
+        paletteSampling,
+        styledProjection
       ].join('/');
       if (shaders.has(key)) return shaders.get(key);
       const shader = resources.program(
@@ -34,11 +35,21 @@ out vec3 v_world;
 ${lighting ? 'layout(location=2)in vec2 a_light;out vec2 v_light;' : ''}
 out float v_depth;
 out vec3 v_camera;
+${styledProjection ? 'uniform vec2 u_surfaceViewport;uniform float u_vertexSnap;out vec2 v_affine;' : ''}
 void main(){
   vec4 p=u_view*vec4(a_point,1.0);
   ${lighting ? 'v_light=a_light;' : ''}
   v_texel=a_texel;v_world=a_point;v_depth=-p.z;v_camera=p.xyz;
   gl_Position=u_proj*p;
+  ${styledProjection ? `
+  v_affine=a_texel*gl_Position.w;
+  if(u_vertexSnap>0.0&&gl_Position.w>0.0){
+    vec2 screen=(gl_Position.xy/gl_Position.w*.5+.5)*u_surfaceViewport;
+    screen.y=u_surfaceViewport.y-screen.y;
+    screen=floor(screen/u_vertexSnap+.5)*u_vertexSnap;
+    screen.y=u_surfaceViewport.y-screen.y;
+    gl_Position.xy=(screen/u_surfaceViewport*2.0-1.0)*gl_Position.w;
+  }` : ''}
 }`,
         `#version 300 es
 precision highp float;
@@ -60,12 +71,15 @@ in vec2 v_texel;
 in vec3 v_world;
 in float v_depth;
 in vec3 v_camera;
+${styledProjection ? 'uniform bool u_affine;uniform vec4 u_projectionBounds;in vec2 v_affine;' : ''}
 layout(location=0) out vec4 color;
 layout(location=1) out vec4 depth;
 layout(location=2) out vec4 water;
 void main(){
-  vec2 rawTexel=u_uvSlip?v_texel*u_uvTransform.xy+u_uvTransform.zw:v_texel;
+  vec2 uv=${styledProjection ? 'u_affine?v_affine*gl_FragCoord.w:v_texel' : 'v_texel'};
+  vec2 rawTexel=u_uvSlip?uv*u_uvTransform.xy+u_uvTransform.zw:uv;
   vec2 texel=u_uvSlip?clamp(rawTexel,u_uvBounds.xy,u_uvBounds.zw):rawTexel;
+  ${styledProjection ? 'if(u_affine&&!u_uvSlip)texel=clamp(texel,u_projectionBounds.xy,u_projectionBounds.zw);' : ''}
   ${paletteSampling ? `
   if(u_paletteSampling)texel=clamp(texel,u_sampleRegion.xy,u_sampleRegion.xy+u_sampleRegion.zw-1.0);
   ` : ''}
@@ -76,6 +90,7 @@ void main(){
   vec2 scale=u_samplingScale*(u_uvSlip?u_uvTransform.xy:vec2(1.0));
   vec2 dx=(dFdx(numerator)-v_texel*dFdx(q))*scale/q;
   vec2 dy=(dFdy(numerator)-v_texel*dFdy(q))*scale/q;
+  ${styledProjection ? 'if(u_affine){dx=dFdx(uv)*scale;dy=dFdy(uv)*scale;}' : ''}
   if(u_paletteSampling)ink=samplePalette(rawTexel,dx,dy,ink);
   ` : ''}
   if(ink.a<.5||dot(u_arrivalPlane,vec4(v_world,1.0))<0.0||dot(u_splatPlane,vec4(v_camera,1.0))<0.0)discard;
@@ -402,6 +417,9 @@ in vec3 v_world;flat in vec3 v_normal;out vec4 color;void main(){color=vec4(eLig
       upload(atlas);
       if (paletteSampling !== false && atlas.paletteSampling !== undefined && (!samplingPlan || !samplingGLSL))
         throw new TypeError('Palette-filtered surfaces need SpriteSurface.samplingPlan and samplingGLSL');
+      if (atlas.projectionRanges !== undefined && !projectionPlan)
+        throw new TypeError('Styled surface projection needs SpriteSurface.projectionPlan');
+      const projections = projectionPlan?.(atlas) ?? [];
       const rangesWithFilters = paletteSampling === false ? null : samplingPlan?.(atlas);
       const filters = new Set((rangesWithFilters ?? []).map(range => range.filter).filter(Boolean));
       for (const [filter, entry] of integralTextures) if (!filters.has(filter)) {
@@ -424,7 +442,7 @@ in vec3 v_world;flat in vec3 v_normal;out vec4 color;void main(){color=vec4(eLig
       }
       gl.activeTexture(gl.TEXTURE0 + 6);
       gl.bindTexture(gl.TEXTURE_2D, texture);
-      const shader = shaderFor(wet, section, !index && lighting?.active, environment, useSampling);
+      const shader = shaderFor(wet, section, !index && lighting?.active, environment, useSampling, projections.length > 0);
       gl.useProgram(shader.p);
       shader.set({
         u_view: view,
@@ -448,6 +466,22 @@ in vec3 v_world;flat in vec3 v_normal;out vec4 color;void main(){color=vec4(eLig
       gl.bindVertexArray(vao);
       if (!index && lighting?.active) gl.enableVertexAttribArray(2);
       else gl.disableVertexAttribArray(2);
+      let projectionIndex = 0;
+      function drawRange(first, end) {
+        if (!projections.length) {
+          gl.drawArrays(gl.TRIANGLES, first, end - first);
+          return;
+        }
+        while (first < end) {
+          while (projections[projectionIndex]?.end <= first) projectionIndex++;
+          const next = projections[projectionIndex], style = next?.first <= first ? next : null;
+          const stop = Math.min(end, (style ? style.end : next?.first) ?? end);
+          shader.set({ u_affine: style?.affine ?? false, u_vertexSnap: (style?.vertexSnap ?? 0) * samplingScale,
+            ...(style?.affine && { u_projectionBounds: style.bounds }) });
+          gl.drawArrays(gl.TRIANGLES, first, stop - first);
+          first = stop;
+        }
+      }
       if (useSampling) {
         const previous = prefixUnits.map(unit => {
           gl.activeTexture(gl.TEXTURE0 + unit);
@@ -471,7 +505,7 @@ in vec3 v_world;flat in vec3 v_normal;out vec4 color;void main(){color=vec4(eLig
                 u_protectCount: filter.rule.protect.length,
                 ...(filter.highlights.length && { u_sampleProtected: filter.highlights }) })
             });
-            gl.drawArrays(gl.TRIANGLES, first, end - first);
+            drawRange(first, end);
           }
         } finally {
           for (let i = 0; i < prefixUnits.length; i++) {
@@ -489,16 +523,16 @@ in vec3 v_world;flat in vec3 v_normal;out vec4 color;void main(){color=vec4(eLig
       for (const { first: start, end, transform, bounds } of ranges) {
         if (start > first) {
           shader.set({ u_uvSlip: false });
-          gl.drawArrays(gl.TRIANGLES, first, start - first);
+          drawRange(first, start);
         }
         shader.set({ u_uvSlip: true, u_uvTransform: transform, u_uvBounds: bounds });
-        gl.drawArrays(gl.TRIANGLES, start, end - start);
+        drawRange(start, end);
         first = end;
       }
       const count = active.vertices.length / 5;
       if (first < count) {
         shader.set({ u_uvSlip: false });
-        gl.drawArrays(gl.TRIANGLES, first, count - first);
+        drawRange(first, count);
       }
       gl.activeTexture(gl.TEXTURE0);
     }

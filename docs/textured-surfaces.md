@@ -59,6 +59,49 @@ alpha to block local light. [Shadows from painted cutouts](painted-cutout-shadow
 
 Run `ink-studio render examples/textured-surfaces.js` for a mixed example. Its `build(seed,{textured:false})` also exercises the SDF and splat rendering path.
 
+## PS1-style material projection
+
+Set `projection` on `face`, `mesh`, `faceRegion`, or `meshRegion`.
+Each surface can choose its own settings, including when several share
+the same atlas region. Procedural graphs use `warp.surface.options.projection`.
+
+```js
+atlas.faceRegion(origin, right, up, paintedRamp, {
+  id: 'loading-ramp',
+  projection: { mapping: 'affine', vertexSnap: 2, subdivisions: 4 }
+});
+```
+
+| Setting | Behavior |
+| --- | --- |
+| `mapping` | Defaults to `'perspective'`. Set `'affine'` to interpolate texture coordinates in screen space. Long, tilted triangles show the strongest texture swim. |
+| `vertexSnap` | Defaults to `0`. Set a spacing from `.25` to `16` native art pixels to snap projected vertices to a grid measured from the top-left of the view. It works with either mapping. |
+| `subdivisions` | Defaults to `1`. Give each triangle `n` segments per edge, from 1 to 16, to emit `n²` triangles. Smaller triangles reduce affine swim. Ink interpolates positions and UVs on the original triangle and caps a subdivided atlas at two million triangles. |
+
+Both renderers retain perspective-correct depth and world attributes.
+Vertex snapping moves the rasterized outline. Shared vertices on the same
+grid stay aligned. Where two surfaces meet, mismatched snap spacing or
+subdivision can expose a seam. Transparent pixels, palette filtering, and
+UV slip work with either mapping. Painted shadow casters use the authored
+planar face in world space.
+
+Custom WebGL hosts can pass `projectionPlan: SpriteSurface.projectionPlan`
+to `createSurfacePipeline`.
+
+[Relay Nine](../examples/material-projection.js) runs a matched camera
+move over a painted loading ramp in four modes. Compare perspective with
+affine to see the texture warp, then add a three-pixel snap and four
+subdivisions per edge. The railings and gate keep their perspective mapping.
+
+```sh
+node examples/material-projection.js relay-review
+node cli/ink-studio.js clip examples/material-projection.js --w 176 --h 112 \
+  --px 1 --raw --from 0 --to 3.5 --fps 12 --params '{"mode":"snap"}' --out relay-nine.apng
+```
+
+Use `perspective`, `affine`, `snap`, or `subdivided` as the scene's
+`mode` control.
+
 ## Palette-preserving minification
 
 Pass a `sampling` rule to `face`, `mesh`, `faceRegion`, or
@@ -77,7 +120,7 @@ atlas.mesh(terrain, 256, 192, paint, {
 ```
 
 When a projected art pixel covers multiple texels, the filter uses the
-perspective-correct UV gradients to integrate that footprint. Aligned
+UV gradients of the selected projection to integrate that footprint. Aligned
 footprints use exact fractional texel areas. Oblique footprints use
 four strips along the longer screen derivative. The resolved RGB is one
 authored swatch. A magnified surface keeps its original nearest texels.

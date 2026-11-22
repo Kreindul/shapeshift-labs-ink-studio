@@ -47,18 +47,21 @@ const ShadowCutouts = (() => {
     }
     const slip = atlas[slipSymbol];
     const edits = slip?.vertices === vertices && slip.width === width && slip.height === height ? slip.ranges : [];
-    for (const { first, region, shell: authoredShell } of shadowFaces) {
+    for (const { first, region, shell: authoredShell, subdivisions = 1 } of shadowFaces) {
       const shell=shadowShells && authoredShell;
-      if (!integer(first) || first % 3 || (first + 6) * 5 > vertices.length)
+      const span = 3 * subdivisions ** 2, end = first + 2 * span;
+      if (!integer(first) || first % 3 || !Number.isSafeInteger(subdivisions) || subdivisions < 1 || subdivisions > 16 ||
+          end * 5 > vertices.length)
         throw new RangeError('Invalid painted shadow face vertex range');
       const base = first * 5, vertex = i => Array.from(vertices.subarray(base + i * 5, base + i * 5 + 5));
-      const [a, b, c, c2, b2, corner] = [0, 1, 2, 3, 4, 5].map(vertex);
+      const bIndex = (subdivisions - 1) * 6 + 1;
+      const [a, b, c, c2, b2, corner] = [0, bIndex, span - 1, span, span + bIndex, 2 * span - 1].map(vertex);
       const nearly = (p, q) => Math.abs(p - q) <= 2e-6 * Math.max(1, Math.abs(p), Math.abs(q));
       if (!a.every((n, k) => nearly(b[k], b2[k]) && nearly(c[k], c2[k]) && nearly(b[k] + c[k] - n, corner[k])) ||
           !nearly(a[3], c[3]) || !nearly(a[4], b[4]))
         throw new RangeError('A painted shadow face must stay a single planar, UV-aligned quad');
-      const change = edits.find(edit => edit.first < first + 6 && edit.end > first);
-      if (change && (change.first > first || change.end < first + 6))
+      const change = edits.find(edit => edit.first < end && edit.end > first);
+      if (change && (change.first > first || change.end < end))
         throw new RangeError('UV slip must move the whole painted shadow face');
       const bounds = change?.bounds ?? [region.x, region.y, region.x + region.width - 1, region.y + region.height - 1];
       const [x, y, x1, y1] = bounds, w = x1 - x + 1, h = y1 - y + 1;

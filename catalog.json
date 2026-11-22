@@ -991,6 +991,17 @@
       ]
     },
     {
+      "id": "look.materialProjection",
+      "kind": "material",
+      "status": "ready",
+      "title": "PS1-style material projection",
+      "what": "Style individual textured surfaces with affine UVs, native art-pixel vertex snapping, and regular triangle subdivision.",
+      "use": "SpriteSurface.make().faceRegion(origin, right, up, region, { projection: { mapping: 'affine', vertexSnap: 2, subdivisions: 4 } })",
+      "where": "src/sprite-surface.js, cli/sprite-surfaces.js, src/webgl/surfaces.mjs",
+      "example": "examples/material-projection.js",
+      "tags": ["textures", "pixel-art", "affine", "geometry"]
+    },
+    {
       "id": "look.viewDither",
       "kind": "material",
       "status": "ready",

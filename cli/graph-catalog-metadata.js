@@ -206,6 +206,7 @@ const options = {
     channel: property('number|string', { description: 'Raster channel or magnitude for two-channel motion.' }, 0),
     bias: property('number', seconds, 0), scale: property('number', {}, 1) },
   'warp.surface': { alphaThreshold: property('number', limit(1, 255, true), 128),
+    projection: property('record', { description: 'Choose affine UVs, art-pixel vertex snapping, and triangle subdivision.' }),
     sampling: property('boolean|record', { description: 'Enable palette-preserving filtering for this surface footprint.' }) },
   'proc.plasma': { ...size, time: sampleTime,
     range: property('vec2', { description: 'Increasing field interval mapped onto the palette slots.' }, [-1, 1]) },
