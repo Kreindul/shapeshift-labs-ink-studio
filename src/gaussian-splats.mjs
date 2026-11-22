@@ -320,6 +320,27 @@ function shBasis(direction, degree) {
   return basis;
 }
 
+function colorChannel(dc, sh, index, channel, basis) {
+  let value = 0.5 + SH0 * dc[index * 3 + channel];
+  if (basis) for (let j = 0; j < basis.length; j++)
+    value += basis[j] * sh[(index * basis.length + j) * 3 + channel];
+  return Math.round(clamp(value, 0, 1) * 255);
+}
+
+export function gaussianSplatColors(world, index, { eye, back, ortho }) {
+  const { count, degree, dc, sh, up } = world.gaussianHarmonics ?? {};
+  if (!Number.isInteger(index) || index < 0 || index >= count || !dc)
+    throw new RangeError('Inspecting Gaussian color needs a live imported splat index');
+  const at = index * 16;
+  const ray = ortho ? back.map(value => -value) : eye.map((value, axis) => world.data[at + axis] - value);
+  const direction = up === 'z' ? [ray[0], -ray[2], ray[1]] : ray;
+  const basis = Math.hypot(...direction) ? shBasis(direction, degree) : null;
+  return {
+    base: [0, 1, 2].map(channel => colorChannel(dc, sh, index, channel)),
+    rgb: [0, 1, 2].map(channel => colorChannel(dc, sh, index, channel, basis))
+  };
+}
+
 const defaultPalette = [0x0c1217, 0x334552, 0x6f8590, 0xbccdd0, 0xf4f8f5];
 
 export function gaussianSplatWorld(cloud, {
@@ -374,13 +395,8 @@ export function gaussianSplatWorld(cloud, {
     data[o + 8] = up === 'z' ? zz : yy;
     data[o + 9] = up === 'z' ? -yz : yz;
     data[o + 10] = up === 'z' ? yy : zz;
-    let packed = 0;
-    for (let channel = 0; channel < 3; channel++) {
-      let color = 0.5 + SH0 * dc[p + channel];
-      if (basis) for (let j = 0; j < terms; j++) color += basis[j] * sh[(i * terms + j) * 3 + channel];
-      packed += Math.round(clamp(color, 0, 1) * 255) * 256 ** channel;
-    }
-    data[o + 7] = packed;
+    data[o + 7] = colorChannel(dc, sh, i, 0, basis) |
+      colorChannel(dc, sh, i, 1, basis) << 8 | colorChannel(dc, sh, i, 2, basis) << 16;
   }
   return {
     count, data, seed: 1, detail: 14, radius: size, moving: new Int32Array(), back: new Int32Array(),
