@@ -29,6 +29,9 @@ comp alternate performances, and audition the same edits against a recut.
 See [Foley and perspective](foley-perspective.md) for editorial assets and
 post buses for dialogue, Foley, effects, ambience, and music.
 
+Use [audio delivery](audio-delivery.md) to hand off an aligned post mix as
+Broadcast Wave and an editorial timeline.
+
 ## Soundtrack file
 
 Use `proceduralScore` for a [shared audiovisual score](procedural-score.md).

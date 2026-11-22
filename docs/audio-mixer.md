@@ -109,6 +109,9 @@ processing latency and tail in samples. Artistic delay or reverb
 predelay stays in the wet sound. The mixer compensates algorithmic
 latency at joins and sidechains, including the dry part of a wet/dry insert.
 
+Use [audio delivery](audio-delivery.md) to print the master, reconstructible
+premaster stems, M&E, and editorial media.
+
 ## Export and inspect
 
 A session `end` stops external clips at the specified edit point. By

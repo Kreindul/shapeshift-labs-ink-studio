@@ -14,7 +14,7 @@ function shape({ sampleRate, channels, samples } = {}) {
   return { sampleRate, channels, samples };
 }
 
-function decode(source) {
+function decode(source, { metadata = false } = {}) {
   if (!(source instanceof Uint8Array)) throw new TypeError('WAV decoding needs bytes');
   const bytes = Buffer.from(source.buffer, source.byteOffset, source.byteLength);
   if (bytes.length < 12 || bytes.length > maxBytes || bytes.toString('ascii', 0, 4) !== 'RIFF' ||
@@ -22,7 +22,7 @@ function decode(source) {
   const end = bytes.readUInt32LE(4) + 8;
   if (end < 12 || end > bytes.length) throw new RangeError('Truncated WAV container');
   const chunks = [];
-  let format;
+  let format, bwf;
   for (let at = 12, count = 0; at < end;) {
     if (at + 8 > end || ++count > 65536) throw new RangeError('Invalid WAV chunk table');
     const tag = bytes.toString('ascii', at, at + 4), size = bytes.readUInt32LE(at + 4), start = at + 8;
@@ -45,6 +45,13 @@ function decode(source) {
         throw new RangeError('Unsupported WAV format. Use PCM or IEEE floating point');
       format = { kind, bits, align, sampleRate, channels };
     }
+    if (metadata && tag === 'bext') {
+      if (bwf || size < 602) throw new RangeError('Invalid Broadcast Wave metadata');
+      const text = (offset, length) => bytes.toString('ascii', start + offset, start + offset + length).split('\0')[0];
+      bwf = { description: text(0, 256), originator: text(256, 32), originatorReference: text(288, 32),
+        date: text(320, 10), time: text(330, 8), timeReference: bytes.readBigUInt64LE(start + 338).toString(),
+        version: bytes.readUInt16LE(start + 346) };
+    }
     if (tag === 'data') chunks.push([start, size]);
   }
   if (!format || !chunks.length) throw new RangeError('WAV needs format and data chunks');
@@ -61,18 +68,45 @@ function decode(source) {
     if (!Number.isFinite(n)) throw new RangeError('WAV contains a nonfinite PCM sample');
     samples[i++] = Math.max(-1, Math.min(1, n));
   }
-  return { sampleRate, channels, samples };
+  return { sampleRate, channels, samples, ...(bwf && { bwf }) };
 }
 
 const encodings = Object.freeze({ pcm8: [1, 8], pcm16: [1, 16], pcm24: [1, 24], pcm32: [1, 32],
   float32: [3, 32], float64: [3, 64] });
 
-function encode(source, { encoding = 'pcm16' } = {}) {
+function broadcastExtension(bwf, sampleRate, channels, bits) {
+  const ascii = (value, size) => typeof value === 'string' && value.length <= size && /^[ -~]*$/.test(value);
+  const { description = '', originator = 'Ink Studio', originatorReference = '',
+    date = '', time = '', timeReference = 0 } = bwf;
+  if (!ascii(description, 256) || !ascii(originator, 32) || !ascii(originatorReference, 32) ||
+      !ascii(date, 10) || date && !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      !ascii(time, 8) || time && !/^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(time) ||
+      !(int(timeReference, 0, Number.MAX_SAFE_INTEGER) || typeof timeReference === 'bigint' ||
+        typeof timeReference === 'string' && /^\d{1,20}$/.test(timeReference)))
+    throw new TypeError('Invalid Broadcast Wave origin or time reference');
+  const reference = BigInt(timeReference);
+  if (reference < 0n || reference >= 2n ** 64n) throw new RangeError('Broadcast Wave time reference exceeds 64 bits');
+  const history=Buffer.from(`A=PCM,F=${sampleRate},W=${bits},M=${channels === 1 ? 'mono' : channels === 2 ? 'stereo' : 'multichannel'}\r\n`, 'ascii');
+  const length=602+history.length, chunk=Buffer.alloc(8+length+(length & 1));
+  chunk.write('bext',0);
+  chunk.writeUInt32LE(length,4);
+  for (const [value,offset] of [[description,0],[originator,256],[originatorReference,288],[date,320],[time,330]])
+    chunk.write(value,8+offset,'ascii');
+  chunk.writeBigUInt64LE(reference,8+338);
+  chunk.writeUInt16LE(1,8+346);
+  history.copy(chunk,8+602);
+  return chunk;
+}
+
+function encode(source, { encoding = 'pcm16', bwf } = {}) {
   const { sampleRate, channels, samples } = shape(source);
   if (!Object.hasOwn(encodings, encoding)) throw new RangeError('Unsupported WAV encoding ' + encoding);
   const [kind, bits] = encodings[encoding], stride = bits / 8, align = stride * channels;
+  if (bwf !== undefined && (kind !== 1 || !bwf || typeof bwf !== 'object'))
+    throw new TypeError('Broadcast Wave export needs a PCM encoding and metadata');
+  const extension = bwf === undefined ? null : broadcastExtension(bwf,sampleRate,channels,bits);
   const extensible = channels > 2, fmtSize = extensible ? 40 : kind === 3 ? 18 : 16;
-  const dataLength = samples.length * stride, hasFact = kind === 3, header = 12 + 8 + fmtSize + (hasFact ? 12 : 0) + 8;
+  const dataLength = samples.length * stride, hasFact = kind === 3, header = 12 + 8 + fmtSize + (hasFact ? 12 : 0) + (extension?.length ?? 0) + 8;
   const bytes = Buffer.alloc(header + dataLength + (dataLength & 1));
   bytes.write('RIFF', 0);
   bytes.writeUInt32LE(bytes.length - 8, 4);
@@ -95,6 +129,7 @@ function encode(source, { encoding = 'pcm16' } = {}) {
     bytes.writeUInt32LE(4, header - 16);
     bytes.writeUInt32LE(samples.length / channels, header - 12);
   }
+  if (extension) extension.copy(bytes,header-8-extension.length);
   bytes.write('data', header - 8);
   bytes.writeUInt32LE(dataLength, header - 4);
   const signedScale = 2 ** (bits - 1);
@@ -113,9 +148,9 @@ function encode(source, { encoding = 'pcm16' } = {}) {
   return bytes;
 }
 
-function read(file) {
+function read(file, options) {
   if (fs.statSync(file).size > maxBytes) throw new RangeError('WAV file exceeds the audio budget');
-  return decode(fs.readFileSync(file));
+  return decode(fs.readFileSync(file), options);
 }
 
 module.exports = { decode, encode, read, maxSamples, maxBytes, encodings: Object.freeze(Object.keys(encodings)) };

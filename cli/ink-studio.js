@@ -1103,6 +1103,7 @@ const CMD = {
         '  music rack state rack [settings.json] --out state.json   save recalled macro automation',
         '  music rack render|audition rack recipe.json --out directory   render a rack or compare with bypass',
         '  music rack plugin-info|plugin-state alias [settings.json] --clap-host manifest.json   inspect or save CLAP state',
+        '  music deliver recipe.json --out directory [--strict]   print BWF stems, M&E, loops, cue sheet and editorial timeline',
         '  music repair input.wav settings.json --out output   render before, repaired and removed dialogue',
         '  music editorial spot-foley recipe.json --out project.json   spot paired Foley takes from committed world contacts',
         '  music editorial inspect|render project.json --out output   spot and print editorial audio',

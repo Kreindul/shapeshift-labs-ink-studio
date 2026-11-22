@@ -26,7 +26,7 @@ function placement({ asset, first, end, offset = 0, rate = 1, gain = 1, loop = f
   return { asset, first, end, sourceStep, sourceStart, gain, loop, fade, points };
 }
 
-function sumVoices(voices, resolve, { start, end, sampleRate, gain = 1 }, buses = stereo) {
+function sumVoices(voices, resolve, { start, end, sampleRate, gain = 1, cues }, buses = stereo) {
   const count = end - start;
   if (!Number.isSafeInteger(count) || count < 1 || count * 2 > WAV.maxSamples)
     throw new RangeError('Scene soundtrack exceeds its WAV sample budget');
@@ -46,6 +46,10 @@ function sumVoices(voices, resolve, { start, end, sampleRate, gain = 1 }, buses 
     work += (last - begin) * Math.max(2, source.channels);
     if (work > 240e6) throw new RangeError('Scene soundtrack exceeds its mixing work budget');
     statistics[stem].voices++;
+    if (cues) {
+      const source=typeof voice.asset==='string' ? voice.asset : stem;
+      cues.push({label:voice.cue ?? source,source,role:stem,fromSample:first,toSample:last});
+    }
     let knot = 0, low = 0;
     for (let sample = begin; sample < last; sample++) {
       while (points && knot + 1 < points.length && points[knot + 1].sample <= sample) knot++;
