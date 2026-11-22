@@ -13,6 +13,9 @@ ink-studio music editorial edit foley.json changes.json --out revised-foley.json
 ink-studio export-scene take.json --audio soundtrack.json --out review
 ```
 
+Use [dialogue repair](dialogue-repair.md) to clean a dialogue source and key
+a frequency-specific cut on music or effects.
+
 ## Spot a performance
 
 The CLI input has a `foley` definition and an `assets` table with WAV

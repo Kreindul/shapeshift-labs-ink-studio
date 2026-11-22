@@ -25,6 +25,11 @@
       inputs:{sources:'record',settings:'record'},outputs:{audio:'record',entries:'record',report:'record'},
       run({sources,settings},{seed,time}) {return A.audioPrint.prepare(sources,settings,{seed,time});}
     },
+    'audio.repairDialogue': {
+      description: 'Repair clicks, hum, sibilance and localized spectral noise and audition the removed signal.',
+      inputs:{source:'audio',options},outputs:{value:'audio',before:'audio',removed:'audio',report:'record'},
+      run({source,options}) {return A.repairDialogue(source,options);}
+    },
     'audio.renderMixer': {
       description: 'Render clips through compensated strips, sends, sidechains, and creative inserts such as convolution, granular playback, and freeze.',
       inputs:{source:'record',assets:'record'},outputs:{value:'audio',taps:'record',report:'record'},

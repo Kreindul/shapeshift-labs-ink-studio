@@ -101,6 +101,7 @@ Beat, second, and sample lanes can coexist in one mixer.
 | `transient` | Independent attack and sustain gain, using two envelope speeds |
 | `saturation` | Soft clipping with drive, asymmetry, tone and output trim |
 | `limiter` | Stereo-linked true-peak ceiling with lookahead and release |
+| `deesser`, `band-duck` | Dialogue-focused dynamic EQ with an optional external key for band ducking |
 
 Inserts have a sample-accurate `wet` control between 0 and 1, with a
 fully wet limiter. Unmarked parameters accept automation. Every insert declares its
