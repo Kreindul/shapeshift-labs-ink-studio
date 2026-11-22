@@ -183,6 +183,7 @@
     if (raw.type==='sample') return sampler(raw,assets);
     if (raw.type==='drum') return drum(raw);
     if (raw.type==='keys') return keys(raw);
+    if (raw.type==='subtractive') return P.musicSubtractive.compile(raw);
     check(['fm','analog'].includes(raw.type),'Unknown music instrument type');
     return synth(raw);
   }
@@ -194,7 +195,8 @@
       Object.entries(articulations).every(([name,value])=>id(name) && record(value) && value.type===undefined),
       'Invalid instrument articulations');
     const variants=Object.fromEntries(Object.entries(articulations).map(([name,value])=>[
-      name,instrument({...base,...value,...(value.env && {env:{...base.env,...value.env}})},assets)
+      name,instrument(base.type==='subtractive' ? P.musicSubtractive.articulate(base,value) :
+        {...base,...value,...(value.env && {env:{...base.env,...value.env}})},assets)
     ]));
     return {prepare(note,...args) {
       const name=note.play.articulation;
@@ -202,5 +204,5 @@
     }};
   }
 
-  P.musicInstruments=Object.freeze({compile,record,fields,finite,integer,id,check,clamp,db,hz,hash});
+  P.musicInstruments=Object.freeze({compile,record,fields,finite,integer,id,check,clamp,db,hz,hash,options,envelope,level,phase});
 })(KIT);
