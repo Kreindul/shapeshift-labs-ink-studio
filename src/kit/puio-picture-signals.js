@@ -1,4 +1,4 @@
-/* Sample sound, physical traces and committed world state on the picture clock. */
+/* Sample sound, native traces and committed world state on the picture clock. */
 (function(K){
   const P=K.procedural,W=K.world,T=P.takeTime,S=W.soundMeasurements;
   const {check,own,id,record,selector,read}=W.data,{fields}=W.boundarySignals;
@@ -63,10 +63,17 @@
     return {raw:stat==='min'?min:stat==='max'?max:stat==='peak'?peak:stat==='rms'?Math.sqrt(mean):mean,used};
   }
 
-  function prepare(bindings,{audio={},signals={}}={}){
-    check(record(bindings)&&Object.keys(bindings).length<=64&&Object.keys(bindings).every(id)&&record(audio)&&record(signals),
+  function sampleTrace(trace,channel){
+    const names=Object.keys(trace.channels), name=channel??(names.length===1?names[0]:undefined);
+    check(own(trace.channels,name),'Select a known picture trace channel');
+    const {samples,unit}=trace.channels[name],{sampleRate,startSample,frames}=trace;
+    return {sampleRate,startSample,frames,components:1,unit,at:i=>samples[i]};
+  }
+
+  function prepare(bindings,{audio={},signals={},traces={}}={}){
+    check(record(bindings)&&Object.keys(bindings).length<=64&&Object.keys(bindings).every(id)&&record(audio)&&record(signals)&&record(traces),
       'Picture signals need named bindings and source tables');
-    const validatedAudio=new Map(), physical=new Map();
+    const validatedAudio=new Map(), physical=new Map(), validatedTraces=new Map();
     const rules=Object.entries(bindings).map(([name,binding])=>{
       check(fields(binding,['source','input','output','shape','exponent','fallback'])&&record(binding.source)&&
         range(binding.input)&&binding.input[0]<binding.input[1]&&range(binding.output),
@@ -75,11 +82,11 @@
       check(['linear','smoothstep','power'].includes(shape)&&Number.isFinite(exponent)&&exponent>=.05&&
         exponent<=20&&(binding.exponent===undefined||shape==='power')&&Number.isFinite(fallback),'Invalid picture control '+name);
       let measure;
-      if(source.kind==='audio'||source.kind==='physical'){
-        const audible=source.kind==='audio';
-        check(fields(source,['kind','name','stat','window',...(audible?['channel']:[])])&&id(source.name),
-          'Choose a named audio bus or physical track for '+name);
-        const {stat='rms',window='frame',channel=['first','last'].includes(stat)?'mix':'all'}=source;
+      if(['audio','physical','trace'].includes(source.kind)){
+        const audible=source.kind==='audio', sampled=source.kind==='trace';
+        check(fields(source,['kind','name','stat','window',...(audible||sampled?['channel']:[])])&&id(source.name),
+          'Choose a named audio bus, physical track or native trace for '+name);
+        const {stat='rms',window='frame',channel=audible?(['first','last'].includes(stat)?'mix':'all'):undefined}=source;
         check(stats.includes(stat)&&['frame','previous'].includes(window)&&
           (!audible||!['first','last'].includes(stat)||channel!=='all'),
         'Invalid picture signal statistic, window or channel on '+name);
@@ -88,6 +95,11 @@
           check(own(audio,source.name),'Unknown picture audio bus '+source.name);
           if(!validatedAudio.has(source.name))validatedAudio.set(source.name,pcm(audio[source.name]));
           track=sampleAudio(validatedAudio.get(source.name),channel);
+        }else if(sampled){
+          check(own(traces,source.name),'Unknown picture trace '+source.name);
+          if(!validatedTraces.has(source.name))
+            validatedTraces.set(source.name,W.outputGeometry.validate('trace',traces[source.name]));
+          track=sampleTrace(validatedTraces.get(source.name),channel);
         }else{
           check(own(signals,source.name),'Unknown picture physical track '+source.name);
           if(!physical.has(source.name))physical.set(source.name,samplePhysical(signals[source.name]));
@@ -97,7 +109,7 @@
           const [firstSample,endSample]=spans(frame,track.sampleRate,window);
           const {raw,used}=reduce(track,firstSample,endSample,stat,audible);
           return {raw,unit:track.unit,sampleRate:track.sampleRate,firstSample,endSample,used,stat,window,
-            ...(audible&&{channel})};
+            ...(channel!==undefined&&{channel})};
         };
       }else{
         check(fields(source,['kind','signal','field','at','args','path','project'])&&source.kind==='world'&&

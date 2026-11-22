@@ -151,5 +151,5 @@
     })};
   }
 
-  W.outputTiming=Object.freeze({trace,traceWindow,audio,events,eventWindow});
+  W.outputTiming=Object.freeze({trace,traceWindow,audio,events,eventWindow,eventTime});
 })(KIT);

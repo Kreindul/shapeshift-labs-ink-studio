@@ -531,6 +531,10 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         if(!report.passed)process.exitCode=2;
         return;
       }
+      case 'review': {
+        ensure(other===undefined,'Use sim review <recipe.json> --out directory [--require-match]');
+        return require('./aligned-simulation-review.js').command(kit,file,opt);
+      }
       case 'measure': {
         ensure(typeof file==='string'&&other===undefined&&Object.keys(opt).every(key=>['out','json'].includes(key)),
           'Use sim measure <run.json> [--out report.json]');
