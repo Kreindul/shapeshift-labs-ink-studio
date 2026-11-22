@@ -170,6 +170,8 @@ module.exports = {
   describeGraphNode: require('./cli/graph-catalog.js').describeGraphNode,
   createTake: require('./cli/take.js').createTake,
   readTake: require('./cli/take.js').readTake,
+  renderAudiovisualTake: require('./cli/audiovisual-take.js').render,
+  readAudiovisualTake: require('./cli/audiovisual-take.js').open,
   ...require('./cli/graph-host.js'),
   readWav: require('./cli/wav.js').read,
   decodeWav: require('./cli/wav.js').decode,

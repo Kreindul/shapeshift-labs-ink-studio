@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),WAV=require('./wav.js');
 
 const runFormat='ink-studio/physical-audio-run';
-function run(kit,request,file,dependency=()=>{}){
+function prepare(kit,request,file,dependency=()=>{}){
   const W=kit.KIT.world,{check,record,id}=W.data,{fields}=W.boundarySignals;
   check(fields(request,['format','version','plan','inputs'])&&request.format===runFormat&&request.version===1&&
     record(request.inputs)&&Object.keys(request.inputs).length<=32&&Object.keys(request.inputs).every(id),
@@ -38,7 +38,7 @@ function run(kit,request,file,dependency=()=>{}){
     }
     return [name,W.physicalSignals.fromTrace(native.get(entry),input.selection)];
   }));
-  return W.physicalAudio.render(read(request.plan).value,signals);
+  return {signals,result:W.physicalAudio.render(read(request.plan).value,signals)};
 }
 
 function writeStems(directory,result,{exclude=[]}={}){
@@ -64,4 +64,4 @@ function writeStems(directory,result,{exclude=[]}={}){
   return Object.fromEntries(items.map(([name],index)=>[name,files[index]]));
 }
 
-module.exports={runFormat,run,writeStems};
+module.exports={runFormat,prepare,run:(...args)=>prepare(...args).result,writeStems};

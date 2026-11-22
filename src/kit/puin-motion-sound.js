@@ -10,6 +10,12 @@
   const curveNames=['linear','smoothstep','power'];
   const mixerLimit=2048;
 
+  function mapRange(value,input,output,shape='linear',exponent=2){
+    const u=Math.min(1,Math.max(0,(value-input[0])/(input[1]-input[0])));
+    const t=shape==='smoothstep'?u*u*(3-2*u):shape==='power'?u**exponent:u;
+    return output[0]+(output[1]-output[0])*t;
+  }
+
   function compile(plan,measurements){
     check(fields(plan,['format','version','id','sampleRate','lanes'])&&plan.format===format&&plan.version===1&&id(plan.id)&&
       integer(plan.sampleRate,8000,96000)&&record(plan.lanes)&&integer(Object.keys(plan.lanes).length,1,64)&&
@@ -42,11 +48,7 @@
         check(previousSample===null||sample>previousSample,'Sound lane '+name+' has multiple observations at audio sample '+sample);
         let target;
         if(raw===null)target=missing==='hold'&&!row.cut?state:fallback;
-        else {
-          const u=Math.min(1,Math.max(0,(raw-input[0])/(input[1]-input[0])));
-          const t=shape==='smoothstep'?u*u*(3-2*u):shape==='power'?u**exponent:u;
-          target=output[0]+(output[1]-output[0])*t;
-        }
+        else target=mapRange(raw,input,output,shape,exponent);
         if(index===0||row.cut){
           if(sample>0)append(sample-1,state);
           state=target;
@@ -98,7 +100,7 @@
       values:Object.fromEntries(entries.map(([name,{value}])=>[name,value])),lanes:Object.fromEntries(entries)};
   }
 
-  W.motionSound=Object.freeze({format,resultFormat,compile,sample});
+  W.motionSound=Object.freeze({format,resultFormat,compile,sample,mapRange});
   const options={type:'record',default:{}};
   P.graph.operations=Object.freeze({...P.graph.operations,
     'audio.soundMeasurements':{

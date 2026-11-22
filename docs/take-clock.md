@@ -1,5 +1,8 @@
 # Exact take clock
 
+Use [audiovisual takes](audiovisual-takes.md) to drive a picture graph from
+the same physical signals and audio buffers that supply a take WAV.
+
 Use a take to sample an Ink world and a graph at the same frame. The clock
 derives video frame boundaries, committed simulation ticks, and output audio
 sample positions from integer ratios. Rendering, keyframe interpolation, and

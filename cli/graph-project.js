@@ -677,16 +677,20 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     artifactIdentity,
     snapshot,
     run:options=>run(request(options)),
-    clip(options) {
+    clip(options, { frameInputs } = {}) {
       const { inputs, seed, ...settings } = fields(options,
         ['output','from','to','warmup','format','clock','renderOptions','capture','inputs','seed'], 'graph clip options');
-      const requestOptions = request({inputs,seed});
+      if (frameInputs!==undefined&&typeof frameInputs!=='function') throw new TypeError('Graph frame inputs need a host callback');
+      const start=frameInputs===undefined?request({inputs,seed}):clock(time,seed??projectPlan.seed);
       const runner = execution();
       workerPool?.resetStats();
       try {
-        const result=clip(settings,{kit,plan:projectPlan,checks:assertions,seed:requestOptions.seed,
+        const result=clip(settings,{kit,plan:projectPlan,checks:assertions,seed:start.seed,
           sample(take,sequence) {
-            return runner.evaluate({...requestOptions,time:take.start,take},sequence).frame;
+            if(frameInputs===undefined)return runner.evaluate({...start,time:take.start,take},sequence).frame;
+            const supplied=frameInputs(take);
+            if(!record(supplied))throw new TypeError('Graph frame inputs must return a record');
+            return runner.evaluate(request({inputs:{...inputs,...supplied},take,seed:start.seed}),sequence).frame;
           }});
         if (workerPool) result.report.workers=workerPool.stats();
         return result;

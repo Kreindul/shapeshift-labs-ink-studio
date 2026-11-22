@@ -11,9 +11,9 @@ const checkpointFormat = 'ink-studio/take-checkpoint';
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 
 function createTake({ clock: definition = {}, world, graph, simulation } = {}, {
-  kit = require('../index.js').load(), checkpoint, maxSeekTicks = 36000
+  kit = require('../index.js').load(), checkpoint, maxSeekTicks = 36000, evaluateGraph = true
 } = {}) {
-  if (!Number.isSafeInteger(maxSeekTicks) || maxSeekTicks < 1 ||
+  if (!Number.isSafeInteger(maxSeekTicks) || maxSeekTicks < 1 || typeof evaluateGraph !== 'boolean' ||
       graph !== undefined && (typeof graph?.run !== 'function' || typeof graph?.plan !== 'function'))
     throw new TypeError('Expected a compiled take graph and a positive tick budget');
   const { KIT: K } = kit, W = K.world, runtime = W.runtime;
@@ -66,7 +66,7 @@ function createTake({ clock: definition = {}, world, graph, simulation } = {}, {
     }
     if (active && tick - active.view().tick > maxSeekTicks)
       throw new RangeError('Take seek exceeds the simulation tick budget');
-    const result = graph?.run({ take: frame, ...(inputs !== undefined && { inputs }), ...(seed !== undefined && { seed }) });
+    const result = evaluateGraph ? graph?.run({ take: frame, ...(inputs !== undefined && { inputs }), ...(seed !== undefined && { seed }) }) : undefined;
     const previous = active?.checkpoint();
     let view, timeline, model;
     try {
@@ -125,6 +125,8 @@ function readTake(file, { kit = require('../index.js').load(), checkpoint, ...op
 }
 
 function command(pos, opt, settings) {
+  if(pos[0]==='render-av'&&pos.length===2)
+    return require('./audiovisual-take.js').command(pos[1],opt,settings);
   const usage = 'Use take sample <take.json> --frame N [--iteration N --resume checkpoint.json --checkpoint file.json --out report.json]';
   if (pos.length !== 2 || pos[0] !== 'sample' ||
       Object.entries(opt).some(([key, value]) => !['frame', 'iteration', 'resume', 'checkpoint', 'out'].includes(key) ||
