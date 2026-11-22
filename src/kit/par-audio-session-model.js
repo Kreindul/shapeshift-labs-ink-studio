@@ -82,12 +82,12 @@
     }
     return {at,range,choice};
   }
-  function compile(session,assets) {
+  function compile(session,assets,host) {
     check(fields(session,['format','version','id','sampleRate','production','takes','audio','comp','pins','mixer','automation']) &&
       session.format===format && session.version===1 && id(session.id) && record(session.production) &&
       integer(session.sampleRate,8000,96000),'Expected a version 1 music edit session');
     const {production,sampleRate:rate}=session, revisions=table(session.takes ?? {},15,'score takes');
-    const baseline=A.compile(production,instruments(assets,production));
+    const baseline=A.compile(production,instruments(assets,production),host);
     const map=baseline.arrangement.score.tempoMap ?? {}, time=S.mixerTime(rate,map);
     const frames=time.frame(time.position({bar:baseline.arrangement.report.bars}));
     check(integer(frames,1,rate*180),'Music edit sessions can span up to three minutes');
@@ -95,7 +95,7 @@
     for (const [name,revision] of revisions) {
       check(name!==reference && record(revision) && revision.unpin===undefined,'Score takes need a revision and respect production pins');
       const bank=instruments(assets,production,revision), source=A.revise(production,revision,bank);
-      const score=A.compile(source,instruments(assets,source));
+      const score=A.compile(source,instruments(assets,source),host);
       check(signature(Object.keys(score.tracks))===signature(Object.keys(baseline.tracks)),
         'Score takes share the same tracks');
       producers.set(name,{source,score});

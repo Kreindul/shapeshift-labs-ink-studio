@@ -91,11 +91,10 @@ parameter IDs. The same `--clap-host` option works on `music mix render`.
 Register plug-ins and workers you trust. Process isolation contains a
 worker crash, while the plug-in runs with the account's permissions.
 
-The worker handles offline effects and free-running processing. The
-supported contract is fixed channel layout, latency, and finite tail
-per render. Plug-in GUIs, notes, host transport, and realtime playback
-are outside this worker's scope. The built-in graph nodes run native
-racks. JavaScript callers can supply trusted implementations to
+The worker handles offline effects and
+[CLAP instruments](clap-instruments-and-handoff.md).
+The supported effects contract is fixed channel layout, latency,
+and finite tail per render. The built-in graph nodes run native racks. JavaScript callers can supply trusted implementations to
 the mixer or rack as `{adapters:{name:{describe,render}}}`. The
 adapter declares parameter ranges, latency, tail, sidechain support,
 and identity. Its render call receives score-aligned stereo audio,

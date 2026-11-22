@@ -1,8 +1,8 @@
 const {Worker,isMainThread,workerData,parentPort}=require('node:worker_threads');
 
 if (isMainThread) {
-  module.exports=function createPreparer(file,paths) {
-    const worker=new Worker(__filename,{workerData:{file,paths}});
+  module.exports=function createPreparer(file,paths,hostFile) {
+    const worker=new Worker(__filename,{workerData:{file,paths,hostFile}});
     const pending=new Map();
     let sequence=0, failure;
     worker.on('message',({id,value,error})=>{
@@ -31,7 +31,8 @@ if (isMainThread) {
 } else {
   const P=require('..').load().KIT.procedural;
   const {readAssets}=require('./music-mixer.js');
-  const editor=P.mediaGraph.musicSession.create(readAssets(workerData.paths,workerData.file,P)), shared=new WeakMap();
+  const host=workerData.hostFile===undefined ? undefined : require('./clap-adapter').load(workerData.hostFile);
+  const editor=P.mediaGraph.musicSession.create(readAssets(workerData.paths,workerData.file,P),host), shared=new WeakMap();
   function share(pcm) {
     if (!pcm) return pcm;
     let value=shared.get(pcm);

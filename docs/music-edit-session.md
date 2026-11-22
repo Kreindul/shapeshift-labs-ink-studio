@@ -4,7 +4,8 @@ Hear alternate score performances and audio takes in a common mix. Loop a
 passage, switch lanes at score addresses, and keep chosen ranges in an
 editable recipe. Use [producer revisions](music-producer.md),
 [audio editorial](audio-editorial.md), and [sample motifs](sample-motif.md)
-as sources.
+as sources. Use [DAW handoff](clap-instruments-and-handoff.md#hand-the-edit-to-a-daw)
+to export the active comp, routing, automation, and aligned prints.
 
 ## Assemble a session
 

@@ -4,12 +4,19 @@ const read=file=>JSON.parse(fs.readFileSync(file,'utf8'));
 
 module.exports=function command([mode,file,config],opt,kit) {
   const P=kit.KIT.procedural,{fields,check}=P.musicInstruments;
-  check(file && ['inspect','edit','render','preview','stream','play'].includes(mode),
-    'Use music session inspect, edit, render, preview, stream or play');
+  check(file && ['inspect','edit','render','preview','stream','play','handoff'].includes(mode),
+    'Use music session inspect, edit, render, preview, stream, play or handoff');
   const recipe=read(file);
   check(fields(recipe,['session','assets']),'Expected a music edit session and WAV asset table');
-  const paths=recipe.assets ?? {}, editor=P.mediaGraph.musicSession.create(readAssets(paths,file,P));
+  const paths=recipe.assets ?? {}, hostFile=opt['clap-host'], host=hostFile===undefined ? undefined : require('./clap-adapter').load(hostFile);
+  const editor=P.mediaGraph.musicSession.create(readAssets(paths,file,P),host);
   let session=recipe.session;
+  if (mode==='handoff') {
+    check(typeof opt.out==='string','Use --out for the DAW package');
+    const result=require('./music-handoff.js').publish(editor.handoff(session),file,recipe,opt.out,host);
+    process.stdout.write(JSON.stringify(result)+'\n');
+    return result;
+  }
   function save(target,value=session) {
     check(typeof target==='string','Use an output path for the session recipe');
     const folder=path.dirname(path.resolve(target)), source=path.dirname(path.resolve(file));
@@ -57,7 +64,7 @@ module.exports=function command([mode,file,config],opt,kit) {
     check(Number.isInteger(port) && port>=0 && port<=65535,'Choose a session port from 0 to 65535');
     const absolute=Object.fromEntries(Object.entries(paths).map(([name,ref])=>[name,path.resolve(path.dirname(file),ref)]));
     const settings=config && read(config);
-    const preparer=require('./music-session-edit-worker.js')(file,paths);
+    const preparer=require('./music-session-edit-worker.js')(file,paths,hostFile);
     return (async()=>{
       try {
         const prepared=await preparer.prepare(session);

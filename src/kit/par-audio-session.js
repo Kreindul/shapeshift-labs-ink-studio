@@ -6,7 +6,7 @@
   const cacheBudget=160*1024*1024, pcmBudget=32e6;
   const audio=(sampleRate,samples)=>({sampleRate,channels:2,samples});
   const byteSize=pcm=>pcm?.samples.byteLength ?? 0;
-  function create(input={}) {
+  function create(input={},host) {
     check(record(input) && Object.keys(input).length<=128 && Object.keys(input).every(id),'Expected named session audio assets');
     let count=0;
     const assets=Object.fromEntries(Object.entries(input).map(([name,raw])=>{
@@ -91,7 +91,7 @@
         return {dry:audio(plan.rate,out),from};
       },counts);
     }
-    function inspect(session,plan=compile(session,assets)) {
+    function inspect(session,plan=compile(session,assets,host)) {
       return {id:session.id,sampleRate:plan.rate,frames:plan.frames,pins:plan.pins,comp:plan.choices,
         lanes:Object.fromEntries(plan.lanes.map(lane=>{
           const row=plan.audio.get(lane);
@@ -203,21 +203,28 @@
       return {recipe:{...plan.mixer,strips,end:samples(frames)},material};
     }
     function render(session,preview) {
-      const plan=compile(session,assets), transport=playback(plan,preview);
+      const plan=compile(session,assets,host), transport=playback(plan,preview);
       const counts={hits:0,misses:0};
       const {segments,warmup,switches}=transport;
       const {recipe,material}=mixerInput(plan,segments,counts);
-      const printed=preview===undefined ? M.mixer.render(recipe,material) :
-        S.renderMixerTransport({...recipe,tail:'cut'},material,segments);
+      const printed=preview===undefined ? M.mixer.render(recipe,material,host) :
+        S.renderMixerTransport({...recipe,tail:'cut'},material,segments,host);
       const cut=pcm=>({...pcm,samples:pcm.samples.slice(warmup*2)});
       return {value:cut(printed.value),taps:Object.fromEntries(Object.entries(printed.taps).map(([name,pcm])=>[name,cut(pcm)])),
         report:{sampleRate:plan.rate,warmupSamples:warmup,frames:printed.report.frames-warmup,
           comp:plan.choices,switches,cache:counts,mixer:printed.report,
           segments:segments.slice(warmup ? 1 : 0).map(({from,to})=>({from,to}))}};
     }
+    function handoff(session) {
+      const plan=compile(session,assets,host);
+      const {segments}=playback(plan);
+      const counts={hits:0,misses:0}, {recipe,material}=mixerInput(plan,segments,counts);
+      const printed=M.mixer.render(recipe,material,host);
+      return S.musicHandoff(plan,recipe,material,printed);
+    }
     const edit=(session,changes)=>edits(session,assets,changes);
     function prepareTransport(session) {
-      const plan=compile(session,assets);
+      const plan=compile(session,assets,host);
       const {rate,map,frames,lanes,sourceLanes,mixer,pins,choices}=plan;
       const cache={hits:0,misses:0}, unique=new Set();
       let prepared=0;
@@ -239,7 +246,7 @@
     }
     const openPreparedTransport=(prepared,options)=>S.openSessionTransport(prepared,options,{assets,edit,prepareTransport});
     const open=(session,options)=>openPreparedTransport(prepareTransport(P.data.freeze(P.data.clone(session))),options);
-    return Object.freeze({inspect,edit,render,open,prepareTransport,openPreparedTransport});
+    return Object.freeze({inspect,edit,render,handoff,open,prepareTransport,openPreparedTransport});
   }
   M.musicSession=Object.freeze({create});
 })(KIT.procedural);

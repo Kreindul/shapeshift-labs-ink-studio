@@ -17,7 +17,7 @@
 
 namespace {
 void need(bool ok, const char *message) { if (!ok) throw std::runtime_error(message); }
-constexpr uint32_t magic = 0x314b4e49, blockSize = 256, stateLimit = 4*1024*1024, maxFrames = 8000000;
+constexpr uint32_t magic = 0x314b4e49, instrumentMagic = 0x324b4e49, blockSize = 256, stateLimit = 4*1024*1024, maxFrames = 8000000;
 thread_local bool audioThread = false;
 
 template <class T> T read(std::ifstream &file) {
@@ -45,18 +45,37 @@ struct Lane {
     return left.value+(right.value-left.value)*(sample-left.at)/(right.at-left.at);
   }
 };
+enum NoteType { On=-3, Off=-2, Choke=-1 };
+struct Note {
+  uint32_t at;
+  int32_t id;
+  int16_t key, type;
+  double value;
+};
+struct Tempo {uint32_t at;double beat,bpm;};
 struct Job {
   uint32_t rate, frames, latency, tail;
+  bool instrument;
+  uint32_t meter=4;
+  std::vector<Tempo> changes;
   std::vector<Lane> lanes;
+  std::vector<Note> notes;
   std::vector<char> state;
   std::vector<float> input,key;
   explicit Job(const char *name) {
     std::ifstream file(name,std::ios::binary);
-    need(read<uint32_t>(file)==magic,"Unknown CLAP job format");
+    const auto version=read<uint32_t>(file);
+    need(version==magic || version==instrumentMagic,"Unknown CLAP job format");
+    instrument=version==instrumentMagic;
     rate=read<uint32_t>(file); frames=read<uint32_t>(file);
     const auto inputFrames=read<uint32_t>(file), keyFrames=read<uint32_t>(file), stateBytes=read<uint32_t>(file),
       controls=read<uint32_t>(file);
     latency=read<uint32_t>(file); tail=read<uint32_t>(file);
+    const auto events=instrument ? read<uint32_t>(file) : 0;
+    if (instrument) meter=read<uint32_t>(file);
+    const auto tempos=instrument ? read<uint32_t>(file) : 0;
+    need(meter>=1 && meter<=32 && tempos<=513,"Invalid CLAP time signature or tempo budget");
+    need(events<=2000000 && (!instrument || (!inputFrames && !keyFrames)),"Invalid CLAP note or input budget");
     need(rate>=8000 && rate<=96000 && frames<=maxFrames && inputFrames<=maxFrames &&
       keyFrames<=maxFrames && stateBytes<=stateLimit && controls<=64,"CLAP job exceeds host bounds");
     for (uint32_t i=0;i<controls;i++) {
@@ -73,6 +92,26 @@ struct Job {
       }
       lanes.push_back(std::move(lane));
     }
+    notes.reserve(events);
+    for (uint32_t i=0;i<events;i++) {
+      const auto at=read<uint32_t>(file);
+      const auto id=read<int32_t>(file);
+      const auto key=read<int16_t>(file), type=read<int16_t>(file);
+      read<uint32_t>(file); // reserved
+      const auto value=read<double>(file);
+      const double minimum=type==CLAP_NOTE_EXPRESSION_TUNING ? -120 : 0;
+      const double maximum=type==CLAP_NOTE_EXPRESSION_TUNING ? 120 : type==CLAP_NOTE_EXPRESSION_VOLUME ? 4 : 1;
+      need(at<frames && id>=0 && key>=0 && key<=127 && type>=On && type<=CLAP_NOTE_EXPRESSION_PRESSURE &&
+        value>=minimum && value<=maximum && (i==0 || notes.back().at<=at),"Invalid CLAP note event");
+      notes.push_back({at,id,key,type,value});
+    }
+    for (uint32_t i=0;i<tempos;i++) {
+      const auto at=read<uint32_t>(file);
+      const auto beat=read<double>(file), bpm=read<double>(file);
+      need(at<frames && (i ? at>changes.back().at : at==0) && std::abs(beat)<=1e9 && bpm>=1 && bpm<=1000,
+        "Invalid CLAP transport segment");
+      changes.push_back({at,beat,bpm});
+    }
     state=readMany<char>(file,stateBytes);
     input=readMany<float>(file,2*size_t(inputFrames));
     key=readMany<float>(file,2*size_t(keyFrames));
@@ -80,7 +119,14 @@ struct Job {
   }
 };
 struct Events {
-  std::vector<clap_event_param_value_t> values;
+  union Event {
+    clap_event_header_t header;
+    clap_event_param_value_t param;
+    clap_event_note_t note;
+    clap_event_note_expression_t expression;
+    clap_event_midi_t midi;
+  };
+  std::vector<Event> values;
   clap_input_events_t in{this,
     [](const clap_input_events_t *list) {return uint32_t(static_cast<Events *>(list->ctx)->values.size());},
     [](const clap_input_events_t *list, uint32_t index)->const clap_event_header_t * {
@@ -89,8 +135,27 @@ struct Events {
     }};
   clap_output_events_t out{nullptr,[](const clap_output_events_t *,const clap_event_header_t *) {return true;}};
   void push(uint32_t i,const clap_param_info_t &param,double value) {
-    values.push_back({{sizeof(clap_event_param_value_t),i,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_PARAM_VALUE,0},
-      param.id,param.cookie,-1,-1,-1,-1,value});
+    Event event{};
+    event.param={{sizeof(clap_event_param_value_t),i,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_PARAM_VALUE,0},
+      param.id,param.cookie,-1,-1,-1,-1,value};
+    values.push_back(event);
+  }
+  void push(uint32_t i,const Note &note,uint16_t port,uint32_t dialect) {
+    Event event{};
+    if (dialect==CLAP_NOTE_DIALECT_MIDI) {
+      need(note.type<0,"MIDI-only CLAP instrument cannot receive native note expression");
+      const auto status=uint8_t(note.type==On ? 0x90 : 0x80);
+      const auto vel=note.type==On ? std::max(1l,std::lround(note.value*127)) : std::lround(note.value*127);
+      event.midi={{sizeof(clap_event_midi_t),i,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_MIDI,0},port,
+        {status,uint8_t(note.key),uint8_t(vel)}};
+    } else if (note.type<0) {
+      const auto type=uint16_t(note.type==On ? CLAP_EVENT_NOTE_ON : note.type==Off ? CLAP_EVENT_NOTE_OFF : CLAP_EVENT_NOTE_CHOKE);
+      event.note={{sizeof(clap_event_note_t),i,CLAP_CORE_EVENT_SPACE_ID,type,0},note.id,int16_t(port),0,note.key,note.value};
+    } else {
+      event.expression={{sizeof(clap_event_note_expression_t),i,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_NOTE_EXPRESSION,0},
+        note.type,note.id,int16_t(port),0,note.key,note.value};
+    }
+    values.push_back(event);
   }
 };
 struct Host {
@@ -100,6 +165,11 @@ struct Host {
       static const clap_host_thread_check_t thread{
         [](const clap_host_t *) {return !audioThread;},[](const clap_host_t *) {return audioThread;}
       };
+      static const clap_host_note_ports_t notes{
+        [](const clap_host_t *) {return uint32_t(CLAP_NOTE_DIALECT_CLAP|CLAP_NOTE_DIALECT_MIDI);},
+        [](const clap_host_t *,uint32_t) {}
+      };
+      if (!std::strcmp(ext,CLAP_EXT_NOTE_PORTS)) return &notes;
       static const clap_host_latency_t latency{[](const clap_host_t *) {}};
       static const clap_host_params_t params{
         [](const clap_host_t *,clap_param_rescan_flags) {},
@@ -216,27 +286,55 @@ Catalog parameters(Instance &instance,Job &job,Events &events) {
   instance.callback();
   return rows;
 }
-uint32_t ports(Instance &instance) {
+struct Ports {uint32_t input=0,key=0,output=0,dialect=0;uint16_t note=0;};
+Ports ports(Instance &instance,bool instrument) {
   const auto *ext=instance.extension<clap_plugin_audio_ports_t>(CLAP_EXT_AUDIO_PORTS);
   const auto *plugin=instance.plugin;
-  need(ext && ext->count(plugin,false)==1,"Host requires one CLAP audio output");
-  const auto count=ext->count(plugin,true);
   clap_audio_port_info_t input{},output{},key{};
-  need((count==1 || count==2) && ext->get(plugin,0,true,&input) && ext->get(plugin,0,false,&output) &&
-    input.channel_count==2 && output.channel_count==2,"Host requires stereo main input and output");
-  if (count==1) return 0;
-  need(ext->get(plugin,1,true,&key) && (key.channel_count==1 || key.channel_count==2),
-    "A CLAP key port needs mono or stereo input");
-  return key.channel_count;
+  need(ext && ext->count(plugin,false)==1 && ext->get(plugin,0,false,&output),"Host requires one CLAP audio output");
+  const auto count=ext->count(plugin,true);
+  Ports result;
+  result.output=output.channel_count;
+  if (instrument) {
+    need(count==0 && (result.output==1 || result.output==2),"CLAP instrument needs no audio inputs and a mono or stereo output");
+    const auto *notes=instance.extension<clap_plugin_note_ports_t>(CLAP_EXT_NOTE_PORTS);
+    need(notes,"CLAP instrument needs a note input");
+    const auto n=notes->count(plugin,true);
+    need(n && n<=128,"Invalid CLAP note port count");
+    for (uint32_t i=0;i<n;i++) {
+      clap_note_port_info_t info{};
+      need(notes->get(plugin,i,true,&info),"Cannot read CLAP note port");
+      if (info.supported_dialects&CLAP_NOTE_DIALECT_CLAP) {
+        result.dialect=CLAP_NOTE_DIALECT_CLAP;
+        result.note=uint16_t(i);
+        break;
+      }
+      if (!result.dialect && (info.supported_dialects&CLAP_NOTE_DIALECT_MIDI)) {
+        result.dialect=CLAP_NOTE_DIALECT_MIDI;
+        result.note=uint16_t(i);
+      }
+    }
+    need(result.dialect,"No supported CLAP or MIDI note dialect");
+  } else {
+    need((count==1 || count==2) && ext->get(plugin,0,true,&input) &&
+      input.channel_count==2 && result.output==2,"Host requires stereo main input and output");
+    result.input=count;
+    if (count==2) {
+      need(ext->get(plugin,1,true,&key) && (key.channel_count==1 || key.channel_count==2),
+        "A CLAP key port needs mono or stereo input");
+      result.key=key.channel_count;
+    }
+  }
+  return result;
 }
 
-void render(Instance &instance,Job &job,Events &events,const Catalog &params,uint32_t keyChannels,const char *file) {
+void render(Instance &instance,Job &job,Events &events,const Catalog &params,const Ports &ports,const char *file) {
   std::ofstream out(file,std::ios::binary);
-  need(bool(out) && (job.key.empty() || keyChannels),"Invalid CLAP output or sidechain");
+  need(bool(out) && (job.key.empty() || ports.key),"Invalid CLAP output or sidechain");
   std::array<std::array<float,blockSize>,2> main{},side{},output{};
   float *pMain[]={main[0].data(),main[1].data()}, *pSide[]={side[0].data(),side[1].data()},
     *pOut[]={output[0].data(),output[1].data()};
-  clap_audio_buffer_t inputs[2]={{pMain,nullptr,2,0,0},{pSide,nullptr,keyChannels,0,0}}, result{pOut,nullptr,2,0,0};
+  clap_audio_buffer_t inputs[2]={{pMain,nullptr,2,0,0},{pSide,nullptr,ports.key,0,0}}, result{pOut,nullptr,ports.output,0,0};
   const auto frames=uint64_t(job.frames)+job.latency;
   audioThread=true;
   instance.processing=instance.plugin->start_processing(instance.plugin);
@@ -244,8 +342,27 @@ void render(Instance &instance,Job &job,Events &events,const Catalog &params,uin
   need(instance.processing,"CLAP start processing failed");
   std::vector<float> interleaved;
   interleaved.reserve(blockSize*2);
-  for (uint64_t base=0;base<frames;base+=blockSize) {
-    const auto count=uint32_t(std::min<uint64_t>(blockSize,frames-base));
+  size_t eventIndex=0, tempoIndex=0;
+  for (uint64_t base=0;base<frames;) {
+    if (tempoIndex+1<job.changes.size() && job.changes[tempoIndex+1].at==base) ++tempoIndex;
+    const auto next=tempoIndex+1<job.changes.size() ? job.changes[tempoIndex+1].at : frames;
+    const auto count=uint32_t(std::min({uint64_t(blockSize),frames-base,next-base}));
+    clap_event_transport_t transport{};
+    if (!job.changes.empty()) {
+      const auto &tempo=job.changes[tempoIndex];
+      const auto beat=tempo.beat+double(base-tempo.at)*tempo.bpm/(60*job.rate);
+      const auto bar=std::floor(beat/job.meter);
+      transport.header={sizeof(transport),0,CLAP_CORE_EVENT_SPACE_ID,CLAP_EVENT_TRANSPORT,0};
+      transport.flags=CLAP_TRANSPORT_HAS_TEMPO|CLAP_TRANSPORT_HAS_BEATS_TIMELINE|
+        CLAP_TRANSPORT_HAS_SECONDS_TIMELINE|CLAP_TRANSPORT_HAS_TIME_SIGNATURE|CLAP_TRANSPORT_IS_PLAYING;
+      transport.song_pos_beats=std::llround(beat*CLAP_BEATTIME_FACTOR);
+      transport.song_pos_seconds=std::llround(double(base)*CLAP_SECTIME_FACTOR/job.rate);
+      transport.tempo=tempo.bpm;
+      transport.bar_number=int32_t(bar);
+      transport.bar_start=std::llround(bar*job.meter*CLAP_BEATTIME_FACTOR);
+      transport.tsig_num=uint16_t(job.meter);
+      transport.tsig_denom=4;
+    }
     events.values.clear();
     for (uint32_t i=0;i<count;i++) {
       const auto sample=base+i, offset=sample*2;
@@ -254,14 +371,16 @@ void render(Instance &instance,Job &job,Events &events,const Catalog &params,uin
         side[ch][i]=offset+ch<job.key.size() ? job.key[offset+ch] : 0;
         output[ch][i]=0;
       }
-      if (keyChannels==1) side[0][i]=(side[0][i]+side[1][i])*.5f;
+      if (ports.key==1) side[0][i]=(side[0][i]+side[1][i])*.5f;
       for (auto &lane:job.lanes) if (lane.points.size()>1) {
         const auto value=lane.at(sample);
         if (lane.last!=value) {events.push(i,params.at(lane.id),value);lane.last=value;}
       }
+      while (eventIndex<job.notes.size() && job.notes[eventIndex].at==sample)
+        events.push(i,job.notes[eventIndex++],ports.note,ports.dialect);
     }
     result.constant_mask=0;
-    const clap_process_t process{int64_t(base),count,nullptr,inputs,&result,keyChannels ? 2u : 1u,1,&events.in,&events.out};
+    const clap_process_t process{int64_t(base),count,job.changes.empty() ? nullptr : &transport,ports.input ? inputs : nullptr,&result,ports.input,1,&events.in,&events.out};
     audioThread=true;
     const auto status=instance.plugin->process(instance.plugin,&process);
     audioThread=false;
@@ -271,13 +390,15 @@ void render(Instance &instance,Job &job,Events &events,const Catalog &params,uin
     interleaved.clear();
     for (uint32_t i=0;i<count;i++) if (base+i>=job.latency) {
       for (size_t ch=0;ch<2;ch++) {
-        const float value=output[ch][result.constant_mask&(1u<<ch) ? 0 : i];
+        const auto channel=ports.output==1 ? 0 : ch;
+        const float value=output[channel][result.constant_mask&(1u<<channel) ? 0 : i];
         need(std::isfinite(value),"Nonfinite CLAP output");
         interleaved.push_back(value);
       }
     }
     if (!interleaved.empty()) out.write(reinterpret_cast<const char *>(interleaved.data()),interleaved.size()*sizeof(float));
     need(bool(out),"Cannot write CLAP PCM");
+    base+=count;
   }
 }
 } // namespace
@@ -293,7 +414,7 @@ int main(int argc,char **argv) {
     need(loadState(instance,job.state),"CLAP state could not be restored");
     Events events;
     const auto params=parameters(instance,job,events);
-    const auto keyChannels=ports(instance);
+    const auto layout=ports(instance,job.instrument);
     if (mode=="snapshot") {saveState(instance,argv[6]);return 0;}
     instance.start(job.rate);
     instance.callback();
@@ -303,13 +424,13 @@ int main(int argc,char **argv) {
     need(latency<=job.rate*2 && tail<=job.rate*60,"CLAP declares unsupported latency or tail");
     if (mode=="render") {
       need(job.latency==latency && job.tail==tail,"CLAP render contract changed since planning");
-      render(instance,job,events,params,keyChannels,argv[6]);
+      render(instance,job,events,params,layout,argv[6]);
       audioThread=true;instance.plugin->stop_processing(instance.plugin);audioThread=false;
       instance.processing=false;
       need(!decay || decay->get(instance.plugin)==tail,"CLAP tail changed during the render");
     } else {
       std::ofstream report(argv[7]);
-      report << latency << ' ' << tail << ' ' << keyChannels << '\n' << std::setprecision(17);
+      report << latency << ' ' << tail << ' ' << layout.key << ' ' << layout.dialect << '\n' << std::setprecision(17);
       for (const auto &[id,param]:params) report << id << ' ' << param.min_value << ' ' << param.max_value << ' '
         << bool(param.flags&CLAP_PARAM_IS_AUTOMATABLE) << ' ' << bool(param.flags&CLAP_PARAM_IS_STEPPED) << '\n';
       need(bool(report),"Cannot write CLAP metadata");

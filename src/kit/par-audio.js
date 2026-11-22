@@ -253,6 +253,11 @@
         return A.musicSession.create(assets).render(source,options.preview);
       }
     },
+    'music.handoffEditSession': {
+      description:'Export the active comp, sample-addressed MIDI and desk routing with aligned source stems.',
+      inputs:{source:'record',assets:sessionAssets},outputs:{value:'audio',stems:'record',taps:'record',plan:'record'},
+      run({source,assets}) {return A.musicSession.create(assets).handoff(source);}
+    },
     'music.atmosphereReference': {
       description:'Read the audio clock and performed note gates for a pinned atmosphere score.',
       inputs:{score:'audio',performance:'record'},outputs:{value:'record'},
