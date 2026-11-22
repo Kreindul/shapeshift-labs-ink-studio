@@ -62,6 +62,8 @@ clock ratio in its parent's. For a standalone block run,
 samples handled by blocks. Timings vary with the kernel and machine.
 [Prepared processors](simulation-prepared-processing.md) can further
 limit the block size based on the compiled model's work budget.
+Use [`sim block-check`](simulation-block-independence.md) to compare
+different request sizes and browser traces on the same authored timeline.
 
 ## Resonator demo
 

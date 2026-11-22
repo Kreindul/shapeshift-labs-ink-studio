@@ -55,6 +55,19 @@
     return value;
   }
 
+  function inspectBuffers(saved) {
+    check(saved?.format===format && saved.version===version && record(saved.buffers) &&
+      Object.keys(saved.buffers).length<=64,'Invalid kernel state for buffer inspection');
+    let bytes=0;
+    return Object.fromEntries(Object.entries(saved.buffers).map(([name,row])=>{
+      check(id(name) && record(row) && own(arrays,row.type) && Number.isSafeInteger(row.length) && row.length>=0,
+        'Invalid kernel buffer layout for '+name);
+      bytes+=row.length*arrays[row.type].BYTES_PER_ELEMENT;
+      check(bytes<=maxBytes,'Kernel snapshot exceeds its typed buffer budget');
+      return [name,unpack(row.base64,row,name)];
+    }));
+  }
+
   function ports(source = {}, inbound = false) {
     check(record(source), 'Expected named kernel ports');
     return Object.fromEntries(Object.entries(source).map(([name, raw]) => {
@@ -353,6 +366,6 @@
     return name;
   }
 
-  W.kernels = Object.freeze({register,prepare,format,maxBlockSize,operation:name => operations.get(name),
+  W.kernels = Object.freeze({register,prepare,inspectBuffers,format,maxBlockSize,operation:name => operations.get(name),
     graphOperations:() => Object.fromEntries(operations)});
 })(KIT);

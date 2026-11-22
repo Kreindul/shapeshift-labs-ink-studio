@@ -517,6 +517,17 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         break;
       }
       case 'plan': return respond(runtime(load(file)).composition());
+      case 'block-check': {
+        ensure(typeof file==='string' && typeof other==='string' &&
+          (opt.candidate===undefined||typeof opt.candidate==='string'),
+        'Use sim block-check <model.json> <plan.json> [--candidate trace.json]');
+        const source=embedModels(read(file),file,shot?.dependency);
+        const {reference,report}=W.blockReview.review(source,read(other),opt.candidate===undefined?undefined:read(opt.candidate));
+        if (opt['trace-out']!==undefined) write(opt['trace-out'],reference);
+        respond(report);
+        if (report.status==='diverged') process.exitCode=2;
+        break;
+      }
       case 'dependencies': return dependencyReport(file);
       case 'scrub': return scrubSimulation(file);
       case 'take': return captureTake(file);

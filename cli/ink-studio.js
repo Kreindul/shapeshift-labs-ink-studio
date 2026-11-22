@@ -995,6 +995,7 @@ const CMD = {
         '    sim run <world> --workers N [--profile]   advance eligible systems in deterministic Node worker partitions',
         '    sim run <world> --record file.json [--observations plan.json]   retain reproducible execution evidence',
         '    sim verify <run> [--workers N]   replay and check the recorded evidence',
+        '    sim block-check <model> <plan> [--candidate trace.json] [--trace-out file.json]   compare sample block partitions',
         '    --trace-steps [N]   retain actual solver inputs and state for debugging',
         '    sim diff <run|world> [<run|world>] --first [--from N] [--ticks N]   locate the first divergence',
         '    sim run <world> --checkpoint file.json --checkpoint-store DIR   reuse snapshot blocks across checkpoints and runs',

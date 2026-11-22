@@ -93,7 +93,8 @@ at a different rate using the ordinary block executor.
 `sim run --profile` includes the processor's measured time, hard capacity
 rejections, deadline overruns and faults, including processors inside
 modules. The browser uses the same `processor.report()` API. Host-local
-measurements are outside deterministic replay.
+measurements are outside deterministic replay. [Block review](simulation-block-independence.md)
+compares live and offline sample traces with exact or explicitly tolerated numerical differences.
 
 ## Vent network demo
 

@@ -1,5 +1,7 @@
 /* Shared by the Node and browser playback examples. */
-function registerPreparedVentNetwork(K) {
+function registerPreparedVentNetwork(K, precision='float64') {
+  if (precision!=='float64' && precision!=='float32') throw Error('Unknown vent calculation precision');
+  const store=precision==='float32'?Math.fround:value=>value;
   const capacity = {maxSamples:160,maxWork:1152,maxBytes:8192,deadlineMs:1000*96/48000};
   return K.world.kernels.register('prepared-vent-network',{
     revision:1,
@@ -36,7 +38,7 @@ function registerPreparedVentNetwork(K) {
               delta[a]-=transfer;
               delta[b]+=transfer;
             }
-            for (let i=0;i<cells;i++) pressure[i]=0.986*(pressure[i]+delta[i]);
+            for (let i=0;i<cells;i++) pressure[i]=store(0.986*(pressure[i]+delta[i]));
             trace[sample]=pressure[cells-1];
           }
           output.outlet=pressure[cells-1];
