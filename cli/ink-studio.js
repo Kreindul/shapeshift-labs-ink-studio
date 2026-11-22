@@ -1155,6 +1155,7 @@ const CMD = {
         '  music motif audition recipe.json [settings.json] --out directory   compare roles over one score window',
         '  music motif keep|render recipe.json selection.json --out directory   replay or keep an editable sample role',
         '  music timbre analyze|project|match <recipe.json> [settings.json]   derive or compare recording gestures',
+        '  music timbre evolve recipe.json [settings.json] --out directory   hand off one measured sound across playable instruments',
         '  music timbre audition|arrange <recipe.json> [settings.json] --out directory   play or keep a timbre orchestration',
         '  music timbre palette <coastal|metal-breath|broken-beat> --out directory   export playable patches and PCM',
         '  music critique plan <recipe.json> <brief.json>   measure a passage and propose editable comparisons',

@@ -139,3 +139,10 @@ Graph nodes are `music.extractTimbreGesture`, `music.projectTimbreGesture`,
 `music.planTimbreOrchestration`. Feed a plan's variants and the combined
 production and derived assets into `music.auditionProduction`. Use
 `ink-studio graph describe <node> --example` for runnable graph recipes.
+
+## Hand a single sound between instruments
+
+Use [evolving orchestration](timbre-evolution.md) to keep one continuous
+trajectory while different instruments take over the attack, body and
+decay. Edit the handoff markers and decide which measured qualities each
+player inherits.

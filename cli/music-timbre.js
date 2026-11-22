@@ -5,8 +5,8 @@ const read=file=>JSON.parse(fs.readFileSync(file,'utf8'));
 
 module.exports=function command([mode,file,settingsFile],opt,kit) {
   const P=kit.KIT.procedural,A=P.mediaGraph,J=A.timbreComposition,{fields,id,check}=P.musicInstruments;
-  check(typeof file==='string' && ['analyze','project','match','palette','audition','arrange'].includes(mode),
-    'Use music timbre analyze, project, match, palette, audition or arrange');
+  check(typeof file==='string' && ['analyze','project','match','palette','audition','arrange','evolve'].includes(mode),
+    'Use music timbre analyze, project, match, palette, audition, arrange or evolve');
   const output=(value,target)=>{
     if (target) json(target,value);
     else process.stdout.write(JSON.stringify(value,null,2)+'\n');
@@ -39,7 +39,8 @@ module.exports=function command([mode,file,settingsFile],opt,kit) {
     check(fields(recipe,['source','analysis','library']),'A timbre analysis recipe needs a source and optional settings');
     return output(J.extract(recording,settings ?? recipe.analysis),folder);
   }
-  check(folder && fields(recipe,['source','production','settings','options','library','assets']) &&
+  const keys=['source','production','settings','options','library','assets'];
+  check(folder && fields(recipe,mode==='evolve' ? [...keys,'analysis'] : keys) &&
     recipe.production!==undefined && (mode!=='arrange' || fields(settings,['take','note']) && id(settings.take) &&
       (settings.note===undefined || typeof settings.note==='string' && settings.note.length<=1000)),
   'An orchestration needs a production, settings, output directory and optional selection');
@@ -47,6 +48,23 @@ module.exports=function command([mode,file,settingsFile],opt,kit) {
   const loaded=typeof recipe.production==='string' ? read(productionFile) : recipe.production;
   const production=loaded.production ?? loaded;
   const bank=recipe.assets===undefined ? readAssets(loaded.assets ?? {},productionFile,P) : readAssets(recipe.assets,file,P);
+  if (mode==='evolve') {
+    const E=A.timbreEvolution, profile=E.analyze(recording,recipe.analysis);
+    const {value,revision,report}=E.plan(profile,production,settings ?? recipe.settings,bank);
+    const project=path.join(folder,'production.json'), plan=path.join(folder,'evolution.json');
+    const options=recipe.options ?? {};
+    const rendered=P.musicProduction.render(value,bank,options);
+    const audio=path.join(folder,'mix.wav');
+    write(audio,WAV.encode(rendered.value,{encoding:'pcm24'}));
+    const stems=Object.fromEntries(Object.entries(rendered.stems).map(([name,pcm])=>{
+      const file=path.join(folder,'stems',name+'.wav');
+      write(file,WAV.encode(pcm,{encoding:'pcm24'}));
+      return [name,file];
+    }));
+    json(project,{production:value,assets:storeAssets(bank,folder),options});
+    json(plan,{profile,revision,report,source:sources.recording});
+    return output({project,plan,audio,...(Object.keys(stems).length && {stems})});
+  }
   const preview=mode==='audition' ? J.audition(recording,production,recipe.settings,bank,settings ?? recipe.options) : null;
   const plan=preview?.plan ?? J.plan(recording,production,recipe.settings,bank);
   const selected=mode==='arrange' ? plan.variants.find(row=>row.id===settings.take) : null;
