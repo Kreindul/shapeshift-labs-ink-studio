@@ -21,6 +21,28 @@ the canvas context and can rebuild GPU resources after context restoration.
 Call `renderer.dispose()` when the canvas is removed. For device actions,
 attach [remappable viewer input](viewer-input.md) to the canvas.
 
+## Resolve compatibility
+
+The default `resolve: 'auto'` builds the resolve shader for the first frame
+that needs it. If your WebGL driver stalls or fails while linking the full
+resolve shader, select the simpler shader when creating the renderer:
+
+```js
+const renderer = createRenderer(canvas, {
+  toolkit: { KIT, PixelLook },
+  resolve: 'simple'
+});
+```
+
+Simple mode uses only the small resolve shader, including after context
+restoration. It supports baked colors and basic scene palette resolve. A
+frame that needs per-pixel materials, glass beams, screen-space ambient
+occlusion, tone mapping, resolve-time palette grading or constraints,
+coverage-aware resolve, or water reports the incompatible feature. Use
+`resolve: 'auto'` for these features, or disable them to render in simple mode.
+For example, pass `tone: false` to bypass an authored tone, `water: false` to
+render without water optics, or `raw: true` to draw the baked RGB.
+
 ## Frames
 
 Pass the world returned by `builder.finish()`. The drawing buffer is the art
@@ -41,8 +63,8 @@ The browser defaults reuse depth order when the caller marks the rows
 unchanged and the view, depth-dependent time, and ordering inputs match.
 Scenes with bone buffers sort again. The canvas also uses a smaller palette
 resolve shader when per-pixel materials, ambient occlusion, glass beams,
-tone mapping, and grading are inactive. Pass `reuseOrder: false` or
-`specialize: false` to the factory to compare the corresponding full path.
+tone mapping, and grading are inactive. Pass `reuseOrder: false` to compare
+sorting or `specialize: false` in auto mode to compare the full resolve.
 
 | Frame control | Effect |
 | --- | --- |
