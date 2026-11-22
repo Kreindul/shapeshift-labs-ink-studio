@@ -923,6 +923,7 @@ outside the original image.
 | `fx.tileStrideSlip` | Read successive tile rows using an authored `stride`, `offset`, and `wrapAt`. The `addresses` output shows where each whole tile reads from. |
 | `fx.scanlineRemap` | Repeat, skip, or blank whole rows with `options.edits`. The `addresses` output shows the source row for each destination row. |
 | `fx.rasterSchedule` | [Write indexed palette slots, source offsets, and pixel sizes](#schedule-raster-register-writes) on authored output rows. |
+| `fx.tileAttributes` | [Paint per-tile ink and paper](#paint-tile-color-attributes) on a one-bit image and resolve competing sprite and effect writes. |
 | `fx.signalRecovery` | [Hold the last usable raster after a fault and relock](#recover-from-signal-loss). Outputs the raster, receiver status, and stage transition events. |
 | `fx.blockSubstitute` | Replace rectangles with samples from the original `source` or the named rasters in `banks`. The `mask` output marks copied pixels. |
 | `fx.bitplane` | Flip a bit, clear a bit, or borrow a bit from an aligned `bank` of palette indices. Connect a one-channel `source` and its ordered `palette`. Outputs RGBA `value` and edited `indices`. |
@@ -1143,6 +1144,14 @@ Use the same cycle definitions on an [indexed surface](projected-effects.md#inde
 or the [Copper render pass](render-graph.md#copper-style-raster-schedules).
 Run `node examples/palette-cycling.cjs chromatic-current.html` to see two
 cycles advance at different speeds over one fixed index grid.
+
+### Paint tile color attributes
+
+Use [tile color attributes](tile-attributes.md) to assign ink and paper
+swatches to each cell of a one-bit raster. The `fx.tileAttributes` node
+accepts an editable palette map and prioritized writes from sprite
+silhouettes or effect coverage. Use the output as a raster or feed it
+into a named render-graph layer.
 
 ### Schedule raster register writes
 

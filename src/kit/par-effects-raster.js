@@ -100,6 +100,14 @@
       inputs:{source:'raster',options},outputs:{value:'displayRaster'},time:true,
       run({source,options},{time}){return {value:E.rasterSchedule(source,{time,...options})};}
     },
+    'fx.tileAttributes': {
+      description: 'Color a one-bit layer with paintable tile palettes and prioritized coverage writes.',
+      inputs: { source: 'raster', palette: 'palette', writes: { type: 'array<record>', default: [] }, options },
+      outputs: { value: 'displayRaster' },
+      run({ source, palette, writes, options }) {
+        return { value: E.tileAttributes.compile(source, palette, options).frame({ writes }).value };
+      }
+    },
     'fx.blockSubstitute':{
       inputs:{source:'raster',banks:options,options},outputs:{value:'raster',mask:'raster'},
       run({source,banks,options}){return E.blockSubstitute(source,{...options,banks});}

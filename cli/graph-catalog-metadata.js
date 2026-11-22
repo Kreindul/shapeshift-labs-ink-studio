@@ -185,6 +185,11 @@ const options = {
     palette: property('array<string>', { description: 'Base palette of 1 to 256 hex RGB or RGBA swatches.' }),
     cycles: property('record', { description: 'Named palette cycles applied before row writes.' }),
     schedule: property('array<record>', { description: 'Increasing output rows with persistent offset, pixelScale or palette writes.' }, []) },
+  'fx.tileAttributes': {
+    tileSize: property('number|vec2', { description: 'Positive integer width and height in art pixels.' }, 8),
+    defaults: property('record', { description: 'Base ink slot, paper slot and optional priority.' }, { ink: 1, paper: 0 }),
+    cells: property('array<record>', { description: 'Paint edits by zero-based tile coordinate.' }, [])
+  },
   'fx.paletteCycle': { time: sampleTime },
   'fx.paletteFault': { swaps: property('array', { constraints: { entries: 'Nonoverlapping pairs of distinct palette slots' } }, []) },
   'warp.address': { time: sampleTime },
