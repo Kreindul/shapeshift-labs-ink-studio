@@ -56,6 +56,7 @@ const SdfAssist = require('../src/sdf-assist.js');
 const SdfRaster = require('./sdf-assist.js');
 const { footprint, exportOffsets, coverageOffsets, sampledDepth } = require('./splat-sampling.js');
 const CurveCoverage = require('./curve-coverage.js');
+const CurveWidth = require('../src/curve-width.js');
 const { createMaskResolve, applyMasks } = require('./look-mask-resolve.js');
 const PalettePixel = require('./palette-pixel.js');
 const PaletteComposition = require('./palette-composition.js');
@@ -350,6 +351,7 @@ function renderFrame(world, o, preparedPalettes) {
   const blendDepth = transparency?.mode === 'blend' ? transparency.depthTolerance : 0;
   const planarFootprints=(o.splatFootprints??look.splatFootprints)!==false&&world.splatFootprints?.styles?.some(p=>p.depth==='plane');
   const curves = world.curveSplats && (o.curveSplats ?? look.curveSplats ?? true);
+  const curveWidthAt = CurveWidth.prepare(o.curveWidth ?? look.curveWidth)?.bind(world);
   const deepPlan = o[deepScope];
   const sortedSurfaces = curves || Boolean(deepPlan) || orderMode === 'surface' || blendDepth > 0 || planarFootprints;
   const fragmentBudget = o.fragmentBudget ?? 500000;
@@ -785,7 +787,7 @@ function renderFrame(world, o, preparedPalettes) {
     tp = 1 / tangent,
     asp = W / H,
     baseCount = world.count;
-  const curveCamera = curves && { view: V, near, focal, width: W, height: H, ortho };
+  const curveCamera = curves && { view: V, near, focal, width: W, height: H, ortho, artScale: o.artGridScale || 1 };
   const curveLightSample = curves && [1, 0, 0];
   const curveFrames = curves && (world.curveClips || world.curveTiming || shutterRows) &&
     (world.anim?.rig || world.anim?.bones || world.reconstructionPose) &&
@@ -1764,7 +1766,7 @@ function renderFrame(world, o, preparedPalettes) {
         window = { ...window, direction: [0, 3, 6].map(k =>
           m[k] * direction[0] + m[k + 1] * direction[1] + m[k + 2] * direction[2]) };
       }
-      curve = CurveSplat.prepare(d, q, position, SC[i], al, curveCamera, clips, window);
+      curve = CurveSplat.prepare(d, q, position, SC[i], al, curveCamera, clips, window, curveWidthAt?.(i));
       if (!curve) continue;
       curveStrength = !opticalActive && edgeStrengthAt && edgeStrengthAt(i);
       if (curveStrength) curveMargin = CurveCoverage.margin;
@@ -2022,7 +2024,7 @@ function renderFrame(world, o, preparedPalettes) {
       if (!glassLooks.has(target)) glassLooks.set(target, optics.transform(target));
       glassLook = glassLooks.get(target);
     }
-    const coat = !retainLayers && PIX && (curveStrength || opticalActive || correction || fieldParticle ||
+    const coat = !retainLayers && PIX && (curveStrength || curve?.projectedWidth?.fade || opticalActive || correction || fieldParticle ||
       hasSurface && (!writesDepth || reflectInRaster || surface.reveals(i)));
     if (coat && !surfaceOverlay) surfaceOverlay = new Float32Array(W * H * 4);
     if (audit && (r > 1 || g > 1 || b > 1)) audit.sample('splat', Math.max(0, r), Math.max(0, g), Math.max(0, b));
@@ -2089,8 +2091,8 @@ function renderFrame(world, o, preparedPalettes) {
         const planeHit=planeRay&&SplatFootprints.planeSample(shapeCenter,frame,planeRay.origin,planeRay.direction);
         if(planeFrame&&!planeHit)continue;
         const curveFootprint = curveStrength && CurveCoverage.footprint(curve, rayAt, ix + .5, iy + .5, near, curveNormal, curveStrength);
-        const curveRay = !curveStrength && curve && rayAt(ix + .5, iy + .5);
-        const curveHit = curveStrength ? curveFootprint?.hit : curveRay && CurveSplat.sample(curve, curveRay, near, curveNormal);
+        const curveHit = curveStrength ? curveFootprint?.hit :
+          curve && CurveSplat.sampleAt(curve, rayAt, ix + .5, iy + .5, near, curveNormal);
         if (curve && !curveHit) continue;
         const planeDepth = curveHit ? curveHit.depth : planeHit ? planeHit.t * planeRay.axial : undefined;
         if(planeHit&&planeDepth<near)continue;
@@ -2229,8 +2231,8 @@ function renderFrame(world, o, preparedPalettes) {
           if (localProbe) [pr,pg,pb] = probes.shade(point,n,[pr,pg,pb],fog,centerFog ? fogMix : 0,localAlbedo);
         }
         if (curveLight || curveHit?.normal || curveEmission) {
-          const [u, v] = curveFootprint?.offset ?? [];
-          const curveView = curveFootprint ? rayAt(ix + .5 + u, iy + .5 + v).direction : curveRay.direction;
+          const [u, v] = curveFootprint?.offset ?? [0, 0];
+          const curveView = rayAt(ix + .5 + u, iy + .5 + v).direction;
           const visibility = centerFog ? 1 - fogMix : 1;
           let gain = 1, shine, scatter = 0;
           if (curveLight) {
@@ -2307,7 +2309,8 @@ function renderFrame(world, o, preparedPalettes) {
         }
         a *= alpha;
         if (a < minimumAlpha) continue;
-        const wd = writesDepth && alpha === 1 && !exact;
+        const wd = writesDepth && alpha === 1 && !exact &&
+          (!curve?.group || curveFootprint?.depths || curveHit.alpha === 1);
         const surfaceZ = sectionZ ?? exact?.z ?? planeDepth ?? (wantsDepth ?
           sampledDepth(rayAt(ix + .5, iy + .5), probeNormal, probeCenter, -cz, probeReach) : -cz);
         if (preciseDepth && surfaceDepth && surfaceZ>surfaceDepth[p]+1e-5) continue;

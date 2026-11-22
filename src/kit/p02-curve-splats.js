@@ -773,6 +773,7 @@
       Array.isArray(recipe.strands) && recipe.strands.length > 0 && recipe.strands.length <= 1024,
       'expected a version 1 curve splat scene with named strands');
     const { seed = 1, background = '#172332', palette = [], paletteRoles, camera = {}, look = {}, liveSun, charts = {} } = recipe;
+    CurveWidth.prepare(look?.curveWidth);
     check(Number.isSafeInteger(seed) && Array.isArray(palette) && palette.length <= 255, 'invalid seed or palette');
     const colors = [packed(background), ...Array.from(palette, packed)];
     check(charts && Object.getPrototypeOf(charts) === Object.prototype && Object.keys(charts).length <= 1024,

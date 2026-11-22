@@ -560,6 +560,50 @@ normal CLI `--edge-filter off` switch previews centre sampling for all
 materials, and `--edge-filter file.json` previews alternate rules.
 The [edge filtering guide](edge-filter.md) lists all selectors and overrides.
 
+## Set art-pixel width by material
+
+Use `look.curveWidth` in a curve-splat scene or JavaScript world, or
+`finish.look.curveWidth` in a diorama. The first matching selector wins.
+Materials keep their physical gauge by default. Set an explicit
+`physical` rule to exempt a material when the scene has a different default.
+
+```json
+{
+  "rules": [
+    {
+      "select": { "material": "tension-cord" },
+      "policy": { "mode": "minimum", "pixels": 1.12, "maxScale": 6 }
+    },
+    {
+      "select": { "material": "linen-infill" },
+      "policy": { "mode": "fade", "range": [0.48, 0.91] }
+    },
+    {
+      "select": { "material": "body-yarn" },
+      "policy": { "mode": "physical" }
+    }
+  ]
+}
+```
+
+| Mode | Behaviour |
+| --- | --- |
+| `physical` | Use the authored width, including any width profile, taper or animation. |
+| `minimum` | Enlarge the cross-section if its projected nominal width drops below `pixels`. Optional `maxScale` limits how much it can grow. Rounded caps grow with the section. |
+| `fade` | Keep the physical cross-section and fade opacity smoothly through `range: [hiddenAt, fullAt]` in art pixels. Use this on fine threads where a width floor would fill the gaps. |
+
+The headless renderer measures across the projected path, including the
+orientation of elliptical and flattened sections. For optical profiles the
+width is the nominal gauge, independent of the soft halo. Perspective depth
+can vary along a strand, so a part close to the camera can stay at its
+physical width while a distant part widens or fades. The policy applies
+after timed width and reveal and before subpixel sampling and palette resolve.
+
+Use `render(world, { curveWidth })` or `--curve-width file.json` to audition
+alternate rules. Use `--curve-width off` to preview physical widths throughout.
+The [loom demo](../examples/curve-splat-minimum-width.cjs) makes three matched
+zooms and writes the editable scene and an alternate policy file.
+
 ## Render and compare
 
 The [editable example](../examples/curve-splat-scene.json) uses

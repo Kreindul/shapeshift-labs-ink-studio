@@ -166,7 +166,44 @@ const CurveSplat = (() => {
     return hardGroup(tag) ? value * fade : -Math.expm1(Math.log1p(-Math.min(.999, value)) * fade);
   }
 
-  function prepare(data, at, position, scale, opacity, { view, near, focal, width, height, ortho }, clips, window) {
+  function projectWidth(policy, shape, radius, aspect, flattened, camera, ends) {
+    const { view, focal, width, height, ortho, artScale = 1 } = camera;
+    const inverse = ends.map(point => ortho ? 1 : -1 / point[2]);
+    const [start, end] = ends.map(([x, y], i) => [x * inverse[i], y * inverse[i]]);
+    const dx = end[0] - start[0], dy = end[1] - start[1], span = Math.hypot(dx, dy);
+    let normal = span * focal > 1e-7 ? [-dy / span, dx / span] : null;
+    if (!normal) {
+      // A nearly end-on curve has no useful screen tangent. Measure across
+      // the projected major axis or across the view ray for a round section.
+      const major = shape.major && [0, 1, 2].map(j =>
+        shape.major[0] * view[j] + shape.major[1] * view[j + 4] + shape.major[2] * view[j + 8]);
+      const tangent = major ? start.map((value, i) => major[i] + (ortho ? 0 : value * major[2])) : start;
+      const length = Math.hypot(...tangent);
+      normal = length > 1e-12 ? [-tangent[1] / length, tangent[0] / length] : [1, 0];
+    }
+    const [nx, ny] = normal, skew = ortho ? 0 : nx * start[0] + ny * start[1];
+    const across = [0, 4, 8].map(i => nx * view[i] + ny * view[i + 1] + skew * view[i + 2]);
+    const major = shape.major ? dot(across, shape.major) : 0;
+    const minor = shape.minor ? dot(across, shape.minor) * aspect ** 2 : 0;
+    const reach = flattened ? (1 - flatBlur) * Math.abs(major) + Math.hypot(major * flatBlur, minor) :
+      shape.major ? Math.hypot(major, minor) : Math.hypot(...across);
+    const rate = 2 * radius * reach * focal / artScale;
+    const widths = inverse.map(value => rate * value);
+    const fade = policy.mode === 'fade';
+    const low = policy.weight(Math.min(...widths)), high = policy.weight(Math.max(...widths));
+    if (fade && high === 0) return null;
+    if (low === 1 && high === 1) return;
+    if (low === high) return { fade, bound: fade ? 1 : low, constant: low };
+    const sx = width / 2 + start[0] * focal, sy = height / 2 + start[1] * focal;
+    const ux = span ? dx / (span * span * focal) : 0, uy = span ? dy / (span * span * focal) : 0;
+    return { fade, bound: fade ? 1 : low, weight(x, y) {
+      const u = Math.max(0, Math.min(1, (x - sx) * ux + (y - sy) * uy));
+      return policy.weight(widths[0] + (widths[1] - widths[0]) * u);
+    } };
+  }
+
+  function prepare(data, at, position, scale, opacity, camera, clips, window, widthPolicy) {
+    const { view, near, focal, width, height, ortho } = camera;
     const packed = data[at + 15], section = sectionOf(packed);
     if (section < 0) return null;
     const shape = dimensions(data, at, scale, section);
@@ -188,9 +225,12 @@ const CurveSplat = (() => {
     if (!(length > 0)) return null;
     const from = start.map((v, i) => v + first * (end[i] - v));
     const bounds = [Infinity, Infinity, -Infinity, -Infinity];
-    const support = radius * (group ? (flattened ? 2 : 1) : beta ? betaRadius + Number(flattened) : 5);
-    for (const u of [first, last]) {
-      const [x, y, z] = a.map((v, i) => v + u * (b[i] - v));
+    const ends = [first, last].map(u => a.map((v, i) => v + u * (b[i] - v)));
+    const projectedWidth = widthPolicy ? projectWidth(widthPolicy, shape, radius, data[at + 14], flattened, camera, ends) : undefined;
+    if (projectedWidth === null) return null;
+    const support = radius * (projectedWidth?.bound ?? 1) *
+      (group ? (flattened ? 2 : 1) : beta ? betaRadius + Number(flattened) : 5);
+    for (const [x, y, z] of ends) {
       const depth = Math.max(near, -z), magnification = ortho ? focal : focal / depth;
       const reach = ortho ? focal * support : focal * support / Math.max(near, depth - support);
       const ex = reach * (ortho ? 1 : 1 + Math.abs(x) / depth);
@@ -202,8 +242,10 @@ const CurveSplat = (() => {
       bounds[3] = Math.max(bounds[3], sy + ey);
     }
     const middle = a.map((v, i) => v + (first + last) / 2 * (b[i] - v));
-    return { from, axis, radius, length, bounds, middle, major: shape.major, minor: shape.minor, flattened,
-      group, beta, opacity, clips, tau: -Math.log1p(-Math.min(.999, opacity)) };
+    const fixed = projectedWidth?.constant ?? 1, fixedFade = projectedWidth?.fade ? fixed : 1;
+    return { from, axis, radius: projectedWidth?.fade ? radius : radius * fixed, length, bounds, middle,
+      major: shape.major, minor: shape.minor, flattened, group, beta, opacity: opacity * fixedFade, clips,
+      projectedWidth, tau: -Math.log1p(-Math.min(.999, opacity)) * fixedFade };
   }
 
   // The integral is optical depth per unit strength, with the nearest point on the sampled axis.
@@ -504,7 +546,15 @@ const CurveSplat = (() => {
     if (wantDensity) hit.density = density;
     return hit;
   }
+  function sampleAt(strand, rayAt, x, y, near, wantNormal, wantDensity) {
+    const style = strand.projectedWidth, weight = style?.weight?.(x, y) ?? 1;
+    if (weight === 0) return null;
+    const section = weight === 1 ? strand : style.fade ?
+      { ...strand, opacity: strand.opacity * weight, tau: strand.tau * weight } :
+      { ...strand, radius: strand.radius * weight };
+    return sample(section, rayAt(x, y), near, wantNormal, wantDensity);
+  }
   return Object.freeze({ tag, joinGroups, axialUnits, minimum, clipStride, materialStride, lightingStride, timingStride, clipPlanes,
-    emissionAt, lightingAt, isRow, carrier, writeClips, timeWindow, timedOpacity, prepare, sample, specular, directional });
+    emissionAt, lightingAt, isRow, carrier, writeClips, timeWindow, timedOpacity, prepare, sample, sampleAt, specular, directional });
 })();
 if (typeof module !== 'undefined') module.exports = CurveSplat;

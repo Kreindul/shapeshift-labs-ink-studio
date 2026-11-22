@@ -180,6 +180,85 @@ test('filtered coverage blends the visible wire with opaque geometry at its loca
   }
 });
 
+test('a selected minimum holds in art pixels through zoom and perspective depth', () => {
+  const line = source([[-2.1, -.37, -2.4], [2.1, -.37, 1.5]], {
+    width: .024, edge: 'hard', material: 'cable'
+  });
+  const mark = source([[-1.4, .60, .12], [1.4, .60, .12]], {
+    width: .036, edge: 'hard', material: 'paint'
+  });
+  const policy = {
+    default: { mode: 'minimum', pixels: 1.6 },
+    rules: [{ select: { material: 'paint' }, policy: { mode: 'physical' } }]
+  };
+  const make = strand => C.world({ ...scene([strand, mark]), look: { curveWidth: policy, edgeFilter: true } });
+  const world = make(line), divided = make({ ...line, source: Array.from({ length: 19 }, (_, i) =>
+    K.V.lerp(...line.source.points, i / 18)) });
+  for (const ortho of [false, true]) for (const dist of [5, 9]) {
+    const options = { ...imageOptions, transparent: true, ortho, dist };
+    const on = ink.render(world, options), physical = ink.render(world, { ...options, curveWidth: false });
+    const top = 35 * on.w;
+    assert.deepEqual(on.alpha.subarray(0, top), physical.alpha.subarray(0, top));
+    for (const x of [53, 64, 75]) {
+      assert.ok(band(on, x, 38) > 1.44 && band(on, x, 38) < 1.86);
+      assert.ok(band(physical, x, 38) < .72);
+    }
+    const subdivided = ink.render(divided, options);
+    for (const x of [53, 64, 75]) assert.ok(Math.abs(band(subdivided, x) - band(on, x)) < .14);
+    const scaled = ink.render(world, { ...options, w: options.w * 3, h: options.h * 3, px: 3 });
+    assert.deepEqual(scaled.alpha, on.alpha);
+  }
+  const capped = { default: { mode: 'minimum', pixels: 5, maxScale: 1 } };
+  assert.deepEqual(ink.render(world, { ...imageOptions, curveWidth: capped }).rgb,
+    ink.render(world, { ...imageOptions, curveWidth: false }).rgb);
+});
+
+test('fade leaves fine weave gaps unfilled and retains smooth opacity inside the range', () => {
+  const strands = [-.23, .23].map(y => source([[-1.5, y, 0], [1.5, y, 0]], {
+    width: .10, edge: 'hard', material: 'weave'
+  }));
+  strands.push(source([[-1.5, 0, .1], [1.5, 0, .1]], { width: .026, edge: 'hard', material: 'filament' }));
+  const curveWidth = { rules: [{ select: { material: 'filament' }, policy: { mode: 'fade', range: [.38, .95] } }] };
+  const world = C.world({ ...scene(strands), look: { curveWidth, edgeFilter: true } });
+  for (const edgeFilter of [false, true]) {
+    const view = { ...imageOptions, transparent: true, ortho: true, edgeFilter, target: [0,.02,0], passes: ['depth'] };
+    const renders = [2.6, 4, 6, 8, 12].map(dist => ink.render(world, { ...view, dist }));
+    const center = 37 * view.w + 64, opposite = 38 * view.w + 64;
+    const occupancy = renders.map(frame => Math.max(frame.alpha[center], frame.alpha[opposite]));
+    assert.equal(occupancy.at(-1), 0);
+    assert.ok(occupancy[0] > occupancy[1] && occupancy[1] > occupancy[2] && occupancy[2] > 0, occupancy.join(','));
+    assert.ok(renders.at(-1).alpha.some(value => value > 100));
+    assert.equal(renders[2].passes.depth[center], renders.at(-1).passes.depth[center]);
+  }
+  assert.throws(() => C.world({ ...scene(strands), look: { curveWidth: { default: { mode: 'fade', range: [1, 1] } } } }),
+    /increasing art-pixel range/);
+});
+
+test('projected width measures a flattened ribbon across its camera-facing section', () => {
+  const ribbon = source(straight, { width: .2, edge: 'hard', section: 'flattened', aspect: .10 });
+  const edgeOn = { ...ribbon, up: [0,0,1] }, broadside = { ...ribbon, up: [0,1,0] };
+  const options = { ...imageOptions, transparent: true, ortho: true, edgeFilter: true };
+  const withMinimum = { ...options, curveWidth: { default: { mode: 'minimum', pixels: 1.8 } } };
+  const edge = C.world(scene([edgeOn])), broad = C.world(scene([broadside]));
+  assert.ok(band(ink.render(edge, options), 64) < .5);
+  assert.ok(band(ink.render(edge, withMinimum), 64) > 1.6);
+  assert.deepEqual(ink.render(broad, withMinimum).alpha, ink.render(broad, options).alpha);
+});
+
+test('a depth-slanted strand fades continuously within a segment with filtered edges', () => {
+  const ends = [[-2.2, 0, -2.4], [1.55, 0, 2.0]];
+  const split = Array.from({ length: 25 }, (_, i) => K.V.lerp(...ends, i / 24));
+  const style = { edge: 'hard', width: .046 };
+  const world = points => C.world(scene([source(points, style)]));
+  const options = { ...imageOptions, transparent: true, edgeFilter: true,
+    curveWidth: { default: { mode: 'fade', range: [.72, 1.2] } } };
+  const a = ink.render(world(ends), options), b = ink.render(world(split), options);
+  assert.ok(band(a, 42) < .05);
+  assert.ok(band(a, 65) > .1);
+  assert.ok(band(a, 84) > .64);
+  for (let x = 45; x < 87; x++) assert.ok(Math.abs(band(a, x) - band(b, x)) < .035);
+});
+
 test('width and taper use arc length, including for a path with irregular control spacing', () => {
   const fixed = profileFrame({ width: .22 });
   assert.deepEqual(fixed.alpha, profileFrame({ radius: .11 }).alpha);

@@ -610,6 +610,11 @@
       bad('finish.look.edgeFilter', error.message);
     }
     try {
+      CurveWidth.prepare(look?.curveWidth);
+    } catch (error) {
+      bad('finish.look.curveWidth', error.message);
+    }
+    try {
       MotionalCoverage.prepare(look?.motionalCoverage);
     } catch (error) {
       bad('finish.look.motionalCoverage', error.message);

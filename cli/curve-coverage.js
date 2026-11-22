@@ -12,31 +12,34 @@ const samples = offsets.length - 1, margin = .5;
 
 function footprint(strand, rayAt, x, y, near, normal, strength) {
   const soft = !strand.group;
-  const center = CurveSplat.sample(strand, rayAt(x, y), near, false, soft);
+  const center = CurveSplat.sampleAt(strand, rayAt, x, y, near, false, soft);
   const depths = strand.group && new Float64Array(offsets.length);
+  const opacity = depths && strand.projectedWidth?.fade && strand.projectedWidth.weight && new Float64Array(offsets.length);
   if (depths && center) depths[0] = center.depth;
+  if (opacity && center) opacity[0] = center.alpha;
   let representative = center, offset = offsets[0], density = 0;
   for (let i = 1; i < offsets.length; i++) {
     const [u, v] = offsets[i];
-    const sample = CurveSplat.sample(strand, rayAt(x + u, y + v), near, false, soft);
+    const sample = CurveSplat.sampleAt(strand, rayAt, x + u, y + v, near, false, soft);
     if (!sample) continue;
     if (depths) depths[i] = sample.depth;
     else density += sample.density;
+    if (opacity) opacity[i] = sample.alpha;
     if (!representative) {
       representative = sample;
       offset = offsets[i];
     }
   }
   if (!representative) return null;
-  const hit = normal ? CurveSplat.sample(strand, rayAt(x + offset[0], y + offset[1]), near, true) : representative;
+  const hit = normal ? CurveSplat.sampleAt(strand, rayAt, x + offset[0], y + offset[1], near, true) : representative;
   const centerAlpha = center?.alpha ?? 0;
   // Optical depths add across segments, so splitting a soft curve does not
   // change its filtered density.
   if (soft) hit.alpha = -Math.expm1(-((center?.density ?? 0) * (1 - strength) + density * strength / samples));
-  return { hit, offset, centerAlpha, depths, strength };
+  return { hit, offset, centerAlpha, depths, opacity, strength };
 }
 
-function add(group, entry, { depths, strength }) {
+function add(group, entry, { depths, opacity, strength, hit }) {
   group ??= { curveGroup: entry.curveGroup, strength, nearest: depths, lanes: new Array(offsets.length) };
   const { lanes } = group;
   let added = false;
@@ -47,6 +50,7 @@ function add(group, entry, { depths, strength }) {
       added = true;
     }
   }
+  if (added && opacity) entry.rayOpacity = opacity.map(value => value / hit.alpha);
   return added ? group : null;
 }
 
@@ -57,7 +61,7 @@ function resolve({ strength, lanes }, edgeThreshold) {
     const entry = lanes[i], weight = i === 0 ? 1 - strength : areaWeight;
     if (!entry || !weight) continue;
     const [, , , coverage, r, g, b] = entry.sample;
-    const a = coverage * weight;
+    const a = coverage * (entry.rayOpacity?.[i] ?? 1) * weight;
     alpha += a;
     red += r * a;
     green += g * a;
@@ -68,7 +72,7 @@ function resolve({ strength, lanes }, edgeThreshold) {
   // Keep an actual hit for depth and ownership. The visible color is the
   // premultiplied mean of the winning rays, including multi-colored joins.
   // The sample payload is in the renderer's composite argument order.
-  const { sample } = winner, center = lanes[0]?.sample[3] ?? 0;
+  const { sample } = winner, center = (lanes[0]?.sample[3] ?? 0) * (lanes[0]?.rayOpacity?.[0] ?? 1);
   sample[3] = winner.opacity = Math.abs(alpha - 1) < 1e-12 ? 1 : alpha;
   sample[4] = red / alpha;
   sample[5] = green / alpha;

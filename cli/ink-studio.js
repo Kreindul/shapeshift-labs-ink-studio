@@ -653,6 +653,15 @@ function edgeFilterOption() {
   return edgeFilterOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
 }
 
+let curveWidthOverride;
+function curveWidthOption() {
+  const value = opt['curve-width'];
+  if (value === undefined) return;
+  if (value === 'off') return false;
+  if (typeof value !== 'string') die('--curve-width needs a JSON file or off');
+  return curveWidthOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
+}
+
 let translucentSilhouettesOverride;
 function translucentSilhouettesOption() {
   const value = opt['translucent-silhouettes'];
@@ -782,6 +791,7 @@ const view = extra =>
       translucentSilhouettes: translucentSilhouettesOption(),
       splatFootprints: onOffOption('splat-footprints'),
       curveSplats: onOffOption('curve-splats'),
+      curveWidth: curveWidthOption(),
       paletteSampling: onOffOption('palette-sampling'),
       brushwork: onOffOption('brushwork'),
       shadowBandPaint: onOffOption('shadow-band-paint'),
@@ -1307,6 +1317,7 @@ const CMD = {
         'cloud options: --cloud-field cirrus|coastal-stratus|cumulus|storm-front|file.json|off --cloud-representation auto|card|impostor|volume|off --cloud-self-shadows on|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',
         'translucent silhouette options: --translucent-silhouettes file.json|off',
         'curve splats: render or clip a curve-splat-scene JSON. --curve-splats off shows the Gaussian carriers.',
+        '    --curve-width file.json|off   art-pixel width rules for curve materials',
         'motional pixel coverage: --motional-coverage on|off|file.json',
         'celestial options: --celestial-tracks on|off|file.json',
         'sky options: --sky-environment file.json|off --sky-time seconds --sky-profile track=profile --sky-transitions file.json|off --sky-reflections scene|material',
