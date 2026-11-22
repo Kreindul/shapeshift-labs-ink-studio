@@ -2689,7 +2689,7 @@ after any covariance refit or colour selection.
 ### Delivery of baked rows
 
 `KIT.procedural.splatCodec.encode(world.data, world.count, options)` returns a
-`Uint8Array`. `decode(bytes, { maxRows })` returns `{ data, count }`.
+`Uint8Array`. `decode(bytes, { maxRows, expectedCount })` returns `{ data, count }`.
 Row order is preserved. Rig IDs, light captures, per-sample arrays, scene
 settings and palettes travel with the host's scene data.
 
@@ -2709,8 +2709,24 @@ reordering. Within each block, fields are stored as constants or transposed
 byte planes, with dedicated modes for position deltas and axial covariance.
 Gzip or Brotli is applied by the host. The decoder validates its section bounds
 and defaults to a four-million-row limit. Set a smaller `maxRows` for the
-maximum size of the scene you expect to load. Use
-`node scripts/benchmark-splat-codec.js` to compare size and decode time.
+maximum size of the scene you expect to load. If the scene metadata already
+has a row count, pass it as `expectedCount` to catch a count mismatch before
+the decoder reads the payload or allocates the rows. For example, a browser
+host can assemble a world from its matching scene metadata and row stream:
+
+```js
+const response = await fetch(scene.rowsUrl);
+if (!response.ok) throw new Error('Could not load baked splat rows');
+const rows = KIT.procedural.splatCodec.decode(new Uint8Array(await response.arrayBuffer()), {
+  maxRows: 250_000,
+  expectedCount: scene.world.count
+});
+const world = { ...scene.world, ...rows };
+```
+
+Use the same bake revision for `scene.world`, its per-sample arrays and
+the row stream. Equal row counts alone cannot distinguish two different
+bakes. Use `node scripts/benchmark-splat-codec.js` to compare size and decode time.
 
 ### Currents and surface motion
 
