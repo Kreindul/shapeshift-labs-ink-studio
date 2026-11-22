@@ -72,7 +72,8 @@
       const spec = specs[name];
       if (!record(spec) || !id(spec.op)) throw new TypeError('Invalid graph node ' + name);
       const template = Object.hasOwn(operations, spec.op) ? operations[spec.op] :
-        Object.hasOwn(groups, spec.op) ? groups[spec.op] : Object.hasOwn(P.graph.operations || {}, spec.op) ? P.graph.operations[spec.op] : null;
+        Object.hasOwn(groups, spec.op) ? groups[spec.op] : K.world?.kernels?.operation(spec.op) ??
+          (Object.hasOwn(P.graph.operations || {}, spec.op) ? P.graph.operations[spec.op] : null);
       const operation = template?.specialize ? template.specialize(spec,groups) : template;
       if (typeof operation?.run !== 'function' && typeof operation?.instantiate !== 'function')
         throw new TypeError('Unknown graph operation ' + spec.op);

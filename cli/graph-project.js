@@ -200,7 +200,7 @@ function nativeOperations(kit, assets) {
 
 function operationRegistry(kit, operations = {}, assets = new Map()) {
   const stock = nativeOperations(kit, assets);
-  const extensions = Object.fromEntries(named(operations, 'host operations'));
+  const extensions = {...kit.KIT.world?.kernels?.graphOperations(),...Object.fromEntries(named(operations, 'host operations'))};
   return { stock, extensions, overrides: { ...stock, ...extensions }, toolkit: kit.KIT.procedural.graph.operations };
 }
 
@@ -310,7 +310,7 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     }
     return [name,{format,file,sha256:sha256(bytes),value,...(modelHash && {modelHash}),...(kind && {type:kind}),...(codec && {codec})}];
   }));
-  const {stock,overrides:ops}=operationRegistry(kit,operations,assets);
+  const {stock,extensions,overrides:ops}=operationRegistry(kit,operations,assets);
   const scopes=new Map(), preparedGroups=new Map(), visiting=new Set();
   function operationsIn(scope) {
     if (!scopes.has(scope)) scopes.set(scope,Object.create(null));
@@ -398,19 +398,22 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
   clock(time,seed);
   const projectPlan={...header,kind:'plan',...rootPlan,time,seed,assets:assetInfo,exports,assertions:assertionSpecs,
     groups:Object.fromEntries([...preparedGroups].map(([name,{plan}])=>[name,plan])),
-    groupDependencies:dependencyRows,hostOperations:Object.keys(operations).sort()};
+    groupDependencies:dependencyRows,hostOperations:Object.keys(extensions).sort()};
 
   function artifactIdentity() {
     const usesCodec=[...assets.values()].some(asset=>asset.format==='codec') || exports.some(entry=>entry.format==='codec');
     const used=groupUsage(groupTree.scope,spec.nodes);
     const names=new Set();
-    for (const body of [spec,...[...used].map(group=>groupSpecs.get(group))])
-      for (const {op} of Object.values(body.nodes)) if (Object.hasOwn(operations,op)) names.add(op);
-    const versions=[...names].sort().map(name=>[name,operations[name].cacheVersion]);
+    const usedOperations=[spec,...[...used].map(group=>groupSpecs.get(group))]
+      .flatMap(body=>Object.values(body.nodes).map(({op})=>op));
+    for (const op of usedOperations) if (Object.hasOwn(extensions,op)) names.add(op);
+    if (usedOperations.includes('sim.model'))
+      for (const op of Object.keys(kit.KIT.world?.kernels?.graphOperations() ?? {})) names.add(op);
+    const versions=[...names].sort().map(name=>[name,extensions[name].cacheVersion]);
     const unversioned=versions.filter(([,id])=>!(typeof id==='string' && id.trim()) &&
       !(Number.isSafeInteger(id) && id>0)).map(([name])=>name);
     const registered=versions.map(([name,id])=>[name,unversioned.includes(name) ? null : id,...['run','instantiate','specialize'].map(method=>{
-      const implementation=operations[name][method];
+      const implementation=extensions[name][method];
       return typeof implementation==='function' ? Function.prototype.toString.call(implementation) : null;
     })]);
     // Include declaration order and exact numbers alongside the existing project hash.

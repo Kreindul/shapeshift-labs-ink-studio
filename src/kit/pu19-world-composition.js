@@ -62,7 +62,8 @@
         writes:{state:name,outputs:descriptors('outputs'),fields:fields?.writes ?? []},
         emits:contract?.emits ?? null,
         after:contract?.after ?? [],
-        ...(system.module && {module:system.module})
+        ...(system.module && {module:system.module}),
+        ...(system.kernel && {kernel:system.kernel})
       }];
     }));
     const connections = [...incoming.values()].sort((a,b) => a.to < b.to ? -1 : a.to > b.to ? 1 : 0);

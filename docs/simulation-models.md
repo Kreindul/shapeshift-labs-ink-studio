@@ -48,6 +48,8 @@ the rest of the take, so the bundled take can run after relocation.
 
 ## Use the library
 
+For custom typed-buffer solvers, see [creator-authored simulation kernels](simulation-kernels.md).
+
 ```js
 const { KIT: { world: W } } = require('@shapeshift-labs/ink-studio').load();
 const model = require('./sluice.json');
