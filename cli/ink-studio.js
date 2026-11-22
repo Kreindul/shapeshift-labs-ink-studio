@@ -1006,6 +1006,7 @@ const CMD = {
         '    sim diagnose <plan.json> [--out report.json --fail-on warning|error]   locate stability and conservation issues',
         '    sim sensors <run.json> [--out report.json --wav microphones.wav]   record calibrated virtual sensors',
         '    sim physical-audio <run.json> [--out report.json --stems directory]   route simulation signals into aligned WAV stems',
+        '    sim sound-controls <run.json|controls.json> [--out controls.json] [--at seconds | --sample index]   map and inspect sound automation',
         '    sim controller <run.json> [--out trace.json]   replay target following, hysteresis, or PID',
         '    sim fit-targets <plan.json> [--out report.json --require-tolerance]   fit bounded controls to measured targets',
         '    sim input-compile <plan.json> [--out score.json]   compile text, IPA, MIDI, recordings, and cues',

@@ -525,6 +525,16 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
           'Simulation diagnostics reached '+report.status);
         return;
       }
+      case 'sound-controls': {
+        ensure(typeof file==='string'&&other===undefined&&(opt.at===undefined||opt.sample===undefined)&&
+          (opt.at===undefined||typeof opt.at==='string')&&(opt.sample===undefined||typeof opt.sample==='string'),
+        'Use sim sound-controls <run.json|controls.json> [--out controls.json] [--at seconds | --sample index]');
+        const input=read(file), controls=W.motionSound;
+        const result=input.format===controls.resultFormat?input:
+          require('./motion-sound.js').run(kit,input,file,{build,dependency:shot?.dependency});
+        return respond(opt.at!==undefined?controls.sample(result,{at:opt.at.trim().startsWith('{')?parse(opt.at):Number(opt.at)}):
+          opt.sample!==undefined?controls.sample(result,{sample:Number(opt.sample)}):result);
+      }
       case 'physical-audio': {
         ensure(typeof file==='string'&&other===undefined&&(opt.stems===undefined||typeof opt.stems==='string'),
           'Use sim physical-audio <run.json> [--out report.json --stems directory]');

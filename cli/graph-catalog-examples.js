@@ -73,6 +73,11 @@ const diorama = { id: 'node-catalog', seed: 1, style: 'slate', solids: [
 ] };
 
 const link = (node, port = 'value') => ({ node, port });
+const motionSoundMeasurements={format:'ink-studio/sound-measurements',version:1,unit:'m/s',
+  points:[{at:0,value:0},{at:.5,value:.6}]};
+const motionSoundPlan={format:'ink-studio/motion-sound-plan',version:1,id:'wheel',sampleRate:24000,
+  lanes:{level:{source:'speed',input:[0,1],output:[0,.8]}}};
+
 const blindCritique={op:'music.blindCritique',inputs:{source:production,plan:link('plan')}};
 const cameraGrid = { op: 'coord.cameraGrid', inputs: { width: 64, height: 48, camera: { dist: 4 } } };
 const param = input => ({ input });
@@ -234,6 +239,16 @@ const specifications = {
   'anim.frameBank': { inputs: { source: rgba, options: { tiles: { size: [2, 2], every: 4 } } } },
   'sim.define': { inputs: { kind: 'particles' } },
   'sim.run': { nodes: { recipe: { op: 'sim.define', inputs: { kind: 'particles' } } }, inputs: { recipe: link('recipe') } },
+  'audio.soundMeasurements': {inputs:{rows:[{at:0,value:[0,0]},{at:.5,value:[.6,0]}],
+    options:{unit:'m/s',project:'magnitude'}}},
+  'audio.measureRender': {nodes:{
+    subject:{op:'scene.diorama',inputs:{definition:diorama}},
+    capture:{op:'scene.render',inputs:{source:link('subject'),channels:['coverage'],options:{width:16,height:16}}}
+  },inputs:{frame:link('capture','frame'),options:{channel:'coverage'}}},
+  'audio.motionControls': {inputs:{plan:motionSoundPlan,measurements:{speed:motionSoundMeasurements}}},
+  'audio.sampleMotionControls': {nodes:{
+    automation:{op:'audio.motionControls',inputs:{plan:motionSoundPlan,measurements:{speed:motionSoundMeasurements}}}
+  },inputs:{source:link('automation'),options:{at:.3}}},
   'audio.physicalSignal': { inputs:{
     trace:{format:'ink-studio/wave-trace',version:1,info:{sampleRate:24000},start:0,end:3,
       pressure:{end:[.1,.2,-.03]}},selection:{name:'end'}

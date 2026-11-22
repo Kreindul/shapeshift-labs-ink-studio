@@ -86,7 +86,7 @@
       sample(run.view(),from.world.dt,run.events);
       if(tick===until||(tick-from.tick)%every===0)frames.push({tick,...model.report(state)});
     }
-    return {format:S.reportFormat,version:1,kind:'world',rig:model.info,from:from.tick,to:until,frames,checkpoint:state,
+    return {format:S.reportFormat,version:1,kind:'world',rig:model.info,from:from.tick,to:until,dt:from.world.dt,frames,checkpoint:state,
       ...(includeWorldCheckpoint&&{worldCheckpoint:run.checkpoint()})};
   }
 
