@@ -35,6 +35,7 @@ test('search independently realizes one distinct winner per kind and makes actua
   for (const name of ['bass-move','pedal','suspension','drum-answer','exposed'])
     assert.deepEqual(played(name).lead,base.lead);
   assert.deepEqual(played('bass-move').drums,base.drums);
+  assert(new Set(native(result,'bass-move').details.pitches).size>1);
   const pedal=played('pedal').bass.find(row=>at(row,4,12));
   assert.equal(pedal.beat,4);
   assert(pedal.time+pedal.gate>4.5);

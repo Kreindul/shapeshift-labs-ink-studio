@@ -134,8 +134,9 @@
     return (pedal ? pitches.slice(0,5) : pitches.filter(n=>n!==anchor).slice(0,5)).map((first,index)=>attempt('path-'+index,()=>{
       let previous=first;
       const notes=(pedal ? changes.slice(0,1) : changes).map((row,i,list)=>{
-        const preferred=i===0 ? first : near(previous,row.tones,limits)
-          .filter(n=>!ctx.scale || ctx.scale.has(pc(n)))[0];
+        const local=i===0 ? [first] : near(previous,row.tones,limits)
+          .filter(n=>!ctx.scale || ctx.scale.has(pc(n)));
+        const preferred=local.find(n=>pc(n)!==pc(previous)) ?? local[0];
         check(preferred!==undefined,'No in-range bass chord tone at '+row.beat);
         previous=preferred;
         const width=(list[i+1]?.beat ?? to)-row.beat;
