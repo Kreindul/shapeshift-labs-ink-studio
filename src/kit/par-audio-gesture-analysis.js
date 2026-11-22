@@ -112,10 +112,11 @@
 
   function audition(rows,options={}) {
     check(Array.isArray(rows) && integer(rows.length,1,32) &&
-      fields(options,['sampleRate','targetRmsDb','peakDb','gapSeconds','maxGainDb']), 'Invalid gesture audition');
-    const {sampleRate=rows[0]?.value?.sampleRate,targetRmsDb=-23,peakDb=-3,gapSeconds=.28,maxGainDb=24}=options;
+      fields(options,['sampleRate','targetRmsDb','peakDb','gapSeconds','maxGainDb','levelMatch']), 'Invalid gesture audition');
+    const {sampleRate=rows[0]?.value?.sampleRate,targetRmsDb=-23,peakDb=-3,gapSeconds=.28,maxGainDb=24,levelMatch='individual'}=options;
     check(integer(sampleRate,8000,96000) && finite(targetRmsDb,-48,-10) && finite(peakDb,-12,-1) &&
-      finite(gapSeconds,0,2) && finite(maxGainDb,0,36),'Invalid gesture audition levels or clock');
+      finite(gapSeconds,0,2) && finite(maxGainDb,0,36) && ['individual','shared'].includes(levelMatch),
+      'Invalid gesture audition levels or clock');
     const gap=Math.round(gapSeconds*sampleRate);
     let length=0,work=0;
     const clips=rows.map(row=>{
@@ -134,15 +135,18 @@
       }
       const {peak,rms}=measure({sampleRate,channels:2,samples});
       const gain=rms ? Math.min(db(maxGainDb),db(targetRmsDb)/rms,db(peakDb)/peak) : 1;
-      return {samples,report:{id:row.id,startSample,endSample:startSample+count,gain,peak:peak*gain,rms:rms*gain}};
+      return {samples,report:{id:row.id,startSample,endSample:startSample+count,gain,peak,rms}};
     });
     const samples=new Float64Array((length-gap)*2);
-    for (const clip of clips) {
-      const {startSample,gain}=clip.report;
+    const activeGains=clips.filter(row=>row.report.rms>0).map(row=>row.report.gain);
+    const sharedGain=levelMatch==='shared' ? (activeGains.length ? Math.min(...activeGains) : 1) : undefined;
+    const reports=clips.map(clip=>{
+      const {startSample,peak,rms}=clip.report, gain=sharedGain ?? clip.report.gain;
       for (let i=0;i<clip.samples.length;i++) samples[2*startSample+i]=clip.samples[i]*gain;
-    }
+      return {...clip.report,gain,peak:peak*gain,rms:rms*gain};
+    });
     return {value:{sampleRate,channels:2,samples},report:{sampleRate,targetRmsDb,peakDb,gapSamples:gap,
-      clips:clips.map(row=>row.report)}};
+      ...(sharedGain!==undefined && {sharedGain}),clips:reports}};
   }
 
   A.gestureBank=Object.freeze({describe,search,audition});

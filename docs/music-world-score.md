@@ -5,6 +5,9 @@ stems, or do both. The same timeline can include deliberate gaps independent
 of a sound cue. These controls are evaluated in the production renderer, so
 they also apply to audio exports, graph recipes, and trimmed takes.
 
+Use the [atmosphere arranger](atmosphere-arranger.md) when you want to
+schedule beds and sound gestures around the performed score itself.
+
 Put the rules in `music.production.world` in a [scene soundtrack](scene-audio.md).
 Use names from the spatial cue registry or the scene timeline's audio cues.
 The soundtrack collects the resolved onsets, including spatial propagation
