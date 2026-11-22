@@ -24,7 +24,8 @@
       const buffered = schedule.active && (sample === 'average' || W.rates.buffered(edge));
       return {from,to,delay,sample,signal,type,source,target,
         crossRate:signatures.get(source) !== signatures.get(target) || sourceChunk !== targetChunk,
-        publication:crossing && !crossing.immediate ? 'source-history' : crossing ? 'same-phase-if-due' :
+        ...(ports.inputs[to].timing && {reaction:ports.inputs[to].timing}),
+        publication:edge.earlyEvent ? 'same-phase-event' : crossing && !crossing.immediate ? 'source-history' : crossing ? 'same-phase-if-due' :
           delay ? 'delayed-tick' : sample === 'average' ? 'elapsed-interval' :
           systems[source].combinational ? 'same-phase-if-due' : 'after-source-phase',
         ...(delay && {delaySeconds:delay*plan.world.dt}),
@@ -93,7 +94,7 @@
       const group = membership.get(link.source);
       if (group !== membership.get(link.target)) continue;
       group.links.push(link);
-      if (link.publication !== 'same-phase-if-due') group.boundaries.push(link);
+      if (!['same-phase-if-due','same-phase-event'].includes(link.publication)) group.boundaries.push(link);
     }
     return groups.filter(group => group.links.length).sort((a,b) => a.systems[0] < b.systems[0] ? -1 : 1);
   }
@@ -156,7 +157,8 @@
           [unit,finite(count*rate.visitsPerTick)]))})}));
       return [name,{
         kind:spec.kind,...(spec.operatorRevision !== undefined && {revision:spec.operatorRevision}),
-        cadence,hooks,worker:partitioned?.has(name) ? 'eligible' : 'host',
+        cadence,hooks,...(plan.timedSolvers.has(name) && {timedInputs:plan.timedSolvers.get(name),
+          maxEventBoundaries:W.timedEvents.maxBoundaries}),worker:partitioned?.has(name) ? 'eligible' : 'host',
         ...(managed && {chunk:{id:managed.chunk,level:chunkState.entries[managed.chunk].level,sleep:chunks.levelIds.at(-1)}}),
         ...(system.childPlan && {child:system.childPlan(state)}),
         resources:{stateJsonBytes:bytes(state),...(system.typedStateBytes &&

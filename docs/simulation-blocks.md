@@ -23,7 +23,9 @@ registration can also be used by ordinary models.
   inside the sample loop and return the named output record at the end.
   State and outputs at a given sample must agree across different block
   partitions. Include every persistent buffer in the kernel snapshot.
-- Use level ports. If solvers exchange data at every sample, compose
+- Use level inputs. Event outputs can report
+  [occurrences inside the block](simulation-timed-events.md#stamp-an-event).
+  If solvers exchange data at every sample, compose
   their update inside a single block kernel. An ordinary world can
   connect several block models at their published boundaries.
 

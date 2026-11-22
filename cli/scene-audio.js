@@ -185,13 +185,15 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
           append(track.points, point(voice, state.listener, sample));
         }
       }
-      for (const voice of state?.cues ?? []) shot(voice,state.listener,sample,'spatial');
+      for (const voice of state?.cues ?? [])
+        shot(voice,state.listener,voice.onset===undefined ? sample : stamp(voice.onset),'spatial');
       for (const event of events) if (musicSelected && music && event.system === music.system) {
+        const onset = K.world.timedEvents.timeOf(event) ?? event.time ?? time;
         if (production && (event.kind==='music-transition' || event.kind==='music-cue')) {
-          if ((event.time ?? time)<production.timeline.end) productionIntents.push({...event,time:event.time ?? time});
+          if (onset<production.timeline.end) productionIntents.push({...event,time:onset});
           continue;
         }
-        const at = event.time === time ? sample : stamp(event.time ?? time);
+        const at = onset === time ? sample : stamp(onset);
         if (event.kind === 'music-transition') section(event, at);
         if (event.kind === 'music-cue') {
           const addressed = mixer?.cue({ query, listener, cue: event.resource, at: event.emitter, gain: music.gain });

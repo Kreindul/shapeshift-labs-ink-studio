@@ -11,6 +11,8 @@ from the sampling policy. Set `signal` on the connection alongside
 | `event` | Ordered discrete entries, such as contacts or triggered cues. | `events` queues each entry for the next receiver step. Requires event ports. |
 
 Existing links infer their semantics from their port types and policy.
+[Timed event inputs](simulation-timed-events.md) can consume these queues
+at individual boundaries inside a receiver's interval.
 The physical port checks still apply. If a physical level crosses different
 rates, give it an explicit `sample` policy. A sum combines published increments
 in their declared units. For an input in units per second, integrate the

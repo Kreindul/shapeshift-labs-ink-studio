@@ -65,14 +65,15 @@
     function collect(port,parents) {
       if (parents.length) buffers[port]=refs([...(buffers[port]??[]),...parents]);
     }
-    function consume(port) {
+    function consume(port,retain=false) {
       const parents=buffers[port]??[];
-      delete buffers[port];
+      if (!retain) delete buffers[port];
       return parents;
     }
-    function publish(port,value) {
+    function publish(port,value,early=false) {
       if (!staged[port]) return;
       for (const edge of reducers.get(port)??[]) {
+        if (Boolean(edge.earlyEvent)!==early) continue;
         const type=ports.inputs[edge.to].type;
         if (!carries(value,type)) continue;
         if (edge.delay) delayed[edge.to]=refs([...(delayed[edge.to]??[]),staged[port]]);

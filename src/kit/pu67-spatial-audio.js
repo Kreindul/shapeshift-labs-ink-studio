@@ -171,13 +171,13 @@
         if(known.has(input.id))return;
         known.add(input.id);
         const voice=mix(query,ear,input);
-        if(voice)target.push(voice);
+        if(voice)target.push(input.onset===undefined?voice:{...voice,onset:input.onset});
         check(active.length+shots.length<=4096,'Spatial audio mix exceeds its voice budget');
       }
       function route(row,serial){
         const at=eventAt(row), gain=row.gain??1, pitch=row.pitch??1;
         if(!finite(gain,0,64)||!finite(pitch,.0625,8))return;
-        const raw={mode:'cue',at,gain,pitch,exclude:id(row.entity)?row.entity:undefined};
+        const raw={mode:'cue',at,gain,pitch,onset:W.timedEvents.timeOf(row),exclude:id(row.entity)?row.entity:undefined};
         let matched=false;
         for(const binding of bindings.get(row.kind)??[]){
           if(binding.on.system!==undefined&&binding.on.system!==row.system||!Q.condition(binding.on.where,row))continue;

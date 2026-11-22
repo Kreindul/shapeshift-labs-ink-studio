@@ -22,8 +22,14 @@
       ...(lod&&{simulationLOD:lod})};
   }
   function randomSource(seed,name,at,timing){
-    const randomTick=timing?.substeps>1?at+'.'+timing.substep:at;
+    const base=timing?.substeps>1?at+'.'+timing.substep:at;
+    const randomTick=timing?.segment===undefined ? base : base+'.segment.'+timing.segment;
     return key=>P.data.hash(name+'/'+randomTick+'/'+String(key),seed)/4294967296;
+  }
+  function eventContext(ctx,start) {
+    const eventAt = (fraction,event) => W.timedEvents.within(start,ctx.time,fraction,event);
+    return Object.freeze({...ctx,eventAt,
+      emitAt:(fraction,kind,event={},parents)=>ctx.emit(kind,eventAt(fraction,event),parents)});
   }
   function* partitionGroups(names,barriers){
     let start=0;
@@ -61,8 +67,10 @@
       const spatial=provider.dependencies&&Object.freeze({write:note('write'),rebuilt:note('rebuilt'),
         changes(){throw Error('Partition solvers cannot read spatial invalidations');}});
       const contracted=provider.contract!==undefined||world.systems[name].contract!==undefined;
-      const ctx=Object.freeze(Object.defineProperties({id:name,...stepTiming(world,at,freeze(timing)),input:freeze(input),query,
-        emit:note('emit'),...(spatial&&{spatial}),random:randomSource(world.seed,name,at,timing),
+      const step=stepTiming(world,at,freeze(timing)), emit=note('emit');
+      const stamps=eventContext({time:step.time,emit},Math.max(0,step.time-step.dt));
+      const ctx=Object.freeze(Object.defineProperties({id:name,...step,input:freeze(input),query,
+        emit,eventAt:stamps.eventAt,emitAt:stamps.emitAt,...(spatial&&{spatial}),random:randomSource(world.seed,name,at,timing),
         ...(contracted&&{read(alias){throw Error('Undeclared system state read '+name+'/'+String(alias));}})},restricted));
       const start=profile?clock():0, saved=freeze(state);
       const next=adapter?W.simulationAggregate.advance(adapter,saved,ctx):provider.step(saved,ctx);
@@ -98,6 +106,7 @@
   const defaults = {bool:false,number:0,event:[],vec3:[0,0,0],record:{}};
   function portValue(descriptor,value,name) {
     check(descriptor && types[descriptor.type]?.(value), 'Invalid value for ' + name);
+    if (descriptor.type==='event') for (const event of value) W.timedEvents.timeOf(event);
     return freeze(copy(value));
   }
   function portDeclarations(spec, system, name) {
@@ -154,6 +163,10 @@
           const path = name + '/' + key;
           const descriptor = typeof raw === 'string' ? {type:raw} : raw;
           check(id(key) && record(descriptor) && own(types,descriptor.type), 'Invalid port ' + path);
+          check(descriptor.timing===undefined || direction==='inputs' && descriptor.type==='event' &&
+            (descriptor.timing==='split' && typeof system.react==='function' && typeof system.step==='function' ||
+              descriptor.timing==='forward' && system.timedForward===true),
+          'Invalid timed event input '+path);
           const value = portValue(descriptor,descriptor.default ?? defaults[descriptor.type],path);
           ports[direction][path] = freeze({...physicalPort(descriptor,declarations[direction]?.[key],path),default:value});
         }
@@ -235,7 +248,17 @@
     })),{relays});
     const transfers = W.transfers.bind(systems);
     for (const name of transfers.producers) systems[name].checkTransfers?.(transfers.validate);
-    const schedule = W.rates.schedules(world,systems,chunks);
+    const timedInputs = Object.entries(ports.inputs).filter(([,port])=>port.timing!==undefined);
+    const timedSolvers = new Map();
+    for (const [port,descriptor] of timedInputs) {
+      const [name,key] = endpoint(port);
+      check(!chunks?.managed.has(name), 'Timed event input needs a fixed receiving schedule: '+port);
+      if (descriptor.timing==='split') {
+        if (!timedSolvers.has(name)) timedSolvers.set(name,[]);
+        timedSolvers.get(name).push(key);
+      }
+    }
+    const schedule = W.rates.schedules(world,systems,chunks,timedInputs.length>0);
     physicalRates(world,ports,schedule);
     const incoming = new Map(), edges = new Map(), indegree = new Map();
     let filters;
@@ -262,8 +285,10 @@
       if (target.quantity && varying && edge.sample === undefined && edge.signal!=='accumulated')
         throw Error('Incompatible physical ports ' + edge.from + ' -> ' + edge.to +
           ': variable sample rates need an explicit world sampling policy');
-      incoming.set(edge.to,{from:edge.from,to:edge.to,delay,sample,signal,...(crossing && {crossing})});
-      if (crossing?.immediate || !crossing && delay === 0 && sample !== 'average' && systems[from].combinational)
+      const earlyEvent = sample==='events' && delay===0 && target.timing!==undefined && !systems[from].combinational;
+      incoming.set(edge.to,{from:edge.from,to:edge.to,delay,sample,signal,...(crossing && {crossing}),
+        ...(earlyEvent && {earlyEvent:true})});
+      if (earlyEvent || crossing?.immediate || !crossing && delay === 0 && sample !== 'average' && systems[from].combinational)
         phaseEdges.push({kind:'signal',from,to,output:edge.from,input:edge.to});
     }
     if (world.simulationModel) W.models.checkInterface(world,ports,incoming,systems);
@@ -297,7 +322,7 @@
     const interactions = W.interactionRuntime.bind({world,systems,chunks,transfers,ports,incoming,portValue});
     const influence = W.influenceRuntime.bind({systems,transfers,chunks});
     const population = W.populationRuntime.bind({systems,transfers,chunks});
-    const plan = {world,systems,ports,incoming,order,names,transfers,dependencies,schedule,rates,chunks,aggregates,reservations,worksites,
+    const plan = {world,systems,ports,incoming,order,names,transfers,dependencies,schedule,rates,timedSolvers,chunks,aggregates,reservations,worksites,
       interactions,influence,population,causePolicy,contracts,phaseEdges,navigationSources};
     if (world.eventActions !== undefined) plan.eventActions = K.eventActions.compile(world.eventActions, {
       dt: world.dt, validateAction: command => actionCheck(command, plan),
@@ -324,7 +349,10 @@
         'Live patches may change entities and metadata');
       } else if(plan.chunks?.actions.includes(key))plan.chunks.checkAction(key,args);
       else if (key === 'transfer') plan.transfers.validate(args);
-      else check(id(args.kind), 'An event needs a kind');
+      else {
+        check(id(args.kind), 'An event needs a kind');
+        W.timedEvents.timeOf(args);
+      }
     } else {
       check(own(plan.systems[system]?.actions,key), 'Unknown action ' + raw.action);
       plan.systems[system].checkAction?.(key,args);
@@ -429,7 +457,7 @@
     const observers=names.filter(name=>systems[name].afterStep);
     const partitioned=workerPool&&new Set(names.filter(name=>{
       const spec=world.systems[name], {kind}=spec;
-      return systems[name].partitionStep===true&&!Object.keys(contracts.get(name)?.reads??{}).length&&
+      return systems[name].partitionStep===true&&!plan.timedSolvers.has(name)&&!Object.keys(contracts.get(name)?.reads??{}).length&&
         (spec.operatorRevision===undefined&&own(installed,kind)?
           own(modules,kind)&&installed[kind]===modules[kind]:registration(spec)?.worker);
     }));
@@ -494,10 +522,11 @@
       };
     }
     function context(name, worldValue, statesValue, at, input, emit, query, spatial, timing, causal, read) {
-      return Object.freeze({world:worldValue,query,id:name,states:visibleStates(statesValue),
-        ...stepTiming(worldValue,at,timing),input,emit,
+      const step = stepTiming(worldValue,at,timing);
+      return eventContext({world:worldValue,query,id:name,states:visibleStates(statesValue),
+        ...step,input,emit,
         ...(spatial && {spatial}),...(causal && {causal}),...(read && {read}),
-        random:randomSource(worldValue.seed,name,at,timing)});
+        random:randomSource(worldValue.seed,name,at,timing)}, Math.max(0,step.time-step.dt));
     }
     function rootedState(value) {
       return P.data.isImmutable(value) ? value : freeze(copy(value));
@@ -758,6 +787,7 @@
       const causal = causePolicy && W.causality.begin(causalState,at,ports,incoming,causePolicy);
       const makeEmit = (system,scope,root) => (kind,detail = {},parents) => {
         check(id(kind) && record(detail) && events.length < 10000, 'Invalid event or per-tick event budget exceeded');
+        W.timedEvents.timeOf(detail);
         const row=freeze({...copy(detail),kind,system,tick:at,id:at+'.'+events.length});
         events.push(row);
         if (causal) return causal.event(row,parents??scope?.emitParents()??(root?[root]:[]),scope?.location,
@@ -1015,14 +1045,46 @@
         const start = profile ? clock() : 0;
         const worker=workerResults?.get(name);
         if(worker?.error)throw Error(worker.error.message,{cause:worker.error});
-        let next=state;
+        const timedInputs=plan.timedSolvers.get(name);
+        const split=timedInputs?.some(key=>input[key].length);
+        let next=state, calls=1;
         if(worker){
           if(!worker.unchanged)next=rootedState(worker.state);
           for(const [method,args] of worker.effects){
             if(method==='emit')ctx.emit(...args);
             else ctx.spatial[method](...args);
           }
-        }else if(system.step)next=rootedState(system.step(state,ctx));
+        }else if(system.step) {
+          if (split) {
+            const end=ctx.time, begin=Math.max(0,end-ctx.dt);
+            const groups=W.timedEvents.boundaries(timedInputs,input,begin,end);
+            const eventsOff=Object.fromEntries(Object.keys(system.inputs).filter(key=>
+              ports.inputs[name+'/'+key].type==='event').map(key=>[key,[]]));
+            const splitOff=Object.fromEntries(timedInputs.map(key=>[key,[]]));
+            const levels=freeze({...input,...eventsOff});
+            let prior=begin, segment=0;
+            const segmentContext=(time,dt,values,reaction=false)=>eventContext({...ctx,
+              time,dt,input:values,segment,reaction,
+              random:randomSource(nextWorld.seed,name,at,{...timing,segment})},time-dt);
+            function stepTo(time) {
+              if (time<=prior) return;
+              const values=segment===0?freeze({...input,...splitOff}):levels;
+              const part=segmentContext(time,time-prior,values);
+              next=rootedState(system.step(next,part));
+              if (observedTiming) observedTiming.push([name,part.dt,prior/nextWorld.dt-at+1,
+                time/nextWorld.dt-at+1,timing?.every??1,timing?.substep??1,timing?.substeps??1,null]);
+              segment++;
+              prior=time;
+            }
+            for (const group of groups) {
+              stepTo(group.time);
+              next=rootedState(system.react(next,segmentContext(group.time,0,freeze({...levels,...group.ports}),true)));
+            }
+            stepTo(end);
+            calls=segment;
+            if (debug) observed.reactions=groups.map(({time,ports})=>({time,ports}));
+          } else next=rootedState(system.step(state,ctx));
+        }
         readOutputs(name,next,ctx,target);
         if(debug){
           const outputs=Object.fromEntries(Object.keys(system.outputs??{}).map(key=>[key,target[name+'/'+key]]));
@@ -1040,17 +1102,17 @@
         }
         if (profile) {
           const cost = spent[name] ??= {calls:0,ms:0};
-          cost.calls++;
+          cost.calls+=calls;
           cost.ms += clock()-start+(worker?.ms??0);
         }
-        if(observedTiming&&system.step)observedTiming.push([name,ctx.dt,timing?.start??0,timing?.end??1,
+        if(observedTiming&&system.step&&!split)observedTiming.push([name,ctx.dt,timing?.start??0,timing?.end??1,
           timing?.every??1,timing?.substep??1,timing?.substeps??1,timing?.detail?.level??null]);
         return next;
       }
 
       let nextStates, nextOutputs, publishedSignals, nextSampling, delayedSamples;
       if (rates) {
-        const frame = yield* rates.advance(at,committed,outputs,nextManual,delays,lastSignals,sampling,integrate,causal,chunkStep,
+        const frame = yield* rates.advance(at,nextWorld.dt,committed,outputs,nextManual,delays,lastSignals,sampling,integrate,causal,chunkStep,
           prepare&&{prepare,groupsFor});
         ({states:nextStates,outputs:nextOutputs,signals:publishedSignals,buffers:nextSampling,delayedSamples}=frame);
       } else {
@@ -1189,7 +1251,7 @@
       try{return await stepInBackground();}
       finally{asyncActive=false;}
     }
-    function runBlock(end, held) {
+    function runBlock(end, held, eventValues) {
       const first = tick+1, commands = scheduled.get(first) ?? [];
       if (commands.some(row => row.action !== 'world/input')) return false;
       const nextManual = {...manual};
@@ -1197,7 +1259,9 @@
       Object.assign(nextManual,held);
       const input = currentValues(blockSystem,nextManual,{},outputs,delays);
       const start = profile ? clock() : 0, samples = end-tick;
-      const state = systems[blockSystem].stepBlock(states[blockSystem],{start:tick,end,input});
+      const {state,events:emitted} = systems[blockSystem].stepBlock(states[blockSystem],{start:tick,end,input});
+      if (eventValues) for (const [port,rows] of Object.entries(emitted))
+        eventValues[port] = W.rates.add(eventValues[port]??[],rows,'event');
       const nextOutputs = {};
       readOutputs(blockSystem,state,undefined,nextOutputs);
 
@@ -1229,9 +1293,9 @@
       }
       return Math.min(to,tick+blockSize,(commandTicks[low] ?? Infinity)-1);
     }
-    function advanceBlocks(to, held) {
+    function advanceBlocks(to, held, eventValues) {
       while (tick < to) {
-        if (runBlock(blockEnd(to),held)) continue;
+        if (runBlock(blockEnd(to),held,eventValues)) continue;
         check(held === undefined,'Held model inputs need a level-only sample block');
         step();
       }
@@ -1241,7 +1305,9 @@
       check(!asyncActive && tickOK(to) && to >= tick, 'Invalid held block target');
       const values = Object.fromEntries(Object.entries(held).map(([port,value]) =>
         [port,portValue(ports.inputs[port],value,port)]));
-      return advanceBlocks(to,values);
+      const eventValues = {};
+      advanceBlocks(to,values,eventValues);
+      return eventValues;
     }
     function advance(to, {onTick,stopOnOutcome = false} = {}) {
       check(!asyncActive,'A simulation advance is already in progress');

@@ -516,7 +516,9 @@ interpolation, anti-aliased decimation, and fractional delay.
 
 Connection delays are measured in world ticks. Delayed levels hold
 the selected tick's final value. Delayed sums and events carry all
-publications from the selected tick as a batch. Manual numeric inputs
+publications from the selected tick as a batch. Use
+[timed event inputs](simulation-timed-events.md) to react at a known instant
+inside a receiver's step. Manual numeric inputs
 hold their latest command value. Manual events accumulate in command
 order and wait for the scheduled consumer. Initial outputs seed held
 levels, while sums and event wires collect solver publications.

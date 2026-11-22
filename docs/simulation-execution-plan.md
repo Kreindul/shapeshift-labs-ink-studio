@@ -43,7 +43,8 @@ system. The plan reports pending averaged phase quanta and queued event
 counts at the inspected tick. A delayed sum or event wire also retains
 its per-tick batches. [Explicit rate crossings](simulation-rate-crossings.md)
 add the signal semantics, filter settings, effective latency, and
-retained source history.
+retained source history. [Timed event inputs](simulation-timed-events.md)
+show the reaction policy and any same-phase event ordering dependency.
 
 `feedback` identifies strongly connected groups of signal wires and
 declared state reads, including a stateful self-wire. Within a group,

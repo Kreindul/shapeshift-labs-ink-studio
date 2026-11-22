@@ -55,12 +55,13 @@
     return value;
   }
 
-  function ports(source = {}) {
+  function ports(source = {}, inbound = false) {
     check(record(source), 'Expected named kernel ports');
     return Object.fromEntries(Object.entries(source).map(([name, raw]) => {
       const spec = typeof raw === 'string' ? {type:raw} : raw;
-      check(id(name) && keys(spec,['type','default','quantity','description']) && own(types,spec.type) &&
-        (spec.description === undefined || typeof spec.description === 'string'), 'Invalid kernel port ' + name);
+      check(id(name) && keys(spec,['type','default','quantity','description','timing']) && own(types,spec.type) &&
+        (spec.description === undefined || typeof spec.description === 'string') &&
+        (spec.timing===undefined || inbound && spec.type==='event' && spec.timing==='split'), 'Invalid kernel port ' + name);
       const valid = P.graphTypes.validator(types[spec.type]);
       const value = spec.default ?? defaults[spec.type];
       check(valid(value), 'Invalid default for kernel port ' + name);
@@ -95,6 +96,8 @@
     check(record(kernel) && ['advance','reset','snapshot','restore'].every(key => typeof kernel[key] === 'function'),
       'Kernel prepare must return advance, reset, snapshot and restore');
     check(!spec.block || typeof kernel.advanceBlock === 'function', 'Block kernel prepare must return advanceBlock');
+    const reactive = Object.values(spec.inputs).some(port=>port.timing==='split');
+    check(!reactive || typeof kernel.react==='function','Timed kernel inputs need a react hook');
     let current, shape;
 
     function state(outputs, steps) {
@@ -151,15 +154,46 @@
         return outputs;
       });
     }
+    function react(context) {
+      check(Number.isFinite(context?.time) && context.time>=0,'Invalid kernel reaction time');
+      const input = values(spec.inputs,context.input??{},false);
+      return transact(() => {
+        const outputs = values(spec.outputs,kernel.react({...context,dt:0,input}),true);
+        current = state(outputs,current.steps);
+        return outputs;
+      });
+    }
+    const eventPorts = Object.keys(spec.outputs).filter(port=>spec.outputs[port].type==='event');
     function advanceBlock({start = current.steps, end, input:source = {}} = {}) {
       check(start === current.steps && Number.isSafeInteger(end) && end >= start && end-start <= maxBlockSize,
         'Kernel block needs a contiguous integer range of at most '+maxBlockSize+' samples');
-      if (end === start) return current.outputs;
+      if (end === start) return eventPorts.length ? freeze({...current.outputs,
+        ...Object.fromEntries(eventPorts.map(port=>[port,[]]))}) : current.outputs;
       const input = values(spec.inputs,source,false);
       const randomAt = (sample,key) => P.data.hash(instance+'/'+(sample+1)+'/'+String(key),seed)/4294967296;
       return transact(() => {
-        const outputs = values(spec.outputs,kernel.advanceBlock({start,end,dt,input,randomAt}),true);
-        current = state(outputs,end);
+        function eventAt(sample,fraction,event) {
+          check(Number.isSafeInteger(sample) && sample>=start && sample<end,'Event sample is outside the block');
+          return W.timedEvents.within(sample*dt,(sample+1)*dt,fraction,event,{sample,fraction});
+        }
+        const outputs = values(spec.outputs,kernel.advanceBlock({start,end,dt,input,randomAt,eventAt}),true);
+        const endpoint = {...outputs};
+        for (const port of eventPorts) {
+          check(outputs[port].length<=W.rates.maxEvents,'Kernel block event budget exceeded');
+          let previousSample=start, previousFraction=0;
+          endpoint[port]=[];
+          for (const event of outputs[port]) {
+            const {sample,fraction} = event?.timing??{};
+            check(Number.isSafeInteger(sample) && sample>=start && sample<end &&
+              (sample>previousSample || sample===previousSample && fraction>=previousFraction) &&
+              W.timedEvents.timeOf(event)===W.timedEvents.withinTime(sample*dt,(sample+1)*dt,fraction),
+            'Block events need ordered enclosing samples and fractions');
+            previousSample=sample;
+            previousFraction=fraction;
+            if (sample===end-1) endpoint[port].push(event);
+          }
+        }
+        current = state(freeze(endpoint),end);
         return outputs;
       });
     }
@@ -174,7 +208,7 @@
       });
     }
     reset();
-    return Object.freeze({advance,reset,snapshot:()=>current,restore,...(spec.block && {advanceBlock})});
+    return Object.freeze({advance,reset,snapshot:()=>current,restore,...(spec.block && {advanceBlock}),...(reactive && {react})});
   }
 
   function worldProvider(spec) {
@@ -184,12 +218,20 @@
       function stepBlock(saved, range) {
         const run = open();
         run.restore(saved);
-        run.advanceBlock(range);
-        return run.snapshot();
+        const emitted = run.advanceBlock(range);
+        const events = Object.fromEntries(Object.entries(spec.outputs).filter(([,port])=>port.type==='event')
+          .map(([name])=>[id+'/'+name,emitted[name]]));
+        return {state:run.snapshot(),events};
       }
       return {
         inputs:spec.inputs, outputs:spec.outputs, shareCheckpoint:true,
         ...(spec.block && {stepBlock}),
+        ...(Object.values(spec.inputs).some(port=>port.timing==='split') && {react(saved,context) {
+          const run = open();
+          run.restore(saved);
+          run.react(context);
+          return run.snapshot();
+        }}),
         kernel:{kind:spec.kind,revision:spec.revision,description:spec.description,...(spec.block && {block:true})},
         typedStateBytes:saved => Object.values(saved.buffers)
           .reduce((sum,{type,length}) => sum + arrays[type].BYTES_PER_ELEMENT*length,0),
@@ -198,7 +240,7 @@
         validateState:saved => { open().restore(saved); },
         step(saved,context) {
           if (spec.block && world.simulationModel?.blockSize)
-            return stepBlock(saved,{start:context.tick-1,end:context.tick,input:context.input});
+            return stepBlock(saved,{start:context.tick-1,end:context.tick,input:context.input}).state;
           const run = open();
           run.restore(saved);
           run.advance(context);
@@ -264,9 +306,9 @@
       (example === undefined || keys(example,['config','commands','clock'])), 'Invalid simulation kernel registration ' + name);
     const versions = kernels.get(kind) ?? new Map();
     check(!versions.has(revision), 'Duplicate simulation kernel ' + name);
-    const inputs = ports(spec.inputs), outputs = ports(spec.outputs);
-    check(!block || [...Object.values(inputs),...Object.values(outputs)].every(port => port.type !== 'event'),
-      'Block kernels need level ports');
+    const inputs = ports(spec.inputs,true), outputs = ports(spec.outputs);
+    check(!block || Object.values(inputs).every(port => port.type !== 'event'),
+      'Block kernels need level input ports');
     check(!own(outputs,'checkpoint'),'Kernel output checkpoint is reserved for the graph snapshot');
     const def = freeze({kind,revision,description,inputs,outputs,block,prepare:spec.prepare,estimate:spec.estimate,...(example && {example:clone(example)})});
     R.register(kind,worldProvider(def),{revision});

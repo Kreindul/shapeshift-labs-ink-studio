@@ -14,13 +14,14 @@
     const {id:modelId, version, revision, exposedParameters = {}} = model;
     const instanceInfo = {...(parent.systems[id].module !== undefined && {name:parent.systems[id].module}),
       id:modelId, version, revision, seed:world.seed, parameters:exposedParameters};
-    const selectPorts = (aliases, table) => Object.fromEntries(Object.entries(aliases).map(([name, port]) => {
-      const {sampleRates, ...descriptor} = table[port];
+    const selectPorts = (aliases, table, inbound = false) => Object.fromEntries(Object.entries(aliases).map(([name, port]) => {
+      const {sampleRates, timing, ...descriptor} = table[port];
+      if (inbound && timing!==undefined) descriptor.timing='forward';
       if (!descriptor.quantity) return [name, descriptor];
       const {sampleRate, ...quantity} = descriptor.quantity;
       return [name, {...descriptor,quantity}];
     }));
-    const inputs = selectPorts(model.inputs, ports.inputs), outputs = selectPorts(model.outputs, ports.outputs);
+    const inputs = selectPorts(model.inputs, ports.inputs, true), outputs = selectPorts(model.outputs, ports.outputs);
     const explicit = config.drive ?? [];
     check(Array.isArray(explicit) && new Set(explicit).size === explicit.length && explicit.every(name => own(inputs, name)),
       'Model drive must list distinct named inputs on ' + id);
@@ -52,7 +53,7 @@
     }
 
     return {
-      inputs, outputs, fields, module:instanceInfo, shareCheckpoint:true,
+      inputs, outputs, fields, module:instanceInfo, shareCheckpoint:true, timedForward:true,
       childPlan(state) {
         const ticksPerHostTick = T.seconds(ratio);
         return {
@@ -91,7 +92,8 @@
         const current = restore(state);
         if (current[M.heldAdvance]) {
           const held = Object.fromEntries(levels.map(name => [model.inputs[name],ctx.input[name]]));
-          current[M.heldAdvance](to,held);
+          const batches = current[M.heldAdvance](to,held);
+          for (const name of eventOutputs) eventValues[name] = batches[model.outputs[name]] ?? [];
           return capture(current,emptyEvents(events),eventValues);
         }
         // Outer ticks own the input history. A driven child starts its command ledger at this checkpoint.
@@ -100,14 +102,17 @@
         if (!driven.length && !eventOutputs.length) run.advance(to);
         else for (let tick = from + 1; tick <= to; tick++) {
           const commands = levels.map(name => M.command(world, name, ctx.input[name], tick));
-          if (tick === from + 1) for (const name of events)
-            if (pending[name].length) commands.push(M.command(world, name, pending[name], tick));
+          for (const name of events) if (pending[name].length) {
+            const {ready,pending:waiting} = W.timedEvents.select(pending[name],tick*world.dt);
+            pending[name] = waiting;
+            if (ready.length) commands.push(M.command(world,name,ready,tick));
+          }
           if (commands.length) run.schedule(commands);
           run.step();
           for (const name of eventOutputs)
             eventValues[name] = W.rates.add(eventValues[name], run.view().signals[model.outputs[name]], 'event');
         }
-        return capture(run, emptyEvents(events), eventValues);
+        return capture(run, pending, eventValues);
       }
     };
   }

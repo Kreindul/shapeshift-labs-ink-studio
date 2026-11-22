@@ -95,7 +95,7 @@
       'contactEvents must be boolean or material');
     const start=config.bodies??{}, jointSpecs=config.joints??{}, forceSpecs=config.forces??{};
     const impactEvents=config.impactEvents??false, fractureOn=config.fractureOn??{};
-    check(typeof impactEvents==='boolean'&&record(fractureOn)&&Object.entries(fractureOn).every(([key,rule])=>
+    check((typeof impactEvents==='boolean'||impactEvents==='timed')&&record(fractureOn)&&Object.entries(fractureOn).every(([key,rule])=>
       own(start,key)&&!start[key]?.collider&&record(rule)&&[0,1,2].includes(rule.axis??0)&&
       (rule.parts===undefined||Number.isSafeInteger(rule.parts)&&rule.parts>=2&&rule.parts<=32)&&
       (rule.omit===undefined||rule.parts!==undefined&&Array.isArray(rule.omit)&&
@@ -1119,7 +1119,7 @@
         poseCache.set(state.bodies,poses);
       }
       return poses.get(entity)??(entityNames.has(entity)?false:null);
-    },output(state){
+    },output(state,ctx){
       const out={};
       for(const [key,joint] of Object.entries(state.joints)){
         out['speed.'+key]=joint.speed;
@@ -1136,7 +1136,8 @@
         const source=state.bodies[hit.a]?.entity, target=hit.b===null?'ground':state.bodies[hit.b]?.entity;
         if(!source||!target||source===target)return [];
         const row={kind:'impact',source,target,at:hit.at,speed:Math.max(0,hit.speed),normal:hit.normal};
-        return hit.b===null?[row]:[row,{...row,source:target,target:source,normal:V.mul(hit.normal,-1)}];
+        const contact=impactEvents==='timed'?ctx.eventAt(hit.at,row):row;
+        return hit.b===null?[contact]:[contact,{...contact,source:target,target:source,normal:V.mul(hit.normal,-1)}];
       });
       if(fabricFields.length)out['deformable-loads']=state.fabricLoads;
       return out;
