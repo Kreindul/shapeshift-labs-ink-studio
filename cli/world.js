@@ -492,7 +492,11 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
       [name,{kind:spec.kind,revision:spec.operatorRevision,schedule:spec.schedule??{}}]));
     return respond({id,version,revision,seed:world.seed,numerics:source.numerics,domain:source.domain,
       parameters:source.parameters,initial:source.initial,boundaries:source.boundaries,
-      operators,inputs,outputs,probes});
+      operators,inputs,outputs,probes,
+      ...(source.modules !== undefined && {modules:Object.fromEntries(Object.entries(source.modules).map(([name, model]) =>
+        [name,{id:model.id,revision:model.revision}]))}),
+      ...(source.instances !== undefined && {instances:source.instances}),
+      ...(world.simulationModel.exposedParameters && {exposedParameters:world.simulationModel.exposedParameters})});
   }
   function runSimulation([mode,file,other]) {
     switch (mode) {

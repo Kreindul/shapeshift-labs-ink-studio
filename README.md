@@ -750,6 +750,7 @@ sample withdrawal.
 shared world queries, timed actions, checkpoints, replay and branch comparison.
 [Versioned simulation models](docs/simulation-models.md) package domains, parameters,
 operator revisions, clocks, and named measurements in a runnable JSON asset.
+[Reusable simulation modules](docs/simulation-modules.md) combine those models through named ports with independent instance settings and state.
 [System contracts](docs/headless-worlds.md#compose-system-contracts) expose
 typed connections, state reads, event kinds, and execution dependencies.
 [Spatial field coupling](docs/headless-worlds.md#spatial-field-coupling) shares

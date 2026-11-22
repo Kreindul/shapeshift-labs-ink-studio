@@ -35,26 +35,81 @@
         (at.socket === undefined || id(at.socket)) : vector(at.point) && at.socket === undefined);
   }
 
+  function parameterValues(source, overrides = {}) {
+    const declared = source.parameterSchema === undefined ? {} : source.parameterSchema;
+    const exposed = entries(declared, 'parameter schema');
+    for (const [name] of entries(overrides, 'parameter override'))
+      check(own(declared,name), 'Model ' + source.id + ' does not expose parameter ' + name);
+    for (const [name, spec] of exposed) {
+      const valid = K.procedural.graphTypes.validator(spec?.type);
+      check(fields(spec, ['type','min','max','choices','description']) && valid &&
+        (spec.description === undefined || typeof spec.description === 'string') &&
+        (spec.min === undefined || spec.type === 'number' && Number.isFinite(spec.min)) &&
+        (spec.max === undefined || spec.type === 'number' && Number.isFinite(spec.max)) &&
+        (spec.min === undefined || spec.max === undefined || spec.min <= spec.max) &&
+        (spec.choices === undefined || Array.isArray(spec.choices) &&
+          spec.choices.length > 0 && spec.choices.every(valid)),
+      'Invalid model parameter schema for ' + name);
+      const accepts = value => valid(value) && (spec.min === undefined || value >= spec.min) &&
+        (spec.max === undefined || value <= spec.max) &&
+        (spec.choices === undefined || spec.choices.some(choice => W.data.equal(choice,value)));
+      check(own(source.parameters,name) && accepts(source.parameters[name]), 'Invalid default model parameter ' + name);
+      if (own(overrides,name)) check(accepts(overrides[name]), 'Invalid override for model parameter ' + name);
+    }
+    return {...source.parameters,...overrides};
+  }
+
+  function instantiate(model, {parameters, seed} = {}) {
+    check(model?.format === format && model.version === version && record(model.parameters),
+      'A module needs an embedded versioned simulation model');
+    const source = copy(model), values = parameterValues(source, parameters === undefined ? {} : copy(parameters));
+    check(seed === undefined || Number.isSafeInteger(seed), 'Model instance seed must be an integer');
+    return freeze({...source, parameters:values, ...(seed !== undefined && {seed})});
+  }
+
+  function expand(source, scope) {
+    if (source?.modules === undefined && source?.instances === undefined) return source;
+    const {modules = {}, instances = {}, systems = {}, ...world} = source;
+    const definitions = Object.fromEntries(entries(modules, 'module').map(([name, model]) => {
+      check(model?.format === format && model.version === version && id(model.id) && revision(model.revision),
+        'Module ' + name + ' needs a versioned simulation model');
+      return [name,model];
+    }));
+    check(record(systems), 'Invalid world systems');
+    const additions = Object.fromEntries(entries(instances, 'instance').map(([name, declaration]) => {
+      const spec = scope ? bindings(declaration,scope) : declaration;
+      check(name !== 'world' && !own(systems,name), 'Duplicate or reserved model instance ' + name);
+      check(fields(spec, ['module','parameters','seed','drive','schedule','contract']) &&
+        id(spec.module) && own(definitions,spec.module), 'Unknown or invalid module for instance ' + name);
+      const {module, schedule, contract, ...options} = spec;
+      return [name,{
+        ...system(definitions[module],options), operatorRevision:1, module,
+        ...(schedule !== undefined && {schedule}), ...(contract !== undefined && {contract})
+      }];
+    }));
+    return {...world,systems:{...systems,...additions}};
+  }
+
   function compile(raw) {
     const source = copy(raw);
     check(fields(source, ['format', 'version', 'id', 'revision', 'seed', 'numerics', ...sections,
-      'operators', 'inputs', 'outputs', 'probes', 'connections', 'commands', 'world']) &&
+      'operators', 'inputs', 'outputs', 'probes', 'connections', 'commands', 'world', 'modules', 'instances', 'parameterSchema']) &&
       source.format === format && source.version === version && id(source.id) && revision(source.revision) &&
       Number.isSafeInteger(source.seed), 'Expected an Ink Studio simulation model with a supported version, ID, revision and integer seed');
     check(sections.every(key => record(source[key])), 'Model needs domain, parameters, initial and boundaries records');
+    parameterValues(source);
     const {numerics} = source;
     check(fields(numerics, ['dt']) && Number.isFinite(numerics.dt) && numerics.dt > 0 && numerics.dt <= 1,
       'Model numerics needs an explicit timestep in (0, 1]');
     check(source.world === undefined || fields(source.world, ['entities', 'visual', 'assetPacks', 'metadata']),
       'Model world may supply entities, visual settings, asset packs and metadata');
 
-    const systems = Object.fromEntries(entries(source.operators, 'operator').map(([name, spec]) => {
+    const systems = Object.fromEntries(entries(source.operators === undefined ? {} : source.operators, 'operator').map(([name, spec]) => {
       check(fields(spec, ['kind', 'revision', 'config', 'schedule', 'contract', 'portQuantities']) && id(spec.kind) &&
         revision(spec.revision) && record(spec.config ?? {}), 'Model operator ' + name + ' needs a kind and pinned revision');
       const {revision: operatorRevision, ...settings} = bindings(spec, source);
       return [name, {...settings, operatorRevision}];
     }));
-    check(Object.keys(systems).length > 0, 'A model needs at least one operator');
 
     for (const key of ['inputs', 'outputs'])
       for (const [, port] of entries(source[key], key)) endpoint(port);
@@ -69,12 +124,18 @@
       return {...timing, action: 'world/input', args: {port: source.inputs[input], value: bindings(value, source)}};
     });
 
-    const {id: name, revision: assetRevision, inputs, outputs, probes} = source;
-    return W.manifest({
+    const {id: name, revision: assetRevision, inputs, outputs, probes, modules, instances} = source;
+    const exposedParameters = Object.fromEntries(Object.entries(source.parameterSchema ?? {}).map(([key,schema]) =>
+      [key,{...schema,value:source.parameters[key]}]));
+    const world = expand({
       ...bindings(source.world ?? {}, source), id: name, seed: source.seed, dt: numerics.dt,
-      systems, connections: source.connections ?? [], commands,
-      simulationModel: {id: name, version, revision: assetRevision, inputs, outputs, probes}
-    });
+      systems, ...(modules !== undefined && {modules}), ...(instances !== undefined && {instances}),
+      connections: source.connections ?? [], commands,
+      simulationModel: {id: name, version, revision: assetRevision, inputs, outputs, probes,
+        ...(Object.keys(exposedParameters).length && {exposedParameters})}
+    }, source);
+    check(Object.keys(world.systems).length > 0, 'A model needs at least one operator or module instance');
+    return W.manifest(world);
   }
 
   function checkInterface(world, ports, incoming, systems) {
@@ -118,10 +179,11 @@
     return W.scrub.create(checkpoint ?? world, {commands:scheduled, checkpointEvery, checkpointCache});
   }
 
-  function system(model, {drive = []} = {}) {
+  function system(model, {drive = [], parameters, seed} = {}) {
     check(model?.format === format, 'A simulation-model system needs an embedded model definition');
-    return {kind: 'simulation-model', config: {model, drive}};
+    return {kind: 'simulation-model', config: {model, drive,
+      ...(parameters !== undefined && {parameters}), ...(seed !== undefined && {seed})}};
   }
 
-  W.models = Object.freeze({format, compile, checkInterface, sample, command, session, system});
+  W.models = Object.freeze({format, compile, expand, instantiate, checkInterface, sample, command, session, system});
 })(KIT);

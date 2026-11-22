@@ -30,15 +30,20 @@ function mapModels(document, resolve) {
     return entries.some(([name, value]) => value !== section[name]) ? {...owner, [key]:Object.fromEntries(entries)} : owner;
   }
 
+  function modelDefinition(value) {
+    const ref = reference(value);
+    return ref ? resolve(ref) : isModel(value) ? mapModels(value, resolve) : value;
+  }
+
   function system(spec) {
     if (spec?.kind !== 'simulation-model') return spec;
-    const before = spec.config?.model, ref = reference(before);
-    const model = ref ? resolve(ref) : isModel(before) ? mapModels(before, resolve) : before;
+    const before = spec.config?.model, model = modelDefinition(before);
     return model === before ? spec : {...spec, config:{...spec.config, model}};
   }
 
-  if (isModel(document)) return mapSection(document, 'operators', system);
-  return mapSection(mapSection(document, 'systems', system), 'prefabs',
+  const withModules = mapSection(document, 'modules', modelDefinition);
+  if (isModel(document)) return mapSection(withModules, 'operators', system);
+  return mapSection(mapSection(withModules, 'systems', system), 'prefabs',
     prefab => record(prefab) ? mapSection(prefab, 'systems', system) : prefab);
 }
 

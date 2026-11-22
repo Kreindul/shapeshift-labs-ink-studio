@@ -5,12 +5,16 @@
   const {freeze} = K.procedural.data;
 
   function provider(config, {world: parent, id}) {
-    check(Object.keys(config).every(key => key === 'model' || key === 'drive') && config.model?.format === M.format,
+    check(Object.keys(config).every(key => ['model','drive','parameters','seed'].includes(key)) && config.model?.format === M.format,
       'Simulation-model system ' + id + ' needs an embedded model definition');
-    const world = R.validate(config.model), model = world.simulationModel;
-    const {systems, ports} = R.prefabInterfaces(world);
+    const definition = config.parameters === undefined && config.seed === undefined ? config.model :
+      M.instantiate(config.model,{parameters:config.parameters,seed:config.seed});
+    const {world, systems, ports} = R.modelInterface(definition), model = world.simulationModel;
+    const {id:modelId, version, revision, exposedParameters = {}} = model;
+    const instanceInfo = {...(parent.systems[id].module !== undefined && {name:parent.systems[id].module}),
+      id:modelId, version, revision, seed:world.seed, parameters:exposedParameters};
     const selectPorts = (aliases, table) => Object.fromEntries(Object.entries(aliases).map(([name, port]) => {
-      const descriptor = table[port];
+      const {sampleRates, ...descriptor} = table[port];
       if (!descriptor.quantity) return [name, descriptor];
       const {sampleRate, ...quantity} = descriptor.quantity;
       return [name, {...descriptor,quantity}];
@@ -47,7 +51,7 @@
     }
 
     return {
-      inputs, outputs, fields, shareCheckpoint:true,
+      inputs, outputs, fields, module:instanceInfo, shareCheckpoint:true,
       initial() {
         live = R.create(world);
         return capture(live, emptyEvents(events), emptyEvents(eventOutputs));

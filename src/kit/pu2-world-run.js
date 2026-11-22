@@ -359,7 +359,7 @@
     });
   }
   function prepare(source,{implementations} = {}) {
-    const world = source?.format === W.models.format ? W.models.compile(source) : W.manifest(source);
+    const world = source?.format === W.models.format ? W.models.compile(source) : W.manifest(W.models.expand(source));
     const plan = compile(world,implementations);
     for (const command of world.commands) actionCheck(command,plan);
     scenarioCheck(world.scenario,plan);
@@ -391,6 +391,10 @@
     {...workerPool.implementations,...implementations}:implementations;
   const validate=(source,{implementations,workerPool}={})=>
     prepare(source,{implementations:implementationsFor(implementations,workerPool)}).world;
+  function modelInterface(source) {
+    const {world,plan:{systems,ports}} = prepare(source);
+    return {world,systems,ports};
+  }
   function create(source, {checkpoint,implementations,profile = false,validated = false,workerPool,regionRevisions,traceSteps,
     recordRun,playback,skipInitialSubmission=false,validateEntities} = {}, token) {
     check(workerPool===undefined||typeof workerPool?.solve==='function'&&
@@ -1276,6 +1280,6 @@
     return {tick:a.tick,time:{before:a.tick*a.world.dt,after:b.tick*b.world.dt},edits:Q.keyedChanges(a,b)};
   }
   W.runtime = Object.freeze({register,validate,create,openRecording,replay,replayAsync,verify,verifyAsync,diff,firstDivergence:W.stepDebug.firstDivergence,
-    checkpointFormat,runFormat,maxTick,partitionKernel,checkpointsEqual,
+    checkpointFormat,runFormat,maxTick,partitionKernel,checkpointsEqual,modelInterface,
     prefabInterfaces:(world,{implementations}={})=>compile(world,implementations,true)});
 })(KIT);

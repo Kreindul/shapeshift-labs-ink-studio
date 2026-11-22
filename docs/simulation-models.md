@@ -72,6 +72,8 @@ first registered implementation or their host override.
 
 ## Instantiate a model in a world
 
+Use [reusable simulation modules](simulation-modules.md) to name one definition and place several instances with exposed parameters.
+
 Add a `simulation-model` system. Reference the model relative to the
 world file and supply its revision, or put the complete model JSON in
 `config.model`. From the library, use
