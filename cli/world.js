@@ -525,6 +525,20 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
           'Simulation diagnostics reached '+report.status);
         return;
       }
+      case 'physical-audio': {
+        ensure(typeof file==='string'&&other===undefined&&(opt.stems===undefined||typeof opt.stems==='string'),
+          'Use sim physical-audio <run.json> [--out report.json --stems directory]');
+        const physical=require('./physical-audio.js'), dependencies=new Set([file]);
+        const result=physical.run(kit,read(file),file,filename=>{
+          dependencies.add(filename);
+          shot?.dependency?.(filename);
+        });
+        if(opt.stems!==undefined){
+          if(typeof opt.out==='string')dependencies.add(opt.out);
+          result.report.files=physical.writeStems(opt.stems,result,{exclude:[...dependencies]});
+        }
+        return respond(result.report);
+      }
       case 'sensors': {
         ensure(typeof file==='string'&&other===undefined&&(opt.wav===undefined||typeof opt.wav==='string')&&
           (opt.wav===undefined||typeof opt.out!=='string'||path.resolve(opt.wav)!==path.resolve(opt.out)),

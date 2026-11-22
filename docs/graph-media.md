@@ -17,6 +17,8 @@ The audio port contains `sampleRate`, `channels` and normalized interleaved
 `samples`. Over-range finite float input is clamped to `[-1, 1]`.
 
 Export an audio output with `format: "wav"` and optional `encoding`.
+For calibrated simulation pickups and aligned dry, propagation, and mix buses,
+see [Physical audio](physical-audio.md).
 The default is `pcm16`. Other choices are `pcm8`, `pcm24`, `pcm32`,
 `float32` and `float64`. Inspecting an audio socket can also write a WAV
 preview. Node callers can use `ink.readWav`, `ink.decodeWav` and `ink.encodeWav`.

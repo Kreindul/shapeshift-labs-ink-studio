@@ -234,6 +234,16 @@ const specifications = {
   'anim.frameBank': { inputs: { source: rgba, options: { tiles: { size: [2, 2], every: 4 } } } },
   'sim.define': { inputs: { kind: 'particles' } },
   'sim.run': { nodes: { recipe: { op: 'sim.define', inputs: { kind: 'particles' } } }, inputs: { recipe: link('recipe') } },
+  'audio.physicalSignal': { inputs:{
+    trace:{format:'ink-studio/wave-trace',version:1,info:{sampleRate:24000},start:0,end:3,
+      pressure:{end:[.1,.2,-.03]}},selection:{name:'end'}
+  } },
+  'audio.physical': { inputs:{
+    plan:{format:'ink-studio/physical-audio-plan',version:1,id:'bench',sampleRate:24000,frames:64,
+      sources:{pipe:{signal:'tap',pcmPerUnit:.5}},paths:{arrival:{source:'pipe',delaySamples:4}}},
+    signals:{tap:{format:'ink-studio/physical-signal',version:1,kind:'pressure',quantity:{unit:'Pa'},
+      sampleRate:24000,startSample:0,samples:[.1,.2,-.03]}}
+  } },
   'sim.wave-sensors': { inputs: {
     rig:{format:'ink-studio/sensor-rig',version:1,id:'audio-probe',revision:1,
       sensors:{mic:{kind:'microphone',source:{kind:'wave',probe:'end'}}}},

@@ -24,4 +24,5 @@
     return {read,cost:step===1 ? 2 : radius*4};
   }
   P.mediaGraphSupport.pcmReader=pcmReader;
+  P.mediaGraph.pcmReader=pcmReader;
 })(KIT.procedural);
