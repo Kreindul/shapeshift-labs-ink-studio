@@ -90,10 +90,10 @@
       "kind": "api",
       "status": "ready",
       "title": "Compose retro screen transitions and custom shader sequences",
-      "what": "The WebGL 2 transition compositor provides 49 parameterized presets, timing and cue markers, custom GLSL stages, and same-context render targets.",
+      "what": "The WebGL 2 transition compositor provides 50 parameterized presets, timing and cue markers, custom GLSL stages, and same-context render targets. Column melt takes painted timing, resistance, and sticking and moves whole art-pixel rows.",
       "use": "composer.draw(createTransition('sleepy-double-blink').sample(seconds))",
       "where": "webgl.mjs, src/webgl/transition-composer.mjs",
-      "example": "docs/transitions.md, examples/transitions/index.html",
+      "example": "docs/transitions.md, examples/transitions/index.html, examples/column-melt.mjs",
       "tags": [
         "transition",
         "browser",

@@ -1025,7 +1025,7 @@ npx ink-studio patch run project.json --watch 'final=$picture' --out previews
 
 ## Screen transitions
 
-The browser package includes 49 preset transitions, from blackouts and eyelid
+The browser package includes 50 preset transitions, from blackouts and eyelid
 reveals to encounter wipes and memory dissolves. Use the compositor with Ink
 Studio render targets or your own images and textures. Presets expose timing,
 shader parameters, and cue markers. Compose custom sequences and register GLSL

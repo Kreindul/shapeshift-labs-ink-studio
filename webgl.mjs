@@ -5,6 +5,7 @@ export { createTransitionComposer } from './src/webgl/transition-composer.mjs';
 export { createTransition, transitionPresets } from './src/webgl/transition-presets.mjs';
 export { createTransitionPlayback, defineTransition, transitionEasings } from './src/webgl/transition-timeline.mjs';
 export { transitionShaders } from './src/webgl/transition-shaders.mjs';
+export { createColumnMeltMap, renderColumnMelt } from './src/column-melt.mjs';
 export { createSplatInstances } from './src/webgl/instances.mjs';
 
 export { createSurfacePipeline } from './src/webgl/surfaces.mjs';
