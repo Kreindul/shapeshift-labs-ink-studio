@@ -1106,6 +1106,7 @@ const CMD = {
         '  music production <mode> <recipe.json> [config.json]   arrange, mix, audition and render adaptive music',
         '  music production cue-map <recipe.json> [map.json]   apply or inspect a cue-wide arrangement map',
         '  music production voice-lead <recipe.json> <settings.json>   search inner lines around locked outer tracks',
+        '  music production search <recipe.json> <brief.json>   shortlist distinct cue, phrase and note revisions',
         '  music production groove <recipe.json> [mapping.json]   transfer performance timing, accents and gates',
         '  music mix render recipe.json --out directory   render routed audio, inserts, automation and taps',
         '  music mix meter input.wav [--out report.json]   measure loudness, true peak and mono compatibility',

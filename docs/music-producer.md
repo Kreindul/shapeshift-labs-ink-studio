@@ -4,6 +4,9 @@
 take lanes alongside recordings and sample motifs. Loop a passage through the
 session desk, switch takes, and keep selected time ranges.
 
+[Composition search](music-composition-search.md) builds producer takes
+from independent cue, phrase, and note decisions under a shared brief.
+
 Start with a production, a named section, and a listening goal. Compare
 different musical decisions across the same lead-in and return. Listen to
 the room and ensemble in context, then solo the bars and instruments that

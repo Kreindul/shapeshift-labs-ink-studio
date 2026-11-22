@@ -24,14 +24,14 @@
       owners.set(key,component);
     };
     for (const [index,{revision:row}] of components.entries()) {
-      check(fields(row,['id','edits','harmonies','changes','tracks','patches','room','gain']) &&
+      check(fields(row,['id','edits','harmonies','changes','tracks','patches','room','gain','cueMap']) &&
         (row.id===undefined || id(row.id)) && Object.keys(row).some(key=>key!=='id'),
         'Producer components need a production revision');
       for (const [key,value] of Object.entries(row)) {
         if (key==='id') continue;
-        if (key==='gain') {
-          claim('gain',index);
-          revision.gain=value;
+        if (key==='gain' || key==='cueMap') {
+          claim(key,index);
+          revision[key]=value;
         } else if (key==='edits' || key==='changes') {
           check(Array.isArray(value) && value.length<=(key==='edits'?128:64) && Array.from(value).every(record),
             'Invalid producer '+key);

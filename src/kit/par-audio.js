@@ -526,6 +526,15 @@
       inputs:{source:'record',brief:'record',assets:options},outputs:{value:'record'},
       run({source,brief,assets}) {return {value:P.musicProduction.planProducer(source,brief,assets)};}
     },
+    'music.searchComposition': {
+      description: 'Search contrasting cue, phrase and note revisions with harmonic constraints and one winner per kind.',
+      inputs:{source:'record',brief:'record',assets:options},
+      outputs:{value:'record',session:'record',winners:'array<record>',report:'record'},
+      run({source,brief,assets}) {
+        const value=P.musicProduction.searchComposition(source,brief,assets);
+        return {value,session:value.session,winners:value.winners,report:value.report};
+      }
+    },
     'music.reviewProducer': {
       description: 'Level-match producer takes in context and return aligned listening windows and instrument solos.',
       inputs:{source:'record',session:'record',assets:options,options},

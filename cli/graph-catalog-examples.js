@@ -273,6 +273,8 @@ const specifications = {
   'music.auditionProduction': { inputs:{source:production,variants:[{id:'dry'},{id:'room',tracks:{lead:{send:.7}}}],
     options:{end:.25,sampleRate:8000}} },
   'music.planProducer': {inputs:producerPlan.inputs},
+  'music.searchComposition': {inputs:{source:production,brief:{section:'opening',kinds:['note-gesture'],
+    constraints:{pins:{lead:'pitch'}},preferences:{gesture:'pickup'}}}},
   'music.reviewProducer': {nodes:{plan:producerPlan},inputs:{
     source:production,session:link('plan'),options:{end:.25,sampleRate:8000,focus:[{id:'lead',tracks:['lead']}]}}},
   'music.keepProducer': {nodes:{plan:producerPlan},inputs:{source:production,session:link('plan'),
