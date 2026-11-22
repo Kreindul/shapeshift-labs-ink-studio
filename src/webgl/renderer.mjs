@@ -1,3 +1,4 @@
+import { captureGaussianTurntable, gaussianCoverageFrame } from './gaussian-turntable.mjs';
 import { createSplatPaintPass, splatPaintStyle } from './splat-paint-pass.mjs';
 import { createGaussianHarmonics } from './gaussian-harmonics.mjs';
 import {createEngravingBinding} from './engraving.mjs';
@@ -1213,7 +1214,8 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         u_fog: rgb(world.pal[fog.c ?? 0] ?? 0),
         u_fogp: [fog.start ?? 1, fog.max ?? 0, ...camera.depthRange], ...water, ...env?.uniforms, ...section
       });
-      const background = [...rgb(world.pal[0]), 1], tangent = camera.tangent;
+      const captureSplatCoverage = world.gaussianHarmonics && frame[gaussianCoverageFrame];
+      const background = [...rgb(world.pal[0]), captureSplatCoverage ? 0 : 1], tangent = camera.tangent;
       const surfaces = frame.spriteSurfaces === false ? null : world.spriteSurfaces;
       const preview = frame.spriteSurfaces !== false && frame.scalePreviews !== false && world.scalePreviews;
       const previewAPI = toolkit.KIT?.procedural?.lod?.preview;
@@ -1235,6 +1237,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         u_materialGridScale: samples, background, tangent, lookGrid:coverage&&[width,height],layeredGlass,surfaces,scaleSurfaces,spriteRows,spriteGrid:[width/rw,height/rh],surfaceFrame }, water, wet, env);
       if (colored)
         drawGeometry(shader, contours, width, height, { u_idx: 0, u_snap: 1, u_hard: 0, background, tangent,surfaces,scaleSurfaces,spriteRows,surfaceFrame }, water, wet, env);
+      if (captureSplatCoverage) captureSplatCoverage((colored ? contours : geometry).framebuffer);
       if (splatPaint) {
         shader.set({ u_splatPaintRows: splatPaintPass.bind(splatPaint.mask), u_splatPaintCount: splatPaint.mask.count });
         drawGeometry(shader, splatPaintPass.mask, width, height, {
@@ -1762,6 +1765,11 @@ export function createRenderer(canvas, { toolkit, specialize = true, reuseOrder 
       backend.render(world, settings, width, height, output);
       if (picking?.world === world && (frame.changedRows?.length !== 0 || world.anim?.bones?.length)) picking = undefined;
       return captures;
+    },
+    captureTurntable(world, options) {
+      if (disposed) throw new Error('The Ink Studio renderer has been disposed');
+      if (gl.isContextLost()) throw new Error('The Ink Studio WebGL context is lost');
+      return captureGaussianTurntable(gl, api.render, world, options);
     },
     pick(world, ray, frame = {}) {
       if (disposed) throw new Error('The Ink Studio renderer has been disposed');

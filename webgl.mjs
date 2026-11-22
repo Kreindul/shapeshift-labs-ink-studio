@@ -29,3 +29,4 @@ export {
   createLiveAudioRouter, readTimecode, timecodeAt, createMidiTimecode, createMidiBeatClock, sampleLinkClock,
   createLtcDecoder, projectionHomography, projectionPoint, createProjectionMapper, patchDmx, connectShowBridge
 } from './show-control.mjs';
+export { encodeGaussianTurntablePNG } from './src/webgl/gaussian-turntable.mjs';

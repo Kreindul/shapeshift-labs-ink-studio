@@ -1,3 +1,4 @@
+import { mountTurntable } from './turntable.mjs';
 import { createDrawingInput } from '../../src/webgl/drawing-input.mjs';
 import { createSplatMaskPainter } from '../../src/webgl/splat-mask-painter.mjs';
 import { createGaussianColorInspector, gaussianSwatchJump } from '../../src/webgl/gaussian-color-inspector.mjs';
@@ -14,7 +15,7 @@ const undoMask = get('undo-mask'), clearMask = get('clear-mask'), maskStatus = g
 const rampInputs = [...document.querySelectorAll('.ramp input')];
 const samples = [['ply', samplePly], ['spz', sampleSpz]];
 const maxBytes = 768 * 1024 * 1024;
-let views, drawCanvas, gl, renderer, world, inspector, painter, currentFrame, current, jump, probeResult, cursor;
+let views, drawCanvas, gl, renderer, world, inspector, painter, turntable, currentFrame, current, jump, probeResult, cursor;
 let ticket = 0, playing = false, previous, request, angle = Number(orbit.value);
 
 function frame(now) {
@@ -45,6 +46,7 @@ function frame(now) {
     } catch (error) {
       errorStatus(error);
       world = currentFrame = undefined;
+      turntable.invalidate();
       clearInspection();
       setPlaying(false);
     }
@@ -165,6 +167,7 @@ function updateMask() {
   maskStatus.textContent = count.toLocaleString() + ' splats painted';
   undoMask.disabled = !painter?.canUndo;
   clearMask.disabled = !count;
+  turntable?.invalidate();
 }
 
 function updateTool() {
@@ -262,6 +265,7 @@ try {
   drawCanvas.height = views[0].canvas.height;
   renderer = createRenderer(drawCanvas, { toolkit: { KIT, PixelLook } });
   gl = drawCanvas.getContext('webgl2');
+  turntable = mountTurntable({ renderer, source: () => ({ world, frame: world && atAngle(angle) }), pause: () => setPlaying(false) });
   for (const view of views) {
     const { canvas } = view;
     attachBrush(view);
@@ -287,7 +291,12 @@ try {
   tool.addEventListener('change', updateTool);
   brushSize.addEventListener('input', () => { get('brush-value').value = brushSize.value + ' px'; });
   for (const setting of [showMask, applyRamp, pixelCleanup, protectMask, ...rampInputs])
-    setting.addEventListener('input', () => { probeResult = undefined; jump = undefined; redraw(); });
+    setting.addEventListener('input', () => {
+      probeResult = undefined;
+      jump = undefined;
+      if (setting !== showMask) turntable.invalidate();
+      redraw();
+    });
   undoMask.addEventListener('click', () => { painter.undo(); updateMask(); redraw(); });
   clearMask.addEventListener('click', () => { painter.clear(); updateMask(); redraw(); });
   probe.addEventListener('click', checkNearby);
@@ -311,5 +320,5 @@ try {
   void open('Sample PLY', samplePly, 'ply', [.578543, .398297]);
 } catch (error) {
   errorStatus(error);
-  for (const id of ['angle', 'play', 'ply', 'spz', 'file', 'splat-tool']) get(id).disabled = true;
+  for (const id of ['angle', 'play', 'ply', 'spz', 'file', 'splat-tool', 'turntable-generate']) get(id).disabled = true;
 }
