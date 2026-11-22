@@ -58,6 +58,7 @@ test('rehearsal exposes same absolute comparison windows with editable bridges, 
   assert.equal(entry.takes[0].join.exit,1.5);
   assert.equal(entry.takes[1].join.exit,1.8);
   assert(entry.takes[1].join.joinedLayers.some(row=>row.kind==='common-tone' && row.start<4 && row.end>4));
+  assert(entry.takes[1].nearby.some(row=>row.kind==='transition' && row.time===4));
   assert.equal(hit.takes[0].join.status,'played');
   assert(hit.takes[0].join.issues.some(issue=>issue.kind==='hook-collision'));
   assert.equal(hit.takes[1].join.status,'withheld');

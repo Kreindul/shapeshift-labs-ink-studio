@@ -71,7 +71,8 @@ counts of cancelled and pending requests, dwell lengths, loops, and the
 highest-priority cases. It links each selected case to time-aligned WAVs.
 Set `options.cases` to an array of `{trace,id}` entries to revisit particular
 cases. Comparison windows use the same absolute samples and a shared
-loudness target with a peak ceiling. Use `target` in LUFS and `ceiling`
+loudness target with a peak ceiling. Each take lists nearby boundaries so
+a moved loop or splice can be located within the same window. Use `target` in LUFS and `ceiling`
 in dBTP to set playback. The rehearser accepts up to twelve traces and five
 alternatives within its PCM budget. Keep cases short for fast auditions.
 

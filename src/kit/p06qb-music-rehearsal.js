@@ -135,14 +135,16 @@
         takes:passes.map((pass,i)=>{
           const {value,report}=pass.traces[index];
           const join=report.cases.find(row=>row.id===selection.id && Math.abs(row.time-baseline.time)<1e-8);
+          const nearby=report.cases.filter(row=>row.time>=start && row.time<end)
+            .map(({id,kind,time,priority})=>({id,kind,time,priority}));
           return {id:pass.id,playback:clips[i].playback,join:join ?? null,
-            audio:join?.audio ?? E.audioEvidence(value,baseline.time)};
+            nearby,audio:join?.audio ?? E.audioEvidence(value,baseline.time)};
         })};
     });
     return {report:frozen({format,version:1,sampleRate,watchTracks,traces:reports,matrix:matrix(timeline,reports),
       weakest:weakness.slice(0,limit),listening,variants:passes.slice(1).map(pass=>({id:pass.id,note:pass.note,
         traces:pass.traces.map(({report})=>({id:report.id,peak:report.peak,rms:report.rms,
-          cases:report.cases.length,flagged:report.cases.filter(row=>row.priority>0).length}))}))}),audio};
+          dwells:report.dwells,cases:report.cases.length,flagged:report.cases.filter(row=>row.priority>0).length}))}))}),audio};
   }
 
   const rehearsal=Object.freeze({capture:Q.captureWorld,captureScore:Q.captureScore,validateTrace:Q.validate,revise,run});
