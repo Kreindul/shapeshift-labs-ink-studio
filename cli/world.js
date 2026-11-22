@@ -515,6 +515,22 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         return respond(require('./mass-properties.js').measure(kit,read(file),file,
           {dependency:shot?.dependency,assetPack:opt['asset-pack']}));
       }
+      case 'reference': {
+        ensure((file===undefined||typeof file==='string')&&other===undefined&&
+          Object.keys(opt).every(key=>['out','suite','json'].includes(key))&&
+          (opt.suite===undefined||typeof opt.suite==='string')&&(opt.out===undefined||typeof opt.out==='string'),
+        'Use sim reference [experiment] [--suite suite.json --out report.json]');
+        const destination=opt.out===undefined?undefined:path.resolve(opt.out);
+        const {report}=require('./reference-experiments.js').run(kit,{
+          suite:opt.suite,id:file,dependency:source=>{
+            ensure(path.resolve(source)!==destination,'Reference report must be separate from its source assets');
+            shot?.dependency?.(source);
+          }
+        });
+        respond(report);
+        if(!report.passed)process.exitCode=2;
+        return;
+      }
       case 'measure': {
         ensure(typeof file==='string'&&other===undefined&&Object.keys(opt).every(key=>['out','json'].includes(key)),
           'Use sim measure <run.json> [--out report.json]');

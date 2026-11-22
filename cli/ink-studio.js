@@ -1005,6 +1005,7 @@ const CMD = {
         '    sim grid-ops <plan.json> [--out report.json]   apply finite-volume operators to a compiled grid, chart, or mesh',
         '    sim diagnose <plan.json> [--out report.json --fail-on warning|error]   locate stability and conservation issues',
         '    sim measure <run.json> [--out report.json]   named simulation measurements and CI assertions',
+        '    sim reference [experiment] [--suite suite.json --out report.json]   run the shipped physics benchmarks',
         '    sim sensors <run.json> [--out report.json --wav microphones.wav]   record calibrated virtual sensors',
         '    sim physical-audio <run.json> [--out report.json --stems directory]   route simulation signals into aligned WAV stems',
         '    sim sound-controls <run.json|controls.json> [--out controls.json] [--at seconds | --sample index]   map and inspect sound automation',

@@ -15,6 +15,8 @@ settings and unreadable sources are command errors. A valid signal
 window without enough evidence returns an unavailable measurement.
 An assertion on that measurement fails with its reason.
 
+The [reference experiments](reference-experiments.md) demonstrate measurements against known solutions for waves, mechanics, and transport.
+
 ## Author a run
 
 ```json
