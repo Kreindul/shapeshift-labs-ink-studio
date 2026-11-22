@@ -32,7 +32,7 @@ vec4 relightAt(int row) { return texelFetch(u_relight, ivec2(row & 511, row >> 9
 export function splatShaderSources(ascii, sampleCoverage, {
   water = false, airPockets = false, layered = false, atlas = false, portal = false, instances = false,
   contributions = false, masked = false, textured = false, layeredGlass = false, coverageRules, materialStyles = false,
-  environment = false, emitterFog=false, relighting = false, optical = false, stableDetail, cutaway, airflow, footprints = false, footprintGLSL, engraving=false, screenPrintGLSL, spriteReconstruction, facingColors = false, gaussianDegree
+  environment = false, emitterFog=false, relighting = false, optical = false, stableDetail, cutaway, airflow, footprints = false, footprintGLSL, engraving=false, screenPrintGLSL, spriteReconstruction, facingColors = false, gaussianDegree, splatPaint = false
 } = {}) {
   if (footprints && typeof footprintGLSL !== 'string') throw new Error('Footprint shaders need SplatFootprints.glsl');
   const coverageStride = coverageRules?.coverageStride ?? 4;
@@ -55,6 +55,7 @@ uniform vec4 u_effectTimes, u_effectWind;
 uniform vec2 u_waterAndRainTime, u_rainWind; uniform float u_emissiveWind;
 ${airflow?.glsl ?? ''}
 uniform float u_paintMarker; uniform int u_afterimageStart; flat out int v_paint;
+${splatPaint ? 'uniform highp sampler2D u_splatPaintRows; uniform bool u_splatPaintPass; uniform int u_splatPaintCount;' : ''}
 uniform int u_splatCoverage; uniform float u_materialGridScale; flat out int v_coverage;
 ${stableDetail ? `uniform vec2 u_detailTexture, u_detailGeometry;
 flat out float v_detailGeometry, v_detailTexture;
@@ -118,6 +119,11 @@ void main(){
   vec4 t3 = ${instances ? 'a_instance != 0 ? vec4(0.0) : ' : ''}texelFetch(u_data, ivec2(col + 3, row), 0);
   v_paint = (u_paintMarker != 0.0 && t3.z == u_paintMarker ||
     u_afterimageStart > 0 && a_index >= u_afterimageStart) ? 1 : 0;
+  ${splatPaint ? `if (u_splatPaintPass) {
+    int index = a_index;
+    v_paint = index < u_splatPaintCount ?
+      int(texelFetch(u_splatPaintRows, ivec2((index >> 2) & 511, index >> 11), 0)[index & 3]) : 0;
+  }` : ''}
   ${materialStyles ? 'v_pixelStyle = texelFetch(u_materialStyles, ivec2(record & 511, row), 0);' : ''}
   ${footprints ? `
   vec4 brush0=texelFetch(u_footprintRows,ivec2((record & 511)*2,row),0);

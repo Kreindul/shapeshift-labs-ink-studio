@@ -21,6 +21,12 @@
   }
   .marker[data-state=obscured] { opacity:.5; border-style:dashed; }
   .marker[data-state=cursor] { border-radius:2px; border-color:#aff0e4; }
+  .brush {
+    position:absolute; border:1px solid #affeec; border-radius:50%; pointer-events:none;
+    box-sizing:border-box; transform:translate(-50%,-50%); aspect-ratio:1;
+    background:#42f5c826; box-shadow:0 0 0 1px #07141b;
+  }
+  canvas[data-paint] { touch-action:none; }
   canvas { cursor:crosshair; display:block; width:100%; aspect-ratio:4/3; background:#0b1523; }
   #palette { image-rendering:pixelated; }
   figcaption { padding:9px 12px; font-size:14px; font-weight:650; }
@@ -41,7 +47,15 @@
   output { text-align:right; font-variant-numeric:tabular-nums; }
   #status { color:#a9beca; margin:0 0 0 auto; font-size:12px; }
   #status[data-state=error] { color:#ffc1ad; }
-  .inspector { margin-top:12px; }
+  .inspector, .paint-tools { margin-top:12px; }
+  .paint-tools h2 { font-size:16px; margin:0 0 8px; }
+  .paint-row { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; }
+  .paint-row + .paint-row { margin-top:8px; }
+  .paint-row label { display:inline-flex; align-items:center; gap:5px; font-size:13px; }
+  select { background:#182a3e; color:inherit; border:1px solid #395469; border-radius:5px; padding:6px; }
+  input[type=color] { padding:0; width:25px; height:23px; border:1px solid #395469; border-radius:4px; background:#182a3e; }
+  .ramp { display:inline-flex; gap:4px; }
+  #mask-status { margin:0 0 0 auto; color:#a9beca; font-size:12px; }
   .inspector-head { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
   .inspector h2 { font-size:16px; margin:0; }
   .inspector-actions { display:flex; gap:6px; }
@@ -65,11 +79,11 @@
 <main>
   <header>
     <h1>Pelagic</h1>
-    <p>Pick a patch in either view, then orbit to see how its color changes.</p>
+    <p>Inspect a patch or brush a mask in either view, then orbit to see it from another angle.</p>
   </header>
   <div class="views">
-    <figure><div class="view-image"><canvas id="rgb" width="560" height="420" tabindex="0" aria-label="Directional RGB view. Click a patch, or use arrow keys and Enter."></canvas><span class="marker" aria-hidden="true" hidden></span></div><figcaption>Directional RGB</figcaption></figure>
-    <figure><div class="view-image"><canvas id="palette" width="280" height="210" tabindex="0" aria-label="Directional palette view. Click a patch, or use arrow keys and Enter."></canvas><span class="marker" aria-hidden="true" hidden></span></div><figcaption>Directional palette</figcaption></figure>
+    <figure><div class="view-image"><canvas id="rgb" width="560" height="420" tabindex="0" aria-label="Directional RGB view. Click a patch, or use arrow keys and Enter."></canvas><span class="marker" aria-hidden="true" hidden></span><span class="brush" aria-hidden="true" hidden></span></div><figcaption>Directional RGB</figcaption></figure>
+    <figure><div class="view-image"><canvas id="palette" width="280" height="210" tabindex="0" aria-label="Directional palette view. Click a patch, or use arrow keys and Enter."></canvas><span class="marker" aria-hidden="true" hidden></span><span class="brush" aria-hidden="true" hidden></span></div><figcaption>Directional palette</figcaption></figure>
   </div>
   <div class="controls">
     <div class="orbit">
@@ -85,12 +99,34 @@
       <p id="status" role="status">Loading sample…</p>
     </div>
   </div>
-  <section class="controls inspector" aria-labelledby="inspector-title">
+  <section class="controls paint-tools" aria-labelledby="paint-title">
+    <h2 id="paint-title">Paint-on-splat mask</h2>
+    <div class="paint-row">
+      <label>Tool <select id="splat-tool"><option value="inspect">Inspect</option><option value="paint">Paint</option><option value="erase">Erase</option></select></label>
+      <label>Brush <input id="brush-size" type="range" min="2" max="24" value="7"><output id="brush-value" for="brush-size">7 px</output></label>
+      <label><input id="show-mask" type="checkbox"> Show mask</label>
+      <button type="button" id="undo-mask" disabled>Undo</button>
+      <button type="button" id="clear-mask" disabled>Clear mask</button>
+      <p id="mask-status" role="status">0 splats painted</p>
+    </div>
+    <div class="paint-row">
+      <label><input id="apply-ramp" type="checkbox" checked> Mask ramp</label>
+      <div class="ramp" role="group" aria-label="Mask ramp swatches">
+        <input type="color" aria-label="Darkest mask swatch" value="#432640">
+        <input type="color" aria-label="Dark mask swatch" value="#974a5b">
+        <input type="color" aria-label="Light mask swatch" value="#f08a62">
+        <input type="color" aria-label="Lightest mask swatch" value="#ffdda0">
+      </div>
+      <label><input id="pixel-cleanup" type="checkbox"> Pixel cleanup</label>
+      <label><input id="protect-mask" type="checkbox" checked> Protect painted pixels</label>
+    </div>
+  </section>
+  <section id="color-inspector" class="controls inspector" aria-labelledby="inspector-title">
     <div class="inspector-head">
       <h2 id="inspector-title">Splat color inspector</h2>
       <div class="inspector-actions">
         <button type="button" id="probe" disabled>Check ±1°</button>
-        <button type="button" id="clear" disabled>Clear</button>
+        <button type="button" id="clear" disabled>Clear pick</button>
       </div>
     </div>
     <dl class="swatches">

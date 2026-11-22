@@ -1,3 +1,4 @@
+import { createSplatPaintPass, splatPaintStyle } from './splat-paint-pass.mjs';
 import { createGaussianHarmonics } from './gaussian-harmonics.mjs';
 import {createEngravingBinding} from './engraving.mjs';
 import { createFootprintBinding } from './footprints.mjs';
@@ -132,6 +133,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
     const maxSize = gl.getParameter(gl.MAX_TEXTURE_SIZE), maxBuffers = gl.getParameter(gl.MAX_DRAW_BUFFERS);
     const targets = createTargets(gl, resources);
     const { target, table, textureUnit } = targets;
+    let splatPaintPass;
     // The material-controls pass uses unit 31 before the splat draw.
     const bindGaussians = createGaussianHarmonics(gl, resources, 31, maxSize);
     const environment = createEnvironment(gl,resources,targets,maxSize,toolkit);
@@ -580,6 +582,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         buffer.ensureDepth();
         gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.depthMask(true);
         gl.clearBufferfv(gl.DEPTH,0,[1]);gl.disable(gl.BLEND);
+        if (options.u_splatPaintPass) gl.colorMask(false,false,false,false);
         if (surfaces) {
           surfacePipeline ??= createSurfacePipeline(gl, surfaceOptions);
           surfacePipeline.draw(surfaces, { ...options.surfaceFrame, water, wet, width, height, samplingScale: options.u_materialGridScale ?? 1 });
@@ -600,6 +603,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         }
         if(options.surfaceFrame?.lighting?.display){emitterSurfacePipeline??=createSurfacePipeline(gl,{cutaway:cutawayAPI?.glsl});emitterSurfacePipeline.draw(options.surfaceFrame.lighting.display,{...options.surfaceFrame,lighting:null,water,wet,width,height});}
         data.bind();
+        if (options.u_splatPaintPass) gl.colorMask(true,true,true,true);
         gl.depthMask(false);
         if(!options.u_idx){gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);}
       }else if(options.u_idx!==3)gl.disable(gl.DEPTH_TEST);
@@ -608,7 +612,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       shader.set({
         ...options,u_geometryDepth:+(hasSurfaces||hasPlanes),
         u_portalCoverPlane: options.u_portalCoverPlane ?? zero,
-        u_paintPass: !!options.u_paintPass,
+        u_paintPass: !!options.u_paintPass, u_splatPaintPass: !!options.u_splatPaintPass,
         u_materialGridScale: options.u_materialGridScale ?? 1,
         u_facingGridScale: options.u_materialGridScale ?? 1,
         u_spriteLodGrid: options.spriteGrid ?? [1,1],
@@ -962,6 +966,12 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       key.resize(patterned ? width : 1, patterned ? height : 1);
       if (cover && patterned && frame.edges !== false) portalSpriteLayer ??= target(2, { depth: true });
       if (cleaning) cleaned.resize(width, height);
+      const splatPaint = !raw && splatPaintStyle(world, frame.splatPaint ?? world.splatPaint);
+      if (splatPaint) {
+        splatPaintPass ??= createSplatPaintPass({ table, target, maxSize, program, textureUnit, fullscreen });
+        splatPaintPass.resize(width, height);
+        historyValid = false;
+      }
       if (damping) {
         finished.resize(width, height);
         history.forEach(buffer => buffer.resize(width, height));
@@ -1166,7 +1176,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       const gaussianUniforms = bindGaussians(harmonics, colorMode !== 'baked');
       const shader = pipeline.programFor({
         water: !!wet, airPockets: wet?.airPockets, layered: wet?.layered, atlas: wet?.atlas, portal: plane !== zero || !!cover,
-        gaussianDegree: gaussianUniforms ? harmonics.degree : undefined,
+        gaussianDegree: gaussianUniforms ? harmonics.degree : undefined, splatPaint: !!splatPaint,
         instances: !!plan, contributions:coverage && !!constraints, masked, textured:constraints?.textured, layeredGlass,
         engraving:engraved, footprints, materialStyles, facingColors:facing && facingAPI, environment:env?.media,emitterFog:!!env?.lit, relighting, optical:opticalMaterials, cutaway:!!section, spriteReconstruction:!!spriteMask
       });
@@ -1225,6 +1235,13 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         u_materialGridScale: samples, background, tangent, lookGrid:coverage&&[width,height],layeredGlass,surfaces,scaleSurfaces,spriteRows,spriteGrid:[width/rw,height/rh],surfaceFrame }, water, wet, env);
       if (colored)
         drawGeometry(shader, contours, width, height, { u_idx: 0, u_snap: 1, u_hard: 0, background, tangent,surfaces,scaleSurfaces,spriteRows,surfaceFrame }, water, wet, env);
+      if (splatPaint) {
+        shader.set({ u_splatPaintRows: splatPaintPass.bind(splatPaint.mask), u_splatPaintCount: splatPaint.mask.count });
+        drawGeometry(shader, splatPaintPass.mask, width, height, {
+          u_idx: 0, u_snap: 1, u_hard: 0, u_paintPass: true, u_splatPaintPass: true,
+          tangent, surfaces, scaleSurfaces, spriteRows, surfaceFrame
+        }, water, wet, env);
+      }
       if (paintOnPatterns) {
         drawGeometry(shader, paintOverlay, width, height, { u_idx: 0, u_snap: 1, u_hard: 0, u_paintPass: true,
           tangent, lookGrid: coverage && [width, height] }, water, wet, env);
@@ -1315,7 +1332,8 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         textureUnit(8, glassBoundary.textures[0]);
       }
       if (facingPattern) bones.bind(facingBoneUnit);
-      fullscreen(resolve, cleaning ? cleaned.framebuffer : destination, width, height, {
+      const resolveOutput = cleaning ? cleaned.framebuffer : destination;
+      fullscreen(resolve, splatPaint ? splatPaintPass.source.framebuffer : resolveOutput, width, height, {
         ...patternedUniforms, ...glassUniforms, ...bindTone(frameTone), ...water, ...env?.uniforms, u_waterMask: 11,
         ...(layeredGlass&&{u_glassBoundary:8,u_glassBack:4,u_glassThrough:7,
           u_glassRange:camera.depthRange,u_glassProjection:camera.projection}),
@@ -1341,6 +1359,8 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         u_gk: glass ? (glass.k || 0.14) : 0, u_bars: Math.min(0.45, world.anim?.bars ?? 0),
         u_grade: +!!grade, ...(grade ? { u_out: grade, u_outl: grade } : {})
       });
+      if (splatPaint)
+        splatPaintPass.finish(splatPaint, (colored ? contours : geometry).textures[0], resolveOutput, width, height);
       if (cleaning) {
         if (scopedCleanup) {
           if (uploadedDetailFlags !== detail.flags) {
