@@ -1,5 +1,5 @@
 import { gaussianSplatColors } from '../gaussian-splats.mjs';
-import { cameraLens } from './camera-lens.mjs';
+import { splatScreenRays } from './splat-screen-ray.mjs';
 import { cameraPose, makeCamera } from './view.mjs';
 
 const minimumWeight = .018;
@@ -22,13 +22,8 @@ export function createGaussianColorInspector(renderer, world, { width, height })
 
   let selection = null;
   function hits(camera, u, v, frame) {
-    const { view, eye, tangent, ortho, clipNear, clipFar } = camera;
-    const rayAt = cameraLens.rays(view, eye, width, height, height / (2 * tangent), ortho);
-    const { origin, direction, axial } = rayAt(u * width, (1 - v) * height);
-    return renderer.pick(world, {
-      origin: origin.map((value, i) => value + direction[i] * clipNear / axial), direction,
-      maxDistance: (clipFar - clipNear) / axial, soft: true, threshold: minimumWeight
-    }, frame);
+    const ray = splatScreenRays(camera, width, height)(u * width, v * height);
+    return renderer.pick(world, { ...ray, threshold: minimumWeight }, frame);
   }
 
   function select(u, v, frame = {}) {
@@ -51,9 +46,12 @@ export function createGaussianColorInspector(renderer, world, { width, height })
     if (!contributions.some(hit => hit.index === index && hit.weight >= minimumWeight))
       return { ...sample, state: 'obscured' };
     const color = readPalettePixel(x, y);
-    const slot = color ? world.pal.indexOf(color[0] << 16 | color[1] << 8 | color[2]) : -1;
+    const packed = color ? color[0] << 16 | color[1] << 8 | color[2] : -1;
+    const slot = world.pal.indexOf(packed);
+    const ramp = slot < 0 ? (frame.splatPaint ?? world.splatPaint)?.ramp?.indexOf(packed) ?? -1 : -1;
     return { ...sample, state: 'visible', pixel: [x, y],
-      swatch: slot >= 0 ? { index: slot, rgb: [color[0], color[1], color[2]] } : null };
+      swatch: slot >= 0 || ramp >= 0 ? { index: Math.max(slot, ramp), rgb: [color[0], color[1], color[2]],
+        ...(ramp >= 0 && { ramp: true }) } : null };
   }
 
   return Object.freeze({ select, inspect, clear() { selection = null; } });
@@ -61,7 +59,7 @@ export function createGaussianColorInspector(renderer, world, { width, height })
 
 export function gaussianSwatchJump(before, after) {
   if (!before?.swatch || !after?.swatch || before.selection !== after.selection ||
-      before.swatch.index === after.swatch.index) return null;
+      before.swatch.rgb.every((value, i) => value === after.swatch.rgb[i])) return null;
   const cosine = before.back.reduce((sum, value, axis) => sum + value * after.back[axis], 0);
   const degrees = Math.acos(Math.max(-1, Math.min(1, cosine))) * 180 / Math.PI;
   if (degrees < .001 || degrees > 2.00001) return null;

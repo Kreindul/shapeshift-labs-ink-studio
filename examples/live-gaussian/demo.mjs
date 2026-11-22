@@ -1,3 +1,5 @@
+import { createDrawingInput } from '../../src/webgl/drawing-input.mjs';
+import { createSplatMaskPainter } from '../../src/webgl/splat-mask-painter.mjs';
 import { createGaussianColorInspector, gaussianSwatchJump } from '../../src/webgl/gaussian-color-inspector.mjs';
 import { createRenderer } from '../../src/webgl/renderer.mjs';
 import { decodeGaussianSplat, gaussianSplatWorld } from '../../src/gaussian-splats.mjs';
@@ -6,9 +8,13 @@ import { samplePly, sampleSpz, pelagicPalette } from '../webgpu-graphs/sample.mj
 const get = id => document.getElementById(id);
 const orbit = get('angle'), degrees = get('degrees'), play = get('play'), status = get('status');
 const palette = get('palette'), probe = get('probe'), clear = get('clear'), feedback = get('jump-status');
+const tool = get('splat-tool'), brushSize = get('brush-size'), showMask = get('show-mask');
+const applyRamp = get('apply-ramp'), pixelCleanup = get('pixel-cleanup'), protectMask = get('protect-mask');
+const undoMask = get('undo-mask'), clearMask = get('clear-mask'), maskStatus = get('mask-status');
+const rampInputs = [...document.querySelectorAll('.ramp input')];
 const samples = [['ply', samplePly], ['spz', sampleSpz]];
 const maxBytes = 768 * 1024 * 1024;
-let views, drawCanvas, gl, renderer, world, inspector, currentFrame, current, jump, probeResult, cursor;
+let views, drawCanvas, gl, renderer, world, inspector, painter, currentFrame, current, jump, probeResult, cursor;
 let ticket = 0, playing = false, previous, request, angle = Number(orbit.value);
 
 function frame(now) {
@@ -47,10 +53,15 @@ function frame(now) {
 }
 
 function atAngle(degrees) {
+  const mask = painter?.mask;
+  const splatPaint = mask?.indices.length ? {
+    mask, protect: protectMask.checked, preview: showMask.checked,
+    ramp: applyRamp.checked ? rampInputs.map(input => Number.parseInt(input.value.slice(1), 16)) : undefined
+  } : false;
   return {
     camera: { ...world.cam, yaw: degrees * Math.PI / 180, pitch: -.08, dist: world.cam.dist * .94 },
     gaussianColor: 'palette', width: palette.width, height: palette.height,
-    colored: false, dither: 0, damp: false, changedRows: []
+    colored: false, dither: 0, damp: false, changedRows: [], clean: pixelCleanup.checked, splatPaint
   };
 }
 
@@ -91,7 +102,7 @@ function displayInspection(emptyMessage = 'Pick a patch to track its swatch.') {
   const swatch = current?.swatch;
   colorChip('base-color', current?.base);
   colorChip('live-color', current?.rgb);
-  colorChip('palette-color', swatch?.rgb, swatch && 'Swatch ' + swatch.index);
+  colorChip('palette-color', swatch?.rgb, swatch && (swatch.ramp ? 'Ramp ' : 'Swatch ') + swatch.index);
   probe.disabled = !swatch;
   clear.disabled = !current;
   const event = probeResult === null ? null : probeResult ?? jump;
@@ -136,6 +147,67 @@ function checkNearby() {
   }
 }
 
+function pointAt(canvas, event) {
+  const bounds = canvas.getBoundingClientRect();
+  return [(event.clientX - bounds.left) / bounds.width, (event.clientY - bounds.top) / bounds.height];
+}
+
+function showBrush(view, point) {
+  view.brush.hidden = !point;
+  if (!point) return;
+  view.brush.style.left = point[0] * 100 + '%';
+  view.brush.style.top = point[1] * 100 + '%';
+  view.brush.style.width = 2 * Number(brushSize.value) / palette.width * 100 + '%';
+}
+
+function updateMask() {
+  const count = painter?.mask.indices.length ?? 0;
+  maskStatus.textContent = count.toLocaleString() + ' splats painted';
+  undoMask.disabled = !painter?.canUndo;
+  clearMask.disabled = !count;
+}
+
+function updateTool() {
+  const painting = tool.value !== 'inspect';
+  get('color-inspector').hidden = painting;
+  for (const view of views) {
+    view.canvas.toggleAttribute('data-paint', painting);
+    showBrush(view, null);
+  }
+  if (painting) {
+    setPlaying(false);
+    clearInspection();
+  }
+}
+
+function attachBrush(view) {
+  const { canvas } = view;
+  createDrawingInput(canvas, {
+    brush() {
+      if (tool.value === 'inspect' || !currentFrame) return null;
+      setPlaying(false);
+      return { kind: 'stroke', surface: 'view', radius: Number(brushSize.value),
+        erase: tool.value === 'erase', frame: currentFrame, painter };
+    },
+    project: event => pointAt(canvas, event),
+    preview: draft => showBrush(view, draft?.points.at(-1)),
+    commit({ points, radius, erase, frame, painter: source }) {
+      if (source !== painter) return;
+      try {
+        painter.stroke(points, frame, { radius, erase });
+        updateMask();
+        redraw();
+      } catch (error) {
+        maskStatus.textContent = error.message;
+      }
+    }
+  });
+  canvas.addEventListener('pointermove', event => {
+    if (tool.value !== 'inspect' && !event.buttons) showBrush(view, pointAt(canvas, event));
+  });
+  canvas.addEventListener('pointerleave', () => showBrush(view, null));
+}
+
 function redraw() {
   request ??= requestAnimationFrame(frame);
 }
@@ -163,7 +235,10 @@ async function open(name, read, mode, examplePoint) {
     world = gaussianSplatWorld(cloud, { colorMode: 'rgb', palette: pelagicPalette });
     currentFrame = undefined;
     clearInspection();
-    inspector = createGaussianColorInspector(renderer, world, { width: palette.width, height: palette.height });
+    const grid = { width: palette.width, height: palette.height };
+    inspector = createGaussianColorInspector(renderer, world, grid);
+    painter = createSplatMaskPainter(renderer, world, grid);
+    updateMask();
     status.dataset.state = 'ready';
     status.textContent = name + ' · ' + cloud.count.toLocaleString() + ' splats · SH degree ' + cloud.degree;
     for (const [id] of samples) get(id).setAttribute('aria-pressed', id === mode);
@@ -180,19 +255,21 @@ async function open(name, read, mode, examplePoint) {
 try {
   views = ['rgb', 'palette'].map(id => {
     const canvas = get(id);
-    return { canvas, context: canvas.getContext('2d', { alpha: false }), marker: canvas.nextElementSibling };
+    return { canvas, context: canvas.getContext('2d', { alpha: false }), marker: canvas.nextElementSibling, brush: canvas.parentElement.querySelector('.brush') };
   });
   drawCanvas = document.createElement('canvas');
   drawCanvas.width = views[0].canvas.width;
   drawCanvas.height = views[0].canvas.height;
   renderer = createRenderer(drawCanvas, { toolkit: { KIT, PixelLook } });
   gl = drawCanvas.getContext('webgl2');
-  for (const { canvas } of views) {
+  for (const view of views) {
+    const { canvas } = view;
+    attachBrush(view);
     canvas.addEventListener('click', event => {
-      const bounds = canvas.getBoundingClientRect();
-      select((event.clientX - bounds.left) / bounds.width, (event.clientY - bounds.top) / bounds.height);
+      if (tool.value === 'inspect') select(...pointAt(canvas, event));
     });
     canvas.addEventListener('keydown', event => {
+      if (tool.value !== 'inspect') return;
       const steps = { ArrowLeft: [-1,0], ArrowRight: [1,0], ArrowUp: [0,-1], ArrowDown: [0,1] };
       if (steps[event.key]) {
         event.preventDefault();
@@ -207,6 +284,12 @@ try {
     });
     canvas.addEventListener('blur', () => { cursor = undefined; displayInspection(); });
   }
+  tool.addEventListener('change', updateTool);
+  brushSize.addEventListener('input', () => { get('brush-value').value = brushSize.value + ' px'; });
+  for (const setting of [showMask, applyRamp, pixelCleanup, protectMask, ...rampInputs])
+    setting.addEventListener('input', () => { probeResult = undefined; jump = undefined; redraw(); });
+  undoMask.addEventListener('click', () => { painter.undo(); updateMask(); redraw(); });
+  clearMask.addEventListener('click', () => { painter.clear(); updateMask(); redraw(); });
   probe.addEventListener('click', checkNearby);
   clear.addEventListener('click', () => clearInspection());
   orbit.addEventListener('input', () => {
@@ -228,5 +311,5 @@ try {
   void open('Sample PLY', samplePly, 'ply', [.578543, .398297]);
 } catch (error) {
   errorStatus(error);
-  for (const id of ['angle', 'play', 'ply', 'spz', 'file']) get(id).disabled = true;
+  for (const id of ['angle', 'play', 'ply', 'spz', 'file', 'splat-tool']) get(id).disabled = true;
 }

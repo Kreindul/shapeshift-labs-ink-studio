@@ -247,3 +247,70 @@ test('Gaussian color inspection follows one patch and reads the rendered palette
   tool.clear();
   assert.equal(tool.inspect(frame, assert.fail), null);
 });
+
+test('a splat mask stroke retains nearby contributors and supports erase, undo and clear', async () => {
+  const { createSplatMaskPainter } = await import('../webgl.mjs');
+  const data = new Float32Array(3 * 16);
+  for (const o of [0, 16, 32]) for (const field of [4, 8, 10]) data[o + field] = .0025;
+  const world = { data, count: 3, gaussianHarmonics: { count: 3 }, cam: { dist: 4 } };
+  const dominant = { index: 0, distance: 4, weight: .5 };
+  const contributions = [dominant, { index: 1, distance: 4.08, weight: .12 }, { index: 2, distance: 5, weight: .15 }];
+  let queries = 0;
+  const painter = createSplatMaskPainter({ pick(w, ray) {
+    assert.equal(w, world);
+    assert(ray.soft);
+    queries++;
+    return { dominant, contributions };
+  } }, world, { width: 100, height: 75 });
+  const empty = painter.mask;
+  assert.equal(painter.stroke([[-1, -.2]], {}, { radius: 3 }), empty);
+  const painted = painter.stroke([[.3, .5], [.7, .5]], {}, { radius: 3 });
+  assert(queries > 12);
+  assert.deepEqual(painted.indices, [0, 1]);
+  assert.deepEqual(empty.indices, []);
+  assert.equal(painter.stroke([[.5, .5]], {}, { radius: 2 }), painted);
+  assert.deepEqual(painter.stroke([[.5, .5]], {}, { radius: 2, erase: true }).indices, []);
+  assert.deepEqual(painter.undo().indices, [0, 1]);
+  assert.deepEqual(painter.clear().indices, []);
+  assert.deepEqual(painter.undo().indices, [0, 1]);
+  assert.deepEqual(painter.undo().indices, []);
+  assert.equal(painter.canUndo, false);
+});
+
+test('WebGL applies a translucent splat mask to its ramp and protects its pixel from cleanup', { skip: !process.env.INK_TEST_CHROME }, () => {
+  const result = require('../cli/look-webgl.js')({}, () => {}, (kit, fixture, backend) => {
+    const data = new Float32Array(32);
+    for (const o of [0, 16]) for (const field of [4, 8, 10]) data[o + field] = .00002;
+    data[3] = .92;
+    data[7] = 0x707070;
+    data[18] = 1;
+    data[23] = 0x707070;
+    const world = { data, count: 2, radius: 2, pal: [0x101010, 0x505050, 0x707070], dither: 0,
+      moving: new Int32Array(), back: new Int32Array(), cam: { dist: 4, target: [0,0,0], yaw: 0, pitch: 0 },
+      gaussianHarmonics: { count: 2, degree: 0, dc: Float32Array.of(-.55,-.55,-.55,-.55,-.55,-.55),
+        sh: new Float32Array(), up: 'y', colorMode: 'palette' } };
+    const mask = { count: 2, indices: [0] };
+    const draw = backend(65, 65, { offscreen: true, colored: false, dither: 0, damp: false });
+    function center(frame) {
+      draw.draw(world, frame);
+      return draw.sample({ middle: [32,32] }).middle;
+    }
+    const plain = center({ clean: false });
+    const clean = center({ clean: true });
+    const protectedPixel = center({ clean: true, splatPaint: { mask, protect: true } });
+    const ramp = center({ clean: false, splatPaint: { mask, ramp: [0x9ddcc7] } });
+    const raw = center({ gaussianColor: 'rgb' });
+    const rawPaint = center({ gaussianColor: 'rgb', splatPaint: { mask, ramp: [0x9ddcc7], preview: true } });
+    world.data = data.slice();
+    world.data[19] = 1;
+    const covered = center({ clean: false, splatPaint: { mask, ramp: [0x9ddcc7] } });
+    draw.close();
+    return { plain, clean, protectedPixel, ramp, raw, rawPaint, covered };
+  }, {});
+  assert.deepEqual(result.plain, [80,80,80]);
+  assert.deepEqual(result.clean, [16,16,16]);
+  assert.deepEqual(result.protectedPixel, result.plain);
+  assert.deepEqual(result.ramp, [157,220,199]);
+  assert.deepEqual(result.rawPaint, result.raw);
+  assert.notDeepEqual(result.covered, result.ramp);
+});

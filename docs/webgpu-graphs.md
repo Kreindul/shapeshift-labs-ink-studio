@@ -134,4 +134,32 @@ the returned integer grid coordinates. Coordinates start at the top left.
 Pass successive inspection samples to `gaussianSwatchJump(before, after)`
 to compare visible swatches on the selection.
 
+### Paint a mask on an imported cloud
+
+In [Pelagic](../examples/live-gaussian/index.html), select **Paint** and drag
+over either view. The brush picks nearby visible contributors and retains
+their splat indices. Turn the cloud to continue the same mask from another
+angle. **Show mask** displays its visible coverage in the palette view. **Erase**, **Undo**,
+and **Clear mask** let you revise it.
+
+- **Mask ramp** quantizes the painted region against its own editable swatches.
+- **Protect painted pixels** lets the region keep its resolved pixels when
+  **Pixel cleanup** is enabled. Ramp and cleanup controls work independently.
+- Translucent splats participate through the same back-to-front opacity
+  compositing as the color pass. A foreground occluder can hide painted splats.
+
+For browser hosts, import `createSplatMaskPainter` from `webgl.mjs`. Create
+it with `(renderer, world, { width, height })` using the palette render's art
+grid. Call `stroke(points, frame, { radius, erase })` with normalized
+top-left points and a radius in art pixels. Use the returned mask or read
+`painter.mask` after `undo()` or `clear()`. The mask can be stored as JSON
+and reused with the same imported cloud and vertex order:
+
+```js
+renderer.render(world, {
+  ...frame, gaussianColor: 'palette', clean: true,
+  splatPaint: { mask: painter.mask, ramp: [0x432640, 0x974a5b, 0xf08a62, 0xffdda0], protect: true }
+});
+```
+
 Format references. [Graphdeco PLY implementation](https://github.com/graphdeco-inria/gaussian-splatting/blob/main/scene/gaussian_model.py) · [Niantic SPZ](https://github.com/nianticlabs/spz) · [WebGPU specification](https://www.w3.org/TR/webgpu/)
