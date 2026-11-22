@@ -117,6 +117,29 @@
       outputs:{value:'audio',before:'audio',session:'record',report:'record'},
       run({source,assets,revision}) {return A.audioEditorial.reconform(source,assets,revision);}
     },
+    'audio.describeGesture': {
+      description:'Analyze a slice for pitch motion, tail texture, transient rate and other searchable acoustic descriptors.',
+      inputs:{source:'audio'},outputs:{value:'record'},
+      run({source}) {return {value:A.gestureBank.describe(source)};}
+    },
+    'audio.searchGestures': {
+      description:'Rank a sliced corpus by weighted acoustic descriptor targets and authored filters.',
+      inputs:{entries:'array<record>',options},outputs:{value:'record',items:'array<record>'},
+      run({entries,options}) {
+        const value=A.gestureBank.search(entries,options);
+        return {value,items:value.items};
+      }
+    },
+    'audio.auditionGestures': {
+      description:'Build a sample-addressed listening reel with bounded level matching and peak protection.',
+      inputs:{clips:'array<record>',options},outputs:{value:'audio',report:'record'},
+      run({clips,options}) {return A.gestureBank.audition(clips,options);}
+    },
+    'audio.synthesizeGesture': {
+      description:'Excite a breath resonator, grainy friction model or inharmonic metal modes and print aligned perspectives.',
+      inputs:{options:{type:'record'}},outputs:{value:'audio',perspectives:'record',report:'record'},
+      run({options},{seed}) {return A.synthesizeGesture({seed,...options});}
+    },
     'audio.shapeInstrumentSample': {
       description:'Shape sample pitch, duration and formants independently while preserving its attack.',
       inputs:{source:'audio',options},outputs:{value:'audio',report:'record'},

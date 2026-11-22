@@ -301,6 +301,12 @@ const specifications = {
   'audio.renderEditorial': {inputs:{source:editorial,assets:{tone:audio},options:{stems:true}}},
   'audio.reconformEditorial': {inputs:{source:editorial,assets:{tone:audio},revision:{
     picture:{fps:25,shots:[{id:'insert',frames:1},{id:'door',frames:2}]}}}},
+  'audio.describeGesture': {inputs:{source:audio}},
+  'audio.searchGestures': {inputs:{entries:[{id:'bench/take/tap',articulation:'metal',descriptors:{
+    version:1,duration:.19,pitchMotion:null,tailRoughness:.08,voicedFraction:0,brightness:.5,tailLevel:-12,attackRate:5.26,
+    root:null,peak:.8,rms:.12}}],options:{phrase:'short metal'}}},
+  'audio.auditionGestures': {inputs:{clips:[{id:'take/direct',value:audio}],options:{targetRmsDb:-23}}},
+  'audio.synthesizeGesture': {inputs:{options:{model:'metal',duration:.2,seed:12,room:.5}}},
   'audio.shapeInstrumentSample': {inputs:{source:audio,options:{attackFrames:8}}},
   'audio.analyzeInstrumentSamples': {inputs:{assets:{tone:audio}}},
   'audio.auditionInstrumentRange': {inputs:{assets:{tone:audio},options:{offsets:[0]}}},

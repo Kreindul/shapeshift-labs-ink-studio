@@ -11,6 +11,10 @@ with their processing paths, exact ranges, seed, and reusable markers.
 Use [sample editing](sample-edit.md) to mark and audition transients,
 split recordings into reusable regions, and assemble crossfaded takes.
 
+Use the [gesture bank](gesture-bank.md) to group recordings into sessions with
+aligned perspectives, search slices by acoustic descriptors, and keep
+selected gestures as catalog samples.
+
 ## Recover a live take
 
 Start `ink-studio show-bridge` and open **Sample capture** from Signal Room.
