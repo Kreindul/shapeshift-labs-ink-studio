@@ -171,3 +171,7 @@ extensive channels across resolution and moving-boundary changes.
 
 [Reduced simulation models](model-reduction.md) bake detailed sections, branched domains,
 and sampled responses into smaller assets with recorded fitting ranges and error.
+
+[General state integrators](state-integrators.md) provide fixed RK4,
+semi-implicit Euler, adaptive RK4, and time-localized reactions for
+creator-authored equations.

@@ -128,3 +128,6 @@ The demo compares uninterrupted motion with a fresh run restored at
 0.95 seconds. It exports the animation, a still, the actual saved
 checkpoint, and a JSON report. The graph node resumes from the same
 checkpoint and reproduces the final position.
+
+For continuous state vectors, [general state integrators](state-integrators.md)
+provide prepared solvers, checkpointable error control, and substep event detection.

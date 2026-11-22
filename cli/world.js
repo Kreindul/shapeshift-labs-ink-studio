@@ -515,6 +515,10 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         return respond(require('./mass-properties.js').measure(kit,read(file),file,
           {dependency:shot?.dependency,assetPack:opt['asset-pack']}));
       }
+      case 'integrate': {
+        ensure(typeof file==='string' && other===undefined,'Use sim integrate <plan.json> [--out trace.json]');
+        return respond(require('./state-integrators.js').run(kit,read(file),file,shot?.dependency));
+      }
       case 'reduce': {
         ensure(typeof file==='string' && other===undefined,'Use sim reduce <plan.json> [--out asset.json]');
         return respond(require('./model-reduction.js').bake(kit,read(file),file,shot?.dependency));
