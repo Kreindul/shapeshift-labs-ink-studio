@@ -162,3 +162,6 @@ faces, neighbors, and boundary regions for grid, chart, and mesh operators.
 [Physical property measurements](mass-properties.md) provide mass, volume,
 centres, inertia tensors, thickness and resolved material coefficients for
 model bindings.
+
+[Moving boundaries](moving-boundaries.md) turn socket and cloth motion into
+aperture, sealing, and displaced-volume signals for solvers.

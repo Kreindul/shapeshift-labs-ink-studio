@@ -1223,6 +1223,9 @@ stroke, and can reverse with the pressure gap. Its ports report
 Connect position to a mechanics slider's position drive. The mechanical
 load can be authored or supplied on `load.<pipe>`.
 
+Use a [moving boundary](moving-boundaries.md) to drive a valve from a measured
+mechanical lift or a moving cloth patch.
+
 Use `world/input` or signal connections to drive the numeric
 `valve.<pipe>`, `boost.<pipe>`, `leak.<leak>`, and
 `boundary.<boundary>` inputs. Opening values range from zero to one and
