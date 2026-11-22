@@ -2,9 +2,9 @@
 (function (P) {
   const {fields,record,finite,integer,id,check,hash}=P.musicInstruments;
   const eps=1e-8, round=n=>Number(n.toFixed(9));
-  const names=['density','register','harmony','silence','room','level'];
+  const names=['density','register','harmony','silence','room','level','eq'];
   const fieldsFor={density:['parts','value','keep'],register:['parts','semitones'],
-    harmony:['chords','every'],silence:['parts','mode'],room:['parts','send'],level:['parts','gainDb','fadeSeconds']};
+    harmony:['chords','every'],silence:['parts','mode'],room:['parts','send'],level:['parts','gainDb','fadeSeconds'],eq:['parts','hz','q','gainDb','fadeSeconds']};
   const byStart=(a,b)=>a.from-b.from;
   function list(raw,max,label) {
     check(Array.isArray(raw) && raw.length<=max,'Invalid cue '+label+' list');
@@ -74,9 +74,11 @@
         check(values.length===2 && values.every(value=>finite(value,0,1)),'Cue room needs a send level or pair of levels');
         row.send=values;
       }
-      if (key==='level') {
+      if (key==='level' || key==='eq') {
         const fade=raw.fadeSeconds ?? .02;
-        check(finite(raw.gainDb,-60,18) && finite(fade,0,2),'Cue level needs a gain in dB and a fade in seconds');
+        check(finite(fade,0,2) && (key==='level' ? finite(raw.gainDb,-60,18) :
+          finite(raw.hz,20,24000) && finite(raw.q ?? 1,.35,12) && finite(raw.gainDb,-24,24)),
+        'Invalid cue '+key+' gain, fade or band');
         row.fadeSeconds=Math.min(fade,(row.endTime-row.startTime)*.5);
       }
       return row;
@@ -171,6 +173,34 @@
     };
   }
 
+  function equalizer(rows,rate) {
+    if (!rows.length) return null;
+    let index=0, filter;
+    const pair=[0,0];
+    return {
+      reset(){filter=null;},
+      tick(left,right,frame,time) {
+        while (index<rows.length && time>=rows[index].endTime-eps) {
+          index++;
+          filter=null;
+        }
+        const row=rows[index];
+        if (!row || row.gainDb===0 || time<row.startTime-.35) return null;
+        filter ??= P.audioParametric.band('peak',rate,
+          ()=>Math.min(rate*.48,row.hz),()=>row.q ?? 1,()=>row.gainDb);
+        filter(left,right,frame,pair);
+        if (time<row.startTime-eps) return null;
+        const edge=Math.min(time-row.startTime,row.endTime-time);
+        if (row.fadeSeconds) {
+          const wet=Math.max(0,Math.min(1,edge/row.fadeSeconds));
+          pair[0]=left+(pair[0]-left)*wet;
+          pair[1]=right+(pair[1]-right)*wet;
+        }
+        return pair;
+      }
+    };
+  }
+
   function report(music) {
     const cue=music.cue,{events,program}=music;
     const audible=Object.entries(events).map(([name,rows])=>[name,rows.filter(row=>row.velocity>0 &&
@@ -186,5 +216,5 @@
       lanes:cue.lanes,harmony:program.events.map(({id,harmony,beat,time})=>({id,harmony,beat:round(beat),time})),
       tracks:summary(0,music.end),roomCuts:cue.roomCuts}));
   }
-  P.musicCueMap=Object.freeze({compile,harmonize,shape,cursor,report});
+  P.musicCueMap=Object.freeze({compile,harmonize,shape,cursor,equalizer,report});
 })(KIT.procedural);

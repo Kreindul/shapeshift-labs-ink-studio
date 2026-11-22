@@ -1,5 +1,9 @@
 # Critique a passage by ear
 
+Use the [audio critique workbench](music-critique-audio.md) to inspect any
+production passage, ask for a particular monitor view, and audition your
+own addressed edits. This page covers the preset and blind workflow.
+
 Start with a normal [music production](music-production.md), a named section,
 and something you want to hear more clearly. Ink renders the original passage
 with its actual instrument, room and filter history. A critique links the

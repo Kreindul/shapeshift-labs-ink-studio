@@ -7,8 +7,8 @@ const audio=(file,value)=>write(file,WAV.encode(value,{encoding:'pcm24'}));
 
 module.exports=function command([mode,file,config,settingsFile],opt,kit) {
   const C=kit.KIT.music.production.critique,{check,fields}=kit.KIT.procedural.musicInstruments;
-  check(typeof file==='string' && ['plan','listen','keep','tag','find'].includes(mode),
-    'Use music critique plan, listen, keep, tag or find');
+  check(typeof file==='string' && ['plan','listen','keep','tag','find','inspect','compare','apply'].includes(mode),
+    'Use music critique inspect, compare, apply, plan, listen, keep, tag or find');
   const out=typeof opt.out==='string' ? path.resolve(opt.out) : undefined;
   const output=(result,target)=>{
     if (target) json(target,result);
@@ -37,6 +37,31 @@ module.exports=function command([mode,file,config,settingsFile],opt,kit) {
   }
   const recipe=read(file), source=recipe.production ?? recipe, paths=assetPaths(recipe,file);
   const assets=Object.fromEntries(Object.entries(paths).map(([id,at])=>[id,WAV.read(at)]));
+  if (mode==='inspect' || mode==='compare') {
+    check(config && out,'Supply a listening request and output directory');
+    const result=C.openAudio(source,assets)[mode](read(config));
+    const files=Object.fromEntries(Object.entries(result.audio).map(([id,value])=>{
+      const name=id+'.wav';
+      audio(path.join(out,name),value);
+      return [id,name];
+    }));
+    const report=path.join(out,'report.json');
+    json(report,{...result.report,files});
+    if (!result.key) return output({report,files});
+    const key=path.join(out,'comparison.json');
+    json(key,result.key);
+    return output({report,files,key,token:result.key.token});
+  }
+  if (mode==='apply') {
+    check(config && settingsFile && out,'Supply a comparison, decision and output directory');
+    const result=C.applyEdit(source,read(config),read(settingsFile),assets);
+    const reference=path.join(out,'reference.json'), production=path.join(out,'production.json');
+    publishJson(reference,result.reference,'A different critique decision already uses this directory');
+    json(path.join(out,'revision.json'),result.revision);
+    json(production,{production:result.production,assets:Object.fromEntries(Object.entries(paths)
+      .map(([name,at])=>[name,path.relative(out,at)])),...(recipe.options && {options:recipe.options})});
+    return output({reference,production});
+  }
   if (mode==='plan') {
     check(config,'Supply a critique brief');
     const brief=read(config);

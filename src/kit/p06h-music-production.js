@@ -295,7 +295,8 @@
         const moments=[...base.program.events,...program.events,...written.cues.filter(row=>row.part===name)];
         check(tracks[name] ? JSON.stringify(base.events[name])===JSON.stringify(events[name]) &&
           (!cue || cue.perTrack[name].room.every(row=>row.send.every(value=>value===tracks[name].mix.send)) &&
-          !cue.perTrack[name].cuts.length && cue.perTrack[name].level.every(row=>row.gainDb===0)) :
+          !cue.perTrack[name].cuts.length && [...cue.perTrack[name].level,...cue.perTrack[name].eq]
+            .every(row=>row.gainDb===0)) :
           moments.every(row=>JSON.stringify(base.program.pitch(name,row.time))===JSON.stringify(program.pitch(name,row.time))),
         (cue ? 'Cue map or groove changes pinned part ' : 'Groove changes pinned part ')+name);
       }
@@ -413,6 +414,7 @@
       const cut=Q.cursor(music.cue?.perTrack[name].cuts ?? []);
       const roomSend=Q.cursor(music.cue?.perTrack[name].room ?? []);
       const level=Q.cursor(music.cue?.perTrack[name].level ?? []);
+      const eq=Q.equalizer(music.cue?.perTrack[name].eq ?? [],sampleRate);
       const coefficient=frequency=>1-Math.exp(-2*Math.PI*Math.min(sampleRate*.49,frequency)/sampleRate);
       const high=coefficient(desk.highpass), low=coefficient(desk.lowpass);
       const dry=stems ? new Float32Array(n*2) : null;
@@ -427,6 +429,7 @@
           if (!cutting) {
             cutting=true;
             lowL=lowR=highL=highR=0;
+            eq?.reset();
             if (!sessionSource) echo=G.tapeEcho(track.echo,sampleRate);
           }
           continue;
@@ -454,6 +457,8 @@
         } else {
           l=lowL*volume*panL; r=lowR*volume*panR;
         }
+        const shaped=eq?.tick(l,r,i,time);
+        if (shaped) [l,r]=shaped;
         if (echo) {
           const wet=echo(i,l,r,settings?.echo ?? track.echo.send);
           l+=wet[0]; r+=wet[1];

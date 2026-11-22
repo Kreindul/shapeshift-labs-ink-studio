@@ -122,13 +122,6 @@
     return result;
   }
 
-  function assetSignature(assets) {
-    return Object.keys(assets).sort().map(name=>{
-      const {samples,channels,sampleRate}=P.mediaGraph.audio(assets[name]);
-      return [name,sampleRate,channels,samples.length,R.audioHash(samples)];
-    });
-  }
-
   function blind(source,planned,assets={},options={}) {
     check(planned?.format===planFormat && planned.version===1 && Array.isArray(planned.session?.takes) &&
       planned.session.takes.length>=2 && fields(options,['id','seed','target','ceiling']) &&
@@ -153,7 +146,7 @@
     const order=shuffle(takes,seed), labels=Object.fromEntries(order.map((row,i)=>[String.fromCharCode(97+i),row.id]));
     const keys=Object.keys(labels), pairs=keys.flatMap((first,i)=>keys.slice(i+1).map(second=>[first,second]));
     const trials=shuffle(pairs,seed^0x44f9d9).map((pair,i)=>({id:'pair-'+(i+1),takes:shuffle(pair,seed+i*307+19)}));
-    const signature=assetSignature(assets);
+    const signature=R.assetSignature(assets);
     const stamp=JSON.stringify([name,seed,planned.session,context,focus,sampleRate,target,ceiling,signature]);
     const token='test-'+P.data.hash(stamp).toString(36)+'-'+P.data.hash(stamp,0x9e3779b9).toString(36);
     const audio=Object.fromEntries(keys.map((label,i)=>[label,order[i].value]));
@@ -179,7 +172,7 @@
       Array.isArray(selection.votes) && integer(selection.votes.length,1,256) &&
       id(selection.id ?? key.test.id) && R.prose(title,160),
     'Record the test token, chosen label, votes and a listening reason');
-    check(JSON.stringify(key.assets)===JSON.stringify(assetSignature(assets)),'Recorded listening decision needs its original audio assets');
+    check(JSON.stringify(key.assets)===JSON.stringify(R.assetSignature(assets)),'Recorded listening decision needs its original audio assets');
     const tags=R.tags(selection.tags ?? key.tags ?? []);
     const counts=Object.fromEntries(Object.keys(key.labels).map(label=>[label,Object.fromEntries(criteria.map(name=>[name,0]))]));
     const ballots=new Set();
@@ -208,5 +201,5 @@
     return {...result,producerReference:result.reference,reference};
   }
 
-  P.musicProduction=Object.freeze({...A,critique:Object.freeze({plan,blind,keep,tagReference:R.tag,findReferences:R.search})});
+  P.musicProduction=Object.freeze({...A,critique:Object.freeze({plan,blind,keep,openAudio:P.musicCritiqueWorkbench.open,applyEdit:P.musicCritiqueWorkbench.apply,tagReference:R.tag,findReferences:R.search})});
 })(KIT.procedural);

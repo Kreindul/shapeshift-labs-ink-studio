@@ -15,6 +15,13 @@
     }
     return (hash>>>0).toString(36);
   }
+  function assetSignature(assets) {
+    return Object.keys(assets).sort().map(name=>{
+      const {samples,channels,sampleRate}=P.mediaGraph.audio(assets[name]);
+      return [name,sampleRate,channels,samples.length,audioHash(samples)];
+    });
+  }
+
   function tags(value) {
     check(Array.isArray(value) && value.length<=16 && Array.from(value).every(tag=>
       prose(tag,80) && words(tag).length>0) && new Set(value.map(normalized)).size===value.length,
@@ -58,5 +65,5 @@
     }).filter(Boolean);
     return hits.sort((a,b)=>b.score-a.score || a.id.localeCompare(b.id)).slice(0,options.limit ?? 12);
   }
-  P.musicCritiqueReferences=Object.freeze({tag,search,tags,prose,audioHash,decisionFormat});
+  P.musicCritiqueReferences=Object.freeze({tag,search,tags,prose,audioHash,assetSignature,decisionFormat});
 })(KIT.procedural);

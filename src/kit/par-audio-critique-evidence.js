@@ -110,19 +110,25 @@
       .slice(0,6);
   }
 
-  function measure(score,range,focus,lead,layers,sampleRate) {
+  function measure(score,range,focus,lead,layers,sampleRate,rendered) {
     const requestedStart=score.clock.timeAt({beat:range.fromBeat}), requestedEnd=score.clock.timeAt({beat:range.toBeat});
-    const {value,stems,report}=A.renderCompiled(score,{start:requestedStart,end:requestedEnd,sampleRate,stems:true});
-    const context=address(score,sampleRate,range.fromBeat,range.toBeat);
+    const {value,stems,report}=rendered ?? A.renderCompiled(score,{start:requestedStart,end:requestedEnd,sampleRate,stems:true});
+    const context=rendered ? range : address(score,sampleRate,range.fromBeat,range.toBeat);
+    const anchors=new Map([context,focus].flatMap(row=>[[row.fromBeat,row.firstSample],[row.toBeat,row.endSample]]));
+    const at=(a,b)=>{
+      const raw=address(score,sampleRate,a,b), firstSample=anchors.get(a) ?? raw.firstSample;
+      const endSample=anchors.get(b) ?? raw.endSample;
+      return {...raw,firstSample,endSample,start:firstSample/sampleRate,end:endSample/sampleRate};
+    };
     const whole=stats(value), centers=[95,260,700,1800,Math.min(4600,Math.round(sampleRate*.39))];
     const points=[...new Set([range.fromBeat,focus.fromBeat,focus.toBeat,range.toBeat])].sort((a,b)=>a-b);
     const rows=[];
     for (let i=0;i<points.length-1;i++) for (let beat=points[i];beat<points[i+1]-1e-8;beat+=1) {
       const end=Math.min(beat+1,points[i+1]);
-      const range=address(score,sampleRate,beat,end);
+      const range=at(beat,end);
       const relative=range.firstSample-report.firstSample, frames=range.endSample-range.firstSample;
       if (frames<8) continue;
-      const bounds=Array.from({length:9},(_,i)=>address(score,sampleRate,beat,beat+(end-beat)*i/8).endSample-range.firstSample);
+      const bounds=Array.from({length:9},(_,i)=>at(beat,i===8 ? end : beat+(end-beat)*i/8).endSample-range.firstSample);
       const mix=segment(value,relative,relative+frames), mixBands=spectra(mix,bounds,centers);
       const leadAudio=lead && segment(stems[lead],relative,relative+frames);
       const leadPower=leadAudio && spectra(leadAudio,bounds,centers);
@@ -134,7 +140,7 @@
       rows.push({range,mix:{...measured,peakSample:measured.peakOffset===null ? null : range.firstSample+measured.peakOffset},
         masking:overlap,signature:mixBands.flatMap(band=>Array.from(band,value=>Math.sqrt(value)))});
     }
-    return {value,stems,report:{sampleRate,context,focus:address(score,sampleRate,focus.fromBeat,focus.toBeat),
+    return {value,stems,report:{sampleRate,context,focus:rendered ? focus : address(score,sampleRate,focus.fromBeat,focus.toBeat),
       mix:whole,windows:rows.map(({signature,...row})=>row),repeats:repeats(rows)}};
   }
 
@@ -168,5 +174,5 @@
     return {audio,ranges,gain};
   }
 
-  P.musicCritiqueEvidence=Object.freeze({address,measure,snippets});
+  P.musicCritiqueEvidence=Object.freeze({address,measure,snippets,stats,segment});
 })(KIT.procedural);

@@ -86,5 +86,17 @@
     return retained.concat(compiled.notes).filter(row=>!compiled.attacks.some(({from,to})=>
       row.time>=from-epsilon && row.time<to-epsilon)).concat(compiled.extra).sort((a,b)=>a.time-b.time);
   }
-  P.musicNoteClips=Object.freeze({clip,rows,overlay});
+  function edit(clips,address,set) {
+    check(fields(address,['clip','voice','note']) && Object.keys(address).length===3 &&
+      Object.values(address).every(id) && fields(set,['beat','duration','midi','velocity','play','tie']),
+    'Invalid addressed note edit');
+    const result=P.data.clone(clips ?? []);
+    const note=result.find(clip=>clip.id===address.clip)?.voices.find(voice=>voice.id===address.voice)
+      ?.notes.find(note=>note.id===address.note);
+    check(note,'Unknown editable clip note');
+    Object.assign(note,P.data.clone(set));
+    return result;
+  }
+
+  P.musicNoteClips=Object.freeze({clip,rows,overlay,edit});
 })(KIT.procedural);
