@@ -239,7 +239,9 @@ const specifications = {
   'music.makePhrase': { inputs:{options:{beatsPerBar:4,bars:4,style:'syncopated',seed:42}} },
   'music.analyzeArrangement': { inputs:{source:arrangement,options:{audio:{end:2,sampleRate:8000}}} },
   'music.suggest': { inputs:{source:{...arrangement,sections:[{id:'opening',bars:4,harmony:'home'}]},options:{limit:2}} },
-  'music.renderProduction': { inputs:{source:production,options:{end:.25,sampleRate:8000,stems:true}} },
+  'music.renderProduction': { inputs:{source:{...production,patches:{pluck:{type:'subtractive',pulseWidth:.41,
+    pwm:{depth:.19,rate:.83},filter:{cutoff:480,resonance:1.6,envAmount:36,keyTrack:.8}}}},
+    options:{end:.25,sampleRate:8000,stems:true}} },
   'music.inspectProduction': { inputs:{source:production} },
   'music.applyGroove': {inputs:{source:production,mapping:{
     template:{format:'ink-studio/performance-groove',version:1,id:'take',step:.25,length:2,

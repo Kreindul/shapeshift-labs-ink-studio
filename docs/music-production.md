@@ -29,9 +29,13 @@ Degree-based events still follow the part's pitch mapping.
 | --- | --- |
 | `analog` | Harmonic body, color, detuned width in cents, grain, drive, and an attack/decay/sustain/release envelope |
 | `fm` | The same envelope and texture controls, plus modulator ratio, index, and index decay |
+| `subtractive` | Band-limited saw and pulse, a sine sub, pulse-width LFO, and a resonant low-pass with note-local envelope and key follow |
 | `keys` | Tine and strike synthesis with velocity-dependent bite, dust, wear, and an amplitude envelope |
 | `drum` | Kick, snare, hat, rim, metal, or brush synthesis with pitch, decay, and transient controls |
 | `sample` | Ordered zones with list of asset names, optional root pitch and key range, velocity interval, named articulation, gain in dB, tuning in cents, one-shot playback or a gated loop |
+
+See [subtractive synth voices](subtractive-synth.md) for the oscillator,
+filter, and articulation controls and an audible workshop.
 
 Pass WAV assets by name in the CLI recipe's `assets` record. Graph and JavaScript
 callers pass decoded audio buffers. Exact articulations take precedence over a
