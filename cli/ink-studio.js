@@ -1006,6 +1006,7 @@ const CMD = {
         '    sim solve <plan.json> [--out report.json --require-convergence]   solve dense, tridiagonal, sparse, or bracketed scalar systems',
         '    sim network <run.json> [--out trace.json]   simulate a lumped effort/flow network and its sources',
         '    sim waves <run.json> [--out trace.json --wav audition.wav]   render distributed or delay-line pressure and flow',
+        '    sim excite <run.json> [--out trace.json --wav force.wav]   render contact impulses, slip, and excitation forces',
         '    sim sections <plan.json> [--out report.json]   measure mesh, SDF, or contour sections along a path',
         '    sim model-changes <plan> [--samples N --resume file --checkpoint file]   play prepared parameter ramps and topology swaps',
         '    sim block-check <model> <plan> [--candidate trace.json] [--trace-out file.json]   compare sample block partitions',

@@ -80,3 +80,6 @@ The demo feeds one swept impact and one fractional-sample note onset to
 a split receiver and a receiver that reacts at its scheduled boundary.
 Both receive the original times. The board shows the reaction times and
 resulting motion. The JSON includes the exact event stamps and replay check.
+
+Use [contact samples and exciters](contact-exciters.md) for swept position,
+momentum transfer, tangential slip, and average force on the same clock.

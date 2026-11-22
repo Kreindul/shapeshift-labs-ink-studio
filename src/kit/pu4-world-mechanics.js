@@ -94,8 +94,8 @@
     check(config.contactEvents===undefined || typeof config.contactEvents==='boolean'||materialContacts,
       'contactEvents must be boolean or material');
     const start=config.bodies??{}, jointSpecs=config.joints??{}, forceSpecs=config.forces??{};
-    const impactEvents=config.impactEvents??false, fractureOn=config.fractureOn??{};
-    check((typeof impactEvents==='boolean'||impactEvents==='timed')&&record(fractureOn)&&Object.entries(fractureOn).every(([key,rule])=>
+    const impactEvents=config.impactEvents??false, contactSamples=config.contactSamples??false, fractureOn=config.fractureOn??{};
+    check(typeof contactSamples==='boolean'&&(typeof impactEvents==='boolean'||impactEvents==='timed')&&record(fractureOn)&&Object.entries(fractureOn).every(([key,rule])=>
       own(start,key)&&!start[key]?.collider&&record(rule)&&[0,1,2].includes(rule.axis??0)&&
       (rule.parts===undefined||Number.isSafeInteger(rule.parts)&&rule.parts>=2&&rule.parts<=32)&&
       (rule.omit===undefined||rule.parts!==undefined&&Array.isArray(rule.omit)&&
@@ -120,10 +120,10 @@
     const richer=fabricFields.length>0||Object.values(start).some(item=>item?.collider!==undefined||item?.structure!==undefined);
     const local=config.gravityField!==undefined;
     check(!local||typeof config.gravityField==='string','Invalid mechanics gravity field');
-    const continuous=config.continuous??(richer||local||impactEvents), advanced=richer||continuous||local, baseIterations=config.contactIterations??10;
+    const continuous=config.continuous??(richer||local||impactEvents||contactSamples), advanced=richer||continuous||local, baseIterations=config.contactIterations??10;
     const validIterations=n=>Number.isSafeInteger(n)&&n>=1&&n<=32;
     check((config.continuous===undefined||typeof config.continuous==='boolean')&&validIterations(baseIterations)&&
-      (!impactEvents||continuous),
+      (!(impactEvents||contactSamples)||continuous),
       'Invalid mechanical contact controls');
     const initialBodies={}, initials={}, inputs={}, outputs={}, claimed=new Map(), driveOrder=[], mountOrder=[];
     const surface=W.surfaceState, surfaceChannels=K.procedural.surfaceState.channels(config.surfaceChannels);
@@ -131,6 +131,7 @@
     const initialCharts={};
     if (config.contactEvents) outputs.contacts='event';
     if(impactEvents)outputs.impacts='event';
+    if(contactSamples)outputs['contact-samples']='event';
     if(canFracture)inputs['fracture-contacts']='event';
     if(fabricFields.length)outputs['deformable-loads']='event';
     const index = W.spatial.create(), indexed = new Map(), poseCache = new WeakMap();
@@ -610,7 +611,7 @@
           observe(a,point,V.mul(force,-1));
           if(b!==null)observe(b,point,force);
         }:undefined;
-        motion=W.contactMotion.prepare(bodies,roots,masses,{ground:plane,fabric,onContact,onFabric(seat,key,magnitude){
+        motion=W.contactMotion.prepare(bodies,roots,masses,{ground:plane,fabric,onContact,measure:contactSamples,onFabric(seat,key,magnitude){
           const {system,shape,face,nodes,weights,point,normal}=seat, body=bodies[key],
             token=JSON.stringify([key,system,shape,face]), previous=fabricLoads.get(token);
           const impulse=V.mad(previous?.impulse??zero,normal,magnitude);
@@ -1078,7 +1079,9 @@
       'Invalid saved deformable reactions');
       if(continuous)check(Array.isArray(state.impacts)&&state.impacts.length<=64&&typeof state.impactLimited==='boolean'&&
         state.impacts.every(hit=>record(hit)&&own(state.bodies,hit.a)&&(hit.b===null||own(state.bodies,hit.b))&&vector(hit.normal)&&
-          vector(hit.parts,2)&&Number.isFinite(hit.speed)&&Number.isFinite(hit.at)&&hit.at>=0&&hit.at<=1),
+          vector(hit.parts,2)&&Number.isFinite(hit.speed)&&Number.isFinite(hit.at)&&hit.at>=0&&hit.at<=1&&
+          (!contactSamples||record(hit.measurement)&&vector(hit.measurement.point)&&vector(hit.measurement.slip)&&
+            vector(hit.measurement.impulse)&&['ground','surface','overlap'].includes(hit.measurement.pointBasis))),
       'Invalid saved continuous contacts');
       surface.validate(state,surfaceChannels);
     },checkAction(type,args){
@@ -1138,6 +1141,13 @@
         const row={kind:'impact',source,target,at:hit.at,speed:Math.max(0,hit.speed),normal:hit.normal};
         const contact=impactEvents==='timed'?ctx.eventAt(hit.at,row):row;
         return hit.b===null?[contact]:[contact,{...contact,source:target,target:source,normal:V.mul(hit.normal,-1)}];
+      });
+      if(contactSamples)out['contact-samples']=(state.impacts??[]).flatMap(hit=>{
+        const source=state.bodies[hit.a]?.entity, target=hit.b===null?(hit.surface?.shape??'ground'):state.bodies[hit.b]?.entity;
+        if(!source||!target||source===target||!hit.measurement.impulse.some(value=>value!==0))return [];
+        const time=W.timedEvents.timeOf(ctx.eventAt(hit.at,{}));
+        return [W.contactSamples.sample({kind:'impact',source,target,...hit.measurement,
+          normal:hit.normal,interval:ctx.dt,forceBasis:'step-average'},{time})];
       });
       if(fabricFields.length)out['deformable-loads']=state.fabricLoads;
       return out;

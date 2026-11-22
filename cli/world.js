@@ -515,6 +515,16 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         return respond(require('./mass-properties.js').measure(kit,read(file),file,
           {dependency:shot?.dependency,assetPack:opt['asset-pack']}));
       }
+      case 'excite': {
+        ensure(typeof file==='string' && other===undefined && (opt.wav===undefined||typeof opt.wav==='string'),
+        'Use sim excite <run.json> [--out trace.json --wav force.wav]');
+        ensure(opt.wav===undefined||typeof opt.out!=='string'||path.resolve(opt.wav)!==path.resolve(opt.out),
+          'Contact trace and WAV need distinct output files');
+        const exciter=require('./contact-exciter.js'), plan=read(file);
+        const result=exciter.run(kit,plan,file,shot?.dependency);
+        if(opt.wav!==undefined)exciter.writeWav(opt.wav,result,plan.audio);
+        return respond(result);
+      }
       case 'waves': {
         ensure(typeof file==='string' && other===undefined && (opt.wav===undefined||typeof opt.wav==='string'),
         'Use sim waves <run.json> [--out trace.json --wav audition.wav]');
