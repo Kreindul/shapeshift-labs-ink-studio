@@ -83,7 +83,8 @@
       const frequency=note.frequency*2**(bend/1200);
       const start=glide && note.fromFrequency ? note.fromFrequency : frequency;
       const vibratoHz=frequency*(2**(vibrato/1200)-1);
-      const maximum=Math.max(frequency,start)+vibratoHz;
+      const pitchMax=note.expression?.pitchMax ?? 1;
+      const maximum=Math.max(frequency,start)+vibratoHz+frequency*Math.max(0,pitchMax-1);
       const widthSpeed=osc.pulse ? tau*lfo.depth*lfo.rate : 0;
       const saw=osc.saw || osc.pulse ? sawBand((maximum+widthSpeed)/rate) : null;
       const filter=bypass ? null : lowpass(rate,tone.resonance);
@@ -97,14 +98,15 @@
         const current=highGuard ? frequency+(glide ? (start-frequency)*Math.max(0,1-t/glide) : 0)+
           vibratoHz*Math.sin(t*tau*5.2) : 0;
         const edge=lfo.depth ? lfo.depth*Math.sin(tau*(lfo.rate*t+lfo.phase)) : 0;
-        const guard=highGuard ? clamp((.49*rate-current-widthSpeed)/(.07*rate)) : 1;
+        const guarded=current+frequency*Math.max(0,pitchMax-1);
+        const guard=highGuard ? clamp((.49*rate-guarded-widthSpeed)/(.07*rate)) : 1;
         let sample=0;
         if (saw && guard) {
           const center=saw(turn);
           sample=guard*(osc.saw*center+
             (osc.pulse ? osc.pulse*(saw(turn-osc.pulseWidth-edge)-center) : 0));
         }
-        const subGuard=highGuard ? clamp((.49*rate-current/2)/(.07*rate)) : 1;
+        const subGuard=highGuard ? clamp((.49*rate-guarded/2)/(.07*rate)) : 1;
         if (osc.sub && subGuard) sample+=osc.sub*subGuard*Math.sin(Math.PI*turn);
         if (filter) {
           const cutoff=Math.max(20,Math.min(ceiling,2**(cutoffBase+amount*level(sweep,t,gate))));

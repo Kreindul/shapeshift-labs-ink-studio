@@ -13,12 +13,12 @@
   const mod = (x,n) => (x%n+n)%n;
 
   function expression(raw) {
-    require(fields(raw,['delay','gate','bend','glide','vibrato','retrigger','offset','articulation','brightness']) &&
+    require(fields(raw,['delay','gate','bend','glide','vibrato','retrigger','offset','articulation','brightness','curves']) &&
       [['delay',-.125,.125],['gate',.05,2],['bend',-1200,1200],['glide',0,2],['vibrato',0,100],
         ['offset',0,5],['brightness',0,1]].every(([key,lo,hi]) => raw[key]===undefined || finite(raw[key],lo,hi)) &&
       (raw.retrigger===undefined || integer(raw.retrigger,1,8)) &&
       (raw.articulation===undefined || id(raw.articulation)), 'Invalid note expression');
-    return {...raw};
+    return {...raw,...(raw.curves!==undefined && {curves:P.musicNoteExpression.validate(raw.curves)})};
   }
 
   function motif(raw) {

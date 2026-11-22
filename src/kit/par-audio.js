@@ -535,6 +535,19 @@
         return {value,session:value.session,winners:value.winners,report:value.report};
       }
     },
+    'music.instrumentPresets': {
+      description:'Get editable stock reed, electric tines and bass patches with contextual articulation maps.',
+      inputs:{},outputs:{value:'record'},
+      run() {return {value:P.musicProduction.instrumentPresets};}
+    },
+    'music.planPocket': {
+      description:'Plan four takes that isolate written rhythm changes and linked microtiming.',
+      inputs:{source:'record',brief:'record',assets:options},outputs:{value:'record',variants:'array<record>',report:'record'},
+      run({source,brief,assets}) {
+        const value=P.musicProduction.planPocket(source,brief,assets);
+        return {value,...value};
+      }
+    },
     'music.reviewProducer': {
       description: 'Level-match producer takes in context and return aligned listening windows and instrument solos.',
       inputs:{source:'record',session:'record',assets:options,options},

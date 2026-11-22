@@ -14,6 +14,9 @@ Use [note clips and voice-leading search](music-voice-leading.md) to
 try independent inner lines around a locked melody and bass.
 Use [patch gestures](music-gestures.md) to rehearse different performances
 of the written notes.
+Use [instrument performance maps](music-instrument-performance.md) for
+compensated attacks, interval-aware joins, key-up samples and independent
+rhythm and microtiming auditions.
 
 The [sample instrument builder](sample-instrument-builder.md) creates a
 portable sampler patch and its WAV assets from a bank of recorded gestures.

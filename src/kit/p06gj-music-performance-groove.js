@@ -116,13 +116,21 @@
     }));
     const followers=new Map();
     for (const row of links) {
-      check(fields(row,['leader','followers','within','strength']) && names.includes(row.leader) &&
+      check(fields(row,['leader','followers','within','strength','offset']) && names.includes(row.leader) &&
         Array.isArray(row.followers) && integer(row.followers.length,1,7),'Groove link needs a leader and followers');
-      const {within=.0625,strength=1}=row;
+      const {within=.0625,strength=1,offset}=row;
       check(finite(within,0,.5) && finite(strength,0,1),'Invalid groove link tolerance or strength');
+      if (offset!==undefined) {
+        check(fields(offset,['unit','points']) && ['seconds','beats'].includes(offset.unit) &&
+          Array.isArray(offset.points) && integer(offset.points.length,1,64),'A groove link offset needs a unit and beat-addressed points');
+        const limit=offset.unit==='beats' ? .25 : .125;
+        check(Array.from(offset.points).every((point,i)=>Array.isArray(point) && point.length===2 &&
+          finite(point[0],0,plan.sections.at(-1).end) && finite(point[1],-limit,limit) &&
+          (!i || point[0]>offset.points[i-1][0])),'Groove link offsets need increasing beats and bounded offsets');
+      }
       for (const name of row.followers) {
         check(names.includes(name) && name!==row.leader && !followers.has(name),'Each groove follower needs one other leader');
-        followers.set(name,{leader:row.leader,within,strength});
+        followers.set(name,{leader:row.leader,within,strength,offset});
       }
     }
     const order=[], visiting=new Set();
@@ -152,7 +160,7 @@
           target:clock.timeAt({beat:round(beat+cell.length)})-at,strength:rule.length}})
       };
     }
-    function driver(name,events) {
+    function driver(name,events,clock) {
       const link=followers.get(name);
       if (!link || !link.strength) return null;
       const leader=events[link.leader].filter(row=>row.velocity>0).slice().sort((a,b)=>a.beat-b.beat || a.time-b.time);
@@ -170,7 +178,16 @@
         let first=best;
         for (let i=(best===b ? lo : lo-1)-1;i>=0 && Math.abs(leader[i].beat-best.beat)<eps;i--)
           first=leader[i];
-        return time+(first.time-time)*link.strength;
+        let offset=0;
+        if (link.offset) {
+          const {unit,points}=link.offset;
+          const index=points.findIndex(row=>row[0]>beat);
+          const before=index<0 ? points.at(-1) : points[Math.max(0,index-1)], after=points[index];
+          offset=index<=0 ? before[1] : before[1]+(after[1]-before[1])*(beat-before[0])/(after[0]-before[0]);
+          if (unit==='beats')
+            offset=clock.timeAt({beat:round(Math.max(0,beat+offset))})-clock.timeAt({beat:round(beat)});
+        }
+        return time+(first.time+offset-time)*link.strength;
       };
     }
     return {order,style,driver,anchor:beat=>pin.has(round(beat))};

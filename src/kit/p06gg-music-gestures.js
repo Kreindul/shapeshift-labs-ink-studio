@@ -16,7 +16,7 @@
 
   function patch(raw,assets) {
     check(record(raw),'Expected a music patch');
-    const {gestures={},echo,...instrument}=raw;
+    const {gestures={},echo,performance,...instrument}=raw;
     check(record(gestures) && Object.keys(gestures).length<=24 && Object.keys(gestures).every(id),'Invalid patch gestures');
     const curves=Object.fromEntries(Object.entries(gestures).map(([name,gesture])=>{
       check(fields(gesture,[...mixFields,...noteFields]) && Object.keys(gesture).length,'A gesture needs named curves');
@@ -40,7 +40,8 @@
       check(finite(tape.delay,.025,1.5) && finite(tape.feedback,0,.8) &&
         ['damping','wow','flutter','width','send'].every(name=>finite(tape[name],0,1)),'Invalid tape echo parameter');
     }
-    return {player:I.compile(instrument,assets),gestures:curves,echo:tape,
+    const player=I.compile(instrument,assets);
+    return {player,performance:P.musicPhrasing.compile(performance,instrument),gestures:curves,echo:tape,
       color:instrument.color ?? (instrument.type==='drum' ? .55 : instrument.type==='keys' ? .5 : .6)};
   }
 
