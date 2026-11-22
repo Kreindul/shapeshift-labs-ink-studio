@@ -41,6 +41,48 @@ world position, arc distance, and textile UV when present.
 The optional `maxSegments` bounds preparation before the builder receives
 any rows. Standalone scenes have a total budget of 60,000 segments.
 
+## Set width, taper, and twist
+
+Set the three channels independently on a strand. A number holds across the
+whole strand. An array of `[u, value]` keys interpolates linearly. Use
+`{ "samples": [...] }` for painted values spaced evenly along the path.
+Positions run from 0 to 1 by arc length on each strand. A JavaScript
+function can paint a channel from `{ u, distance, point, id, family, index, uv }`.
+The `uv` entry is available on textile charts.
+
+```js
+K.curveSplats.draw(builder, source, {
+  width: { samples: [.05, .11, .28, .36, .17] },
+  taper: [[0, 1], [.72, 1], [1, 0]],
+  twist: [[0, 0], [1, 2 * Math.PI]],
+  aspect: .24
+});
+```
+
+- `width` is twice the Gaussian standard deviation in world units along the
+  major section axis. It takes precedence over `radius`. A fixed width keeps
+  a cable at the same world gauge through bends.
+- `taper` multiplies the width by a value from 0 to 1. A zero profile omits
+  coverage there.
+- `twist` rotates the section about the path tangent in radians. Set `up`
+  to choose the initial major-axis direction. `aspect` sets the minor
+  width as a fraction of the major width, from .1 to 1. Supplying `twist`
+  defaults this ratio to .35 so the roll is visible. A round section uses 1.
+
+`profileSamples` sets the sampling resolution for varying channels and
+defaults to 96. The builder also splits at control keys and adds samples
+for fast changes in keyed twist. The resulting piecewise sections fit
+within the existing segment budget. Adjust the profiles or source geometry
+and rebuild to update them.
+
+Set `appearance.curveProfile` on a textile with `renderer: 'curve-splats'`
+to pass the same options to its strands. With the simulation's curve splat
+renderer enabled, set `visual.routedLinkProfiles.<link-id>` for an
+individual routed link. The [profile example](../examples/curve-splat-profiles.json)
+shows a fixed cable, painted stroke, tapered tip, and twisted ribbon. Run
+`node examples/curve-splat-profiles.cjs studio/out/curve-splat-profiles`
+to render an animated review.
+
 ## Render and compare
 
 The [editable example](../examples/curve-splat-scene.json) uses

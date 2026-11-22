@@ -260,7 +260,8 @@
       object = 'textile',
       material = 'yarn',
       maxMarks = 180000,
-      renderer = 'patches'
+      renderer = 'patches',
+      curveProfile
     } = {}
   ) {
     check(
@@ -280,7 +281,8 @@
     const explicitColor = color === undefined || typeof color === 'function' ? null : rgb(color);
     const threads = checkedThreads(plan);
     if (renderer === 'curve-splats') return K.curveSplats.draw(B, { kind: 'textile', plan: { threads } }, {
-      color: color ?? (sample => defaultColors[sample.family]), object, material, maxSegments: Math.min(maxMarks, K.curveSplats.segmentLimit)
+      ...curveProfile, color: color ?? (sample => defaultColors[sample.family]), object, material,
+      maxSegments: Math.min(maxMarks, K.curveSplats.segmentLimit)
     });
     const limit = threads.reduce((n, s) => n + s.stations.length * sides * 2, 0);
     check(limit <= maxMarks, 'native mark budget exceeded before drawing');

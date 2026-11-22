@@ -53,7 +53,7 @@ test('spline, textile, routed and recorded trail inputs retain their separate pa
 
   const textile = K.textile.weave({ size: [2, 1.4], columns: 4, rows: 3, radius: .06, clearance: .02 });
   let sampled = 0;
-  const yarn = K.textile.draw(B, textile, { renderer: 'curve-splats', color: ({ uv }) => {
+  const yarn = K.textile.draw(B, textile, { renderer: 'curve-splats', curveProfile: { width: .18, twist: .3 }, color: ({ uv }) => {
     assert.equal(uv.length, 2);
     sampled++;
     return '#76d6ae';
@@ -64,12 +64,17 @@ test('spline, textile, routed and recorded trail inputs retain their separate pa
 
   const fixture = structuredClone(require('../examples/world-routed-workshop.json'));
   fixture.visual.routedLinkRenderer = 'curve-splats';
+  fixture.visual.routedLinkProfiles = { hose: { width: .28 } };
   const run = K.world.runtime.create(fixture);
   const link = run.query().probe('routes/links', undefined, { link: 'hose' }).value;
   const routed = C.draw(B, { kind: 'routed', link });
   assert.equal(routed.threads.length, link.paths.length);
   assert.ok(routed.segments > 0);
-  assert.equal(K.world.visual(kit, run.view(), run.query()).curveSplats, true);
+  const visual = K.world.visual(kit, run.view(), run.query());
+  assert.equal(visual.curveSplats, true);
+  const meta = visual.renderMetadata, hose = meta.objects.indexOf('hose');
+  assert.ok(hose > 0);
+  assert.ok(meta.objectIds.some((id, i) => id === hose && Math.abs(visual.data[i * 16 + 12] - .14) < 1e-6));
 
   const trail = { kind: 'trail', samples: [{ point: [0, 0, 0] }, { point: [.4, .2, 0] },
     null, [1, 1, 0], [1.5, 1.2, 0]] };
@@ -87,7 +92,7 @@ test('the normal render CLI opens an editable JSON curve scene and can switch to
   t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
   const file = name => path.join(folder, name);
   const entry = scene([{ source: { kind: 'spline', points: [[-2,0,0],[-.8,.7,.2],[.8,-.5,-.3],[2,0,0]], samples: 5 },
-    radius: .065, color: '#f3b56b', object: 'wire' }]);
+    width: { samples: [.06, .21, .10] }, twist: [[0, 0], [1, Math.PI]], color: '#f3b56b', object: 'wire' }]);
   fs.writeFileSync(file('strand.json'), JSON.stringify(entry));
   const cli = path.resolve(__dirname, '../cli/ink-studio.js');
   for (const mode of ['on', 'off']) {
@@ -98,4 +103,60 @@ test('the normal render CLI opens an editable JSON curve scene and can switch to
   const curve = PNG.read(file('on.png')), fallback = PNG.read(file('off.png'));
   assert.equal(curve.w, 128);
   assert.notDeepEqual(curve.rgb, fallback.rgb);
+});
+
+const band = (frame, x) => {
+  let result = 0;
+  for (let y = 0; y < frame.h; y++) result += frame.alpha[y * frame.w + x] / 255;
+  return result;
+};
+const straight = [[-2, 0, 0], [2, 0, 0]];
+const profileFrame = style => ink.render(C.world(scene([{ source: straight, ...style }])),
+  { ...imageOptions, ortho: true, transparent: true });
+
+test('width and taper use arc length, including for a path with irregular control spacing', () => {
+  const fixed = profileFrame({ width: .22 });
+  assert.deepEqual(fixed.alpha, profileFrame({ radius: .11 }).alpha);
+  assert.ok(Math.abs(band(fixed, 48) - band(fixed, 80)) < .02);
+  const pressure = { samples: [.10, .43, .10] };
+  const painted = profileFrame({ width: pressure, taper: [[0, 1], [.64, 1], [1, 0]] });
+  assert.ok(band(painted, 64) > 2 * band(painted, 35));
+  assert.ok(band(painted, 92) < .25 * band(painted, 64));
+  const irregular = ink.render(C.world(scene([{ source: [[-2, 0, 0], [-1.85, 0, 0], [.92, 0, 0], [2, 0, 0]],
+    width: pressure, taper: [[0, 1], [.64, 1], [1, 0]] }])),
+  { ...imageOptions, ortho: true, transparent: true });
+  assert.ok(Math.abs(band(irregular, 64) - band(painted, 64)) < .08);
+  assert.deepEqual(pressure.samples, [.10, .43, .10]);
+});
+
+test('twist physically turns an elliptical section about the strand tangent', () => {
+  const broad = profileFrame({ width: .44, aspect: .26, twist: 0 });
+  const edge = profileFrame({ width: .44, aspect: .26, twist: Math.PI / 2 });
+  const visibleWidth = (frame, x) => {
+    let pixels = 0;
+    for (let y = 0; y < frame.h; y++) if (frame.alpha[y * frame.w + x] >= 30) pixels++;
+    return pixels;
+  };
+  assert.ok(visibleWidth(broad, 64) >= visibleWidth(edge, 64) * 2);
+  const roll = profileFrame({ width: .44, aspect: .26, twist: [[0, 0], [1, Math.PI]] });
+  assert.ok(visibleWidth(roll, 64) < visibleWidth(roll, 43) * .65);
+  assert.ok(visibleWidth(roll, 64) < visibleWidth(roll, 86) * .65);
+  const circular = profileFrame({ width: .44, aspect: 1 });
+  assert.deepEqual(profileFrame({ width: .44, aspect: 1, twist: [[0, 0], [1, 5]] }).alpha, circular.alpha);
+});
+
+test('profile painters are sampled in path order and a bad profile leaves the builder intact', () => {
+  const B = kit.makeBuilder(1, palette), positions = [];
+  const range = C.draw(B, straight, { width: at => {
+    positions.push(at.u);
+    assert.equal(at.point.length, 3);
+    return .05 + at.u * .18;
+  }, twist: at => at.u * Math.PI, profileSamples: 24 });
+  assert.equal(range.segments, 24);
+  assert.ok(positions.every((v, i) => i === 0 || v > positions[i - 1]));
+  const count = B.count();
+  assert.throws(() => C.draw(B, straight, { taper: [[0, 1], [0, .3]] }), /increasing positions/);
+  assert.throws(() => C.draw(B, straight, { width: ({ u }) => u > .6 ? NaN : .25 }), /invalid width/);
+  assert.throws(() => C.draw(B, straight, { taper: 0, twist: [[0, 0], [1, Math.PI]], maxSegments: 3 }), /segment budget/);
+  assert.equal(B.count(), count);
 });

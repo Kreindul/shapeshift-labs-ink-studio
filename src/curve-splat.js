@@ -1,15 +1,47 @@
-/* Finite, round Gaussian strands carried by ordinary native splat rows. */
+/* Finite Gaussian strands carried by ordinary native splat rows. */
 const CurveSplat = (() => {
   // Kind zero leaves the motion payload free. Preserve the tag through native row copies.
-  const marker = -161291.375, minimum = 1e-5;
+  const marker = -161291.375, profileMarker = -161292.375, minimum = 1e-5;
+  // Keep the axial eigenvalue separate from the transverse values even for very short spans.
+  const axialUnits = (radius, half) => Math.max(4, Math.min(64, 1 + (half / radius) ** 2 / 3));
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-  const isRow = (data, at) => data[at + 15] === marker && (data[at + 11] & 15) === 0 &&
-    data[at + 12] > 0 && data[at + 13] > 0;
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const unit = a => {
+    const length = Math.hypot(...a);
+    return length > 0 ? a.map(v => v / length) : null;
+  };
+  const isRow = (data, at) => (data[at + 15] === marker || data[at + 15] === profileMarker) &&
+    (data[at + 11] & 15) === 0 && data[at + 12] > 0 && data[at + 13] > 0;
+
+  function profiledDimensions(radius, half, aspect, scale, xx, xy, xz, yy, yz, zz) {
+    const ratio = aspect * aspect, longitudinal = axialUnits(radius, half);
+    const variance = (xx + yy + zz) / (longitudinal + 1 + ratio);
+    const size = Math.sqrt(variance) * scale;
+    if (!(size > 0) || !(aspect >= .1 && aspect < 1)) return null;
+    const matrix = [[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]].map(row => row.map(v => v / variance));
+    const pivot = matrix[0][0] >= matrix[1][1] && matrix[0][0] >= matrix[2][2] ? 0 :
+      matrix[1][1] >= matrix[2][2] ? 1 : 2;
+    let axis = unit(matrix[pivot]);
+    if (!axis) return null;
+    for (let i = 0; i < 16; i++) axis = unit(matrix.map(row => dot(row, axis)));
+    const across = matrix.map((row, i) => row.map((v, j) =>
+      v - (i === j ? ratio : 0) - (longitudinal - ratio) * axis[i] * axis[j]));
+    const transverse = across[0][0] >= across[1][1] && across[0][0] >= across[2][2] ? across[0] :
+      across[1][1] >= across[2][2] ? across[1] : across[2];
+    const along = dot(transverse, axis);
+    const major = unit(transverse.map((v, i) => v - along * axis[i]));
+    if (!major) return null;
+    return {
+      axis, major, minor: cross(axis, major).map(v => v / aspect), radius: size, half: half * size / radius
+    };
+  }
 
   function dimensions(data, at, scale) {
     const radius = data[at + 12], half = data[at + 13];
     const xx = data[at + 4], xy = data[at + 5], xz = data[at + 6];
     const yy = data[at + 8], yz = data[at + 9], zz = data[at + 10];
+    if (data[at + 15] === profileMarker)
+      return profiledDimensions(radius, half, data[at + 14], scale, xx, xy, xz, yy, yz, zz);
     // The carrier stores the covariance of a uniform segment convolved with a round Gaussian.
     // Its principal axis also follows native rigid transforms. Recover the uniform scale from the trace.
     const ratio = (xx + yy + zz) / (3 * radius * radius + half * half / 3);
@@ -57,17 +89,28 @@ const CurveSplat = (() => {
       bounds[3] = Math.max(bounds[3], sy + ey);
     }
     const middle = a.map((v, i) => v + (first + last) / 2 * (b[i] - v));
-    return { from, axis, radius, length, bounds, middle, tau: -Math.log1p(-Math.min(.999, opacity)) };
+    return { from, axis, radius, length, bounds, middle, major: shape.major, minor: shape.minor,
+      tau: -Math.log1p(-Math.min(.999, opacity)) };
   }
 
   // Integrate over the finite axis after projecting the Gaussian orthogonal to the camera ray.
   function sample(strand, { origin, direction, axial }, near) {
-    const { from, axis, radius, length, tau } = strand;
-    const vx = from[0] - origin[0], vy = from[1] - origin[1], vz = from[2] - origin[2];
-    const axialStart = vx * direction[0] + vy * direction[1] + vz * direction[2];
-    const parallel = dot(axis, direction);
-    const px = vx - axialStart * direction[0], py = vy - axialStart * direction[1], pz = vz - axialStart * direction[2];
-    const dx = axis[0] - parallel * direction[0], dy = axis[1] - parallel * direction[1], dz = axis[2] - parallel * direction[2];
+    const { from, axis, radius, length, major, minor } = strand;
+    const offsetFromEye = [from[0] - origin[0], from[1] - origin[1], from[2] - origin[2]];
+    const axialStart = dot(offsetFromEye, direction), axialSlope = dot(axis, direction);
+    let start = offsetFromEye, ray = direction, along = axis, tau = strand.tau;
+    if (major) {
+      // Whiten the elliptical kernel and integrate the Gaussian along the transformed ray.
+      start = [dot(axis, offsetFromEye), dot(major, offsetFromEye), dot(minor, offsetFromEye)];
+      ray = [axialSlope, dot(major, direction), dot(minor, direction)];
+      const rayScale = Math.hypot(...ray);
+      ray = ray.map(v => v / rayScale);
+      along = [1, 0, 0];
+      tau /= rayScale;
+    }
+    const rayStart = major ? dot(start, ray) : axialStart, parallel = major ? ray[0] : axialSlope;
+    const px = start[0] - rayStart * ray[0], py = start[1] - rayStart * ray[1], pz = start[2] - rayStart * ray[2];
+    const dx = along[0] - parallel * ray[0], dy = along[1] - parallel * ray[1], dz = along[2] - parallel * ray[2];
     const transverse = Math.hypot(dx, dy, dz), sigma = radius * Math.SQRT2;
     let at, nearest, integral;
     if (transverse * length < 1e-4 * radius) {
@@ -83,8 +126,8 @@ const CurveSplat = (() => {
     const offset = Math.hypot(px + nearest * dx, py + nearest * dy, pz + nearest * dz) / sigma;
     if (offset > 3.6) return null;
     const alpha = -Math.expm1(-tau * integral * Math.exp(-offset * offset));
-    return alpha >= minimum ? { alpha, depth: Math.max(near, axial * (axialStart + at * parallel)) } : null;
+    return alpha >= minimum ? { alpha, depth: Math.max(near, axial * (axialStart + at * axialSlope)) } : null;
   }
-  return Object.freeze({ marker, minimum, isRow, prepare, sample });
+  return Object.freeze({ marker, profileMarker, axialUnits, minimum, isRow, prepare, sample });
 })();
 if (typeof module !== 'undefined') module.exports = CurveSplat;

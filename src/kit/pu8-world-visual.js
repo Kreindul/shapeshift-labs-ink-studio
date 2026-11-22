@@ -311,8 +311,10 @@
         const {id,entity,material,radius,paths,look}=link;
         const first=B.count(), target=targetFor(entity), ramp=look??[19,20,21,22,23];
         if (config.routedLinkRenderer === 'curve-splats') {
+          const profiles = config.routedLinkProfiles;
+          const profile = profiles && Object.hasOwn(profiles, id) ? profiles[id] : undefined;
           K.curveSplats.draw(B, { kind: 'routed', link }, {
-            color: B.P[ramp[Math.floor(ramp.length / 2)]] ?? B.P[1], target
+            ...profile, color: B.P[ramp[Math.floor(ramp.length / 2)]] ?? B.P[1], target
           });
           continue;
         }

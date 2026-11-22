@@ -66,44 +66,138 @@
     }
   }
 
+  function channel(value, name, min, max) {
+    const read = value => {
+      check(finite(value, min, max), 'invalid ' + name + ' value');
+      return value;
+    };
+    if (typeof value === 'number') {
+      const constant = read(value);
+      return { sample: () => constant };
+    }
+    if (typeof value === 'function') return { sample: at => read(value(at)), varying: true };
+    let rows = Array.isArray(value) ? value : value?.keys;
+    if (value?.samples !== undefined) {
+      const samples = value.samples;
+      check(rows === undefined && Array.isArray(samples) && samples.length >= 2 && samples.length <= 512,
+        'expected two to 512 painted ' + name + ' samples');
+      rows = Array.from(samples, (v, i) => [i / (samples.length - 1), v]);
+    }
+    check(Array.isArray(rows) && rows.length > 0 && rows.length <= 512, 'expected up to 512 ' + name + ' keys');
+    const keys = Array.from(rows, (row, i) => {
+      check(Array.isArray(row) && row.length === 2 && finite(row[0], 0, 1) &&
+        (i === 0 || row[0] > rows[i - 1][0]), name + ' keys need increasing positions from zero to one');
+      return [row[0], read(row[1])];
+    });
+    function sample({ u }) {
+      if (u <= keys[0][0]) return keys[0][1];
+      if (u >= keys.at(-1)[0]) return keys.at(-1)[1];
+      let first = 0, last = keys.length - 1;
+      while (last - first > 1) {
+        const middle = (first + last) >> 1;
+        if (keys[middle][0] > u) last = middle;
+        else first = middle;
+      }
+      const [a, x] = keys[first], [b, y] = keys[last];
+      return x + (y - x) * (u - a) / (b - a);
+    }
+    return { sample, keys, varying: keys.some(([, v]) => v !== keys[0][1]) };
+  }
+
+  function profileStops(channels, resolution) {
+    if (!channels.some(p => p?.varying)) return [];
+    const stops = new Set(Array.from({ length: resolution - 1 }, (_, i) => (i + 1) / resolution));
+    for (const [i, profile] of channels.entries()) {
+      if (!profile?.varying || !profile.keys) continue;
+      for (const [j, [u, v]] of profile.keys.entries()) {
+        if (u > 0 && u < 1) stops.add(u);
+        if (!j) continue;
+        const [from, previous] = profile.keys[j - 1];
+        if (v === previous) continue;
+        const steps = i === 2 ? Math.ceil(Math.abs(v - previous) / (Math.PI / 12)) : 8;
+        for (let k = 1; k < steps; k++) stops.add(from + (u - from) * k / steps);
+        check(stops.size <= segmentLimit, 'profile exceeds the segment budget');
+      }
+    }
+    return [...stops].sort((a, b) => a - b);
+  }
+
+  function majorAxis(frames, index, axis, t, angle) {
+    const direction = K.V.lerp(frames[index].N, frames[index + 1].N, t);
+    const projected = K.V.mad(direction, axis, -K.V.dot(direction, axis));
+    const reference = Math.abs(axis[1]) < .9 ? [0, 1, 0] : [1, 0, 0];
+    const n = K.V.norm(K.V.len(projected) > 1e-7 ? projected : K.V.mad(reference, axis, -K.V.dot(reference, axis)));
+    return K.V.mad(K.V.mul(n, Math.cos(angle)), K.V.cross(axis, n), Math.sin(angle));
+  }
+
   function prepare(source, options = {}) {
     const link = source?.kind === 'routed' ? source.link : undefined;
-    const { radius, opacity = .94, color = '#eab876', object = link?.id ?? 'curve',
+    const { radius, width, taper = 1, twist = 0, aspect = options.twist === undefined ? 1 : .35,
+      up = [0, 1, 0], profileSamples = 96, opacity = .94, color = '#eab876', object = link?.id ?? 'curve',
       material = link?.material ?? 'strand', target, maxSegments = segmentLimit } = options;
     check((radius === undefined || finite(radius, 1e-6, 100)) && finite(opacity, 0, 1) && label(object) && label(material) &&
+      finite(aspect, .1, 1) && point(up) && K.V.len(up) > 1e-8 &&
+      Number.isSafeInteger(profileSamples) && profileSamples >= 8 && profileSamples <= 1024 &&
       Number.isSafeInteger(maxSegments) && maxSegments >= 0 && maxSegments <= segmentLimit,
-      'invalid strand appearance or segment budget');
+      'invalid strand appearance, profile resolution or segment budget');
+    const profileWidth = width === undefined ? null : channel(width, 'width', 0, 200);
+    const profileTaper = channel(taper, 'taper', 0, 1);
+    const profileTwist = channel(twist, 'twist', -64 * Math.PI, 64 * Math.PI);
+    const elliptical = aspect < .99999;
+    const stops = profileStops([profileWidth, profileTaper, elliptical && profileTwist], profileSamples);
     const fixedColor = typeof color === 'function' ? null : rgb(color);
-    let segments = 0, samples = 0;
+    let segments = 0, examined = 0, samples = 0;
     const strands = paths(source).map((strand, index) => {
-      const width = radius ?? strand.radius ?? .03, id = strand.id ?? String(index);
-      check(finite(width, 1e-6, 100) && label(id), 'invalid strand radius or ID');
+      const baseRadius = radius ?? strand.radius ?? .03, id = strand.id ?? String(index);
+      check(finite(baseRadius, 1e-6, 100) && label(id), 'invalid strand radius or ID');
       const knots = points(strand.points), rows = [];
       if (strand.closed && knots.length >= 2 && K.V.dist(knots[0], knots.at(-1)) > 1e-8) knots.push(knots[0]);
       samples += knots.length;
       check(samples <= 2 * segmentLimit, 'point budget exceeded');
-      let distance = 0;
-      for (let i = 1; i < knots.length; i++) {
-        const from = knots[i - 1], to = knots[i], length = K.V.dist(from, to);
+      const lengths = knots.slice(1).map((to, i) => K.V.dist(knots[i], to));
+      const total = lengths.reduce((sum, length) => length < 1e-7 ? sum : sum + length, 0);
+      const frames = elliptical && total > 0 ? K.curve.frames(knots, Array.from(up)) : null;
+      let distance = 0, stop = 0;
+      for (let i = 0; i < lengths.length; i++) {
+        const from = knots[i], to = knots[i + 1], length = lengths[i];
         if (length < 1e-7) continue;
-        check(++segments <= maxSegments, 'segment budget exceeded');
-        const shade = fixedColor ?? rgb(color({ id, family: strand.family, index: strand.index ?? index,
-          point: K.V.lerp(from, to, .5), distance: distance + length / 2,
-          ...(strand.uvs?.[i - 1] && strand.uvs[i] && { uv: strand.uvs[i - 1].map((v, k) => (v + strand.uvs[i][k]) / 2) }) }));
-        rows.push({ from, to, shade });
+        const axis = frames && K.V.mul(K.V.sub(to, from), 1 / length);
+        const begin = distance / total, end = (distance + length) / total;
+        const a = strand.uvs?.[i], b = strand.uvs?.[i + 1];
+        let previous = 0;
+        while (stop < stops.length && stops[stop] <= begin + 1e-12) stop++;
+        do {
+          check(++examined <= maxSegments, 'segment budget exceeded');
+          const next = stop < stops.length && stops[stop] < end - 1e-12 ?
+            (stops[stop++] * total - distance) / length : 1;
+          const middle = (previous + next) / 2, arc = distance + length * middle;
+          const sample = { id, family: strand.family, index: strand.index ?? index,
+            point: K.V.lerp(from, to, middle), distance: arc, u: arc / total,
+            ...(a && b && { uv: a.map((v, k) => v + (b[k] - v) * middle) }) };
+          const size = (profileWidth ? profileWidth.sample(sample) / 2 : baseRadius) * profileTaper.sample(sample);
+          if (size >= 1e-6 && (next - previous) * length >= 1e-7) {
+            segments++;
+            const shade = fixedColor ?? rgb(color(sample));
+            const profile = frames ? { major: majorAxis(frames, i, axis, middle, profileTwist.sample(sample)), aspect } : undefined;
+            rows.push({ from: previous === 0 ? from : K.V.lerp(from, to, previous),
+              to: next === 1 ? to : K.V.lerp(from, to, next), shade, radius: size, profile });
+          }
+          previous = next;
+        } while (previous < 1);
         distance += length;
       }
-      return { id, width, rows };
+      return { id, rows };
     });
-    return { object, material, target, opacity, strands, segments };
+    return { object, material, target, opacity, strands, segments, examined };
   }
 
   function emit(builder, plan) {
     check(typeof builder?.curveSplat === 'function', 'expected a native splat builder');
     const first = builder.count(), threads = [];
-    for (const { id, width, rows } of plan.strands) {
+    for (const { id, rows } of plan.strands) {
       const start = builder.count();
-      for (const { from, to, shade } of rows) builder.curveSplat(from, to, width, shade, plan.opacity);
+      for (const { from, to, shade, radius, profile } of rows)
+        builder.curveSplat(from, to, radius, shade, plan.opacity, profile);
       const end = builder.count();
       builder.describeSplats?.(start, end, {
         object: plan.object, material: plan.material, target: { entity: plan.object, ...plan.target, surface: id }
@@ -127,7 +221,7 @@
     let remaining = segmentLimit;
     const plans = recipe.strands.map(({ source, ...appearance }, i) => {
       const plan = prepare(source, { object: 'curve:' + i, ...appearance, maxSegments: remaining });
-      remaining -= plan.segments;
+      remaining -= plan.examined;
       return plan;
     });
     const colors = new Set([packed(background), ...Array.from(palette, packed)]);
