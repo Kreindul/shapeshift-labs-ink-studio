@@ -515,6 +515,15 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         return respond(require('./mass-properties.js').measure(kit,read(file),file,
           {dependency:shot?.dependency,assetPack:opt['asset-pack']}));
       }
+      case 'solve': {
+        ensure(typeof file==='string' && other===undefined &&
+          (opt['require-convergence']===undefined||opt['require-convergence']===true),
+        'Use sim solve <plan.json> [--out report.json --require-convergence]');
+        const result=require('./numerical-solvers.js').run(kit,read(file),file,shot?.dependency);
+        respond(result);
+        if(opt['require-convergence'])ensure(result.converged,'Solve ended with status '+result.status);
+        return;
+      }
       case 'grid-ops': {
         ensure(typeof file==='string' && other===undefined,'Use sim grid-ops <plan.json> [--out report.json]');
         return respond(require('./grid-operators.js').run(kit,read(file),file,shot?.dependency));

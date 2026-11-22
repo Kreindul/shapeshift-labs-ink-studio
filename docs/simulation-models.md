@@ -178,3 +178,7 @@ creator-authored equations.
 
 [Grid and mesh operators](grid-operators.md) provide field reconstruction,
 tagged boundary application, and conservative finite-volume transport.
+
+[Linear and bracketed nonlinear solves](numerical-solvers.md) add dense,
+tridiagonal, and sparse matrix solves plus scalar root finding with
+residuals and work limits.
