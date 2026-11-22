@@ -8,6 +8,18 @@ const fs = require('fs'),
   { createHash, randomUUID } = require('crypto');
 const KIT_DIR = path.join(__dirname, 'src', 'kit'),
   read = f => fs.readFileSync(f, 'utf8').replace(/\nif \(typeof module[^\n]*\n?$/, '\n');
+// Keep the browser bake profile on the shared core and the kit modules used by
+// direct sculpting, materials, rigs, captured light, and native splat delivery.
+const bakeKit = new Set([
+  'k0-math.js', 'k0-ownership.js', 'k1-stage.js', 'k2-motion.js', 'k3-shapes.js', 'k4-art.js',
+  'k5-fields.js', 'k8-light.js', 'ka-build.js', 'kb-mesh.js', 'ke-volume.js', 'ki-deform.js', 'kl-vox.js', 'km-ramp.js',
+  'kn-afterimages.js', 'kn-scene-optics.js', 'ko-grow.js', 'kp-curve.js', 'kpx-pixel.js',
+  'kq-surface-presets.js', 'kr-tex.js', 'kt-nodes.js', 'kv-form.js', 'kz-weather.js', 'kza-ascii.js',
+  'p00-procedural.js', 'p01-cutaway.js', 'p01-procedural-surfaces.js', 'p01-splat-sample-state.js',
+  'p02-procedural-mesh.js', 'p04-profile-triangulation.js', 'p17-profile-distance.js', 'p1b-sample-coverage.js',
+  'p39-noise-fields.js', 'p40-field-composition.js', 'p43-render-grid.js', 'p44-splat-footprints.js',
+  'p59-sculptural-fields.js', 'p68-drawing.js', 'p69-material-masks.js', 'p73-blue-noise.js', 'p95-weather-tracks.js'
+]);
 const files = () =>
   [
     'src/stippling.js', 'src/splat-footprints.js', 'src/surface-brush.js', 'src/brushwork.js', 'src/screen-print.js', 'src/engraving.js', 'src/render-grid.js', 'src/randomness.js', 'src/fft.js', 'src/math-fields.js', 'src/typography-truetype.js', 'src/typography.js', 'src/frame-budget.js', 'src/target-inspection.js', 'src/drawing-primitives.js', 'src/palette-cycles.js', 'src/raster-schedule.js', 'src/texture-address.js', 'src/view-annotations.js', 'src/frame-composite.js', 'src/composite-video.js', 'src/frame-bank.js', 'src/motion-smear.js', 'src/ink-veil.js', 'src/textured-surface.js', 'src/palette-resampling.js', 'src/shadow-shell.js', 'src/sprite-surface.js', 'src/render-outputs.js', 'src/camera-atlas.js', 'src/sprite-cels.js', 'src/sprite-fringe.js', 'src/sprite-transitions.js', 'src/atlas-sprites.js', 'src/target-selectors.js', 'src/sprite-reconstruction.js', 'src/camera-lens.js', 'src/camera-impulses.js', 'src/camera-staging.js', 'src/splat-provenance.js',
@@ -41,9 +53,12 @@ function bundle({ format = 'script', profile = 'development' } = {}) {
     if (format === 'commonjs') return source + '\nmodule.exports = { ' + playbackExports + ' };\n';
     return 'const InkScenePlayer = (() => {\n' + source + '\nreturn { ' + playbackExports + ' };\n})();\n';
   }
-  if (profile !== 'development') throw Error('Ink bundle profile must be development or playback');
-  const sources = files().map(read).join('\n');
+  if (profile !== 'development' && profile !== 'bake') throw Error('Ink bundle profile must be development, bake or playback');
+  const inputs = files();
+  const sources = (profile === 'bake' ? inputs.filter(file => path.dirname(file) !== KIT_DIR || bakeKit.has(path.basename(file))) : inputs)
+    .map(read).join('\n');
   if (format === 'module') return sources + '\nexport { ' + EXPORTS + ' };\n';
+  if (format === 'commonjs' && profile === 'bake') return sources + '\nmodule.exports = { ' + EXPORTS + ' };\n';
   if (format === 'commonjs')
     return sources + '\nconst SCENES = [];\n' + demoFiles().map(read).join('\n') +
       '\nmodule.exports = { SCENES, ' + EXPORTS + ' };\n';

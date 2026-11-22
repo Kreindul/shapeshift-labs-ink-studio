@@ -953,6 +953,8 @@ fs.writeFileSync('ink-studio.browser.js', studio.bundle());
 
 The bundle defines `makeBuilder`, `makeSculpt`, `KIT`, `PixelLook` and the other names in `studio.EXPORTS` in script scope. Pass that toolkit to the [browser renderer](#browser-renderer) or to your own rendering code. The host controls input and advances animation.
 
+For direct JavaScript sculpting and live rendering, use the [compact browser bake profile](docs/build-profiles.md#bake-and-render-in-the-browser).
+
 To append the demos to a browser script, write `const SCENES = [];` after the toolkit bundle and append `studio.demos()`. Keep source files in the order returned by `files()` when embedding individually.
 
 For a consuming project's own scene collection, save `ink-studio.config.js` in that project's working directory:

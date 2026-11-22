@@ -2680,6 +2680,10 @@ Use at least one view for each level. `rebake` can resculpt the asset with
 coarser `S.focus` settings. If the merge and rebake both miss the count or
 coverage threshold, the example retains the previous accepted merge.
 Inspect a pass's `candidate.lod` to identify budget limits before tuning it.
+
+`S.aoR` controls the ambient-occlusion probe spacing in world units. Coarser
+bakes sample different surface points and use larger splat footprints, so
+review their baked shading at the intended display distance as well as coverage.
 Check authored colours separately in the same views. The reducer blends
 RGB within each group. For assets that require exact authored ramp entries,
 a record-based delivery pipeline can use `members` to select an authored
