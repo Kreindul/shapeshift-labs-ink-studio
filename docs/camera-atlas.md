@@ -47,6 +47,10 @@ const result = atlas.capture(world, { time: 1.2 });
   The view's `frame` object or synchronous callback can override those options,
   including its orbit camera and camera shot. WebGL views can also use
   `camera.pose` or a snapshot from `captureCamera`.
+- A view can use a synchronous `source({ world, time, tile, frame })`
+  callback. Return [shared render outputs](render-outputs.md#schedule-a-miniature-renderer-as-a-camera-feed)
+  from a miniature renderer to capture color, depth, surface IDs and UVs
+  at the tile’s resolution and cadence.
 - Pose or step the world before calling `capture`. Capture uses the provided
   world and fixes the render time to the supplied time.
 - A feed defaults to the base scene. It can opt into composite layers, a render

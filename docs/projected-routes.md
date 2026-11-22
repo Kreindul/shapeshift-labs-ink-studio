@@ -79,12 +79,11 @@ For strips, U spans one strip and V is in unwrapped texture repeats.
 `placements` lists visible or occluded on-screen prop rectangles, cel
 indices, and visible pixel counts after depth testing.
 
-Bind the frame as a named [render graph input](render-graph.md#connect-procedural-rasters)
-to put the view behind a mask
-or inside a display. To use a mixed-resolution layer callback, return
-`{ w: frame.width, h: frame.height, rgba: frame.data }`. Its diagnostic
-depth describes the route camera’s view. In a monitor composition the
-monitor’s physical depth still comes from its own scene geometry.
+The frame implements [shared render outputs](render-outputs.md).
+Pass it to a camera atlas source, use `KIT.renderOutputs.image(frame)`
+in a mixed-resolution layer callback, or bind its color, depth, IDs, and
+UVs to a render graph. The route camera includes calibration for picking
+3D positions.
 
 ## Signal at Aster Ridge
 

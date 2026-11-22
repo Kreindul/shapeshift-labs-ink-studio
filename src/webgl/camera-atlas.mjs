@@ -85,12 +85,20 @@ export function createCameraAtlas(canvas, { toolkit, contextAttributes, ...defin
           if (scissor) gl.enable(gl.SCISSOR_TEST);
         }
       },
-      capture(world, frame, tile, signal) {
+      capture(world, frame, tile, signal, packet) {
         available();
         withFramebuffers(() => {
           const { x, y, width: w, height: h } = tile;
           if (scratch.width !== w || scratch.height !== h) scratch.resize(w, h);
-          renderer.render(world, { ...frame, target: scratch });
+          if (packet) {
+            composer.setSource('render-output', packet);
+            try {
+              composer.draw({ shader:'mix',from:'render-output',to:'render-output',value:0,phase:0,progress:0,
+                time:frame.time }, { target:scratch });
+            } finally {
+              composer.removeSource('render-output');
+            }
+          } else renderer.render(world, { ...frame, target: scratch });
           let source = scratch.framebuffer;
           if (signal) {
             if (!decoded) {

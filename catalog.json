@@ -1647,6 +1647,17 @@
       "tags": ["routes", "pixel-art", "sprites", "perspective", "raster"]
     },
     {
+      "id": "render.sharedOutputs",
+      "kind": "api",
+      "status": "ready",
+      "title": "Shared miniature render outputs",
+      "what": "Route aligned color, depth, surface IDs and UVs from an independent renderer into a camera atlas, a world monitor, or a graph. Pick surfaces and recover calibrated world positions.",
+      "use": "K.renderOutputs.create / pick / raster / mask and cameraAtlas views[].source",
+      "where": "src/render-outputs.js",
+      "example": "examples/shared-render-outputs.js",
+      "tags": ["camera", "raster", "depth", "picking", "compositing"]
+    },
+    {
       "id": "render.textile",
       "kind": "api",
       "status": "ready",

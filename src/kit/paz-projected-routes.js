@@ -278,7 +278,8 @@
         }
         placements.push({id:owners[prop.id].id,cel:index,projectedPixels,rect:[left,top,w,h],visiblePixels:pixels});
       }
-      return { width,height,channels:4,data,depth,ids,uv,owners,placements };
+      return K.renderOutputs.create({ width,height,data,depth,ids,uv,owners,placements,
+        camera:{origin:at,right,up:vertical,forward,center:[centerX,centerY],scale:[focal,focal]} });
     }
     Object.freeze(owners);
     return Object.freeze({ length,sample,render });
