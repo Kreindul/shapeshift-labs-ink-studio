@@ -101,7 +101,8 @@ module.exports=function command([mode,file,config],opt,kit) {
   const assets=Object.fromEntries(Object.entries(paths).map(([name,file])=>[name,WAV.read(file)]));
   const production=recipe.production ?? recipe;
   let value;
-  if (mode==='inspect') value=P.inspect(production,assets);
+  if (mode==='inspect-instrument') value=P.inspectInstrumentGraph(recipe.patch ?? recipe,assets);
+  else if (mode==='inspect') value=P.inspect(production,assets);
   else if (mode==='performances') value=P.planPerformances(production,config ? read(config) : recipe.performances,assets);
   else if (mode==='themes' && config)
     value={...P.developThemes(production,read(config),assets),...(recipe.assets && {assets:paths})};

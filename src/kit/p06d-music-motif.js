@@ -13,7 +13,9 @@
   const mod = (x,n) => (x%n+n)%n;
 
   function expression(raw) {
-    require(fields(raw,['delay','gate','bend','glide','vibrato','retrigger','offset','articulation','brightness','curves']) &&
+    const {names}=P.musicNoteExpression;
+    require(fields(raw,['delay','gate','bend','glide','vibrato','retrigger','offset','articulation','brightness','curves',...names]) &&
+      names.every(name=>raw[name]===undefined || finite(raw[name],0,1)) &&
       [['delay',-.125,.125],['gate',.05,2],['bend',-1200,1200],['glide',0,2],['vibrato',0,100],
         ['offset',0,5],['brightness',0,1]].every(([key,lo,hi]) => raw[key]===undefined || finite(raw[key],lo,hi)) &&
       (raw.retrigger===undefined || integer(raw.retrigger,1,8)) &&

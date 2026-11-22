@@ -1,7 +1,7 @@
 /* Editable score, recording and automation addresses on one session clock. */
 (function (P) {
   const A=P.musicProduction, M=P.mediaGraph, S=P.mediaGraphSupport;
-  const {check,fields,record,id,integer}=P.musicInstruments, {clone}=P.data;
+  const {check,fields,record,id,integer,assetNames}=P.musicInstruments, {clone}=P.data;
   const reference='reference', room='score-room', format='ink-studio/music-edit-session';
   const table=(value,max,label)=>{
     check(record(value) && Object.keys(value).length<=max && Object.keys(value).every(id),'Invalid session '+label);
@@ -10,10 +10,8 @@
   const get=(value,name)=>Object.hasOwn(value,name) ? value[name] : undefined;
   const samples=value=>({samples:value});
   const signature=value=>JSON.stringify(value);
-  const sampleNames=patch=>patch?.type==='sample' && Array.isArray(patch.zones) ?
-    patch.zones.flatMap(row=>Array.isArray(row?.samples) ? row.samples : []) : [];
   function instruments(assets,production,revision) {
-    const names=new Set([...Object.values(production.patches ?? {}),...Object.values(revision?.patches ?? {})].flatMap(sampleNames));
+    const names=new Set([...Object.values(production.patches ?? {}),...Object.values(revision?.patches ?? {})].flatMap(assetNames));
     return Object.fromEntries([...names].filter(name=>get(assets,name)).map(name=>[name,assets[name]]));
   }
   function addressed(score,lane) {
