@@ -111,4 +111,27 @@ renderer.render(world, { camera, gaussianColor: 'palette', width: 320, height: 2
 - **World conversion.** The decoder retains XYZ, scales, normalized XYZW rotation, opacity and SH coefficients in typed arrays. World conversion fits the cloud and packs each Gaussian's covariance for Ink's renderer. It uses DC color by default. Set `viewDirection: [x, y, z]` in source coordinates to bake the retained harmonics for a fixed viewing direction. Use a live color mode in WebGL to evaluate those coefficients during orbiting.
 - **Limits.** Decoding defaults to a four-million-point maximum. Hosts can pass a lower `maxPoints`. A file named `.gsz` must contain a recognized PLY or SPZ payload. Derivative's [Point File In reference](https://docs.derivative.ca/Point_File_In_POP) and [file-type table](https://docs.derivative.ca/File_Types) list `.spz` for this format.
 
+### Inspect a patch while orbiting
+
+In the [Pelagic viewer](../examples/live-gaussian/index.html), click either view
+or move the cursor with the arrow keys and press Enter. The marker follows the
+selected splat in world space. **Base (DC)** shows its constant color and
+**Live splat RGB** shows its evaluated harmonics. **Palette pixel** shows the
+swatch actually rendered through that patch after the cloud is composited.
+The viewer hides the swatch when the splat's contribution falls below the
+visibility threshold.
+
+Small orbit steps can flag a swatch jump. **Check ±1°** samples the nearby
+views without moving the displayed camera. A jump requires a weighted RGB
+distance of at least 24 on the 8-bit scale over at most two degrees of orbit,
+with the selected splat visible in both samples.
+
+Hosts can use `createGaussianColorInspector(renderer, world, { width, height })`
+from `webgl.mjs`. Pass normalized top-left coordinates and the same camera
+frame to `select(u, v, frame)`. After the palette render, call
+`inspect(frame, readPalettePixel)` with a callback that reads an RGB pixel at
+the returned integer grid coordinates. Coordinates start at the top left.
+Pass successive inspection samples to `gaussianSwatchJump(before, after)`
+to compare visible swatches on the selection.
+
 Format references. [Graphdeco PLY implementation](https://github.com/graphdeco-inria/gaussian-splatting/blob/main/scene/gaussian_model.py) · [Niantic SPZ](https://github.com/nianticlabs/spz) · [WebGPU specification](https://www.w3.org/TR/webgpu/)

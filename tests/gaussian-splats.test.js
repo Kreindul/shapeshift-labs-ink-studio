@@ -194,3 +194,56 @@ test('WebGL live Gaussian color matches baked harmonics through degree four', { 
     if (degree > 0) assert.notDeepEqual(opposite, rgb);
   }
 });
+
+test('Gaussian color inspection follows one patch and reads the rendered palette pixel', async () => {
+  const { createGaussianColorInspector, gaussianSwatchJump, decodeGaussianPly, gaussianSplatWorld } = await import('../webgl.mjs');
+  const packed = [0x081523, 0x276383, 0xda8f7d, 0x286484];
+  const cloud = decodeGaussianPly(ply('binary_little_endian', [0, 0, .8, 0, 0, 0, 0, 0, -.1]));
+  const world = gaussianSplatWorld(cloud, { colorMode: 'rgb', up: 'z', palette: packed });
+  const picker = ink.load().KIT.procedural.contributions.create(world);
+  let hidden = false;
+  const renderer = { pick(w, ray) {
+    assert.equal(w, world);
+    return hidden ? { dominant: null, contributions: [] } : picker.ray(ray);
+  } };
+  const tool = createGaussianColorInspector(renderer, world, { width: 320, height: 240 });
+  const camera = { target: [0, 0, 0], dist: 10, yaw: .4, pitch: -.2 };
+  const frame = { camera };
+  assert.equal(tool.inspect(frame, assert.fail), null);
+  assert.equal(tool.select(0, 0, frame), null);
+  const selection = tool.select(.5, .5, frame);
+  assert.equal(selection.index, 0);
+  const read = rgb => (x, y) => {
+    assert.equal(Math.abs(x - 160) <= 1, true);
+    assert.equal(Math.abs(y - 120) <= 1, true);
+    return rgb;
+  };
+  const first = tool.inspect(frame, read([0x27, 0x63, 0x83]));
+  assert.equal(first.selection, selection);
+  assert.equal(first.state, 'visible');
+  assert.deepEqual(first.swatch, { index: 1, rgb: [0x27, 0x63, 0x83] });
+  const baked = gaussianSplatWorld(cloud);
+  assert.deepEqual(first.base, [baked.data[7] & 255, baked.data[7] >> 8 & 255, baked.data[7] >> 16]);
+  const fixed = gaussianSplatWorld(cloud, { viewDirection: [
+    -Math.cos(camera.pitch) * Math.sin(camera.yaw),
+    Math.cos(camera.pitch) * Math.cos(camera.yaw), -Math.sin(camera.pitch)
+  ] });
+  assert.deepEqual(first.rgb, [fixed.data[7] & 255, fixed.data[7] >> 8 & 255, fixed.data[7] >> 16]);
+  const step = { camera: { ...camera, yaw: camera.yaw + Math.PI / 180 } };
+  const second = tool.inspect(step, read([0xda, 0x8f, 0x7d]));
+  assert.equal(second.selection, selection);
+  const jump = gaussianSwatchJump(first, second);
+  assert.equal(jump.from.index, 1);
+  assert.equal(jump.to.index, 2);
+  assert(jump.degrees > .9 && jump.degrees < 1.1);
+  assert.equal(gaussianSwatchJump(first, tool.inspect(step, read([0x28, 0x64, 0x84]))), null);
+  assert.equal(gaussianSwatchJump(first, tool.inspect(step, read([1, 2, 3]))), null);
+  assert.equal(gaussianSwatchJump(first, tool.inspect({
+    camera: { ...camera, yaw: camera.yaw + .1 }
+  }, read([0xda, 0x8f, 0x7d]))), null);
+  hidden = true;
+  assert.equal(tool.inspect(step, assert.fail).state, 'obscured');
+  assert.equal(tool.inspect({ camera: { ...camera, target: [50, 0, 0] } }, assert.fail).state, 'offscreen');
+  tool.clear();
+  assert.equal(tool.inspect(frame, assert.fail), null);
+});

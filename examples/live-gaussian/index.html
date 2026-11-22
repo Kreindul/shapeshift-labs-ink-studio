@@ -7,13 +7,21 @@
 <style>
   :root { color-scheme: dark; font-family: system-ui, sans-serif; background:#08111b; color:#eaf2f7; }
   body { margin:0; }
-  main { width:min(1050px, 93vw); margin:0 auto; padding:clamp(18px, 5vw, 42px) 0 24px; }
+  main { width:min(1050px, 93vw); margin:0 auto; padding:clamp(18px, 4vw, 32px) 0 24px; }
   header { margin-bottom:20px; }
-  h1 { font-size:clamp(38px, 6vw, 68px); letter-spacing:-.065em; line-height:.94; margin:0 0 12px; }
+  h1 { font-size:clamp(38px, 6vw, 60px); letter-spacing:-.065em; line-height:.94; margin:0 0 12px; }
   header p { color:#a9beca; margin:0; font-size:clamp(13px, 2vw, 16px); }
   .views { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-bottom:12px; }
   figure { margin:0; background:#101e2e; border:1px solid #2a3e52; border-radius:10px; overflow:hidden; }
-  canvas { display:block; width:100%; aspect-ratio:4/3; background:#0b1523; }
+  .view-image { position:relative; }
+  .marker {
+    position:absolute; width:16px; height:16px; box-sizing:border-box; border:2px solid #e6fffc;
+    border-radius:50%; pointer-events:none; transform:translate(-50%,-50%);
+    box-shadow:0 0 0 1px #08111b, inset 0 0 0 1px #08111b;
+  }
+  .marker[data-state=obscured] { opacity:.5; border-style:dashed; }
+  .marker[data-state=cursor] { border-radius:2px; border-color:#aff0e4; }
+  canvas { cursor:crosshair; display:block; width:100%; aspect-ratio:4/3; background:#0b1523; }
   #palette { image-rendering:pixelated; }
   figcaption { padding:9px 12px; font-size:14px; font-weight:650; }
   .controls { background:#101e2e; border:1px solid #2a3e52; border-radius:10px; padding:10px 12px; }
@@ -24,6 +32,8 @@
     padding:6px 9px; font:inherit; cursor:pointer; font-size:13px;
   }
   button[aria-pressed=true] { border-color:#9de0df; background:#254453; }
+  canvas:focus-visible { outline:2px solid #9de0df; outline-offset:-2px; }
+  button:disabled { opacity:.5; cursor:default; }
   button:focus-visible, .upload:focus-within { outline:2px solid #9de0df; outline-offset:2px; }
   .upload { position:relative; overflow:hidden; }
   .upload input { position:absolute; inset:0; width:100%; opacity:0; cursor:pointer; }
@@ -31,6 +41,17 @@
   output { text-align:right; font-variant-numeric:tabular-nums; }
   #status { color:#a9beca; margin:0 0 0 auto; font-size:12px; }
   #status[data-state=error] { color:#ffc1ad; }
+  .inspector { margin-top:12px; }
+  .inspector-head { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+  .inspector h2 { font-size:16px; margin:0; }
+  .inspector-actions { display:flex; gap:6px; }
+  .swatches { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin:8px 0; }
+  .swatches div { display:grid; grid-template-columns:23px 1fr; gap:2px 7px; align-items:center; min-width:0; padding:6px; background:#0c1725; border-radius:5px; }
+  .swatches dt { grid-column:2; font-size:12px; }
+  .swatches dd { grid-column:2; font:11px ui-monospace,monospace; color:#a9beca; margin:0; overflow-wrap:anywhere; }
+  .swatches div::before { content:""; background:var(--chip); grid-row:1/3; grid-column:1; width:20px; height:20px; border:1px solid #547083; border-radius:4px; }
+  #jump-status { margin:0; font-size:12px; color:#a9beca; }
+  #jump-status[data-state=jump] { color:#ffd39b; }
   @media (max-width:575px) {
     main { width:min(380px, 92vw); }
     .views { grid-template-columns:1fr; gap:8px; }
@@ -44,11 +65,11 @@
 <main>
   <header>
     <h1>Pelagic</h1>
-    <p>Orbit a Gaussian splat cloud with live color in RGB and on a pixel-art palette.</p>
+    <p>Pick a patch in either view, then orbit to see how its color changes.</p>
   </header>
   <div class="views">
-    <figure><canvas id="rgb" width="560" height="420" aria-label="Directional RGB view"></canvas><figcaption>Directional RGB</figcaption></figure>
-    <figure><canvas id="palette" width="280" height="210" aria-label="Directional palette view"></canvas><figcaption>Directional palette</figcaption></figure>
+    <figure><div class="view-image"><canvas id="rgb" width="560" height="420" tabindex="0" aria-label="Directional RGB view. Click a patch, or use arrow keys and Enter."></canvas><span class="marker" aria-hidden="true" hidden></span></div><figcaption>Directional RGB</figcaption></figure>
+    <figure><div class="view-image"><canvas id="palette" width="280" height="210" tabindex="0" aria-label="Directional palette view. Click a patch, or use arrow keys and Enter."></canvas><span class="marker" aria-hidden="true" hidden></span></div><figcaption>Directional palette</figcaption></figure>
   </div>
   <div class="controls">
     <div class="orbit">
@@ -64,6 +85,21 @@
       <p id="status" role="status">Loading sample…</p>
     </div>
   </div>
+  <section class="controls inspector" aria-labelledby="inspector-title">
+    <div class="inspector-head">
+      <h2 id="inspector-title">Splat color inspector</h2>
+      <div class="inspector-actions">
+        <button type="button" id="probe" disabled>Check ±1°</button>
+        <button type="button" id="clear" disabled>Clear</button>
+      </div>
+    </div>
+    <dl class="swatches">
+      <div><dt>Base (DC)</dt><dd id="base-color">—</dd></div>
+      <div><dt>Live splat RGB</dt><dd id="live-color">—</dd></div>
+      <div><dt>Palette pixel</dt><dd id="palette-color">—</dd></div>
+    </dl>
+    <p id="jump-status" role="status">Pick a patch to track its swatch.</p>
+  </section>
 </main>
 <script src="../../dist/ink-studio.browser.js"></script>
 <script type="module" src="demo.mjs"></script>
