@@ -338,11 +338,14 @@
     const names=Object.keys(music.tracks);
     check(record(layers) && Object.entries(layers).every(([name,level])=>names.includes(name) &&
       finite(level,0,1)), 'Invalid production layer levels');
-    check(n>0 && stop*(names.length+3)*2<=36e6,'Production exceeds its sample budget');
+    const stereoFrames=sessionSource ? stop+n*2 : stop*2+n*(stems ? names.length+2 : 1);
+    check(n>0 && stereoFrames*2<=36e6 && stop*names.length<=48e6,'Production exceeds its sample budget');
     const buffers={}, mix=sessionSource ? null : new Float32Array(n*2), feed=sessionSource ? null : new Float32Array(stop*2);
+    const data=new Float32Array(stop*2);
     const fadeDuration=tail ? 0 : music.arrangement.score.endFade ?? .09;
     for (const name of names) {
-      const track=music.tracks[name], data=new Float32Array(stop*2);
+      const track=music.tracks[name];
+      data.fill(0);
       const onset=note=>note.start ?? note.time;
       const events=track.performance ? music.events[name].slice().sort((a,b)=>onset(a)-onset(b)) : music.events[name];
       for (const note of events) {

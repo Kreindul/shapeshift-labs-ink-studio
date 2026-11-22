@@ -12,6 +12,35 @@ function assetPaths(recipe,file) {
     return [name,path.resolve(folder,spec)];
   }));
 }
+function writeAssetBank(folder,assets) {
+  fs.mkdirSync(path.join(folder,'assets'),{recursive:true});
+  return Object.fromEntries(Object.entries(assets).map(([name,audio])=>{
+    const relative='assets/'+name+'.wav';
+    fs.writeFileSync(path.join(folder,relative),WAV.encode(audio,{encoding:'pcm24'}));
+    return [name,relative];
+  }));
+}
+function writeWholePiece(folder,{value,assets},engine,{render,sampleRate}) {
+  const bank=writeAssetBank(folder,assets);
+  const pcm=render ? Object.fromEntries(Object.entries(bank).map(([name,file])=>[name,WAV.read(path.join(folder,file))])) : null;
+  const candidates=value.candidates.map(({id,label,production,themeMap,report})=>{
+    const at=path.join(folder,id);
+    fs.mkdirSync(at,{recursive:true});
+    const options={sampleRate,stems:false};
+    const recipe={production,themeMap,options,assets:Object.fromEntries(Object.entries(bank)
+      .map(([name,file])=>[name,path.relative(at,path.join(folder,file))]))};
+    write(path.join(at,'production.json'),recipe);
+    write(path.join(at,'form.json'),report);
+    if (pcm) {
+      const result=engine.render(production,pcm,options);
+      writeTake(at,result.value,{},result.report);
+    }
+    return {id,label,production:id+'/production.json',form:id+'/form.json',...(pcm && {mix:id+'/mix.wav'})};
+  });
+  const manifest=path.join(folder,'manifest.json');
+  write(manifest,{format:value.format,version:value.version,report:value.report,candidates});
+  return {manifest,candidates};
+}
 function timelineBank(recipe,file) {
   const paths=assetPaths(recipe,file);
   const maps={};
@@ -103,17 +132,21 @@ module.exports=function command([mode,file,config],opt,kit) {
   if (mode==='instrument-pack') {
     if (typeof opt.out!=='string') throw new TypeError('Use --out with an instrument pack directory');
     const {id,guide,patches,kit:sampleKit,assets}=P.loadInstrumentPack(file,config ? read(config) : undefined);
-    const folder=path.resolve(opt.out), bank={};
-    fs.mkdirSync(path.join(folder,'assets'),{recursive:true});
-    for (const [name,audio] of Object.entries(assets)) {
-      const relative='assets/'+name+'.wav';
-      fs.writeFileSync(path.join(folder,relative),WAV.encode(audio,{encoding:'pcm24'}));
-      bank[name]=relative;
-    }
+    const folder=path.resolve(opt.out), bank=writeAssetBank(folder,assets);
     const patch=patches[id], manifest=path.join(folder,'instrument.json');
     write(manifest,{format:'ink-studio/instrument-pack',version:1,id,guide,
       ...(patch ? {patch} : {kit:sampleKit}),assets:bank});
     const result={manifest,assets:Object.keys(bank).length};
+    process.stdout.write(JSON.stringify(result)+'\n');
+    return result;
+  }
+  if (mode==='compose-piece') {
+    if (typeof opt.out!=='string') throw new TypeError('Use --out with a whole-piece draft directory');
+    const sampleRate=Number(opt['sample-rate'] ?? 48000);
+    if (!Number.isInteger(sampleRate) || sampleRate<8000 || sampleRate>48000)
+      throw new RangeError('Whole-piece prints need a sample rate from 8000 to 48000 Hz');
+    const pack=P.composeWholePiece(file ? read(file) : undefined);
+    const result=writeWholePiece(path.resolve(opt.out),pack,P,{render:opt.render===true,sampleRate});
     process.stdout.write(JSON.stringify(result)+'\n');
     return result;
   }
@@ -193,7 +226,7 @@ module.exports=function command([mode,file,config],opt,kit) {
     } else {
       const result=mode==='timeline' ?
         P.renderTimeline(sources,timeline,adaptiveIntents(kit.KIT,recipe),assets,{...recipe.options,stems:true}) :
-        P.render(production,assets,{...recipe.options,stems:true});
+        P.render(production,assets,{stems:true,...recipe.options});
       writeTake(folder,result.value,result.stems,result.report,mode==='render'?production:undefined,paths);
       value={mix:path.join(folder,'mix.wav'),report:path.join(folder,'report.json')};
     }

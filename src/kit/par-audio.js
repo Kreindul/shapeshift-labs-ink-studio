@@ -558,6 +558,14 @@
       inputs:{source:'record',brief:'record',assets:options},outputs:{value:'record'},
       run({source,brief,assets}) {return {value:P.musicProduction.planProducer(source,brief,assets)};}
     },
+    'music.composeWholePiece': {
+      description:'Compose competing full-length forms, with scored hook appearances, pulse and endings, from a blank brief.',
+      inputs:{brief:options},outputs:{value:'record',candidates:'array<record>',assets:'record',report:'record'},
+      run({brief}) {
+        const {value,assets}=P.musicProduction.composeWholePiece(brief);
+        return {value,candidates:value.candidates,assets,report:value.report};
+      }
+    },
     'music.searchComposition': {
       description: 'Search contrasting cue, phrase and note revisions with harmonic constraints and one winner per kind.',
       inputs:{source:'record',brief:'record',assets:options},
