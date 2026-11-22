@@ -322,6 +322,7 @@ const specifications = {
   'music.instrumentLibrary': {inputs:{}},
   'music.loadInstrumentPack': {inputs:{name:'cinder-flute',options:{sampleRate:8000}}},
   'music.instrumentPresets': {inputs:{}},
+  'music.composeWholePiece': {inputs:{brief:{duration:90,palette:'electric',forms:['afterimage']}}},
   'music.planPocket': {inputs:{source:production,brief:{
     rhythm:{edits:[{part:'lead',section:'opening',scope:'section',adopt:{length:4,events:[
       {beat:.25,duration:.24,degree:1},{beat:.75,duration:.28,degree:3}
