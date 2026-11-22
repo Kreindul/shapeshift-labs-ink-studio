@@ -41,6 +41,7 @@ const arrangement = { score:{key:{root:'C4'},harmonies:{home:{root:'C4',quality:
   motifs:{melody:motif},parts:{lead:{role:'lead',material:'melody'}},
   sections:[{id:'opening',bars:1,harmony:'home'}] };
 const production = {arrangement,patches:{pluck:{type:'fm'}},tracks:{lead:{patch:'pluck',gain:-11,send:.2}}};
+const editSession={format:'ink-studio/music-edit-session',version:1,id:'bench',sampleRate:8000,production};
 const padPattern = {op:'music.programPads',inputs:{
   source:{id:'bench-roll',length:1,steps:[{id:'tap',beat:0,pad:'metal',play:{sample:'hit'},
     roll:{count:2,spacing:.25,velocity:[1,.7]}}]},options:{render:{sampleRate:8000}}
@@ -330,6 +331,9 @@ const specifications = {
   'music.planSampleMotif': {inputs:sampleMotifPlan.inputs},
   'music.renderSampleMotif': {nodes:{plan:sampleMotifPlan},inputs:{source:audio,score:audio,plan:link('plan'),role:'lead'}},
   'music.auditionSampleMotif': {nodes:{plan:sampleMotifPlan},inputs:{source:audio,score:audio,plan:link('plan')}},
+  'music.inspectEditSession': {inputs:{source:editSession}},
+  'music.editSession': {inputs:{source:editSession,edits:[{op:'pin',lane:'lead',mode:'pitch'}]}},
+  'music.renderEditSession': {inputs:{source:editSession,options:{preview:{from:{beat:0},to:{beat:1}}}}},
   'music.atmosphereReference': {inputs:{score:audio,performance:{events:{lead:[]}}}},
   'music.planAtmosphere': {inputs:atmospherePlan.inputs},
   'music.renderAtmosphere': {nodes:{plan:atmospherePlan},

@@ -94,5 +94,49 @@
     }
     return {frame,position,offset,beatClock,lane};
   }
-  P.mediaGraphSupport.mixerTime=mixerTime;
+
+  // Play score-time lanes against a monotonic sample clock. DSP state and
+  // the beat history used by tempo delay stay continuous across score seeks.
+  function mixerTransport(time,ranges) {
+    const score=time.beatClock();
+    let cursor=0, beat=0;
+    const spans=ranges.map(({from,to})=>{
+      const start=score.beatAt(from), row={cursor,beat,from,start};
+      cursor+=to-from;
+      beat+=score.beatAt(to)-start;
+      return row;
+    });
+    const find=(key,value)=>{
+      let lo=1,hi=spans.length;
+      while (lo<hi) {
+        const mid=(lo+hi)>>>1;
+        if (spans[mid][key]<=value) lo=mid+1;
+        else hi=mid;
+      }
+      return spans[lo-1];
+    };
+    return {...time,beatClock:()=>({
+      beatAt(sample) {
+        const row=find('cursor',sample);
+        return row.beat+score.beatAt(row.from+sample-row.cursor)-row.start;
+      },
+      sampleAt(beat) {
+        const row=find('beat',beat);
+        return row.cursor+score.sampleAt(row.start+beat-row.beat)-row.from;
+      },
+      maxFrames:score.maxFrames
+    }),lane(raw,fallback,low,high,label,origin) {
+      const lane=time.lane(raw,fallback,low,high,label,origin);
+      if (!fields(raw,['unit','curve','points']) || origin!==undefined) return lane;
+      return {...lane,reader() {
+        let span, read;
+        return sample=>{
+          const current=find('cursor',sample);
+          if (current!==span) {span=current; read=lane.reader();}
+          return read(span.from+sample-span.cursor);
+        };
+      }};
+    }};
+  }
+  Object.assign(P.mediaGraphSupport,{mixerTime,mixerTransport});
 })(KIT.procedural);

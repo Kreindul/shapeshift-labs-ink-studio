@@ -8,7 +8,7 @@
     check(record(value) && Object.keys(value).length<=max && Object.keys(value).every(id),'Invalid mixer '+label);
     return Object.entries(value);
   }
-  function compile(source,assets,host,premix,delivery) {
+  function compile(source,assets,host,premix,delivery,transport) {
     check(fields(source,['id','sampleRate','map','end','tail','output','strips','processors','taps','peakPolicy','meter']) &&
       id(source.id) && id(source.output) && record(assets) &&
       (source.meter===undefined || typeof source.meter==='boolean') &&
@@ -16,7 +16,8 @@
       ['normalize','error'].includes(source.peakPolicy ?? 'normalize'),'Invalid mixer recipe');
     const rate=source.sampleRate ?? 48000;
     check(integer(rate,8000,96000),'Mixer sample rate must be 8000 to 96000 Hz');
-    const time=S.mixerTime(rate,source.map), maximum=rate*3600;
+    const timeline=S.mixerTime(rate,source.map), maximum=rate*3600;
+    const time=transport ? S.mixerTransport(timeline,transport) : timeline;
     const bounds=source.end===undefined ? null : time.frame(time.position(source.end));
     check(bounds===null || integer(bounds,1,maximum),'Mixer end must be positive and within one hour');
     const audio=new Map(), strips=new Map(), routes=[];
@@ -135,9 +136,12 @@
       ...exports.map(([,row])=>timing(row.strip,row.tap).end));
     let memory=frames*2*(exports.length+1+(delivery ? deliveryRoles.length+1 : 0)), work=memory;
     for (const row of order) {
+      // The last stage can take ownership when no reader needs its input or
+      // pre-fader contents. Delivery still needs the unmodified master input.
+      row.reusePost=!row.uses.has('input') && !row.uses.has('pre') && !(delivery && row===master);
       for (const [name,stage] of [...Object.entries(row.timing),...row.inserts.map(x=>['insert',x])]) {
         const count=stage.end ? Math.min(frames,stage.end)+stage.latency : 0;
-        if (name!=='pre' || row.uses.has('pre')) memory+=2*count;
+        if (name==='input' || name==='insert' || name==='post' && row.uses.has('post') && !row.reusePost) memory+=2*count;
         memory+=count*(stage.processor?.extra ?? 0);
         work+=count*(stage.processor?.cost ?? 3);
       }
@@ -149,8 +153,8 @@
     return {rate,sourceEnd,frames,order,routes,master,exports};
   }
   const read=(data,index)=>data[index] ?? 0;
-  function render(source,assets,host,premix,delivery) {
-    const {rate,sourceEnd,frames,order,routes,master,exports}=compile(source,assets,host,premix,delivery);
+  function render(source,assets,host,premix,delivery,transport) {
+    const {rate,sourceEnd,frames,order,routes,master,exports}=compile(source,assets,host,premix,delivery,transport);
     const buffers=new Map();
     const stems=delivery && Object.fromEntries(deliveryRoles.map(role=>[role,new Float64Array(frames*2)]));
     let premaster;
@@ -214,7 +218,7 @@
       if (row.uses.has('input')) slot.input={samples:input,latency:arrival};
       if (row.uses.has('pre')) slot.pre={samples:processed,latency:row.timing.pre.latency};
       if (row.uses.has('post')) {
-        const post=allocate(row.timing.post), {latency}=row.timing.post;
+        const post=row.reusePost ? processed : allocate(row.timing.post), {latency}=row.timing.post;
         const fader=row.fader.reader(), pan=row.pan.reader();
         for (let at=latency;at<post.length/2;at++) {
           const t=at-latency, gain=fader(t), balance=pan(t);
@@ -263,4 +267,5 @@
     renderPremix:(source,assets,buses)=>render(source,assets,undefined,buses),
     renderForDelivery:(source,assets,roles={},buses)=>render(source,assets,undefined,buses,roles),
     deliveryRoles});
+  S.renderMixerTransport=(source,assets,ranges)=>render(source,assets,undefined,undefined,undefined,ranges);
 })(KIT.procedural);
