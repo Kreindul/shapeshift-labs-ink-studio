@@ -515,6 +515,17 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         return respond(require('./mass-properties.js').measure(kit,read(file),file,
           {dependency:shot?.dependency,assetPack:opt['asset-pack']}));
       }
+      case 'resonator': {
+        ensure(['bake','render'].includes(file)&&typeof other==='string'&&
+          (opt.wav===undefined||file==='render'&&typeof opt.wav==='string'),
+        'Use sim resonator bake <plan.json> or sim resonator render <run.json> [--out file.json --wav sound.wav]');
+        ensure(opt.wav===undefined||typeof opt.out!=='string'||path.resolve(opt.wav)!==path.resolve(opt.out),
+          'Modal trace and WAV need distinct output files');
+        const modal=require('./modal-resonator.js'), plan=read(other);
+        const result=file==='bake'?modal.bake(kit,plan,other,shot?.dependency):modal.run(kit,plan,other,shot?.dependency);
+        if(opt.wav!==undefined)modal.writeWav(opt.wav,result,plan.audio);
+        return respond(result);
+      }
       case 'excite': {
         ensure(typeof file==='string' && other===undefined && (opt.wav===undefined||typeof opt.wav==='string'),
         'Use sim excite <run.json> [--out trace.json --wav force.wav]');

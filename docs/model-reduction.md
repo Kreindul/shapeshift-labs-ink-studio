@@ -110,3 +110,6 @@ It also runs a scalar wave across a masked twin chamber and compares
 the full pressure response against shortened taps and a modal bank at
 the same listening gain. It writes the full and reduced WAVs, repeatable
 plans, measurement reports, and an animated view of the detailed grid.
+
+For positioned excitation and pickup sites, see
+[resonant mode assets](resonant-modes.md).

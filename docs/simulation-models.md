@@ -191,3 +191,6 @@ tubes for pressure and volume-flow propagation or faster delay guides.
 
 [Contact samples and exciters](contact-exciters.md) publish reusable contact
 geometry, impulses, slip and force from swept impacts and authored gestures.
+
+[Resonant mode assets](resonant-modes.md) store authored, analytic, and
+mesh-derived modes with spatial excitation and pickup sites.
