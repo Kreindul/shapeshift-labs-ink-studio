@@ -3,6 +3,9 @@
 Each tool is a named insert on an existing [mixer strip](audio-mixer.md).
 Use the same mixes and taps in the CLI and audio graph.
 
+Use [dialogue repair and intelligibility](dialogue-repair.md) for a dialogue-keyed
+EQ band, source restoration, and an audible difference preview.
+
 ## Shape a strip
 
 ```json

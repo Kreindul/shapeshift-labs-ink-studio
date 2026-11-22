@@ -336,6 +336,7 @@ const specifications = {
   'audio.auditionRack': {inputs:{source:require('../examples/audio-racks/pocket-repeater.json'),sources:{main:audio},
     options:{tail:'cut'}}},
   'audio.monitorMix': {inputs:{source:audio,options:{mode:'small-speaker'},references:{focus:audio}}},
+  'audio.repairDialogue': {inputs:{source:audio,options:{gainDb:-2,declick:{ranges:[{fromSample:10,toSample:11}]}}}},
   'audio.renderMixer': {nodes:{source:{op:'audio.buffer',inputs:audio},
     bank:{op:'data.record',inputs:{tone:link('source'),space:transientAudio}}},
     inputs:{assets:link('bank'),source:{id:'session',sampleRate:8000,output:'master',

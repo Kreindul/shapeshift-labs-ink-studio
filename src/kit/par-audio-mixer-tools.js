@@ -29,6 +29,7 @@
         else if (mode==='high-shelf') {m0=squared;m1=k*(1-a)*a;m2=1-squared;}
         else if (mode==='lowpass') {m0=0;m2=1;}
         else if (mode==='highpass') {m1=-k;m2=-1;}
+        else if (mode==='bandpass') {m0=0;m1=k;}
         else m1=-k;
         a1=1/(1+g*(g+k)); a2=g*a1; a3=g*a2;
         lastHz=f; lastQ=width; lastGain=gain;
@@ -151,6 +152,8 @@
     }};
   }
   S.parametricBand=band;
+  S.parametricTail=(mode,rate,hz,q,db)=>tailFor(tuning(mode,rate,hz,q,db));
   S.mixerTool=(raw,rate,time)=>raw?.type==='eq' ? eq(raw,rate,time) :
-    Object.hasOwn(schemas,raw?.type) ? dynamics(raw,rate,time) : null;
+    Object.hasOwn(schemas,raw?.type) ? dynamics(raw,rate,time) :
+    ['deesser','band-duck'].includes(raw?.type) ? S.dialogueBand(raw,rate,time) : null;
 })(KIT.procedural);
