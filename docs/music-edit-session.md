@@ -118,3 +118,57 @@ The JavaScript entry point is
 `inspect(session)`, `edit(session, edits)`, and
 `render(session, preview?)`. Use `music.inspectEditSession`,
 `music.editSession`, and `music.renderEditSession` in a graph.
+
+## Play and edit a live loop
+
+```sh
+ink-studio music session play cue.json live.json --out kept.json
+```
+
+Open the loopback URL printed by the command. The settings file is optional.
+It accepts `{from?,to?,at?,preroll?,gain?,fadeSamples?}`. The loop defaults to
+the whole cue, with preroll from cue start if it starts later. `gain` is
+linear monitoring gain and defaults to unity. The default switch fade is
+12 ms. Keep a range at the selected lane's take or copy a written note to the
+reference. The player prepares edits in the background and installs them at
+the next unrendered sample once ready. Save writes the specified recipe with relative asset paths. Without
+`--out`, Save downloads a recipe with paths to the original local WAVs.
+
+Switches apply at the next unrendered sample. The browser buffers roughly
+a tenth of a second and displays the playing loop position. The playhead stays
+in the loop during the switch. A loop edit only moves it if the new range
+excludes its current position. Switching a lane back to **Saved edit** plays
+its reference and any kept ranges.
+
+The live renderer runs one continuous mixer, including per-patch tape echo,
+production room, and causal zero-latency desk inserts. Score automation wraps
+with the loop, and tempo delay runs on the continuous render clock. The live
+player uses a fixed monitor gain and indicates clipping. Use the offline
+preview or print for active block-only and latency-compensated inserts or
+mastering peak policies. Reopen the player after changing the clock, routing,
+or mixer automation.
+
+`editor.open(session, settings?)` is the device-independent transport.
+`pull(frameCount, {taps:true})` supplies interleaved stereo PCM and named taps.
+Each chunk includes the starting and ending score and transport frame
+addresses. Call `state()`, `switchTake({lane,take,fadeSamples?})`,
+`setLoop({from,to})`, `keep({lane,take?,from?,to?,fadeSamples?})`, and
+`edit(changes)` between pulls. A switch with `take:null` restores the saved
+edit. `keep` defaults to the auditioned take and current loop. Read
+`inspect()` for note addresses and `document()` for the saved composition.
+Copy individual written notes by address:
+
+```json
+{"op":"keep-notes","lane":"lead","take":"breathy","notes":[{"clip":"bridge","voice":"top","note":"pickup"}]}
+```
+
+Use `into` to copy into a named take. It defaults to `reference`. Note edits
+honor pins and retain the written clip and voice addresses.
+
+Agents can control the open browser session through its loopback API. Read
+`GET /session` for the current state and the session key, then send JSON with
+the `X-Ink-Session` header. `POST /command` takes an `op` of `state`,
+`inspect`, `switch`, `loop`, `keep`, `edit` (with `changes`), or `save`.
+The browser usually owns the audio listener. A headless player can instead
+use `POST /audio` with `{frames,client}`. Its response is little-endian
+interleaved float32 stereo with the chunk address in `X-Ink-Transport`.

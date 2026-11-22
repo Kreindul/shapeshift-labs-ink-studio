@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ink Studio · Music Session</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui,sans-serif;background:#121619;color:#f1ede2;--ink:#f1ede2;--muted:#bec5bc;--line:#3b4846;--accent:#c9edb3}
+*{box-sizing:border-box}body{margin:0}main{width:min(780px,100%);margin:auto;padding:38px 22px 60px}
+header{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:20px}header p{margin:0 0 7px;font:700 12px ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+h1{font-size:clamp(30px,6vw,48px);line-height:1;margin:0;overflow-wrap:anywhere}
+h2{font-size:17px;margin:0 0 12px}section{margin-top:14px;border:1px solid var(--line);padding:16px;border-radius:8px;background:#1a211f}
+.row{display:flex;flex-wrap:wrap;align-items:end;gap:10px 14px}.between{justify-content:space-between;align-items:center}
+label{display:grid;gap:6px;color:var(--muted);font-size:13px}input,select,button{font:inherit;border-radius:5px;min-height:39px;border:1px solid #576660;background:#131a18;color:var(--ink);padding:7px 9px}
+input{width:7.4em}select{max-width:100%}button{cursor:pointer;padding-inline:14px}button:disabled{opacity:.55;cursor:default}
+button.primary{background:var(--accent);color:#17221a;border-color:var(--accent);font-weight:700}
+progress{display:block;width:100%;height:13px;accent-color:var(--accent);margin:14px 0}
+output{font:13px ui-monospace,monospace;color:var(--muted)}.lane{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center;gap:10px;border-top:1px solid var(--line);padding:7px 0}
+.lane select{width:100%}#status{display:block;min-height:1.5em;margin-top:12px;color:var(--accent);overflow-wrap:anywhere}
+#comp{margin:.5em 0 0;color:var(--muted);font-size:13px}#note{width:min(250px,100%)}
+</style>
+<script type="module" src="/player.mjs"></script>
+</head>
+<body>
+<main>
+<header><p>Ink Studio / Live audition</p><h1 id="title">Music session</h1></header>
+<section aria-label="Playback">
+<div class="row between"><button class="primary" id="play" disabled>Play</button><output id="cursor">Loading session…</output></div>
+<progress id="position" aria-label="Loop position" value="0" max="1"></progress>
+<form id="loop" class="row">
+<label>Loop in · sec<input id="loop-in" type="number" min="0" step="any" required></label>
+<label>Loop out · sec<input id="loop-out" type="number" min="0" step="any" required></label>
+<button>Set loop</button>
+</form>
+</section>
+<section><h2>Live takes</h2><div id="lanes"></div></section>
+<section>
+<h2>Keep in session</h2>
+<form id="keep" class="row">
+<label>Lane<select id="keep-lane"></select></label>
+<label>In · sec<input id="keep-in" type="number" min="0" step="any" required></label>
+<label>Out · sec<input id="keep-out" type="number" min="0" step="any" required></label>
+<button id="keep-range">Keep range</button>
+</form>
+<p id="comp" aria-live="polite"></p>
+<form id="keep-note" class="row">
+<label>Written note<select id="note"></select></label>
+<button id="copy-note">Keep note</button>
+</form>
+</section>
+<section><button id="save">Save session</button><output id="status" role="status"></output></section>
+</main>
+</body>
+</html>

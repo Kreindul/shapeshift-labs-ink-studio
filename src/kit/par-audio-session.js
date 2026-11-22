@@ -30,7 +30,8 @@
         return prior.value;
       }
       counts.misses++;
-      const value=job(), size=byteSize(value.dry)+byteSize(value.room)+key.length*2;
+      const value=job(), size=byteSize(value.dry)+byteSize(value.room)+(value.roomLevel?.byteLength ?? 0)+
+        (value.echoLevel?.byteLength ?? 0)+key.length*2;
       if (size<=cacheBudget) {
         while (bytes+size>cacheBudget) {
           const oldest=cache.keys().next().value;
@@ -42,15 +43,17 @@
       }
       return value;
     }
-    function scoreTake(plan,lane,take,counts) {
+    function scoreTake(plan,lane,take,counts,live=false) {
       const {score,source}=plan.producers.get(take), track=score.tracks[lane];
       const {roomCuts,perTrack}=score.cue ?? {};
       const duck=track.mix.duck?.from;
       const patch=source.patches[track.patch], events=score.events[lane];
       const hasRoom=track.mix.send>0 || perTrack?.[lane].room.some(row=>row.send.some(level=>level>0));
-      const key=signature(['score',lane,plan.rate,plan.map,score.end,source.tracks[lane],patch,score.gain,hasRoom && score.room,
+      const key=signature([live ? 'live-score' : 'score',lane,plan.rate,plan.map,score.end,source.tracks[lane],patch,score.gain,hasRoom && score.room,
         score.arrangement.score.endFade,perTrack?.[lane],roomCuts,events,duck && score.events[duck]]);
       return reuse(key,()=>{
+        if (live) return {...A.renderSessionSource(score,lane,plan.rate),send:track.mix.send,echo:track.echo,
+          roomSpec:hasRoom ? score.room : null,roomCuts,trackCuts:perTrack?.[lane].cuts};
         const result=A.renderCompiled({...score,tracks:{[lane]:track}},{sampleRate:plan.rate,stems:true});
         return {dry:result.stems[lane],room:hasRoom ? result.stems.room : undefined};
       },counts);
@@ -87,8 +90,7 @@
         return {dry:audio(plan.rate,out),from};
       },counts);
     }
-    function inspect(session) {
-      const plan=compile(session,assets);
+    function inspect(session,plan=compile(session,assets)) {
       return {id:session.id,sampleRate:plan.rate,frames:plan.frames,pins:plan.pins,comp:plan.choices,
         lanes:Object.fromEntries(plan.lanes.map(lane=>{
           const row=plan.audio.get(lane);
@@ -212,7 +214,31 @@
           comp:plan.choices,switches,cache:counts,mixer:printed.report,
           segments:segments.slice(warmup ? 1 : 0).map(({from,to})=>({from,to}))}};
     }
-    return Object.freeze({inspect,edit:(session,changes)=>edits(session,assets,changes),render});
+    const edit=(session,changes)=>edits(session,assets,changes);
+    function prepareTransport(session) {
+      const plan=compile(session,assets);
+      const {rate,map,frames,lanes,sourceLanes,mixer,pins,choices}=plan;
+      const cache={hits:0,misses:0}, unique=new Set();
+      let prepared=0;
+      const media=Object.fromEntries(lanes.map(lane=>{
+        const track=plan.audio.get(lane), names=[...(track?.takes ?? plan.producers).keys()];
+        return [lane,{fallback:track?.take ?? reference,materials:Object.fromEntries(names.map(name=>{
+          const value=track ? audioTake(plan,lane,name,cache) : scoreTake(plan,lane,name,cache,true);
+          if (!unique.has(value)) {
+            unique.add(value);
+            prepared+=value.dry.samples.length+(value.roomLevel?.length ?? 0)+(value.echoLevel?.length ?? 0);
+            check(prepared<=48e6,'Prepared live takes exceed the session PCM budget');
+          }
+          const pitches=pins[lane]==='pitch' ? plan.producers.get(name).score.events[lane].map(({beat,voice,midi})=>
+            ({beat,voice,midi})) : [];
+          return [name,{value,pitches}];
+        }))}];
+      }));
+      return {session,rate,map,frames,lanes,sourceLanes,mixer,pins,choices,media,cache,report:inspect(session,plan)};
+    }
+    const openPreparedTransport=(prepared,options)=>S.openSessionTransport(prepared,options,{assets,edit,prepareTransport});
+    const open=(session,options)=>openPreparedTransport(prepareTransport(P.data.freeze(P.data.clone(session))),options);
+    return Object.freeze({inspect,edit,render,open,prepareTransport,openPreparedTransport});
   }
   M.musicSession=Object.freeze({create});
 })(KIT.procedural);

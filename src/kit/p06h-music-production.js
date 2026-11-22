@@ -299,7 +299,37 @@
     return T.index(T.roundDown(T.mul(T.read(time),[BigInt(rate),1n])));
   }
   const roomTimes=[.019,.029,.043,.057,.073,.097,.117,.149,.183,.211,.254,.287,.331,.383,.449];
-  function renderCompiled(music,options={}) {
+  function roomTaps(room,rate) {
+    return roomTimes.map((seconds,i)=>{
+      const time=seconds*room.size;
+      return {samples:Math.max(1,Math.round(time*rate)),
+        gain:room.gain*Math.exp(-3*time/room.decay)*(i%3===1?-.31:.28), cross:i%2===0};
+    });
+  }
+  const roomSmoothing=room=>.06+.39*(1-room.damping);
+  function makeSessionRoom(room,rate) {
+    const taps=roomTaps(room,rate), smoothing=roomSmoothing(room);
+    const length=1+Math.max(...taps.map(row=>row.samples)), ring=new Float32Array(length*2);
+    let index=0,history=0,left=0,right=0;
+    const out=[0,0];
+    return (inputL,inputR,cut)=>{
+      if (cut) {history=0; left=right=0;}
+      let l=0,r=0;
+      for (const tap of taps) {
+        if (tap.samples>history) continue;
+        const at=2*((index+length-tap.samples)%length);
+        l+=ring[at+Number(tap.cross)]*tap.gain;
+        r+=ring[at+Number(!tap.cross)]*tap.gain;
+      }
+      left+=(l-left)*smoothing; right+=(r-right)*smoothing;
+      ring[2*index]=inputL; ring[2*index+1]=inputR;
+      if (++index===length) index=0;
+      if (!cut) history=Math.min(length,history+1);
+      out[0]=left;out[1]=right;
+      return out;
+    };
+  }
+  function renderCompiled(music,options={},sessionSource=false) {
     check(fields(options,['start','end','sampleRate','stems','tail','layers']),'Invalid production render options');
     const {start=0,end=music.end,sampleRate=48000,stems=false,tail=0,layers={}}=options;
     check(finite(start,0,music.end) && finite(end,start,music.end) && end>start &&
@@ -309,7 +339,8 @@
     check(record(layers) && Object.entries(layers).every(([name,level])=>names.includes(name) &&
       finite(level,0,1)), 'Invalid production layer levels');
     check(n>0 && stop*(names.length+3)*2<=36e6,'Production exceeds its sample budget');
-    const buffers={}, mix=new Float32Array(n*2), feed=new Float32Array(stop*2);
+    const buffers={}, mix=sessionSource ? null : new Float32Array(n*2), feed=sessionSource ? null : new Float32Array(stop*2);
+    const fadeDuration=tail ? 0 : music.arrangement.score.endFade ?? .09;
     for (const name of names) {
       const track=music.tracks[name], data=new Float32Array(stop*2);
       const onset=note=>note.start ?? note.time;
@@ -338,13 +369,15 @@
       }
       const desk=track.mix, panL=Math.sqrt((1-desk.pan)/2), panR=Math.sqrt((1+desk.pan)/2);
       const automation=G.automate(track.gestures,{gain:0,pan:desk.pan,cutoff:desk.lowpass,echo:track.echo?.send ?? 0},sampleRate);
-      let echo=G.tapeEcho(track.echo,sampleRate), cutting=false;
+      let echo=sessionSource ? null : G.tapeEcho(track.echo,sampleRate), cutting=false;
       const cut=Q.cursor(music.cue?.perTrack[name].cuts ?? []);
       const roomSend=Q.cursor(music.cue?.perTrack[name].room ?? []);
       const level=Q.cursor(music.cue?.perTrack[name].level ?? []);
       const coefficient=frequency=>1-Math.exp(-2*Math.PI*Math.min(sampleRate*.49,frequency)/sampleRate);
       const high=coefficient(desk.highpass), low=coefficient(desk.lowpass);
       const dry=stems ? new Float32Array(n*2) : null;
+      const roomLevel=sessionSource && roomSend ? new Float32Array(n) : null;
+      const echoLevel=sessionSource && track.echo && automation ? new Float32Array(n) : null;
       let lowL=0,lowR=0,highL=0,highR=0, hit=0;
       const anchors=desk.duck && music.events[desk.duck.from].filter(note=>note.time<end);
       const gain=desk.gain*music.gain*(layers[name] ?? 1);
@@ -354,7 +387,7 @@
           if (!cutting) {
             cutting=true;
             lowL=lowR=highL=highR=0;
-            echo=G.tapeEcho(track.echo,sampleRate);
+            if (!sessionSource) echo=G.tapeEcho(track.echo,sampleRate);
           }
           continue;
         }
@@ -388,23 +421,25 @@
         const span=roomSend?.(time);
         const send=span ? span.send[0]+(span.send[1]-span.send[0])*
           clamp((time-span.startTime)/(span.endTime-span.startTime)) : desk.send;
+        if (sessionSource) {
+          const fade=fadeDuration ? clamp((music.end-time)/fadeDuration) : 1;
+          dry[index]=l*fade; dry[index+1]=r*fade;
+          if (roomLevel) roomLevel[i]=send;
+          if (echoLevel) echoLevel[i]=settings.echo;
+          continue;
+        }
         feed[index]+=l*send; feed[index+1]+=r*send;
         if (i<begin) continue;
         const at=2*(i-begin);
         if (dry) { dry[at]=l; dry[at+1]=r; }
         mix[at]+=l; mix[at+1]+=r;
       }
+      if (sessionSource) return {dry:{sampleRate,channels:2,samples:dry},roomLevel,echoLevel};
       if (dry) buffers[name]={sampleRate,channels:2,samples:dry};
     }
     const wet=stems ? new Float32Array(n*2) : null;
     let left=0,right=0;
-    const taps=roomTimes.map((seconds,i)=>{
-      const time=seconds*music.room.size;
-      return {samples:Math.max(1,Math.round(time*sampleRate)),
-        gain:music.room.gain*Math.exp(-3*time/music.room.decay)*(i%3===1?-.31:.28), cross:i%2===0};
-    });
-    const smoothing=.06+.39*(1-music.room.damping);
-    const fadeDuration=tail ? 0 : music.arrangement.score.endFade ?? .09;
+    const taps=roomTaps(music.room,sampleRate), smoothing=roomSmoothing(music.room);
     const cutRoom=Q.cursor(music.cue?.roomCuts ?? []);
     let history=0;
     let peak=0,power=0,clipped=0;
@@ -479,5 +514,9 @@
     return P.data.freeze({arrangement,events:json(events),duration:end,
       ...(Object.keys(gestures).length && {gestures}),...(cue && {cueMap:Q.report(compiled)})});
   }
-  P.musicProduction=Object.freeze({compile,renderCompiled,render,inspect,mapCue,mapGroove,grooveAt,applyChokes});
+  function renderSessionSource(score,lane,sampleRate) {
+    return renderCompiled({...score,tracks:{[lane]:score.tracks[lane]}},{sampleRate,stems:true},true);
+  }
+  P.musicProduction=Object.freeze({compile,renderCompiled,render,inspect,mapCue,mapGroove,grooveAt,applyChokes,
+    renderSessionSource,makeSessionRoom});
 })(KIT.procedural);

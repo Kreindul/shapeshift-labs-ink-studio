@@ -1,6 +1,6 @@
 const test=require('node:test'), assert=require('node:assert/strict');
 const fs=require('node:fs'), os=require('node:os'), path=require('node:path');
-const {execFileSync}=require('node:child_process'), ink=require('..'), WAV=require('../cli/wav.js');
+const {spawn,execFileSync}=require('node:child_process'), {once}=require('node:events'), ink=require('..'), WAV=require('../cli/wav.js');
 const M=ink.load().KIT.procedural.mediaGraph, rate=8000;
 const s=samples=>({samples}), b=beat=>({beat});
 const format='ink-studio/music-edit-session';
@@ -69,6 +69,127 @@ test('audition switches in score time with warm delay that survives a loop wrap'
   assert.equal(edited.taps.cue.samples[5600*2],Math.fround(.72)*.25);
   const repeated=E.render(source,{from:s(2000),to:s(8000),passes:2});
   assert.equal(repeated.taps.cue.samples[11600*2],Math.fround(.72));
+});
+
+test('live pulls keep delay, room and score position across take switches and loop wraps',()=>{
+  const E=M.musicSession.create({hit:pcm(16000,i=>i===7600 ? .3 : 0),silence:pcm(16000,()=>0)});
+  const source=session();
+  source.audio={cue:{take:'live',takes:{live:{asset:'hit'},muted:{asset:'silence'}}}};
+  source.mixer.strips.cue={sends:{echo:{level:1}}};
+  source.mixer.strips.echo={fader:.7,inserts:['delay']};
+  source.mixer.processors={delay:{type:'tempo-delay',beats:.25,feedback:.42,wet:1}};
+  source.mixer.taps={cue:{strip:'cue'},echo:{strip:'echo'}};
+  const settings={from:s(2000),to:s(8000),fadeSamples:0};
+  const first=E.open(source,settings), split=E.open(source,settings);
+  const before=first.pull(5700,{taps:true});
+  assert.equal(before.taps.cue.samples[5600*2],Math.fround(.3));
+  assert.deepEqual(first.switchTake({lane:'cue',take:'muted'}),
+    {frame:5700,scoreSample:7700,pass:0,lane:'cue',take:'muted'});
+  const after=first.pull(6300,{taps:true});
+  assert.equal(after.taps.cue.samples[5900*2],0);
+  assert(Math.abs(after.taps.echo.samples[900*2]-.21)<1e-6);
+  assert(Math.abs(after.taps.echo.samples[1900*2])>.02);
+  assert.equal(after.end.pass,2);
+  const expected=E.render(source,{from:s(2000),to:s(8000),passes:2,
+    switches:[{pass:0,at:s(7700),lane:'cue',take:'muted'}]});
+  assert(Math.abs(after.taps.echo.samples[900*2]-expected.taps.echo.samples[6600*2])<1e-6);
+  const chunks=[split.pull(401),split.pull(5299)];
+  split.switchTake({lane:'cue',take:'muted'});
+  chunks.push(split.pull(256),split.pull(1),split.pull(6043));
+  const output=chunks.flatMap(row=>Array.from(row.value.samples));
+  assert.deepEqual(output,[...before.value.samples,...after.value.samples]);
+  first.setLoop({from:s(2100),to:s(2107)});
+  const tiny=first.pull(160,{taps:true});
+  assert.equal(tiny.end.scoreSample,2106);
+  assert.equal(tiny.end.pass,22);
+  assert.equal(tiny.end.frame,12160);
+});
+
+test('live room and patch echo continue after switching a performed source to a silent take',()=>{
+  const source=session(), E=M.musicSession.create();
+  source.production.room={gain:-2,size:.6};
+  source.production.patches.keys.echo={delay:.09,send:1,feedback:.45};
+  source.production.tracks.lead.send=1;
+  source.mixer.taps['score-room']={strip:'score-room'};
+  source.pins={};
+  source.takes.silent={tracks:{lead:{clips:clips([{...notes[0],beat:3.3},{...notes[1],beat:3.8,duration:.16}])}}};
+  const start={from:s(1900),to:s(3100),fadeSamples:0,preroll:false};
+  const active=E.open(source,start), control=E.open(source,start);
+  control.switchTake({lane:'lead',take:'silent'});
+  active.pull(1150);
+  control.pull(1150);
+  active.switchTake({lane:'lead',take:'silent'});
+  const tail=active.pull(1100,{taps:true}), nothing=control.pull(1100,{taps:true});
+  assert(tail.end.pass>=1);
+  for (const name of ['lead','score-room']) {
+    assert(nothing.taps[name].samples.every(value=>value===0));
+    assert(tail.taps[name].samples.slice(100).some(value=>Math.abs(value)>1e-5),name);
+  }
+});
+
+test('keep selected ranges and exact notes while the transport remains open',()=>{
+  const E=M.musicSession.create(), source=session(), T=E.open(source,{from:b(2),to:b(4)});
+  T.pull(133);
+  T.switchTake({lane:'lead',take:'soft'});
+  T.keep({lane:'lead',from:b(2.5),to:b(3.4),fadeSamples:8});
+  const keep={op:'keep-notes',lane:'lead',take:'soft',notes:[{clip:'line',voice:'solo',note:'answer'}]};
+  const kept=T.edit([keep]);
+  assert.equal(kept.frame,133);
+  assert.equal(kept.comp[0].from,10000);
+  assert.equal(kept.lanes.lead.take,'soft');
+  const {reference}=T.inspect().lanes.lead.takes;
+  assert.equal(reference[0].velocity,.55);
+  assert.equal(reference[1].beat,2.7);
+  assert.equal(reference[1].velocity,.31);
+  const saved=T.document();
+  assert.throws(()=>T.edit([{...keep,take:'wrong'}]),/pinned/);
+  assert.equal(T.document(),saved);
+  assert.equal(T.pull(40).start.frame,133);
+});
+
+test('live routing refuses an active latency insert and accepts a full bypass',()=>{
+  const E=M.musicSession.create(), source=session();
+  source.mixer.strips.master.inserts=['master-dynamics'];
+  source.mixer.processors={'master-dynamics':{type:'compressor',lookahead:.02}};
+  assert.throws(()=>E.open(source),/master-dynamics.*needs offline rendering/);
+  assert(E.render(source).value.samples.length>0);
+  source.mixer.processors['master-dynamics'].wet=0;
+  const bypass=E.open(source).pull(128).value.samples;
+  assert.deepEqual(bypass,E.open(session()).pull(128).value.samples);
+});
+
+test('the local desk shares its running transport and persists a portable comp',async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'ink-live-session-'));
+  const file=path.join(root,'session.json'), kept=path.join(root,'kept.json');
+  fs.writeFileSync(file,JSON.stringify({session:session()}));
+  const child=spawn(process.execPath,[path.resolve(__dirname,'../cli/ink-studio.js'),'music','session','play',file,'--out',kept]);
+  t.after(async()=>{
+    child.kill();
+    if (child.exitCode===null && child.signalCode===null) await once(child,'exit');
+    fs.rmSync(root,{recursive:true,force:true});
+  });
+  let error='';
+  child.stderr.on('data',chunk=>{error+=chunk;});
+  const line=await Promise.race([once(child.stdout,'data').then(([data])=>data.toString()),
+    once(child,'exit').then(()=>{throw new Error(error || 'Session player exited');})]);
+  const {url}=JSON.parse(line);
+  const http=(route,body,key)=>fetch(url+route,body && {method:'POST',
+    headers:{'content-type':'application/json','x-ink-session':key},body:JSON.stringify(body)});
+  assert.match(await (await http('/')).text(),/Live takes/);
+  const {key,state}=await (await http('/session')).json();
+  assert.equal(state.frame,0);
+  assert.equal((await http('/command',{op:'state'},'invalid')).status,403);
+  const pull=()=>http('/audio',{frames:192,client:'test-player'},key);
+  const chunk=await pull();
+  assert.equal((await chunk.arrayBuffer()).byteLength,192*2*4);
+  const command=async (op,args)=> (await http('/command',{op,...args},key)).json();
+  const ack=await command('switch',{lane:'lead',take:'soft'});
+  assert.equal(ack.frame,192);
+  assert.equal(JSON.parse((await pull()).headers.get('x-ink-transport')).frame,192);
+  assert.equal((await http('/audio',{frames:192,client:'other-player'},key)).status,409);
+  assert.equal((await command('keep',{lane:'lead',from:b(2),to:b(4)})).comp[0].take,'soft');
+  assert.equal((await command('save')).session,kept);
+  assert.equal(JSON.parse(fs.readFileSync(kept)).session.comp[0].take,'soft');
 });
 
 test('audio lanes replay editorial comps and native sample-motif plans',()=>{
