@@ -79,7 +79,9 @@ release. A well-bounded export window preserves the phase of the full note.
 ```
 
 Pitch is integrated over time to keep phase and sample playback continuous.
-Cutoff adds a per-voice low-pass filter. These curves also work on notes
+Cutoff adds a per-voice low-pass filter. An `amplitude` curve applies a
+linear 0–1 gain that can reach silence. A `roughness` curve sets the
+depth of rapid amplitude modulation in the same 0–1 range. These curves also work on notes
 played without performance maps. [Modular patches](music-instrument-graphs.md)
 can also route per-note pressure, breath, damping and contact position to
 their own parameters.

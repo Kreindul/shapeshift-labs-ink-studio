@@ -185,7 +185,9 @@
       check(name!=='room' && Object.hasOwn(plan.parts,name) &&
         fields(raw,['patch','gain','pan','highpass','lowpass','send','groove','pad','choke','duck','gestures','clips']) &&
         Object.hasOwn(patches,raw.patch) && (raw.choke===undefined || id(raw.choke)), 'Track needs a score part and an instrument patch');
-      check(raw.clips===undefined || plan.parts[name].role!=='percussion','Note clips need a pitched production track');
+      check(raw.clips===undefined || plan.parts[name].role!=='percussion' ||
+        Array.isArray(raw.clips) && raw.clips.every(clip=>clip?.mode==='layer'),
+      'Percussion tracks accept additive note clips');
       check(raw.duck===undefined || fields(raw.duck,['from','depth','release']),'Invalid ducking settings');
       const duck=raw.duck && {from:raw.duck.from,depth:number(raw.duck,'depth',4,0,18),
         release:number(raw.duck,'release',.1,.015,1)};

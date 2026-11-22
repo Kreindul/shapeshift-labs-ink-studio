@@ -224,6 +224,17 @@
         return {value,variants:value.variants,assets:{...assets,...derived},report:value.report};
       }
     },
+    'music.measureTimbreEvolution': {
+      description:'Measure a recording’s shared pitch, level and broadband texture trajectories.',
+      inputs:{source:'audio',options},outputs:{value:'record'},
+      run({source,options}) {return {value:A.timbreEvolution.analyze(source,options)};}
+    },
+    'music.planTimbreEvolution': {
+      description:'Crossfade a measured attack, body and decay across playable tracks with independent quality transfer.',
+      inputs:{profile:'record',production:'record',settings:'record',assets:options},
+      outputs:{value:'record',revision:'record',report:'record'},
+      run({profile,production,settings,assets}) {return A.timbreEvolution.plan(profile,production,settings,assets);}
+    },
     'music.inspectEditSession': {
       description:'Inspect the stable score, audio take and automation addresses in a music edit session.',
       inputs:{source:'record',assets:sessionAssets},outputs:{value:'record'},

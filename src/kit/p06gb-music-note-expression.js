@@ -3,7 +3,7 @@
   const {fields,finite,check}=P.musicInstruments;
   const controls=Object.freeze({pressure:.5,breath:0,damping:.25,contact:.5});
   const names=Object.keys(controls);
-  const limits={gainDb:[-60,12],pitchCents:[-1200,1200],cutoffHz:[40,24000],
+  const limits={gainDb:[-60,12],pitchCents:[-1200,1200],cutoffHz:[40,24000],amplitude:[0,1],roughness:[0,1],
     ...Object.fromEntries(names.map(name=>[name,[0,1]]))};
 
   function validate(raw) {
@@ -42,12 +42,15 @@
     if (!raw) return null;
     const pitch=raw.pitchCents && curve(raw.pitchCents,gate,n=>2**(n/1200));
     const amp=raw.gainDb && curve(raw.gainDb,gate,n=>n);
+    const amplitude=raw.amplitude && curve(raw.amplitude,gate,n=>n);
+    const roughness=raw.roughness && curve(raw.roughness,gate,n=>n);
     const filter=raw.cutoffHz && curve(raw.cutoffHz,gate,n=>Math.log(Math.min(n,rate*.47)));
     const motion=Object.fromEntries(names.filter(name=>raw[name]).map(name=>{
       const lane=curve(raw[name],gate,n=>n);
       return [name,t=>lane.value(t)];
     }));
-    return {controls:motion,gain:amp && (t=>10**(amp.value(t)/20)),
+    return {controls:motion,gain:(amp || amplitude) && (t=>(amplitude?.value(t) ?? 1)*10**((amp?.value(t) ?? 0)/20)),
+      roughness:roughness && (t=>roughness.value(t)),
       pitchTime:pitch && (t=>pitch.value(t,true)),
       pitchRatio:pitch && (t=>pitch.value(t)),
       pitchMax:pitch?.max ?? 1,

@@ -217,13 +217,18 @@
     const expression=P.musicNoteExpression.compile(note.play.curves,Math.max(gate,authoredGate),rate);
     const body=player.prepare(expression ? {...note,expression} : note,rate,gate);
     const fadeIn=note.performance?.fadeIn;
-    if (!expression?.gain && !expression?.filter && !fadeIn) return body;
-    const state=[0,0];
+    if (!expression?.gain && !expression?.filter && !expression?.roughness && !fadeIn) return body;
+    const state=[0,0], roughRate=Math.min(70,Math.max(28,note.frequency*.24));
     return {...body,signal(t,frame,ch=0) {
       let sample=body.signal(t,frame,ch);
       if (expression?.filter) {
         state[ch]+=(sample-state[ch])*expression.filter(t);
         sample=state[ch];
+      }
+      if (expression?.roughness) {
+        const depth=.64*expression.roughness(t);
+        const center=1-depth*.5, swing=depth*.5;
+        sample*=(center+swing*sin(roughRate*t+.25))/Math.sqrt(center**2+swing**2*.5);
       }
       const fade=fadeIn ? Math.sin(clamp(t/fadeIn)*Math.PI/2) : 1;
       return sample*fade*(expression?.gain?.(t) ?? 1);
