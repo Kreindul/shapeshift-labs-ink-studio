@@ -136,9 +136,12 @@
       ...exports.map(([,row])=>timing(row.strip,row.tap).end));
     let memory=frames*2*(exports.length+1+(delivery ? deliveryRoles.length+1 : 0)), work=memory;
     for (const row of order) {
+      // The last stage can take ownership when no reader needs its input or
+      // pre-fader contents. Delivery still needs the unmodified master input.
+      row.reusePost=!row.uses.has('input') && !row.uses.has('pre') && !(delivery && row===master);
       for (const [name,stage] of [...Object.entries(row.timing),...row.inserts.map(x=>['insert',x])]) {
         const count=stage.end ? Math.min(frames,stage.end)+stage.latency : 0;
-        if (name!=='pre' || row.uses.has('pre')) memory+=2*count;
+        if (name==='input' || name==='insert' || name==='post' && row.uses.has('post') && !row.reusePost) memory+=2*count;
         memory+=count*(stage.processor?.extra ?? 0);
         work+=count*(stage.processor?.cost ?? 3);
       }
@@ -215,7 +218,7 @@
       if (row.uses.has('input')) slot.input={samples:input,latency:arrival};
       if (row.uses.has('pre')) slot.pre={samples:processed,latency:row.timing.pre.latency};
       if (row.uses.has('post')) {
-        const post=allocate(row.timing.post), {latency}=row.timing.post;
+        const post=row.reusePost ? processed : allocate(row.timing.post), {latency}=row.timing.post;
         const fader=row.fader.reader(), pan=row.pan.reader();
         for (let at=latency;at<post.length/2;at++) {
           const t=at-latency, gain=fader(t), balance=pan(t);
