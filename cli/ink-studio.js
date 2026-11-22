@@ -1123,6 +1123,8 @@ const CMD = {
         '  music motif plan recipe.json --out plan.json   plan four musical roles for a single recording',
         '  music motif audition recipe.json [settings.json] --out directory   compare roles over one score window',
         '  music motif keep|render recipe.json selection.json --out directory   replay or keep an editable sample role',
+        '  music session inspect|edit|render|preview recipe.json [settings.json] --out output   comp and audition score and audio takes',
+        '  music session stream recipe.json   keep a warm session for JSON-line edits and auditions',
         '  music atmosphere plan recipe.json --out plan.json   arrange beds, calls and recurring gestures',
         '  music atmosphere render recipe.json [plan.json] --out directory   mix an editable plan and print atmosphere stems',
         '  music atmosphere audition recipe.json comparison.json --out directory   compare density and level over one score',

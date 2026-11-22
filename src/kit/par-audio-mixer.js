@@ -8,7 +8,7 @@
     check(record(value) && Object.keys(value).length<=max && Object.keys(value).every(id),'Invalid mixer '+label);
     return Object.entries(value);
   }
-  function compile(source,assets,host,premix,delivery) {
+  function compile(source,assets,host,premix,delivery,transport) {
     check(fields(source,['id','sampleRate','map','end','tail','output','strips','processors','taps','peakPolicy','meter']) &&
       id(source.id) && id(source.output) && record(assets) &&
       (source.meter===undefined || typeof source.meter==='boolean') &&
@@ -16,7 +16,8 @@
       ['normalize','error'].includes(source.peakPolicy ?? 'normalize'),'Invalid mixer recipe');
     const rate=source.sampleRate ?? 48000;
     check(integer(rate,8000,96000),'Mixer sample rate must be 8000 to 96000 Hz');
-    const time=S.mixerTime(rate,source.map), maximum=rate*3600;
+    const timeline=S.mixerTime(rate,source.map), maximum=rate*3600;
+    const time=transport ? S.mixerTransport(timeline,transport) : timeline;
     const bounds=source.end===undefined ? null : time.frame(time.position(source.end));
     check(bounds===null || integer(bounds,1,maximum),'Mixer end must be positive and within one hour');
     const audio=new Map(), strips=new Map(), routes=[];
@@ -149,8 +150,8 @@
     return {rate,sourceEnd,frames,order,routes,master,exports};
   }
   const read=(data,index)=>data[index] ?? 0;
-  function render(source,assets,host,premix,delivery) {
-    const {rate,sourceEnd,frames,order,routes,master,exports}=compile(source,assets,host,premix,delivery);
+  function render(source,assets,host,premix,delivery,transport) {
+    const {rate,sourceEnd,frames,order,routes,master,exports}=compile(source,assets,host,premix,delivery,transport);
     const buffers=new Map();
     const stems=delivery && Object.fromEntries(deliveryRoles.map(role=>[role,new Float64Array(frames*2)]));
     let premaster;
@@ -263,4 +264,5 @@
     renderPremix:(source,assets,buses)=>render(source,assets,undefined,buses),
     renderForDelivery:(source,assets,roles={},buses)=>render(source,assets,undefined,buses,roles),
     deliveryRoles});
+  S.renderMixerTransport=(source,assets,ranges)=>render(source,assets,undefined,undefined,undefined,ranges);
 })(KIT.procedural);

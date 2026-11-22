@@ -148,6 +148,7 @@ module.exports=function musicCommand(pos,opt,kit) {
   const [mode,file,editFile]=pos;
   if (mode==='production') return require('./music-production.js')(pos.slice(1),opt,kit);
   if (mode==='motif') return require('./music-sample-motif.js')(pos.slice(1),opt,kit);
+  if (mode==='session') return require('./music-session.js')(pos.slice(1),opt,kit);
   if (mode==='atmosphere') return require('./music-atmosphere.js')(pos.slice(1),opt,kit);
   if (mode==='jam') return require('./music-jam.js')(pos.slice(1),opt,kit);
   if (mode==='gestures') return require('./music-gestures.js')(pos.slice(1),opt,kit);

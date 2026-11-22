@@ -10,6 +10,7 @@
     run({ source, options }, { time, take }) { return sample(source, mediaTime(time, take, options)); }
   });
   const scoreRequests = { type: 'array<record>', default: [] };
+  const sessionAssets = {type:'record',default:{}};
   A.operations = Object.freeze({
     'audio.buffer': {
       inputs: { sampleRate: 'number', channels: 'number', samples: 'array<number>' }, outputs: { value: 'audio' },
@@ -180,6 +181,24 @@
       description:'Hear different musical uses of one recording over the same bars with a shared playback gain.',
       inputs:{source:'audio',score:'audio',plan:'record',options},outputs:{value:'audio',report:'record'},
       run({source,score,plan,options}) {return A.sampleMotif.audition(plan,source,score,options);}
+    },
+    'music.inspectEditSession': {
+      description:'Inspect the stable score, audio take and automation addresses in a music edit session.',
+      inputs:{source:'record',assets:sessionAssets},outputs:{value:'record'},
+      run({source,assets}) {return {value:A.musicSession.create(assets).inspect(source)};}
+    },
+    'music.editSession': {
+      description:'Keep a lane range, pin a performance, or edit a named note, recording or automation knot.',
+      inputs:{source:'record',assets:sessionAssets,edits:scoreRequests},outputs:{value:'record'},
+      run({source,assets,edits}) {return {value:A.musicSession.create(assets).edit(source,edits)};}
+    },
+    'music.renderEditSession': {
+      description:'Render a music comp or audition synchronous take switches and loop passes through one continuous desk.',
+      inputs:{source:'record',assets:sessionAssets,options},outputs:{value:'audio',taps:'record',report:'record'},
+      run({source,assets,options}) {
+        if (Object.keys(options).some(key=>key!=='preview')) throw new RangeError('Unknown session render option');
+        return A.musicSession.create(assets).render(source,options.preview);
+      }
     },
     'music.atmosphereReference': {
       description:'Read the audio clock and performed note gates for a pinned atmosphere score.',
