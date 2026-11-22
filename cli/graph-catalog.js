@@ -7,7 +7,8 @@ function registry(settings) {
   const { toolkit, stock, extensions, overrides } = operationRegistry(kit, operations);
   const entries = { ...toolkit, ...overrides };
   return { kit, entries, origin(id) {
-    return Object.hasOwn(extensions, id) ? 'host' : Object.hasOwn(stock, id) ? 'headless' : 'toolkit';
+    return Object.hasOwn(extensions, id) && extensions[id] !== toolkit[id] ? 'host' :
+      Object.hasOwn(stock, id) ? 'headless' : 'toolkit';
   } };
 }
 

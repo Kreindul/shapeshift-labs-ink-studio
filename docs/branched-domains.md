@@ -76,3 +76,6 @@ It has four tubes, 35 traced sections, three named external ports and four
 observation sites. The playback opens the lower branch and follows the
 accepted flow through the cavity. The demo also writes the compiled domain,
 the runnable model and the trace of section `upper/4`.
+
+Use [distributed pressure and flow](distributed-waves.md) to propagate
+acoustic waves through the measured sections and named probe sites.

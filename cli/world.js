@@ -515,6 +515,16 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         return respond(require('./mass-properties.js').measure(kit,read(file),file,
           {dependency:shot?.dependency,assetPack:opt['asset-pack']}));
       }
+      case 'waves': {
+        ensure(typeof file==='string' && other===undefined && (opt.wav===undefined||typeof opt.wav==='string'),
+        'Use sim waves <run.json> [--out trace.json --wav audition.wav]');
+        ensure(opt.wav===undefined||typeof opt.out!=='string'||path.resolve(opt.wav)!==path.resolve(opt.out),
+          'Wave trace and WAV need distinct output files');
+        const wave=require('./wave-network.js'), plan=read(file);
+        const result=wave.run(kit,plan,file,shot?.dependency);
+        if(opt.wav!==undefined)wave.writeWav(opt.wav,result,plan.audio);
+        return respond(result);
+      }
       case 'network': {
         ensure(typeof file==='string' && other===undefined,'Use sim network <run.json> [--out trace.json]');
         return respond(require('./lumped-network.js').run(kit,read(file),file,shot?.dependency));

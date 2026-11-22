@@ -185,3 +185,6 @@ residuals and work limits.
 
 [Lumped effort/flow networks](lumped-networks.md) compose storage, resistance,
 inertance, springs, dampers, and sources with junction and energy balance.
+
+[Distributed waves](distributed-waves.md) use measured variable-area
+tubes for pressure and volume-flow propagation or faster delay guides.
