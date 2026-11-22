@@ -79,6 +79,9 @@ test('orchestration holds contour and raw attacks while routing the tail and ret
   const paths=row=>P.musicProduction.inspect(row.production,take.plan.assets).events.lead.map(note=>[note.beat,note.midi]);
   assert.deepEqual(paths(coast),paths(metal));
   assert.notDeepEqual(coast.value.samples,metal.value.samples);
+  const wash=coast.production.patches[coast.production.tracks.wash.patch].zones[0];
+  assert.equal(wash.root,take.plan.projection.motifs.tail.events[0].midi);
+  assert(coast.report.stems.wash.rms>.001);
   const {id,range}=take.plan.projection.attacks[0];
   const key=Object.keys(take.plan.assets).find(name=>name.endsWith('-'+id));
   assert.deepEqual(take.plan.assets[key].samples,source.samples.slice(range.fromSample,range.toSample));

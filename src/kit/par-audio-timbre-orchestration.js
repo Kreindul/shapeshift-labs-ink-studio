@@ -51,11 +51,17 @@
     }
     function trail() {
       if (tailPatch) return tailPatch;
+      const target=projection.motifs.tail.events[0].midi;
+      const sourceMidi=profile.tail.midi ?? profile.pitchTrack.at(-1)?.midi ?? target;
+      // Pitch the grains near their intended register before the sampler plays them.
+      const semitones=Math.max(-36,Math.min(36,target-sourceMidi)), shifted=sourceMidi+semitones;
+      const root=Math.max(0,Math.min(127,Math.round(shifted)));
       const value=S.stretchMotifTexture(pcm,sampleRate,{range:projection.tail,frames:Math.round(sampleRate*tailSeconds),
-        grains:{grainMs:121,density:39,semitones:0,sprayMs:17,spread:.70,reverse:.08,jitterCents:32,seed:seed|0}});
-      const pitch=Math.round(profile.tail.midi ?? profile.pitchTrack.at(-1)?.midi ?? projection.root);
+        grains:{grainMs:121,density:39,semitones,sprayMs:17,spread:.70,reverse:.08,jitterCents:32,seed:seed|0}});
+      const peak=value.samples.reduce((p,x)=>Math.max(p,Math.abs(x)),0);
+      const audio=peak>.0001 ? {...value,samples:value.samples.map(x=>.78*x/peak)} : value;
       tailPatch={type:'sample',env:{attack:.07,decay:.58,sustain:.83,release:.31},zones:[
-        {samples:[put(stem+'-tail',value)],root:Math.min(127,pitch),oneShot:false}]};
+        {samples:[put(stem+'-tail',audio)],root,tune:100*(root-shifted),oneShot:false}]};
       return tailPatch;
     }
     function palette(name) {
