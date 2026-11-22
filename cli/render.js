@@ -785,6 +785,8 @@ function renderFrame(world, o, preparedPalettes) {
     asp = W / H,
     baseCount = world.count;
   const curveCamera = curves && { view: V, near, focal, width: W, height: H, ortho };
+  const curveFrames = curves && world.curveClips && (world.anim?.rig || world.anim?.bones || world.reconstructionPose) &&
+    sampleFrames(world, t);
   const ditherView = anchorSpaces.has('view') ? ArtStability.viewProjection(V) : undefined;
   if(!o.reflectionPlane&&!probeView)o.cameraFrame?.({time:camera.time,pose:CameraLens.fromView(V),motion:camera.motion});
   if (!o.reflectionPlane && !probeView) o[captureCamera]?.({width: W, height: H, view: V, tangent: ortho ? oh : tangent, aspect: asp, ortho,
@@ -1720,7 +1722,9 @@ function renderFrame(world, o, preparedPalettes) {
       continue;
     let curve;
     if (curveCamera && CurveSplat.isRow(d, q)) {
-      curve = CurveSplat.prepare(d, q, [x, y, z], SC[i], al, curveCamera);
+      const position = [x, y, z], curveWorld = shutterRows?.pose(i) ?? world;
+      const clips = CurveSplat.clipPlanes(curveWorld.curveClips, i, position, SC[i], curveFrames ? curveFrames(i) : null);
+      curve = CurveSplat.prepare(d, q, position, SC[i], al, curveCamera, clips);
       if (!curve || curve.bounds[0] >= W || curve.bounds[1] >= H || curve.bounds[2] <= 0 || curve.bounds[3] <= 0) continue;
     }
     const cx = curve ? curve.middle[0] : V[0] * x + V[4] * y + V[8] * z + V[12],

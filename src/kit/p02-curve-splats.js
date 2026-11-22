@@ -135,9 +135,146 @@
     return K.V.mad(K.V.mul(n, Math.cos(angle)), K.V.cross(axis, n), Math.sin(angle));
   }
 
+  const capTypes = ['rounded', 'blunt', 'tapered', 'fading'];
+  const smooth = x => {
+    const u = Math.max(0, Math.min(1, x));
+    return u * u * (3 - 2 * u);
+  };
+  function endStyle(value = 'rounded') {
+    const type = typeof value === 'string' ? value : value?.type;
+    const length = typeof value === 'string' ? .16 : value?.length ?? .16;
+    check(capTypes.includes(type) && finite(length, 1e-5, 1), 'invalid cap style or length');
+    return { type, length };
+  }
+  function capStyles(value) {
+    if (value === undefined || typeof value === 'string') {
+      const cap = endStyle(value);
+      return { start: cap, end: cap };
+    }
+    check(value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(key => key === 'start' || key === 'end'), 'caps need start and end styles');
+    return { start: endStyle(value.start), end: endStyle(value.end) };
+  }
+
+  function joinStyles(value) {
+    check(Array.isArray(value) && value.length <= 128, 'expected up to 128 join edits');
+    return Array.from(value, row => {
+      const { type, at, length = type === 'break' ? .04 : .12, strength = 1, spread = .25, color } = row ?? {};
+      check((type === 'break' || type === 'pool') && finite(at, 0, 1) && finite(length, 1e-5, 1),
+        'invalid join type, position or length');
+      if (type === 'break') return { type, at, length };
+      check(finite(strength, 0, 8) && finite(spread, 0, 4), 'invalid pool strength or spread');
+      return { type, at, length, strength, spread, color: color === undefined ? null : rgb(color) };
+    });
+  }
+
+  function joinRanges(join, closed) {
+    const half = join.length / 2;
+    return (closed ? [-1, 0, 1] : [0]).map(shift =>
+      [Math.max(0, join.at + shift - half), Math.min(1, join.at + shift + half)]).filter(([a, b]) => a < b);
+  }
+
+  function strandEnds(knots, lengths, total, caps, joins, closed, profileCuts) {
+    const cuts = new Set(profileCuts);
+    const add = (from, to) => {
+      for (let i = 0; i <= 24; i++) cuts.add(from + (to - from) * i / 24);
+    };
+    const gaps = [];
+    for (const join of joins) for (const [from, to] of joinRanges(join, closed)) {
+      if (join.type === 'break') {
+        gaps.push({ from, to });
+        cuts.add(from);
+        cuts.add(to);
+      } else add(from, to);
+    }
+    gaps.sort((a, b) => a.from - b.from);
+    const merged = [];
+    for (const gap of gaps) {
+      const last = merged.at(-1);
+      if (last && last.to >= gap.from) last.to = Math.max(last.to, gap.to);
+      else merged.push(gap);
+    }
+    const runs = [];
+    let from = 0;
+    for (const gap of merged) {
+      if (gap.from > from) runs.push({ from, to: gap.from, bluntStart: from > 0, bluntEnd: true });
+      from = gap.to;
+    }
+    if (from < 1) runs.push({ from, to: 1, bluntStart: from > 0, bluntEnd: false });
+    if (!closed && runs[0]?.from === 0) {
+      runs[0].bluntStart = caps.start.type === 'blunt';
+      if (caps.start.type === 'fading' || caps.start.type === 'tapered') add(0, caps.start.length);
+    }
+    if (!closed && runs.at(-1)?.to === 1) {
+      runs.at(-1).bluntEnd = caps.end.type === 'blunt';
+      if (caps.end.type === 'fading' || caps.end.type === 'tapered') add(1 - caps.end.length, 1);
+    }
+    // The plane uses the tangent on the visible side of the authored boundary.
+    function plane(u, sign) {
+      const at = u * total, tolerance = total * 1e-12;
+      let distance = 0;
+      for (let i = 0; i < lengths.length; i++) {
+        const length = lengths[i];
+        if (length < 1e-7) continue;
+        const end = distance + length;
+        if (sign > 0 ? at < end - tolerance || end === total : at <= end + tolerance) {
+          const blend = Math.max(0, Math.min(1, (at - distance) / length));
+          return { point: K.V.lerp(knots[i], knots[i + 1], blend),
+            normal: K.V.mul(K.V.sub(knots[i + 1], knots[i]), sign / length) };
+        }
+        distance = end;
+      }
+      return null;
+    }
+    for (const run of runs) {
+      if (run.bluntStart) run.start = plane(run.from, 1);
+      if (run.bluntEnd) run.end = plane(run.to, -1);
+    }
+    return { runs, stops: [...cuts].filter(u => u > 0 && u < 1).sort((a, b) => a - b) };
+  }
+
+  function endWeights(sample, run, caps, closed) {
+    if (closed) return [1, 1];
+    let width = 1, fade = 1;
+    for (const [name, active, distance] of [['start', run.from === 0, sample.u], ['end', run.to === 1, 1 - sample.u]]) {
+      const cap = caps[name];
+      if (!active || distance >= cap.length) continue;
+      if (cap.type === 'tapered') width *= smooth(distance / cap.length);
+      if (cap.type === 'fading') fade *= smooth(distance / cap.length);
+    }
+    return [width, fade];
+  }
+
+  function poolAt(sample, pools, closed) {
+    let spread = 1, density = 1, tint;
+    for (const pool of pools) {
+      const delta = Math.abs(sample.u - pool.at), distance = closed ? Math.min(delta, 1 - delta) : delta;
+      const weight = smooth(1 - 2 * distance / pool.length);
+      if (weight === 0) continue;
+      spread += weight * pool.spread;
+      density += weight * pool.strength;
+      if (pool.color) tint = [...(tint ?? []), [pool.color, weight]];
+    }
+    return { spread, density, tint };
+  }
+
+  function styledOpacity(base, fade, density, edge) {
+    if (fade === 1 && density === 1) return base;
+    if (edge === 'hard') return fade * (1 - (1 - base) ** density);
+    return -Math.expm1(Math.log1p(-Math.min(.999, base)) * fade * density);
+  }
+
+  function continuesFrom(plane, from, to) {
+    return [from, to].every(point => {
+      const offset = K.V.sub(point, plane.point);
+      const epsilon = 1e-8 * Math.max(1, K.V.len(offset));
+      return K.V.dot(plane.normal, offset) >= -epsilon && K.V.len(K.V.cross(plane.normal, offset)) <= epsilon;
+    });
+  }
+
   function prepare(source, options = {}) {
     const link = source?.kind === 'routed' ? source.link : undefined;
-    const { radius, width, taper = 1, twist = 0, section, edge = 'gaussian', up, profileSamples = 96, opacity = edge === 'hard' ? 1 : .94, color = '#eab876', object = link?.id ?? 'curve',
+    const { radius, width, taper = 1, twist = 0, section, edge = 'gaussian', caps: capInput, joins: joinInput = [],
+      up, profileSamples = 96, opacity = edge === 'hard' ? 1 : .94, color = '#eab876', object = link?.id ?? 'curve',
       material = link?.material ?? 'strand', target, maxSegments = segmentLimit } = options;
     const defaultAspect = section === 'flattened' ? .16 : section === 'elliptical' ? .5 :
       section === 'round' || options.twist === undefined ? 1 : .35;
@@ -155,7 +292,9 @@
     const profileTaper = channel(taper, 'taper', 0, 1);
     const profileTwist = channel(twist, 'twist', -64 * Math.PI, 64 * Math.PI);
     const framed = aspect < .99999, flattened = section === 'flattened';
-    const stops = profileStops([profileWidth, profileTaper, framed && profileTwist], profileSamples);
+    const profileCuts = profileStops([profileWidth, profileTaper, framed && profileTwist], profileSamples);
+    const caps = capStyles(capInput), joins = joinStyles(joinInput), pools = joins.filter(join => join.type === 'pool');
+    const endEdits = joins.length || caps.start.type !== 'rounded' || caps.end.type !== 'rounded';
     const fixedColor = typeof color === 'function' ? null : rgb(color);
     let segments = 0, examined = 0, samples = 0;
     const strands = paths(source).map((strand, index) => {
@@ -167,6 +306,11 @@
       check(samples <= 2 * segmentLimit, 'point budget exceeded');
       const lengths = knots.slice(1).map((to, i) => K.V.dist(knots[i], to));
       const total = lengths.reduce((sum, length) => length < 1e-7 ? sum : sum + length, 0);
+      if (total === 0) return { id, rows };
+      const closed = strand.closed ?? (knots.length > 3 && K.V.dist(knots[0], knots.at(-1)) <= 1e-8);
+      const ends = endEdits ? strandEnds(knots, lengths, total, caps, joins, closed, profileCuts) : null;
+      const stops = ends?.stops ?? profileCuts;
+      let runIndex = 0;
       const retainedFrame = framed && up === undefined && strand.frame;
       const chartNormals = framed && up === undefined && section !== undefined ? strand.normals : undefined;
       const initial = up ?? strand.up ?? [0, 1, 0];
@@ -189,10 +333,23 @@
           const sample = { id, family: strand.family, index: strand.index ?? index,
             point: K.V.lerp(from, to, middle), distance: arc, u: arc / total,
             ...(a && b && { uv: a.map((v, k) => v + (b[k] - v) * middle) }) };
-          const size = (profileWidth ? profileWidth.sample(sample) / 2 : baseRadius) * profileTaper.sample(sample);
-          if (size >= 1e-6 && (next - previous) * length >= 1e-7) {
+          while (ends?.runs[runIndex] && sample.u > ends.runs[runIndex].to) runIndex++;
+          const run = ends?.runs[runIndex];
+          const active = !ends || run && sample.u >= run.from;
+          if (active && (next - previous) * length >= 1e-7) {
+            const [tip, fade] = ends ? endWeights(sample, run, caps, closed) : [1, 1];
+            const pool = ends ? poolAt(sample, pools, closed) : { spread: 1, density: 1 };
+            const size = Math.min(100, (profileWidth ? profileWidth.sample(sample) / 2 : baseRadius) *
+              profileTaper.sample(sample) * tip * pool.spread);
+            const rowOpacity = styledOpacity(opacity, fade, pool.density, edge);
+            if (size < 1e-6) {
+              previous = next;
+              continue;
+            }
             segments++;
-            const shade = fixedColor ?? rgb(color(sample));
+            let shade = fixedColor ?? rgb(color(sample));
+            for (const [pigment, weight] of pool.tint ?? [])
+              shade = shade.map((value, k) => Math.round(value + weight * (pigment[k] - value)));
             let profile;
             if (framed) {
               const a = chartNormals?.[i], b = chartNormals?.[i + 1];
@@ -201,8 +358,16 @@
               check(point(direction), 'invalid strand frame');
               profile = { major: majorAxis(direction, axis, profileTwist.sample(sample)), aspect, flattened };
             }
-            rows.push({ from: previous === 0 ? from : K.V.lerp(from, to, previous),
-              to: next === 1 ? to : K.V.lerp(from, to, next), shade, radius: size, profile });
+            // Trim the kernel near an end without clipping distant sections that turn back past it.
+            const reach = size * 6 / total;
+            const start = previous === 0 ? from : K.V.lerp(from, to, previous);
+            const end = next === 1 ? to : K.V.lerp(from, to, next);
+            const left = run?.start && ((distance + previous * length) / total <= run.from + reach ||
+              continuesFrom(run.start, start, end)) ? run.start : null;
+            const right = run?.end && ((distance + next * length) / total >= run.to - reach ||
+              continuesFrom(run.end, start, end)) ? run.end : null;
+            rows.push({ from: start, to: end, shade, radius: size, opacity: rowOpacity, profile,
+              clips: left || right ? [left, right] : undefined });
           }
           previous = next;
         } while (previous < 1);
@@ -210,7 +375,7 @@
       }
       return { id, rows };
     });
-    return { object, material, target, opacity, edge, strands, segments, examined };
+    return { object, material, target, edge, strands, segments, examined };
   }
 
   function emit(builder, plan) {
@@ -221,8 +386,8 @@
     for (const { id, rows } of plan.strands) {
       const start = builder.count();
       const group = nextGroup && rows.length ? nextGroup++ : undefined;
-      for (const { from, to, shade, radius, profile } of rows)
-        builder.curveSplat(from, to, radius, shade, plan.opacity, profile, plan.edge, group);
+      for (const { from, to, shade, radius, opacity, profile, clips } of rows)
+        builder.curveSplat(from, to, radius, shade, opacity, profile, plan.edge, group, clips);
       const end = builder.count();
       builder.describeSplats?.(start, end, {
         object: plan.object, material: plan.material, target: { entity: plan.object, ...plan.target, surface: id }

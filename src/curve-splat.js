@@ -1,7 +1,7 @@
 /* Finite strand kernels carried by ordinary native splat rows. */
 const CurveSplat = (() => {
   // Kind zero leaves the motion payload free. Preserve the tag through native row copies.
-  const marker = -161291.375, minimum = 1e-5;
+  const marker = -161291.375, minimum = 1e-5, clipStride = 12;
   const hardBase = 1 << 20, maxHardGroups = (1 << 20) - 1;
   const betaRadius = Math.sqrt(6), betaIntegral = 5 * Math.PI / 16;
   // Seven-point Gaussian quadrature across the flat section, with rounded Gaussian edges.
@@ -99,7 +99,23 @@ const CurveSplat = (() => {
       .284496736) * t + .254829592) * t * Math.exp(-x * x));
   }
 
-  function prepare(data, at, position, scale, opacity, { view, near, focal, width, height, ortho }) {
+  function clipPlanes(rows, index, position, scale, frame) {
+    const at = index * clipStride;
+    if (!rows || at >= rows.length) return null;
+    const matrix = frame?.basis().anchor;
+    const planes = [];
+    for (const offset of [at, at + 6]) {
+      const normal = Array.from(rows.subarray(offset + 3, offset + 6));
+      if (!normal.some(Boolean)) continue;
+      let delta = Array.from(rows.subarray(offset, offset + 3));
+      if (matrix) delta = [0, 3, 6].map(i => matrix[i] * delta[0] + matrix[i + 1] * delta[1] + matrix[i + 2] * delta[2]);
+      const direction = unit(frame ? frame.worldCovector(normal) : normal);
+      if (direction) planes.push({ point: position.map((v, i) => v + delta[i] * scale), normal: direction });
+    }
+    return planes.length ? planes : null;
+  }
+
+  function prepare(data, at, position, scale, opacity, { view, near, focal, width, height, ortho }, clips) {
     const packed = data[at + 15], section = sectionOf(packed);
     if (section < 0) return null;
     const shape = dimensions(data, at, scale, section);
@@ -133,7 +149,7 @@ const CurveSplat = (() => {
     }
     const middle = a.map((v, i) => v + (first + last) / 2 * (b[i] - v));
     return { from, axis, radius, length, bounds, middle, major: shape.major, minor: shape.minor, flattened,
-      group, beta, opacity, tau: -Math.log1p(-Math.min(.999, opacity)) };
+      group, beta, opacity, clips, tau: -Math.log1p(-Math.min(.999, opacity)) };
   }
 
   // The integral is optical depth per unit strength, with the nearest point on the sampled axis.
@@ -234,8 +250,34 @@ const CurveSplat = (() => {
       capsuleEntry(lower, ray, alongY, 2 * half, radius, near), capsuleEntry(end, ray, alongY, 2 * half, radius, near));
   }
 
+  function clipInterval(planes, origin, direction, from) {
+    let to = Infinity;
+    for (const { point, normal } of planes) {
+      const offset = dot(normal, origin) - dot(normal, point), slope = dot(normal, direction);
+      if (Math.abs(slope) < 1e-10) {
+        if (offset < -1e-8) return null;
+      } else if (slope > 0) from = Math.max(from, -offset / slope);
+      else to = Math.min(to, -offset / slope);
+      if (from > to + 1e-9) return null;
+    }
+    return [from, to];
+  }
+
+  function insideProjectedCaps(planes, origin, direction) {
+    // Soft kernels use the tangent-plane cut projected perpendicular to the ray.
+    // Evaluate the same boundary for every segment, including after subdivision.
+    for (const { point, normal } of planes) {
+      const facing = dot(normal, direction);
+      if (Math.abs(facing) >= 1 - 1e-10) continue;
+      const offset = origin.map((v, i) => v - point[i]);
+      if (dot(normal, offset) - facing * dot(direction, offset) < -1e-8) return false;
+    }
+    return true;
+  }
+
   function sample(strand, { origin, direction, axial }, near) {
-    const { from, axis, radius, length, major, minor, flattened, beta, group } = strand;
+    const { from, axis, radius, length, major, minor, flattened, beta, group, clips } = strand;
+    if (clips && !group && !insideProjectedCaps(clips, origin, direction)) return null;
     const offsetFromEye = [from[0] - origin[0], from[1] - origin[1], from[2] - origin[2]];
     const axialStart = dot(offsetFromEye, direction), axialSlope = dot(axis, direction);
     let start = offsetFromEye, ray = direction, along = axis, scale = 1;
@@ -249,8 +291,11 @@ const CurveSplat = (() => {
       along = alongX;
     }
     if (group) {
-      const t = hardEntry(start, ray, along, radius, length, flattened, near * scale / axial);
-      return Number.isFinite(t) && strand.opacity >= minimum ? { alpha: strand.opacity, depth: t * axial / scale } : null;
+      const interval = clips ? clipInterval(clips, origin, direction, near / axial) : [near / axial, Infinity];
+      if (!interval) return null;
+      const t = hardEntry(start, ray, along, radius, length, flattened, interval[0] * scale);
+      return Number.isFinite(t) && t <= interval[1] * scale + 1e-9 && strand.opacity >= minimum ?
+        { alpha: strand.opacity, depth: t * axial / scale } : null;
     }
     const tau = strand.tau / scale, integrate = beta ? compactKernel : kernel;
     const rayStart = major ? dot(start, ray) : axialStart, parallel = major ? ray[0] : axialSlope;
@@ -279,6 +324,6 @@ const CurveSplat = (() => {
     const coverage = -Math.expm1(-tau * normalization * amount);
     return coverage >= minimum ? { alpha: coverage, depth: Math.max(near, axial * weightedDepth / amount) } : null;
   }
-  return Object.freeze({ tag, joinGroups, axialUnits, minimum, isRow, prepare, sample });
+  return Object.freeze({ tag, joinGroups, axialUnits, minimum, clipStride, clipPlanes, isRow, prepare, sample });
 })();
 if (typeof module !== 'undefined') module.exports = CurveSplat;

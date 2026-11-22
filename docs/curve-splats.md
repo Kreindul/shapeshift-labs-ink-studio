@@ -142,6 +142,42 @@ Open the [editable edge comparison](../examples/curve-splat-edges.json) or run
 `node examples/curve-splat-edges.cjs studio/out/curve-splat-edges` to render
 the matched orbit and measured coverage plots.
 
+## Finish caps and joins
+
+Set `caps` once for both ends or give it separate `start` and `end` styles.
+Terminal caps apply to open path endpoints.
+
+| Cap | Appearance |
+| --- | --- |
+| `rounded` | The default end from the selected edge kernel. |
+| `blunt` | Cuts off coverage at the endpoint. Hard edges use a tangent-plane cut in world space. Soft edges use the projected tangent-plane boundary. |
+| `tapered` | Narrows to a point over `length`, a fraction of the whole path. |
+| `fading` | Reduces density or hard-coverage opacity over `length` while keeping the prescribed width. |
+
+The taper and fade length defaults to .16. Use `joins` to edit an explicit
+position on the strand. `at` and `length` use normalized arc length, like a
+width key. A `break` removes a centered interval and trims both newly exposed
+ends. It also works across a closed path's seam. A `pool` adds local density
+with `strength` and width with `spread`. Set `color` for an optional pigment
+tint. Both soften toward the boundary of the pool. Overlapping break
+intervals combine into one gap.
+
+```js
+K.curveSplats.draw(builder, path, {
+  width: .18,
+  edge: 'beta',
+  caps: { start: 'blunt', end: { type: 'fading', length: .22 } },
+  joins: [
+    { type: 'pool', at: .45, length: .10, strength: 1.5, spread: .4, color: '#d49872' },
+    { type: 'break', at: .72, length: .035 }
+  ]
+});
+```
+
+The [editable cap and join sheet](../examples/curve-splat-caps.json) uses all
+four ends and both join edits. Run `node examples/curve-splat-caps.cjs
+studio/out/curve-splat-caps` for an animated comparison.
+
 ## Render and compare
 
 The [editable example](../examples/curve-splat-scene.json) uses

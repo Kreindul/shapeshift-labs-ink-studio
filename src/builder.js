@@ -1057,8 +1057,8 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
       else fallingSnowRanges.push({ first, end });
     }
   }
-  let hasCurveSplats = false, curveGroups = 0;
-  function curveSplat(from, to, radius, color, opacity, profile, edge, group) {
+  let hasCurveSplats = false, curveGroups = 0, curveClips;
+  function curveSplat(from, to, radius, color, opacity, profile, edge, group, clips) {
     const delta = to.map((v, i) => v - from[i]), half = Math.hypot(...delta) / 2;
     const center = from.map((v, i) => v + delta[i] * .5), axis = delta.map(v => v / (2 * half));
     if (profile) {
@@ -1073,6 +1073,18 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
         { nd: true, ph: radius, sp: half, ex: CurveSplat.tag(0, edge, group) });
     }
     hasCurveSplats = true;
+    if (clips) {
+      const stride = CurveSplat.clipStride, at = (n - 1) * stride;
+      if (!curveClips || curveClips.length < n * stride) {
+        const storage = new Float32Array(Math.max(n * stride, curveClips ? curveClips.length * 2 : 256 * stride));
+        if (curveClips) storage.set(curveClips);
+        curveClips = storage;
+      }
+      for (let i = 0; i < clips.length; i++) if (clips[i]) {
+        const { point, normal } = clips[i];
+        curveClips.set(point.map((v, k) => v - center[k]).concat(normal), at + i * 6);
+      }
+    }
   }
   function finish(meta) {
     const pending = globalThis.INK_DECAL_NEXT;
@@ -1100,6 +1112,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
         data: data.subarray(0, n * 16),
         count: n,
         ...(hasCurveSplats && { curveSplats: true }),
+        ...(curveClips && { curveClips: curveClips.slice(0, n * CurveSplat.clipStride) }),
         ...(paintDecals.length && { paintDecals }),
         ...(correctionRows.length && { paintCorrections: PaintCorrections.bind(correctionRows) }),
         renderMetadata: renderRows(),
@@ -1177,6 +1190,9 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
   const take = () => {
     const out = data.slice(0, n * 16);
     n = 0;
+    hasCurveSplats = false;
+    curveGroups = 0;
+    curveClips = undefined;
     fine = null;
     attr = null;
     attrN = null;

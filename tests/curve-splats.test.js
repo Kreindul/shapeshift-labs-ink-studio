@@ -92,7 +92,7 @@ test('the normal render CLI opens an editable JSON curve scene and can switch to
   t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
   const file = name => path.join(folder, name);
   const entry = scene([{ source: { kind: 'spline', points: [[-2,0,0],[-.8,.7,.2],[.8,-.5,-.3],[2,0,0]], samples: 5 },
-    section: 'flattened', edge: 'beta', width: { samples: [.06, .21, .10] }, twist: [[0, 0], [1, Math.PI]], color: '#f3b56b', object: 'wire' }]);
+    section: 'flattened', edge: 'beta', caps: { start: 'blunt', end: 'fading' }, width: { samples: [.06, .21, .10] }, twist: [[0, 0], [1, Math.PI]], color: '#f3b56b', object: 'wire' }]);
   fs.writeFileSync(file('strand.json'), JSON.stringify(entry));
   const cli = path.resolve(__dirname, '../cli/ink-studio.js');
   for (const mode of ['on', 'off']) {
@@ -246,4 +246,64 @@ test('hard strand groups stay distinct when native worlds with the same local ID
   const single = ink.render(front, opts), combined = ink.render(world, opts);
   assert.equal(single.alpha[38 * single.w + 64], 128);
   assert.equal(combined.alpha[38 * combined.w + 64], 191);
+});
+
+test('rounded, blunt, tapered and fading caps control each end independently', () => {
+  const base = profileFrame({ width: .4 }), rounded = profileFrame({ width: .4, caps: 'rounded' });
+  const blunt = profileFrame({ width: .4, caps: { start: 'blunt', end: 'rounded' } });
+  assert.deepEqual(base.alpha, rounded.alpha);
+  const at = (frame, x, y = 38) => frame.alpha[y * frame.w + x];
+  assert.ok(at(rounded, 21) > 15);
+  assert.equal(at(blunt, 21), 0);
+  assert.equal(at(blunt, 106), at(rounded, 106));
+  assert.equal(at(blunt, 64), at(rounded, 64));
+  const start = type => profileFrame({ width: .4, caps: { start: { type, length: .38 } } });
+  const tapered = start('tapered'), fading = start('fading');
+  assert.ok(band(tapered, 35) < band(base, 35) / 2);
+  assert.ok(at(tapered, 35) > at(fading, 35) + 70);
+  assert.equal(at(fading, 64), at(base, 64));
+  assert.equal(at(tapered, 106), at(base, 106));
+
+  const B = kit.makeBuilder(1, palette);
+  assert.throws(() => C.draw(B, straight, { caps: { end: 'square' } }), /invalid cap/);
+  assert.throws(() => C.draw(B, straight, { joins: [{ type: 'pool', at: 1.1 }] }), /invalid join/);
+  assert.equal(B.count(), 0);
+});
+
+test('blunt caps survive straight subdivision and native assembly in both projections', () => {
+  const pieces = Array.from({ length: 39 }, (_, i) => K.V.lerp(straight[0], straight[1], i / 38));
+  for (const edge of ['gaussian', 'beta', 'hard']) {
+    const make = points => C.world(scene([source(points, { caps: 'blunt', width: .31, edge, opacity: .57 })]));
+    for (const ortho of [false, true]) {
+      const options = { ...imageOptions, ortho, yaw: .67, transparent: true };
+      const world = make(pieces), a = ink.render(make(straight), options), b = ink.render(world, options);
+      assert.ok(a.alpha.every((value, i) => Math.abs(value - b.alpha[i]) <= 1), edge + '/' + ortho);
+      const native = K.procedural.splatProvenance;
+      const subset = native.subset(world, Array.from({ length: world.count }, (_, i) => world.count - 1 - i));
+      assert.deepEqual(ink.render(native.join([subset], world), options).alpha, b.alpha);
+    }
+  }
+});
+
+test('small breaks stay open even with soft edges and pools change only a local part of the strand', () => {
+  for (const edge of ['gaussian', 'beta', 'hard']) {
+    const gap = profileFrame({ width: .4, edge, joins: [{ at: .5, type: 'break', length: .04 }] });
+    assert.equal(gap.alpha[38 * gap.w + 64], 0);
+    assert.ok(gap.alpha[38 * gap.w + 58] > 80);
+    assert.ok(gap.alpha[38 * gap.w + 69] > 80);
+  }
+  const base = profileFrame({ width: .4, opacity: .35 });
+  const pool = profileFrame({ width: .4, opacity: .35,
+    joins: [{ at: .5, type: 'pool', length: .18, strength: 2, spread: .4, color: '#63d5be' }] });
+  assert.ok(band(pool, 64) > band(base, 64) * 1.7);
+  assert.ok(Math.abs(band(pool, 35) - band(base, 35)) < .03);
+  const tint = at(pool, 64, 38);
+  assert.ok(tint[1] > tint[0]);
+
+  const loop = { kind: 'path', closed: true, points: [[0,1,0],[2,1,0],[2,-1,0],[-2,-1,0],[-2,1,0]] };
+  const renderLoop = joins => ink.render(C.world(scene([{ source: loop, width: .25, joins }])),
+    { ...imageOptions, ortho: true, transparent: true });
+  const closed = renderLoop([]), opened = renderLoop([{ type: 'break', at: 0, length: .06 }]);
+  assert.ok(closed.alpha[19 * closed.w + 64] > 180);
+  assert.equal(opened.alpha[19 * opened.w + 64], 0);
 });
