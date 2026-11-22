@@ -286,7 +286,7 @@
     const interactions = W.interactionRuntime.bind({world,systems,chunks,transfers,ports,incoming,portValue});
     const influence = W.influenceRuntime.bind({systems,transfers,chunks});
     const population = W.populationRuntime.bind({systems,transfers,chunks});
-    const plan = {world,systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,aggregates,reservations,worksites,
+    const plan = {world,systems,ports,incoming,order,names,transfers,dependencies,schedule,rates,chunks,aggregates,reservations,worksites,
       interactions,influence,population,causePolicy,contracts,phaseEdges,navigationSources};
     if (world.eventActions !== undefined) plan.eventActions = K.eventActions.compile(world.eventActions, {
       dt: world.dt, validateAction: command => actionCheck(command, plan),
@@ -412,7 +412,7 @@
     const {plan, weather = weatherProgram(world), timeline = W.sceneTimeline(world)}=result;
     const {systems,ports,incoming,order,names,transfers,dependencies,rates,chunks,aggregates,reservations,worksites,
       interactions,influence,population,causePolicy,contracts,phaseEdges,eventActions,navigationSources} = plan;
-    let composition;
+    let composition, inspection;
     const regions=regionRevisions===undefined?null:W.regionRevisions.capture(world,regionRevisions,systems);
     const debug=traceSteps===undefined?null:W.stepDebug.capture(traceSteps);
     const observers=names.filter(name=>systems[name].afterStep);
@@ -1207,7 +1207,16 @@
       profile:() => rates && profile ? Object.fromEntries(names.map(name=>[name,
         metrics.get(name)??{calls:0,ms:0,maxMs:0}])) : Object.fromEntries(metrics),
       rates:() => rates ? {subdivision:rates.subdivision,systems:rates.rates} : null,
-      composition:() => composition ??= W.systemComposition.describe(plan),
+      composition() {
+        composition ??= W.systemComposition.describe(plan);
+        if (inspection?.execution.tick !== tick) {
+          const execution = W.executionPlan.describe(plan,{
+            tick,world,states,delays,sampling,chunkState,partitioned,observers
+          });
+          inspection = Object.freeze({...composition,execution});
+        }
+        return inspection;
+      },
       partitions:()=>({workers:workerPool?.size??0,peakWorkers,batches:partitionBatches,
         systems:Object.fromEntries(names.filter(name=>jobsBySystem.has(name)).map(name=>[name,jobsBySystem.get(name)]))}),
       dependencies:() => ({declarations:dependencies.describe,

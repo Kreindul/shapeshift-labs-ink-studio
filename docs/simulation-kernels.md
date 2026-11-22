@@ -102,6 +102,11 @@ the graph or take time unless `clock.tick` selects a model tick. A supplied
 world checkpoint must match the configuration, clock, and authored
 input schedule. Publish changes to the solver as a new revision.
 
+Use the optional `estimate(config, { id, seed, dt })` registration callback
+to describe workspace size or named work per step in the
+[execution plan](simulation-execution-plan.md#interpret-the-estimates).
+Ink obtains the typed state size from the checkpoint buffers.
+
 ## Checkpoint demo
 
 ```sh

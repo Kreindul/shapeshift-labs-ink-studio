@@ -48,12 +48,16 @@
   }
   const scale = (value,n,type) => type==='number'?value*n:value.map(v=>v*n);
 
-  function bind({rates,subdivision,chunks},systems,ports,incoming,order) {
+  function phases({rates,subdivision,chunks},order) {
     const choices=new Map(order.map(name=>[name,chunks?.rates(name)??[rates[name]]]));
-    const phases = Array.from({length:subdivision},(_,index)=>{
+    return freeze(Array.from({length:subdivision},(_,index)=>{
       const slice=index+1;
       return {slice,names:order.filter(name=>choices.get(name).some(rate=>slice%(subdivision/rate.substeps)===0))};
-    }).filter(row=>row.names.length||row.slice===subdivision);
+    }).filter(row=>row.names.length||row.slice===subdivision));
+  }
+
+  function bind(schedule,systems,ports,incoming,order) {
+    const {rates,subdivision,chunks} = schedule, boundaries = phases(schedule,order);
     const receiving = [], averages = [], delayed = [], bySource = new Map(), eventOutputs = [];
     const wakePorts=new Map();
     for (const [port,descriptor] of Object.entries(ports.outputs))
@@ -118,7 +122,7 @@
         }
       }
       let states=committed, outputs=previous, last=0;
-      for (const {slice,names} of phases) {
+      for (const {slice,names} of boundaries) {
         if(chunks&&slice!==subdivision&&!names.some(name=>{
           const detail=chunkStep.due.get(name);
           return detail?slice%(subdivision/detail.substeps)===0:!chunks.managed.has(name)&&at%rates[name].every===0;
@@ -191,7 +195,7 @@
       return wakePorts.get(name)?.some(({port,edge})=>saved[port].length||
         (!edge?manual[port].length:edge.delay&&delays[port][0].length))??false;
     }
-    return Object.freeze({rates:freeze(rates),subdivision,initial:freeze(initial),validate,advance,hasEvents});
+    return Object.freeze({rates:freeze(rates),subdivision,phases:boundaries,initial:freeze(initial),validate,advance,hasEvents});
   }
-  W.rates = Object.freeze({schedules,policy,bind,buffered,zero,add});
+  W.rates = Object.freeze({schedules,policy,bind,buffered,zero,add,maxEvents});
 })(KIT);

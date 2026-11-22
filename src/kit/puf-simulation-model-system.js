@@ -3,6 +3,7 @@
   const W = K.world, R = W.runtime, M = W.models, T = K.procedural.takeTime;
   const {check, equal, own, record, portOf} = W.data;
   const {freeze} = K.procedural.data;
+  const maxTicksPerVisit = 10000;
 
   function provider(config, {world: parent, id}) {
     check(Object.keys(config).every(key => ['model','drive','parameters','seed'].includes(key)) && config.model?.format === M.format,
@@ -52,6 +53,15 @@
 
     return {
       inputs, outputs, fields, module:instanceInfo, shareCheckpoint:true,
+      childPlan(state) {
+        const ticksPerHostTick = T.seconds(ratio);
+        return {
+          ticksPerHostTick:Number.isFinite(ticksPerHostTick) ? ticksPerHostTick : null,
+          maxTicksPerVisit,
+          hostToModel:{hold:levels,queue:events}, modelToHost:{accumulate:eventOutputs},
+          plan:restore(state).composition()
+        };
+      },
       initial() {
         live = R.create(world);
         return capture(live, emptyEvents(events), emptyEvents(eventOutputs));
@@ -74,7 +84,7 @@
         const count = ctx.substeps ?? 1;
         const phase = [BigInt((ctx.tick - 1) * count + (ctx.substep ?? count)), BigInt(count)];
         const to = T.index(T.roundDown(T.mul(phase, ratio))), from = state.checkpoint.tick;
-        check(to >= from && to - from <= 10000, 'Model ' + id + ' exceeds its per-step tick budget');
+        check(to >= from && to - from <= maxTicksPerVisit, 'Model ' + id + ' exceeds its per-step tick budget');
         const pending = Object.fromEntries(events.map(name => [name, W.rates.add(state.pending[name], ctx.input[name], 'event')]));
         const eventValues = emptyEvents(eventOutputs);
         if (to === from) return freeze({...state, pending, eventValues});

@@ -171,6 +171,9 @@
       return {
         inputs:spec.inputs, outputs:spec.outputs, shareCheckpoint:true,
         kernel:{kind:spec.kind,revision:spec.revision,description:spec.description},
+        typedStateBytes:saved => Object.values(saved.buffers)
+          .reduce((sum,{type,length}) => sum + arrays[type].BYTES_PER_ELEMENT*length,0),
+        ...(spec.estimate && {estimate:() => spec.estimate(config,{id,seed:world.seed,dt:world.dt})}),
         initial:() => open().snapshot(),
         validateState:saved => { open().restore(saved); },
         step(saved,context) {
@@ -232,13 +235,14 @@
     const {revision = 1, description = 'Creator simulation kernel.', example} = spec ?? {};
     const name = 'kernel.' + kind + '.v' + revision;
     check(id(kind) && name.length <= 100 && positiveRevision(revision) && typeof description === 'string' &&
-      keys(spec,['revision','description','inputs','outputs','prepare','example']) && typeof spec.prepare === 'function' &&
+      keys(spec,['revision','description','inputs','outputs','prepare','example','estimate']) && typeof spec.prepare === 'function' &&
+      (spec.estimate === undefined || typeof spec.estimate === 'function') &&
       (example === undefined || keys(example,['config','commands','clock'])), 'Invalid simulation kernel registration ' + name);
     const versions = kernels.get(kind) ?? new Map();
     check(!versions.has(revision), 'Duplicate simulation kernel ' + name);
     const inputs = ports(spec.inputs), outputs = ports(spec.outputs);
     check(!own(outputs,'checkpoint'),'Kernel output checkpoint is reserved for the graph snapshot');
-    const def = freeze({kind,revision,description,inputs,outputs,prepare:spec.prepare,...(example && {example:clone(example)})});
+    const def = freeze({kind,revision,description,inputs,outputs,prepare:spec.prepare,estimate:spec.estimate,...(example && {example:clone(example)})});
     R.register(kind,worldProvider(def),{revision});
     versions.set(revision,def);
     kernels.set(kind,versions);

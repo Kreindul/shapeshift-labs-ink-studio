@@ -17,8 +17,8 @@ ink-studio sim verify sluice.run.json
 
 Run a model directly or run its compiled world. Both use the same tick
 duration and seed. Run and replay reports include the named outputs and
-probe results at the selected endpoint. Use `sim plan` to see the resolved
-world schedule, or `probe` to sample an individual world field.
+probe results at the selected endpoint. Use [`sim plan`](simulation-execution-plan.md) to see
+the resolved schedule, or `probe` to sample an individual world field.
 
 ## Author a model
 

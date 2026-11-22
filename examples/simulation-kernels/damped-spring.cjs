@@ -15,6 +15,7 @@ const definition = {
     energy:{type:'number',quantity:{unit:'J'}},
     crossings:'number'
   },
+  estimate: () => ({workspaceBytes:0, workPerStep:{springIntegrations:1}}),
   prepare(config) {
     const {mass=1,stiffness=26,damping=0.42,displacement=0.72} = config;
     if (!Number.isFinite(mass) || mass <= 0 || !Number.isFinite(stiffness) || stiffness <= 0 ||

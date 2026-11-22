@@ -1716,7 +1716,9 @@ rejected during validation.
 `run.composition()` reports the order, state aliases, typed ports, spatial
 reads and writes, event declarations, same-phase dependencies, and connection
 sampling policies. The CLI exposes the same report as
-`ink-studio sim plan <world|checkpoint|recording>`. A system with declared
+`ink-studio sim plan <world|model|checkpoint|recording>`. Its
+[execution plan](simulation-execution-plan.md) includes rate boundaries,
+signal sampling, feedback, assets, and resource estimates. A system with declared
 peer state reads runs on the host. Worker systems can continue to exchange
 typed signals and use `after` to order their steps.
 
