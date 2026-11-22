@@ -55,7 +55,7 @@ function rasterize(placements, settings) {
     const rotation=basis(placement.yaw,0);
     const frame=lod?undefined:typeof placement.frame==='function'?placement.frame(time,frameView):placement.frame??placement.frameAt?.(time);
     const tile=lod?.view??atlas.select(frame,mode,local(rotation,direction));
-    const effect=atlas.effect?.(tile), fringe=atlas.fringe?.(tile,time);
+    const effect=atlas.effect?.(tile), fringe=atlas.fringe?.(tile,time), transition=atlas.transition?.(tile,time);
     const normalAxes=basis(tile.yaw+placement.yaw,tile.pitch);
     const axes=lod?.axes??(fixed?normalAxes:basis(...heading(direction)));
     const units=tile.unitsPerPixel*placement.scale;
@@ -71,7 +71,8 @@ function rasterize(placements, settings) {
       const v0=bounds?Math.max(0,bounds[1]-tileY):0, v1=bounds?Math.min(height,bounds[3]-tileY):height;
       if (u1<=u0||v1<=v0) continue;
       const [f0,g0,f1,g1]=fringe?.bounds??[u0,v0,u1,v1];
-      const x0=Math.min(u0,f0),y0=Math.min(v0,g0),x1=Math.max(u1,f1),y1=Math.max(v1,g1);
+      const [t0,s0,t1,s1]=transition?.bounds??[u0,v0,u1,v1];
+      const x0=Math.min(u0,f0,t0),y0=Math.min(v0,g0,s0),x1=Math.max(u1,f1,t1),y1=Math.max(v1,g1,s1);
       let left=rasterX+x0, right=rasterX+x1, bottom=rasterY+height-y1, top=rasterY+height-y0;
       if (!exact) {
         const corners=[];
@@ -96,9 +97,9 @@ function rasterize(placements, settings) {
         const u=Math.floor(uAt), v=Math.floor(vAt);
         const inside=u>=u0&&u<u1&&v>=v0&&v<v1;
         const strands=fringe?.at(u,v);
-        if (!inside&&!strands) continue;
+        if (!inside&&!strands&&!transition) continue;
         const p=y*W+x;
-        if (inside && atlas.sample(tile,u,v,placement,sample,id) && (!lod || spriteLOD.alpha(sample.alpha,lod,x,y))) {
+        if ((inside||transition) && atlas.sample(tile,u,v,placement,sample,id,transition) && (!lod || spriteLOD.alpha(sample.alpha,lod,x,y))) {
           const hit=fragmentAt(ray,fixed?plane:plane+placement.scale*sample.depth/facing);
           if (hit) {
             const {position}=hit;

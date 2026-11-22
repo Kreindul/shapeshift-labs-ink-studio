@@ -162,31 +162,37 @@ const AtlasSprites = (() => {
         views.reduce((best,view)=>dot(view.basis.normal,direction)>dot(best.basis.normal,direction)?view:best);
       return edits?.held.get(view)??view;
     }
-    function sample(view,x,y,channels,out,band) {
-      const index=((view.rect.y+y)*width+view.rect.x+x)*4;
-      const edit=edits?.edited.get(view), patch=edit?.maps, texel=(y*view.rect.width+x)*4;
+    function sample(view,x,y,channels,out,band,packet) {
+      const rect = view.rect, inside = x >= 0 && y >= 0 && x < rect.width && y < rect.height;
+      const transition = packet && edits?.transition?.read(packet,x,y);
+      if (!inside && !transition) return false;
+      const index = inside ? ((rect.y+y)*width+rect.x+x)*4 : -4;
+      const edit=edits?.edited.get(view), patch=edit?.maps, texel=inside?(y*rect.width+x)*4:-4;
       const bakedAlpha=maps.color[index+3];
-      const rgba=patch?.color??maps.color, colorIndex=patch?.color?texel:index;
+      const baseImage=patch?.color??maps.color, baseIndex=patch?.color?texel:index;
+      const art=transition?.maps, rgba=art?.color??baseImage, colorIndex=art?transition.index:baseIndex;
       const a=rgba[colorIndex+3]/255;
       if (!a || band !== undefined && scenery.bandAt(index) !== band) return false;
       out.alpha=a;
       for (let c=0;c<3;c++) out.color[c]=rgba[colorIndex+c]/255;
-      const depth=patch?.depth??maps.depth, d=patch?.depth?texel:index;
-      const normal=patch?.normal??maps.normal, n=patch?.normal?texel:index;
-      const emission=patch?.emission??maps.emission, e=patch?.emission?texel:index;
+      const keepBase = !art || Boolean(baseImage[baseIndex+3]);
+      const depth=art?.depth??patch?.depth??maps.depth, d=art?.depth?transition.index:patch?.depth?texel:index;
+      const normal=art?.normal??patch?.normal??maps.normal, n=art?.normal?transition.index:patch?.normal?texel:index;
+      const emission=art?.emission??patch?.emission??maps.emission, e=art?.emission?transition.index:patch?.emission?texel:index;
       out.depth=0;
       if (channels.depth) {
         if (scenery) out.depth=scenery.depths[scenery.bandAt(index)];
-        else if (depth?.[d+3] && (!edit || bakedAlpha || patch.depth))
+        else if (depth?.[d+3] && (art?.depth || keepBase && (!edit || bakedAlpha || patch.depth)))
           out.depth=depthLo+depthSpan*(depthFormat==='gray'?depth[d]/255:
             (depth[d]*65536+depth[d+1]*256+depth[d+2])/0xffffff)-view.depthOrigin;
+        else if (!keepBase) out.depth=transition.extensionDepth??0;
         else if (!bakedAlpha && edit) out.depth=edit.extensionDepth??0;
       }
-      out.hasNormal=!!(normal?.[n+3] && (bakedAlpha || patch?.normal));
-      out.hasEmission=!!(channels.emission&&emission?.[e+3]&&(bakedAlpha||patch?.emission));
+      out.hasNormal=!!(normal?.[n+3] && (art?.normal || keepBase && (bakedAlpha || patch?.normal)));
+      out.hasEmission=!!(channels.emission&&emission?.[e+3]&&(art?.emission || keepBase && (bakedAlpha||patch?.emission)));
       if (out.hasNormal) for (let c=0;c<3;c++) out.normal[c]=normal[n+c]/127.5-1;
       if (out.hasEmission) {
-        const gain=emissionMode==='baked'?255/(patch?.emission?rgba[colorIndex+3]:bakedAlpha):emission[e+3]/255;
+        const gain=emissionMode==='baked'?255/(art?.emission?rgba[colorIndex+3]:patch?.emission?baseImage[baseIndex+3]:bakedAlpha):emission[e+3]/255;
         for(let c=0;c<3;c++) out.emission[c]=Math.min(1,emission[e+c]/255*gain);
       } else out.emission.fill(0);
       return true;
@@ -205,9 +211,10 @@ const AtlasSprites = (() => {
       };
     }
     const editedDepth=edits&&Array.from(edits.edited.values()).some(edit=>edit.maps.depth||edit.extensionDepth!==undefined);
-    return Object.freeze({[assetBrand]:true,select,sample,effect,...(edits?.fringe&&{fringe:edits.fringe}),playback:mode=>cels.playback(timing,fps,mode),
+    return Object.freeze({[assetBrand]:true,select,sample,effect,...(edits?.fringe&&{fringe:edits.fringe}),
+      ...(edits?.transition&&{transition:edits.transition.frame}),playback:mode=>cels.playback(timing,fps,mode),
       snapshot:()=>({metadata:structuredClone(metadata),images:structuredClone(sourceMaps)}),
-      width,height,normalSpace,emissionMode,swatches,largestView:frames.reduce((max,{rect})=>Math.max(max,rect.width*rect.height),0),hasDepth:Boolean(maps.depth||scenery||editedDepth),sceneryPlanes:scenery?.planes});
+      width,height,normalSpace,emissionMode,swatches,largestView:frames.reduce((max,{rect})=>Math.max(max,rect.width*rect.height),0),hasDepth:Boolean(maps.depth||scenery||editedDepth||edits?.transition?.hasDepth),sceneryPlanes:scenery?.planes});
   }
 
   function place(value) {

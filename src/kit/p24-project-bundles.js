@@ -78,12 +78,12 @@
     }
     if (atlas) {
       Object.values(doc.files).forEach(relative);
-      if (typeof doc.cels === 'string') {
-        const sidecar = resolvePath(file, doc.cels);
-        const cels = contents(io.text(sidecar));
-        for (const edit of cels.replacements ?? []) for (const ref of Object.values(edit.files ?? {}))
-          visitAttachment(resolvePath(sidecar, ref), io, visited);
-      } else for (const edit of doc.cels?.replacements ?? []) Object.values(edit.files ?? {}).forEach(relative);
+      const celsFile = typeof doc.cels === 'string' ? resolvePath(file, doc.cels) : file;
+      const cels = celsFile === file ? doc.cels : contents(io.text(celsFile));
+      const transitionFrames = (cels?.transitions ?? []).flatMap(clip => clip.frames ?? []);
+      for (const edit of [...(cels?.replacements ?? []), ...transitionFrames])
+        for (const ref of Object.values(edit.files ?? {})) if (typeof ref === 'string')
+          visitAttachment(resolvePath(celsFile, ref), io, visited);
     } else if (object(doc?.layers) && Number.isSafeInteger(doc.width) && Number.isSafeInteger(doc.height)) {
       for (const layer of Object.values(doc.layers))
         for (const frame of layer?.frames ?? []) relative(typeof frame === 'string' ? frame : frame?.file);
@@ -112,6 +112,9 @@
     const map = imageMap => Object.fromEntries(Object.entries(imageMap).map(([name, data]) => [name, transform(data)]));
     if (next.cels?.replacements) next.cels.replacements = next.cels.replacements.map(({ images, ...edit }) =>
       ({ ...edit, images: map(images) }));
+    if (next.cels?.transitions) next.cels.transitions = next.cels.transitions.map(clip => ({
+      ...clip, frames: clip.frames.map(cel => cel.images ? { ...cel, images: map(cel.images) } : cel)
+    }));
     return { metadata: next, images: map(images) };
   }
 

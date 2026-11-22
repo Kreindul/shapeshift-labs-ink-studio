@@ -157,26 +157,37 @@ function celSize(edit, definition, { frames = [], pitch = 0 }) {
   return views[0].rect;
 }
 
+function celFiles(entry, dir, { width, height }, channels) {
+  if (!entry?.files || typeof entry.files !== 'object' || Array.isArray(entry.files) || entry.images !== undefined)
+    throw new TypeError('Sprite cel manifest needs PNG files');
+  const { files, ...settings } = entry;
+  const images = Object.fromEntries(Object.entries(files).map(([name,file]) => {
+    if (!channels.includes(name) || typeof file !== 'string') throw new TypeError('Unknown sprite cel PNG channel: ' + name);
+    return [name,readRgba(path.resolve(dir,file),width,height)];
+  }));
+  return {...settings,images};
+}
+
 function readCels(definition, dir, metadata) {
   if (typeof definition==='string') {
     const file=path.resolve(dir,definition);
     definition=JSON.parse(fs.readFileSync(file,'utf8'));
     dir=path.dirname(file);
   }
-  if (!definition || typeof definition!=='object' || !Array.isArray(definition.replacements)) return definition;
-  const replacements=definition.replacements.map(edit=>{
-    if (!edit?.files || typeof edit.files!=='object' || Array.isArray(edit.files) || edit.images!==undefined)
-      throw new TypeError('Sprite cel manifest replacements need PNG files');
-    const { files, ...settings }=edit;
-    const {width,height}=celSize(edit, definition, metadata);
-    const images=Object.fromEntries(Object.entries(files).map(([name,file])=>{
-      if (!['color','depth','normal','emission','effect'].includes(name)||typeof file!=='string')
-        throw new TypeError('Unknown sprite cel PNG channel: '+name);
-      return [name,readRgba(path.resolve(dir,file),width,height)];
-    }));
-    return {...settings,images};
+  if (!definition || typeof definition !== 'object') return definition;
+  const resolved = { ...definition };
+  const channels = ['color','depth','normal','emission'];
+  if (Array.isArray(definition.replacements)) resolved.replacements = definition.replacements.map(edit =>
+    celFiles(edit,dir,celSize(edit,definition,metadata),[...channels,'effect']));
+  if (Array.isArray(definition.transitions)) resolved.transitions = definition.transitions.map(clip => {
+    if (!Array.isArray(clip?.frames)) return clip;
+    return { ...clip, frames: clip.frames.map(cel => {
+      if (cel?.files === undefined) return cel;
+      const [, , width, height] = clip.rect ?? [];
+      return celFiles(cel,dir,{width,height},channels);
+    }) };
   });
-  return {...definition,replacements};
+  return resolved;
 }
 
 function readSpriteAtlas(file, { cels } = {}) {
@@ -204,6 +215,11 @@ function spriteAtlasManifest(source, emitImage) {
   if (metadata.cels?.replacements) metadata.cels.replacements=metadata.cels.replacements.map(({images,...edit})=>{
     const {width,height}=celSize(edit,metadata.cels,metadata);
     return {...edit,files:save(images,width,height)};
+  });
+  if (metadata.cels?.transitions) metadata.cels.transitions = metadata.cels.transitions.map(clip => {
+    const [, , width, height] = clip.rect;
+    return { ...clip, frames: clip.frames.map(({images,...cel}) =>
+      images ? { ...cel, files: save(images,width,height) } : cel) };
   });
   return metadata;
 }

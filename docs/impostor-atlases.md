@@ -190,6 +190,83 @@ character, paints its catch sleeve and holds the braced pose for two frames
 while the swinging lantern and camera keep moving. Use `--params
 '{"edited":false}'` for the original bake.
 
+## Authored transition cels
+
+Use `metadata.cels.transitions` to animate small patches of a held sprite
+or replace its whole face for an expression that moves the silhouette.
+A clip is a sequence of drawings on a registered rectangle. Each drawing
+holds for its authored duration. Several clips can run on the same pose.
+
+```json
+{
+  "poses": { "listen": 0 },
+  "transitions": [
+    {
+      "id": "look-and-blink",
+      "frame": "listen",
+      "direction": 0,
+      "rect": [12, 18, 11, 5],
+      "start": 0.4,
+      "frames": [
+        { "duration": 0.10, "files": { "color": "half-lid.png" } },
+        { "duration": 0.08, "files": { "color": "closed.png" } },
+        { "duration": 0.12, "files": { "color": "look-left.png" } }
+      ]
+    },
+    {
+      "id": "jaw-drop",
+      "frame": "listen",
+      "direction": 0,
+      "rect": [8, 10, 22, 29],
+      "mode": "replace",
+      "extensionDepth": -0.04,
+      "start": 1.2,
+      "frames": [
+        { "duration": 0.15, "files": { "color": "jaw-start.png" } },
+        { "duration": 0.30, "files": { "color": "jaw-open.png" } }
+      ]
+    }
+  ]
+}
+```
+
+- `rect` is `[x, y, width, height]` in top-left view-local art pixels.
+  Choose the same registration for every drawing in a clip. Omit `frame`
+  to use a patch on all matching poses. `direction` and `pitch` target
+  separately drawn views. When the body holds a pose, its displayed view
+  selects the paint and the clips continue on the placement clock.
+- In the default `patch` mode, each nontransparent texel supplies its
+  exact RGBA value. Paint any skin or shadow needed to cover an old line.
+  In `replace` mode every texel in the rectangle is replaced. Use its
+  transparent pixels to erase the old cheek or jaw. Include any collar
+  or hair pixels the rectangular replacement should preserve. When
+  active clips intersect, the last one listed supplies the pixel.
+- Use matching-size PNGs in a cel's `files`, decoded RGBA buffers in
+  `images`, or a `paint` object with `rows`, `slots`, or `strokes`.
+  Indexed paint uses the clip's RGB hex `palette`. Existing visible
+  pixels inherit the body cel's depth, normals, and emission. You can
+  supply aligned auxiliary channels with the color. Newly occupied
+  pixels need a `depth` texel or `extensionDepth` in scene units.
+  The patch may extend beyond the view tile by up to 128 pixels.
+- `start` sets the first exposure in seconds and `fps` supplies each
+  drawing's default duration. Use different durations for uneven
+  timing, including a one-frame half-lid or a held half-smile. A
+  duration-only cel reveals the layers underneath. A clip releases
+  when it reaches the end. Use `period` to repeat it on a longer clock.
+
+The Node/CLI sprite atlas renderer supports transition cels on cards and
+impostors. PNG paths in a `cels` sidecar stay relative to the sidecar.
+
+[The Wrong Password](../examples/face-transition-cels.js) holds the body
+while two patches animate a startled blink and a mouth catching
+mid-word. A full-face drawing widens the cheek and drops the jaw for
+the laugh. Use `--params '{"transitions":false}'` for the held pose.
+
+```sh
+node cli/ink-studio.js clip examples/face-transition-cels.js --w 316 --h 190 --px 1 \
+  --raw --from 0 --to 6 --fps 20 --out wrong-password.apng
+```
+
 ## Painted sprite fringes
 
 Add `fringe` to the same `cels` sidecar used for replacements and
