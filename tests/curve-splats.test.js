@@ -447,3 +447,72 @@ test('directional lighting presets and keyed overrides survive native joins and 
   const [red, green, blue] = at(frame, 82, 38);
   assert.ok(red > 205 && green > 110 && blue < 155);
 });
+
+test('surface strokes follow cylindrical arc length, lift and inset across a periodic seam', () => {
+  const chart = K.procedural.surface.cylinder({ id: 'pot', origin: [0, -1, 0], radius: 1, height: 2 });
+  const source = { kind: 'surface', id: 'signature', chart, points: [[.94, .5], [.08, .5]],
+    lift: { keys: [[0, .12], [1, .22]] }, inset: .04 };
+  const plan = C.surfacePath(source);
+  assert.ok(plan.points.length > 5);
+  assert.ok(Math.abs(plan.uvs.at(-1)[0] - 1.08) < 1e-12);
+  assert.ok(Math.abs(Math.hypot(plan.points[0][0], plan.points[0][2]) - 1.08) < 1e-12);
+  assert.ok(Math.abs(Math.hypot(plan.points.at(-1)[0], plan.points.at(-1)[2]) - 1.18) < 1e-12);
+  assert.ok(plan.points.every(([x, y, z]) => y === 0 && Math.hypot(x, z) > 1));
+  const B = kit.makeBuilder(1, palette);
+  const drawn = C.draw(B, source, { object: 'pot', color: ({ uv }) => uv[0] < 1 ? '#f3b56b' : '#76d6ae', edge: 'hard', width: .12 });
+  assert.equal(drawn.threads[0].id, 'signature');
+  assert.ok(drawn.segments > 20);
+  assert.ok(host(B).renderMetadata.targets.some(target => target?.surface === 'signature'));
+  assert.throws(() => C.draw(B, { ...source, points: [[0, .5], [1, 1.02]] }), /open chart axes/);
+  assert.equal(B.count(), drawn.end);
+});
+
+test('surface strokes respect lifted orientation across a Möbius join', () => {
+  const chart = K.procedural.surface.mobius({ id: 'ribbon', radius: 1.2 });
+  const path = C.surfacePath({ chart, points: [[.95, .24], [.05, .76]], lift: .06 });
+  assert.ok(Math.abs(path.uvs.at(-1)[0] - 1.05) < 1e-12);
+  assert.ok(Math.abs(path.uvs.at(-1)[1] - .24) < 1e-12);
+  assert.ok(path.normals.every((normal, i) => !i || K.V.dot(normal, path.normals[i - 1]) > .98));
+  const loop = { chart, coordinates: 'lifted', points: [[0, .5], [1, .5]], closed: true };
+  const closed = C.surfacePath(loop);
+  assert.deepEqual(closed.points[0], closed.points.at(-1));
+  assert.throws(() => C.surfacePath({ ...loop, lift: .05 }), /same offset and side/);
+});
+
+test('surface groove removes actual sculpt depth using the same editable chart path', () => {
+  const chart = { kind: 'plane', origin: [-1, -1, 0], u: [2, 0, 0], v: [0, 2, 0] };
+  const source = { kind: 'surface', chart, points: [[.12, .5], [.88, .5]], inset: .04 };
+  const build = cut => {
+    const B = kit.makeBuilder(1, palette), S = K.sculpt(kit.makeSculpt(B));
+    const solid = S.box([0, 0, -.25], [1, 1, .25], { r: [1, 2] }, { hold: cut, res: .089, objectId: 'plate' });
+    if (cut) {
+      const grooved = C.carve(S, solid, [{ source, radius: .14 }]);
+      assert.ok(S.psd(solid, 0, 0, -.09) < 0);
+      assert.ok(S.psd(grooved, 0, 0, -.09) > 0);
+      assert.ok(S.psd(grooved, 0, .35, -.09) < 0);
+    }
+    S.keepRenderSdf = true;
+    S.bake();
+    return { ...host(B), look: { sdfAssist: { epsilon: .0001 } } };
+  };
+  const view = { ...imageOptions, w: 81, h: 81, ortho: true, passes: ['depth'] };
+  const full = ink.render(build(false), view), grooved = ink.render(build(true), view);
+  const center = 40 * view.w + 40, outside = 30 * view.w + 40;
+  assert.ok(grooved.passes.depth[center] - full.passes.depth[center] > .14);
+  assert.ok(Math.abs(grooved.passes.depth[outside] - full.passes.depth[outside]) < .001);
+});
+
+test('standalone curve scenes share editable named surface charts', () => {
+  const recipe = {
+    ...scene([{ edge: 'hard', width: .16, source: { kind: 'surface', chart: 'face', points: [[.18,.3],[.45,.7],[.82,.4]] } }]),
+    charts: { face: { kind: 'plane', origin: [-2,-1,0], u: [4,0,0], v: [0,2,0] } }
+  };
+  const world = C.world(recipe), first = ink.render(world, { ...imageOptions, transparent: true });
+  assert.ok(first.alpha.some(value => value === 255));
+  assert.equal(world.curveSplatSource, recipe);
+  const edited = structuredClone(recipe);
+  edited.charts.face.origin[1] = -.2;
+  assert.notDeepEqual(ink.render(C.world(edited), { ...imageOptions, transparent: true }).alpha, first.alpha);
+  edited.strands[0].source.chart = 'missing';
+  assert.throws(() => C.world(edited), /unknown surface chart missing/);
+});

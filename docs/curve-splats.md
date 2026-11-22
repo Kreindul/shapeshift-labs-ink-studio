@@ -34,6 +34,7 @@ world position, arc distance, and textile UV when present.
 | Path | An array of 3D points, a compiled `K.curve.path`, or a `{ kind: 'path', points, closed }` record. |
 | Spline | `{ kind: 'spline', points, samples }` samples a Catmull–Rom spline through editable control points. `samples` is per pair of controls. |
 | Curve family | `{ kind: 'family', definition }` uses an existing `K.curve.create` definition. |
+| Surface stroke | `{ kind: 'surface', chart, points, lift, inset }` follows an editable UV path on a chart. |
 | Textile | `{ kind: 'textile', plan }` reads a textile or interlace plan, keeping each strand's ID and width. Set `renderer: 'curve-splats'` in `K.textile.draw` appearance to opt in directly. Existing textile plans can still use `renderer: 'patches'`. |
 | Routed link | `{ kind: 'routed', link }` uses a sampled routed link's `paths`, material, and radius. Cut and broken links retain their separate spans. In simulation visuals set `visual.routedLinkRenderer: 'curve-splats'` alongside `visual.fields.routedLinks`. |
 | Particle trail | `{ kind: 'trail', samples }` takes one particle's ordered XYZ points or `{ point: [x,y,z] }` samples. Use `null` for a discontinuity or spawn break. Submit each particle separately. |
@@ -279,6 +280,76 @@ for the ordinary CLI still and clip commands.
 The tangent-aligned lobe draws on the same principle used in
 [Scheuermann's real-time hair shading](https://shaderwrangler.com/publications/hairsketch/).
 Ink uses a stylized forward-scatter term for transmission.
+
+## Bind strokes to a surface chart
+
+Give a stroke `kind: 'surface'`, a chart, and a polyline in chart UV.
+Ink subdivides the path on the surface and carries its normal into the
+strand section. The default flattened section gives paint and hatching
+a low profile. Use `section: 'round'` for raised thread, or set the
+section, width, and finish as on any other strand.
+
+```js
+const chart = K.procedural.surface.cylinder({
+  id: 'pot', origin: [0, -1, 0], radius: 1.2, height: 2
+});
+const stroke = {
+  kind: 'surface', chart, id: 'stem',
+  points: [[.18, .2], [.22, .42], [.26, .55], [.32, .8]], lift: .008
+};
+K.curveSplats.draw(builder, stroke, {
+  edge: 'hard', width: .06, color: '#16435d', object: 'pot'
+});
+```
+
+`lift` moves outward along the chart normal and `inset` moves inward.
+Both use world units and default to zero. Use a constant or an arc-length
+track to vary them along a mark. For instance, `lift: { samples: [0, .09, 0] }`
+arches a stitch while its ends sit on the chart. Offset callbacks receive
+`{ id, uv, point, normal, distance, u }` on the underlying chart path.
+`tolerance` sets the target chord error in world units and defaults to .001.
+`source.profileSamples` controls varying offsets and defaults to 64.
+
+Use an existing sampler with `sample([u, v])` or
+`samplePointNormal([u, v])` returning `{ p, n }`. Standalone
+curve-splat scene JSON can place a native chart definition inline as
+`source.chart` or use its name from a top-level `charts` map. Definitions
+use `kind` with the native `plane`, `cylinder`, `mobius`, `kleinBottle`,
+`helicoid`, or `catenoid` options. These scene files render the marks by
+themselves. Add them to an existing sculpt with the SDK for occlusion and
+relief.
+
+UVs are unit coordinates by default. On a joined chart, Ink picks each
+point's nearest equivalent to the preceding point. Use
+`coordinates: 'lifted'` for an explicit winding. For example, U can run
+from .8 to 1.8 on a cylinder. Open axes stay within the unit interval.
+Supply `closed: true` to make a loop. Its endpoints must meet at the same
+offset and side of the chart. An offset on a Möbius centreline can take
+two circuits to close. `K.curveSplats.surfacePath(stroke)` exposes sampled
+positions, lifted UVs, and normals for inspection. Rebuild from the UV
+path after changing or placing the chart.
+
+### Cut a groove
+
+Use the same stroke source with `K.curveSplats.carve` before baking a
+sculpt. Each groove subtracts a round swept cutter from a held host solid.
+The cutter's `radius` and the stroke's signed offset control the opening
+and depth. Place the cutter so it intersects the host surface. A deep
+inset can bury it completely. The cut's walls contribute real surface
+depth and can use the sculpt's existing `inner` ramp.
+
+```js
+const solid = S.lathe([0, -1, 0], 2, 1.2, stone, { hold: true, res: .06 });
+K.curveSplats.carve(S, solid, [
+  { source: { ...stroke, lift: 0, inset: .025 }, radius: .08 }
+], { inner: [2, 3, 4] });
+S.bake();
+```
+
+Run the [curved-surface studies](../examples/surface-bound-strokes.js) with
+`node examples/surface-bound-strokes.cjs studio/out/surface-bound-strokes`.
+The CLI can render the same editable study with
+`node cli/ink-studio.js render examples/surface-bound-strokes.js --params '{"study":"groove"}' --raw --out groove.png`.
 
 ## Render and compare
 

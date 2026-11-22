@@ -42,6 +42,7 @@
         return [{ points: K.curve.spline(controls, per) }];
       }
       case 'family': return [pathSpec(K.curve.create(source.definition))];
+      case 'surface': return [surfacePath(source)];
       case 'textile': {
         const plan = source.plan;
         check(Array.isArray(plan?.threads ?? plan?.strands) && (plan.threads ?? plan.strands).length <= segmentLimit,
@@ -190,6 +191,116 @@
     return [...stops].sort((a, b) => a - b);
   }
 
+  function surfaceChart(input, id = 'surface') {
+    if (typeof input?.samplePointNormal === 'function' || typeof input?.sample === 'function') return input;
+    const { kind, ...settings } = input ?? {};
+    check(['plane', 'cylinder', 'mobius', 'kleinBottle', 'helicoid', 'catenoid'].includes(kind),
+      'expected a surface chart sampler or native chart definition');
+    return K.procedural.surface[kind]({ id, ...settings });
+  }
+
+  function surfacePath({ chart: input, points: controls, id, coordinates = 'canonical', closed = false,
+    lift = 0, inset = 0, tolerance = .001, profileSamples = 64 } = {}) {
+    const chart = surfaceChart(input);
+    const stroke = id ?? chart.id ?? 'surface';
+    check(label(stroke) && ['canonical', 'lifted'].includes(coordinates) && typeof closed === 'boolean' &&
+      finite(tolerance, 1e-6, 100) && Number.isSafeInteger(profileSamples) && profileSamples >= 8 && profileSamples <= 1024 &&
+      Array.isArray(controls) && controls.length >= 2 && controls.length <= segmentLimit + 1,
+      'invalid surface stroke ID, coordinate mode or sampling settings');
+    const topology = chart.topology ?? K.procedural.surface.topology({
+      u: chart.periodicU ? 'periodic' : 'open', v: chart.periodicV ? 'periodic' : 'open'
+    });
+    const canonical = coordinates === 'canonical', route = [];
+    for (const uv of controls) {
+      check(topology.contains(uv) && (!canonical || uv.every(n => finite(n, 0, 1))),
+        'surface stroke points must be finite UVs within the open chart axes');
+      const previous = route.at(-1);
+      const at = canonical && previous ? topology.liftNear(uv, previous) : uv.slice();
+      if (!previous || at.some((value, i) => value !== previous[i])) route.push(at);
+    }
+    if (closed && route.length > 1) {
+      const end = topology.liftNear(topology.canonical(route[0]).uv, route.at(-1));
+      if (end.some((value, i) => value !== route.at(-1)[i])) route.push(end);
+    }
+    check(route.length >= 2, 'surface stroke must travel along the chart');
+
+    const read = chart.samplePointNormal ?? chart.sample;
+    let queries = 0;
+    function station(uv) {
+      check(++queries <= segmentLimit * 4, 'surface stroke exceeds the sampling budget');
+      const { p, n } = read.call(chart, uv) ?? {};
+      check(point(p) && point(n) && K.V.len(n) > 1e-8, 'surface chart must return a finite point and nonzero normal');
+      return { uv, p: Array.from(p), n: K.V.norm(n) };
+    }
+    const stations = [station(route[0])];
+    const between = (a, b, fraction) => station(a.uv.map((value, i) => mix(value, b.uv[i], fraction)));
+    function follow(a, b, depth) {
+      const m = between(a, b, .5);
+      // The UV bound also prevents several laps from aliasing to a short XYZ chord.
+      if (a.uv.some((value, i) => Math.abs(value - b.uv[i]) > 1 / 16) ||
+        K.V.dist(m.p, K.V.lerp(a.p, b.p, .5)) > tolerance || K.V.dot(a.n, b.n) < .9848) {
+        check(depth < 24, 'surface chart cannot resolve the stroke continuously');
+        follow(a, m, depth + 1);
+        follow(m, b, depth + 1);
+        return;
+      }
+      check(stations.length <= segmentLimit, 'surface stroke exceeds the station budget');
+      stations.push(b);
+    }
+    for (const uv of route.slice(1)) follow(stations.at(-1), station(uv), 0);
+
+    const metric = [0];
+    for (let i = 1; i < stations.length; i++) metric.push(metric.at(-1) + K.V.dist(stations[i - 1].p, stations[i].p));
+    const total = metric.at(-1);
+    check(total > 1e-7, 'surface stroke must have nonzero arc length');
+    const rise = channel(lift, 'surface lift', 0, 100), recess = channel(inset, 'surface inset', 0, 100);
+    const cuts = profileStops([rise, recess], profileSamples);
+    const result = { id: stroke, points: [], uvs: [], normals: [], closed };
+    function append({ uv, p, n }, distance) {
+      check(result.points.length <= segmentLimit, 'surface stroke exceeds the station budget');
+      const sample = { id: stroke, point: p.slice(), normal: n.slice(), uv: uv.slice(), distance, u: distance / total };
+      const shifted = K.V.mad(p, n, rise.sample(sample) - recess.sample(sample));
+      check(point(shifted), 'surface stroke exceeds the world coordinate budget');
+      result.points.push(shifted);
+      result.uvs.push(uv);
+      result.normals.push(n);
+    }
+    append(stations[0], 0);
+    for (let i = 1, k = 0; i < stations.length; i++) {
+      const from = metric[i - 1] / total, to = metric[i] / total;
+      while (cuts[k] <= from + 1e-12) k++;
+      while (cuts[k] < to - 1e-12) {
+        const u = cuts[k++];
+        append(between(stations[i - 1], stations[i], (u - from) / (to - from)), u * total);
+      }
+      append(stations[i], metric[i]);
+    }
+    if (closed) {
+      check(K.V.dist(result.points[0], result.points.at(-1)) <= 1e-6,
+        'closed surface stroke must meet at the same offset and side of its chart');
+      result.points[result.points.length - 1] = result.points[0].slice();
+    }
+    return result;
+  }
+
+  function carve(sculpt, host, grooves, options = {}) {
+    check(typeof sculpt?.tube === 'function' && typeof sculpt?.join === 'function' && typeof host?.sd === 'function' &&
+      Array.isArray(grooves) && grooves.length && grooves.length <= 1024,
+      'grooves need a sculpt, a held host solid and a bounded list of strokes');
+    let segments = 0;
+    const plans = grooves.map(({ source, radius = .05 }) => {
+      check(finite(radius, 1e-5, 100), 'invalid groove radius');
+      const { points } = surfacePath(source);
+      segments += points.length - 1;
+      check(segments <= segmentLimit, 'grooves exceed the segment budget');
+      return { points, radius };
+    });
+    const cutters = plans.map(({ points, radius }) => sculpt.tube(points, radius, radius, host.mat, { hold: true }));
+    return sculpt.join('cut', host, cutters, {
+      res: host.res, tag: host.tag, objectId: host.renderOwner, target: host.renderTarget, mask: true, r: 0, ...options
+    });
+  }
+
   function majorAxis(direction, axis, angle) {
     const projected = K.V.mad(direction, axis, -K.V.dot(direction, axis));
     const reference = Math.abs(axis[1]) < .9 ? [0, 1, 0] : [1, 0, 0];
@@ -335,8 +446,8 @@
 
   function prepare(source, options = {}, palette) {
     const link = source?.kind === 'routed' ? source.link : undefined;
-    const { radius, width, taper = 1, twist = 0, section, edge = 'gaussian', caps: capInput, joins: joinInput = [],
-      up, profileSamples = 96, opacity = edge === 'hard' ? 1 : .94, color = '#eab876', object = link?.id ?? 'curve',
+    const { radius, width, taper = 1, twist = 0, section = source?.kind === 'surface' ? 'flattened' : undefined,
+      edge = 'gaussian', caps: capInput, joins: joinInput = [], up, profileSamples = 96, opacity = edge === 'hard' ? 1 : .94, color = '#eab876', object = link?.id ?? 'curve',
       material = link?.material ?? 'strand', target, maxSegments = segmentLimit } = options;
     const defaultAspect = section === 'flattened' ? .16 : section === 'elliptical' ? .5 :
       section === 'round' || options.twist === undefined ? 1 : .35;
@@ -485,11 +596,21 @@
     check(recipe?.format === format && recipe.version === 1 && label(recipe.id) &&
       Array.isArray(recipe.strands) && recipe.strands.length > 0 && recipe.strands.length <= 1024,
       'expected a version 1 curve splat scene with named strands');
-    const { seed = 1, background = '#172332', palette = [], paletteRoles, camera = {}, look = {}, liveSun } = recipe;
+    const { seed = 1, background = '#172332', palette = [], paletteRoles, camera = {}, look = {}, liveSun, charts = {} } = recipe;
     check(Number.isSafeInteger(seed) && Array.isArray(palette) && palette.length <= 255, 'invalid seed or palette');
     const colors = [packed(background), ...Array.from(palette, packed)];
+    check(charts && Object.getPrototypeOf(charts) === Object.prototype && Object.keys(charts).length <= 1024,
+      'expected a bounded map of surface charts');
+    const carriers = new Map(Object.entries(charts).map(([id, input]) => {
+      check(label(id), 'invalid surface chart ID');
+      return [id, surfaceChart(input, id)];
+    }));
     let remaining = segmentLimit;
     const plans = recipe.strands.map(({ source, ...appearance }, i) => {
+      if (source?.kind === 'surface' && typeof source.chart === 'string') {
+        check(carriers.has(source.chart), 'unknown surface chart ' + source.chart);
+        source = { ...source, chart: carriers.get(source.chart) };
+      }
       const plan = prepare(source, { object: 'curve:' + i, paletteRoles, ...appearance, maxSegments: remaining }, colors);
       remaining -= plan.examined;
       return plan;
@@ -509,5 +630,5 @@
     });
   }
 
-  K.curveSplats = Object.freeze({ format, segmentLimit, lightingPresets, draw, world });
+  K.curveSplats = Object.freeze({ format, segmentLimit, lightingPresets, surfacePath, carve, draw, world });
 })(KIT);
