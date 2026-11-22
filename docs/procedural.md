@@ -2591,7 +2591,8 @@ default. Pass one owner, surface, and material record per face in
 `groups`. The result maps source vertices to surviving indices.
 
 `lod.mergeSplats(records, {ratio, target, maxDistance, maxRadius,
-viewDirections, silhouette, lockSeams, seamDistance})` reduces native Gaussian samples.
+viewDirections, silhouette, lockSeams, seamDistance, maxSeamPairs, maxPairs})`
+reduces up to 250,000 native Gaussian samples.
 Each record has `id`, `position`, `normal`, `color` in normalized RGB,
 optional `opacity`, and a `radius` or symmetric six-component
 `covariance`. Owner, material, and surface names define independent
@@ -2605,13 +2606,21 @@ used by the renderer. `examples/preview-lod.js` packs an original and
 reduced shield side by side.
 
 The search ranks up to `candidateLimit` nearest candidates per survivor
-(default 8) within each group and merges disjoint pairs in rounds. Set
-`maxPairs` to bound candidate and cross-group pair checks. Increase
-`candidateLimit` if close samples have incompatible normals or colours.
+(default 8) within each group and merges disjoint pairs in rounds. `maxPairs`
+bounds ranked merge candidates evaluated against the distance, normal, and
+colour thresholds (`work.pairs`). `maxSeamPairs` independently bounds
+cross-group distance checks (`work.seamPairs`). Both default to 1,900,000 and
+accept integers from 1 to 10,000,000. Spatial index traversal is separate
+from these pair counts. Increase `candidateLimit` if close samples have
+incompatible normals or colours.
 Use `seamDistance` to set the width of the protected area around boundaries
 independently of the merge distance. It defaults to `maxDistance`.
-A result with status `budget` may still contain valid merges. If the seam
-scan stops early, the original rows are retained.
+If the seam scan runs out of checks, verified interiors can still merge.
+Unverified rows stay at their original positions for this call, and
+`work.seamUnverified` reports how many were held back. They can be checked
+again on a later pass. A result with status `budget` is above the requested
+count and may contain valid merges. An `ok` result can include unverified
+rows when the verified merges were enough to reach the target.
 
 To protect a screen-space result, pass `guard(splats)`. It receives the
 candidate records and returns a boolean. A failed guard returns status
@@ -2623,6 +2632,59 @@ This measures holes and silhouette growth relative to the original foreground.
 Repeat at the cameras and zoom levels the preview is intended for.
 The packed output is static. Authoring data indexed by the original samples
 must be rebuilt or remapped through each survivor's `members`.
+
+#### Bake and check a cascade of coarse levels
+
+For static baked worlds, use `lod.reduceWorld` so each pass carries the
+world's palette and provenance. Reduce in bounded steps, aiming to remove
+at most half the rows in a pass, then increase the merge distance as sample
+spacing grows. Keep `seamDistance` tied to the surface detail you need to
+protect. Supply a descending series of target counts, a finite list of
+estimated spacings for each level, and views at the intended display
+distances. Pass the same camera and render options to the full and reduced
+worlds when comparing coverage.
+
+```js
+const studio = require('@shapeshift-labs/ink-studio');
+const { lod } = studio.load().KIT.procedural;
+
+function buildCoarseLevels(full, levels) {
+  let previous = full;
+  const capture = (world, view) => studio.render(world, { ...view, captureCoverage: true }).coverage;
+  return levels.map(({ target, spacings, seamDistance, maxSeamPairs, maxPairs, views, rebake }) => {
+    if (!views.length) throw new Error('Each coarse level needs a coverage view');
+    const reference = views.map(view => capture(full, view));
+    const accepts = world => world.count <= target && views.every((view, i) =>
+      lod.compareCoverage(reference[i], capture(world, view)).accepted);
+    let candidate = previous;
+    for (const spacing of spacings) {
+      if (candidate.count <= target) break;
+      candidate = lod.reduceWorld(candidate, {
+        target: Math.max(target, Math.ceil(candidate.count / 2)),
+        maxDistance: 1.7 * spacing,
+        seamDistance, maxSeamPairs, maxPairs
+      });
+    }
+    if (accepts(candidate)) {
+      previous = candidate;
+      return { world: candidate, method: 'merge' };
+    }
+    const coarse = rebake?.(target);
+    if (coarse && accepts(coarse)) return { world: coarse, method: 'resculpt' };
+    return { world: previous, method: 'previous' };
+  });
+}
+```
+
+Use at least one view for each level. `rebake` can resculpt the asset with
+coarser `S.focus` settings. If the merge and rebake both miss the count or
+coverage threshold, the example retains the previous accepted merge.
+Inspect a pass's `candidate.lod` to identify budget limits before tuning it.
+Check authored colours separately in the same views. The reducer blends
+RGB within each group. For assets that require exact authored ramp entries,
+a record-based delivery pipeline can use `members` to select an authored
+colour before packing. Run the coverage comparison on the delivered level
+after any covariance refit or colour selection.
 
 ### Delivery of baked rows
 
