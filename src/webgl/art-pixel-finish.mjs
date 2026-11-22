@@ -1,13 +1,13 @@
 // Read resolved color and ownership once for native art-pixel finish passes.
 export function createArtPixelFinish(gl, { target, textureUnit, fullscreen, copy }) {
   const buffer = target();
-  let rgba, scratch, rgb, splatId, protectedPixels;
-  function read(source, bytes, width, height) {
+  let rgba, scratch, rgb, splatId, protectedPixels, depth;
+  function read(source, bytes, width, height, attachment = 0) {
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, source.framebuffer);
-    gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    gl.readBuffer(gl.COLOR_ATTACHMENT0 + attachment);
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
   }
-  function finish(owner, detail, output, width, height, process) {
+  function finish(owner, detail, output, width, height, process, { source = buffer, depthRange } = {}) {
     const size = width * height;
     if (splatId?.length !== size) {
       rgba = new Uint8Array(size * 4);
@@ -16,7 +16,7 @@ export function createArtPixelFinish(gl, { target, textureUnit, fullscreen, copy
       splatId = new Uint32Array(size);
       protectedPixels = new Uint8Array(size);
     }
-    read(buffer, rgba, width, height);
+    read(source, rgba, width, height);
     read(owner, scratch, width, height);
     for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
       const p = y * width + x, j = ((height - 1 - y) * width + x) * 4;
@@ -26,13 +26,24 @@ export function createArtPixelFinish(gl, { target, textureUnit, fullscreen, copy
       rgb[3 * p + 2] = rgba[j + 2];
     }
     if (detail) {
-      if (detail !== buffer) read(detail, scratch, width, height);
-      const marked = detail === buffer ? rgba : scratch;
+      if (detail !== source) read(detail, scratch, width, height);
+      const marked = detail === source ? rgba : scratch;
       for (let y = 0; y < height; y++) for (let x = 0; x < width; x++)
         protectedPixels[y * width + x] = Number(marked[((height - 1 - y) * width + x) * 4 + 3] < 192);
     }
-    const result = process({ w: width, h: height, rgb }, { splatId, protected: detail && protectedPixels });
-    textureUnit(8, buffer.textures[0]);
+    if (depthRange) {
+      if (depth?.length !== size) depth = new Float32Array(size);
+      const [near, far] = depthRange;
+      read(owner, scratch, width, height, 2);
+      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+        const i = ((height - 1 - y) * width + x) * 4;
+        const packed = scratch[i] | scratch[i + 1] << 8 | scratch[i + 2] << 16;
+        depth[y * width + x] = scratch[i + 3] > 127 ? near + (far - near) * packed / 16777215 : Infinity;
+      }
+    }
+    const result = process({ w: width, h: height, rgb }, { splatId, protected: detail && protectedPixels,
+      ...(depthRange && { depth }) });
+    textureUnit(8, source.textures[0]);
     if (result !== rgb) {
       for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
         const p = (y * width + x) * 3, j = ((height - 1 - y) * width + x) * 4;

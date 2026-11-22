@@ -40,6 +40,7 @@ const ObjectMattes = require('./object-mattes.js');
 const OpticalMaterials = require('../src/optical-materials.js');
 const SplatRelighting = require('../src/splat-relighting.js');
 const ColorClusters = require('../src/color-clusters.js');
+const ShotCorrections = require('../src/shot-corrections.js');
 const BoundaryCels = require('../src/boundary-cels.js');
 const MaterialPixelStyle = require('../src/material-pixel-style.js');
 const EffectPalettes = require('../src/effect-palettes.js');
@@ -123,6 +124,7 @@ const deepReflection = Symbol('deep reflection plane');
 const shutterPlan = Symbol('shutter plan');
 const coverageLane = Symbol('motional coverage native/oversampled lane');
 const nativePartMotion = Symbol('part motion native capture');
+const deferredShotCorrection = Symbol('shot correction after shutter integration');
 
 function cameraCapture(options, receive) {
   return { [captureCamera](camera) {
@@ -273,14 +275,18 @@ function render(world, o, preparedPalettes) {
   }
   if (o[shutterPlan] && !o.samples && !o.captureCoverage) {
     const kit = require('../index.js').load();
-    return Shutter.scene(o[reconstructionSource] ?? world, o, o[shutterPlan], (sample, settings, nominal) =>
+    let applyCorrection;
+    const integrated = Shutter.scene(o[reconstructionSource] ?? world, o, o[shutterPlan], (sample, settings, nominal) =>
       render(sample, { ...settings, [shutterPlan]: null, [reconstructionSource]: undefined, [probeCaptures]: undefined,
         motionalCoverageSource: settings.motionalCoverageSource ?? (o[reconstructionSource] ?? world).data,
         partMotionSource: settings.partMotionSource ?? (o[reconstructionSource] ?? world).data,
         colorClusterSource: settings.colorClusterSource ?? o.renderHistoryKey ?? o[reconstructionSource] ?? world,
-        ...(!nominal && { [captureCamera]: undefined, [deepScope]: undefined, [matteScope]:null, [sampledPresentation]: false,
+        ...(nominal ? { [deferredShotCorrection]: apply => { applyCorrection = apply; } } : {
+          shotCorrections: false, captureShotCorrectionSurface: false, [deferredShotCorrection]: undefined,
+          [captureCamera]: undefined, [deepScope]: undefined, [matteScope]:null, [sampledPresentation]: false,
           motionalCoverageHistory: undefined, colorClusterHistory: undefined, partMotionHistory: undefined, capturePartMotion: false })
       }, preparedPalettes), kit);
+    return applyCorrection ? applyCorrection(integrated) : integrated;
   }
   if (!o?.renderStats) return renderFrame(world, o, preparedPalettes);
   const start = performance.now();
@@ -366,6 +372,9 @@ function renderFrame(world, o, preparedPalettes) {
   const legacyLook = styled && !retainContributions;
   const clusterView = !o.samples && !o.captureCoverage && !o.reflectionPlane && !probeView;
   const clusters = styled && clusterView && ColorClusters.prepare(o.colorClusters ?? look.colorClusters);
+  const correctionView = clusterView && !o.captureLightPlate;
+  const shotCorrections = correctionView && ShotCorrections.prepare(o.shotCorrections ?? look.shotCorrections);
+  const captureCorrection = correctionView && o.captureShotCorrectionSurface === true;
   const boundaries = styled && clusterView && BoundaryCels.prepare(o.boundaryCels ?? look.boundaryCels,
     { scenePalette: world.pal, paletteRoles: world.paletteRoles });
   if (clusterView && !clusters?.coherent) o.colorClusterHistory?.clear();
@@ -393,6 +402,7 @@ function renderFrame(world, o, preparedPalettes) {
   if (readabilitySelectors) passSelection.add('splatId');
   if (clusters) for (const channel of ['splatId', 'protected', 'emission', 'paletteOwner']) passSelection.add(channel);
   if (boundaries) passSelection.add('splatId');
+  if (shotCorrections || captureCorrection) for (const channel of ['splatId', 'depth']) passSelection.add(channel);
   const paletteDiagnostic = passSelection.has('paletteOwner');
   if (paletteDiagnostic && !o.raw) passSelection.add('materialId');
   let lookPass;
@@ -450,6 +460,16 @@ function renderFrame(world, o, preparedPalettes) {
     for (const channel of ['objectId', 'materialId', 'emission', 'protected']) passSelection.add(channel);
   }
   const finishLook = (frame, passes, fog, effectSignals, source, paletteState, paletteInventory, beforePalette, paintStage) => {
+    let project;
+    function artProject() {
+      if (!project) {
+        const view = CameraLens.artView(camera, frame.h, stable, undefined, o.artGridScale || 1);
+        const frames = sampleFrames(world, t);
+        project = ColorClusters.projector({ ...camera, view, tangent: ortho ? dist*tangent : tangent },
+          i => frames(i).position());
+      }
+      return project;
+    }
     const legacyAlpha = captureStages && legacyLook ? frame.alpha?.slice() : undefined;
     function capture(graded, stage) {
       frame.quantization = { w:frame.w,h:frame.h,px:frame.px,stage,graded,resolved:frame.rgb.slice(),
@@ -495,11 +515,7 @@ function renderFrame(world, o, preparedPalettes) {
       const before = frame.rgb;
       let continuity;
       if (clusters.coherent) {
-        const view = CameraLens.artView(camera, frame.h, stable, undefined, o.artGridScale || 1);
-        const frames = sampleFrames(world, t);
-        const project = ColorClusters.projector({ ...camera, view, tangent: ortho ? dist*tangent : tangent },
-          i => frames(i).position());
-        continuity = { history:o.colorClusterHistory, source:clusterSource, time:sceneTime, project, projection:ortho,
+        continuity = { history:o.colorClusterHistory, source:clusterSource, time:sceneTime, project:artProject(), projection:ortho,
           palette:frame.palette ?? world.pal, reset:o.resetRenderHistory || o.resetColorClusters,
           captureLabels:o.captureColorClusterLabels };
       }
@@ -533,6 +549,26 @@ function renderFrame(world, o, preparedPalettes) {
         painted = true;
       });
       if (painted) frame = ArtEffects.paletteUse(frame, world.pal);
+    }
+    if (captureCorrection) {
+      frame.shotCorrectionSurface = ShotCorrections.capture(frame, passes, world, artProject());
+      o.shotCorrectionSurfaceFrame?.(frame.shotCorrectionSurface);
+    }
+    if (shotCorrections) {
+      const { edits, ...report } = ShotCorrections.resolve(frame, passes, shotCorrections, world,
+        { time: sceneTime, shotCorrectionFrame: o.shotCorrectionFrame, project: artProject() });
+      for (const color of edits.values()) paletteInventory?.declared.add(color);
+      function applyCorrection(target) {
+        target.shotCorrections = report;
+        o.shotCorrectionsFrame?.(report);
+        if (!edits.size) return target;
+        target = ArtEffects.paletteUse({ ...target, rgb: ShotCorrections.apply(target.rgb, edits) }, world.pal);
+        if (target.quantization) target.quantization.resolved = target.rgb.slice();
+        if (target.colorStages) target.colorStages.final.rgb = target.rgb.slice();
+        return target;
+      }
+      if (o[deferredShotCorrection]) o[deferredShotCorrection](applyCorrection);
+      else frame = applyCorrection(frame);
     }
     if (captureQuantization && !legacyLook) capture(graded ?? (unclustered ?? frame.rgb).slice(), 'frame');
     if (captureStages) {

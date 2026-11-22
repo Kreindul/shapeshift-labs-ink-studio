@@ -173,7 +173,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
     const afterimagesAPI = toolkit.KIT?.afterimages;
     const previewPipelines = [];
     let surfacePipeline,emitterSurfacePipeline, reflectionTarget, secondaryReflectionTarget, reflectionAtlas, reflectionAtlasSize, reflectionAtlasFramebuffer;
-    let artPixelFinish;
+    let artPixelFinish, correctionStage;
     const clusterAPI = toolkit.KIT?.colorClusters, boundaryAPI = toolkit.KIT?.boundaryCels;
     const historiesByDepth = [];
     function historiesAt(depth) {
@@ -752,6 +752,15 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       if (boundaryDefinition !== undefined && boundaryDefinition !== false && !boundaryAPI)
         throw new Error('Boundary cels need the Ink Studio KIT');
       const boundaries = boundaryAPI?.prepare(boundaryDefinition, { scenePalette: world.pal, paletteRoles: world.paletteRoles });
+      const correctionView = !reflectionCapture && plane === zero;
+      const correctionDefinition = correctionView && (frame.shotCorrections ?? look.shotCorrections);
+      const captureCorrection = correctionView && frame.captureShotCorrectionSurface === true;
+      const correctionAPI = toolkit.KIT?.shotCorrections;
+      if ((correctionDefinition !== undefined && correctionDefinition !== false || captureCorrection) && !correctionAPI)
+        throw new Error('Shot corrections need the Ink Studio KIT');
+      const corrections = correctionAPI?.prepare(correctionDefinition);
+      const finishSceneArt = clusters || boundaries, finishShotArt = corrections || captureCorrection;
+      const finishArt = finishSceneArt || finishShotArt;
       const coherenceHistory = plane === zero ? frame.colorClusterHistory ?? viewHistories.clusters : viewHistories.clusters;
       if (!reflectionCapture && !clusters?.coherent) coherenceHistory?.clear();
       const clock = contract?.clock(world, frame);
@@ -844,7 +853,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       const highlightPlan = highlightDefinition && highlightAPI?.prepare(highlightDefinition, {
         scenePalette: world.pal, paletteRoles: world.paletteRoles
       });
-      const packedDepth = Boolean(foamRows?.length || highlightPlan?.length || frame[graphOwner]?.depth);
+      const packedDepth = Boolean(foamRows?.length || highlightPlan?.length || frame[graphOwner]?.depth || finishShotArt);
       const owner = packedDepth ? (graphOwnership ??= target(3)) : masked && !coverage ? maskOwner : plainOwner;
       const sourceWater = frame.water !== false && world.water?.count ? world.water : null;
       const pixel = toolkit.KIT?.pixel;
@@ -1232,12 +1241,12 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
           u_gh: gaps, u_ghn: count, u_gfl: glass.floor ?? -50
         });
       }
-      if (clusters || boundaries) {
+      if (finishArt) {
         copy ??= program(sources.COPY_FS);
         artPixelFinish ??= createArtPixelFinish(gl, { target, textureUnit, fullscreen, copy });
         artPixelFinish.buffer.resize(width, height);
       }
-      const presentation = clusters || boundaries ? artPixelFinish.buffer.framebuffer : output;
+      const presentation = finishArt ? artPixelFinish.buffer.framebuffer : output;
       const destination = damping ? finished.framebuffer : presentation;
       let resolve;
       const styledPattern = patterned && materialStyles;
@@ -1334,35 +1343,68 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         historyValid = true;
         previousVP = vp;
       }
-      if (clusters || boundaries) {
-        let continuity;
-        if (clusters?.coherent) {
-          const sampler = toolkit.KIT.splatFrames.create(world, time, toolkit.KIT.M);
-          continuity = { history:coherenceHistory, source:frame.colorClusterSource ?? frame.renderHistoryKey ?? source,
-            time:t, project:clusterAPI.projector(camera, i => sampler(i).position()), projection:camera.ortho,
-            reset:frame.resetRenderHistory || frame.resetColorClusters, captureLabels:frame.captureColorClusterLabels,
-            palette:Array.from((grade ?? pal).subarray(0,palCount*3)) };
+      const nativeRows = [...(foamRows || []), ...(highlightRows || [])];
+      function drawCels(to) {
+        if (!nativeRows.length) return;
+        drawNativeCels ??= createNativeCelDraw(gl, resources, textureUnit, nativeCelAPI.pixels);
+        drawNativeCels(nativeRows, width, height, to, owner.textures[2], camera.depthRange);
+      }
+      if (finishArt) {
+        let project;
+        function artProject() {
+          if (!project) {
+            const sampler = toolkit.KIT.splatFrames.create(world, time, toolkit.KIT.M);
+            project = clusterAPI.projector(camera, i => sampler(i).position());
+          }
+          return project;
         }
+        const continuity = clusters?.coherent && { history:coherenceHistory,
+          source:frame.colorClusterSource ?? frame.renderHistoryKey ?? source,
+          time:t, project:artProject(), projection:camera.ortho,
+          reset:frame.resetRenderHistory || frame.resetColorClusters, captureLabels:frame.captureColorClusterLabels,
+          palette:Array.from((grade ?? pal).subarray(0,palCount*3)) };
         const detail = clusters && (cleaning ? cleaned : damping ? finished : artPixelFinish.buffer);
-        artPixelFinish.finish(owner, detail, output, width, height, (art, passes) => {
+        function sceneArt(art, passes) {
           if (clusters) {
             const { rgb, ...report } = clusterAPI.apply(art, passes, clusters, world, continuity);
             frame.colorClustersFrame?.(report);
             if (rgb !== art.rgb) art = { ...art, rgb };
           }
-          if (!boundaries) return art.rgb;
+          if (!boundaries) return art;
           const result = boundaryAPI.apply(art, passes, boundaries, world, {
             time: t, captureSites: frame.captureBoundarySites
           });
           frame.boundaryCelsFrame?.(result.report);
-          return result.rgb;
-        });
-      }
-      if (foamRows?.length || highlightRows?.length) {
-        drawNativeCels ??= createNativeCelDraw(gl, resources, textureUnit, nativeCelAPI.pixels);
-        const rows = [...(foamRows || []), ...(highlightRows || [])];
-        drawNativeCels(rows, width, height, output, owner.textures[2], camera.depthRange);
-      }
+          return { ...art, rgb: result.rgb };
+        }
+        function shotArt(art, passes) {
+          if (captureCorrection) frame.shotCorrectionSurfaceFrame?.(
+            correctionAPI.capture(art, passes, world, artProject()));
+          if (!corrections) return art.rgb;
+          const { edits, ...report } = correctionAPI.resolve(art, passes, corrections, world,
+            { time:t, shotCorrectionFrame:frame.shotCorrectionFrame, project:artProject() });
+          frame.shotCorrectionsFrame?.(report);
+          return correctionAPI.apply(art.rgb, edits);
+        }
+        if (finishShotArt && nativeRows.length) {
+          let source = artPixelFinish.buffer;
+          if (finishSceneArt) {
+            correctionStage ??= target();
+            correctionStage.resize(width, height);
+            artPixelFinish.finish(owner, detail, correctionStage.framebuffer, width, height,
+              (art, passes) => sceneArt(art, passes).rgb);
+            source = correctionStage;
+          }
+          drawCels(source.framebuffer);
+          artPixelFinish.finish(owner, null, output, width, height, shotArt, { source, depthRange:camera.depthRange });
+        } else {
+          artPixelFinish.finish(owner, detail, output, width, height, (art, passes) => {
+            const resolved = sceneArt(art, passes);
+            return finishShotArt ? shotArt(resolved, passes) : resolved.rgb;
+          }, { depthRange:finishShotArt ? camera.depthRange : undefined });
+          drawCels(output);
+        }
+      } else drawCels(output);
       gl.activeTexture(gl.TEXTURE0);
       lastWorld = world;
       lastInstances = group;

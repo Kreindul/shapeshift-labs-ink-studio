@@ -100,6 +100,7 @@
       FrameComposite.settings(look?.composite);
       Cutaway.prepare(look?.cutaway);
       ColorClusters.prepare(look?.colorClusters);
+      ShotCorrections.prepare(look?.shotCorrections);
       BoundaryCels.prepare(look?.boundaryCels, { scenePalette: paletteOptions.palette, paletteRoles: paletteOptions.roles });
       RenderGraph.prepare(look?.renderGraph);
       RenderStages.prepare(look?.renderStages, paletteOptions);

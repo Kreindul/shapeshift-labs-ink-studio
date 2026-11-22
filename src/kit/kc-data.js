@@ -691,6 +691,11 @@
       bad('finish.look.colorClusters', error.message);
     }
     try {
+      ShotCorrections.prepare(look?.shotCorrections);
+    } catch (error) {
+      bad('finish.look.shotCorrections', error.message);
+    }
+    try {
       BoundaryCels.prepare(look?.boundaryCels, { scenePalette: st.palette, paletteRoles: st.roles });
     } catch (error) {
       bad('finish.look.boundaryCels', error.message);
