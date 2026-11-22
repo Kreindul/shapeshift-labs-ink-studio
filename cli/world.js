@@ -517,6 +517,21 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         break;
       }
       case 'plan': return respond(runtime(load(file)).composition());
+      case 'block-play': {
+        ensure(typeof file==='string' && typeof opt.samples==='string' && /^\d+$/.test(opt.samples) &&
+          (opt.resume===undefined||typeof opt.resume==='string') && (opt.seek===undefined||opt.seek===true),
+        'Use sim block-play <model.json> --samples N [--resume file.json --checkpoint file.json --seek]');
+        const source=embedModels(read(file),file,shot?.dependency);
+        const {value:checkpoint,store}=opt.resume===undefined?{}:readCheckpointFile(opt.resume);
+        const samples=Number(opt.samples);
+        const play=W.blockReview.playback(source,{path:opt.path??'offline',checkpoint,retainEvents:true});
+        if (opt.seek||samples<play.cursor()) play.seek(samples);
+        else play.process(samples-play.cursor());
+        const saved=play.checkpoint(), {storage,save}=saveCheckpoints(store);
+        if(opt.checkpoint!==undefined) save('checkpoint',opt.checkpoint,saved);
+        return respond({id:saved.identity.id,sample:play.cursor(),capacity:play.capacity,
+          outputs:saved.kernel.outputs,pendingEvents:saved.events,...(Object.keys(storage).length&&{storage})});
+      }
       case 'block-check': {
         ensure(typeof file==='string' && typeof other==='string' &&
           (opt.candidate===undefined||typeof opt.candidate==='string'),

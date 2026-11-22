@@ -65,6 +65,9 @@ limit the block size based on the compiled model's work budget.
 Use [`sim block-check`](simulation-block-independence.md) to compare
 different request sizes and browser traces on the same authored timeline.
 
+[Fast playback checkpoints](simulation-fast-checkpoints.md) preserve the
+sample cursor, persistent buffers, input timeline and unread block events.
+
 ## Resonator demo
 
 ```sh

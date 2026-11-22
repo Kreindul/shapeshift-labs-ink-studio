@@ -2,12 +2,13 @@
 (function (K) {
   const W=K.world, {check,id,equal,own,record,endpoint,copy}=W.data, {freeze}=K.procedural.data;
   const format='ink-studio/block-review', traceFormat='ink-studio/block-trace';
+  const checkpointFormat='ink-studio/block-playback-checkpoint';
   const maxSamples=1000000, maxCapturedValues=2000000;
   const float=type=>type==='Float32Array'||type==='Float64Array';
   const integer=(value,min,max)=>Number.isSafeInteger(value)&&value>=min&&value<=max;
   const fields=(value,names)=>record(value)&&Object.keys(value).every(key=>names.includes(key));
 
-  function setup(model,path,onBlock) {
+  function setup(model,path,onBlock,retainEvents=false) {
     check(model?.format===W.models.format && ['live','offline'].includes(path),'Block playback needs a model and a valid path');
     const {world,systems,ports}=W.runtime.modelInterface(model), [name]=Object.keys(systems);
     check(world.simulationModel.blockSize!==undefined && systems[name].kernel?.block,
@@ -16,33 +17,76 @@
     const session=W.kernels.prepare(kind,operatorRevision,config,{id:name,dt:world.dt,seed:world.seed});
     const {processor}=session, live=path==='live';
     check(!live||processor,'Live block playback needs a prepared processor');
-    const levels=live?processor.input:Object.fromEntries(Object.entries(ports.inputs)
-      .map(([port,spec])=>[endpoint(port)[1],spec.default]));
+    const defaults=Object.fromEntries(Object.entries(ports.inputs).map(([port,spec])=>[endpoint(port)[1],spec.default]));
+    const levels=live?processor.input:{...defaults};
     const commands=world.commands.map(({tick,args})=>({sample:tick-1,port:endpoint(args.port)[1],value:args.value}))
       .sort((a,b)=>a.sample-b.sample);
     const eventPorts=Object.entries(ports.outputs).filter(([,spec])=>spec.type==='event').map(([port])=>endpoint(port)[1]);
     const capacity=Math.min(world.simulationModel.blockSize,processor?.capacity.effectiveMaxSamples??W.kernels.maxBlockSize);
-    let cursor=0,next=0,running=false;
+    const identity=freeze({id:world.id,revision:world.simulationModel.revision,commands});
+    const emptyEvents=()=>Object.fromEntries(eventPorts.map(name=>[name,[]]));
+    let queued=retainEvents?emptyEvents():undefined, cursor=0,next=0,running=false;
 
-    function process(count) {
+    function checkpoint() {
+      return freeze({format:checkpointFormat,version:1,identity,kernel:session.snapshot(),
+        ...(queued && {events:copy(queued)})});
+    }
+
+    function install(saved) {
+      check(!running && saved?.format===checkpointFormat && saved.version===1 &&
+        equal(saved.identity,identity) && integer(saved.kernel?.steps,0,W.runtime.maxTick) &&
+        (retainEvents ? record(saved.events) && Object.keys(saved.events).length===eventPorts.length &&
+          eventPorts.every(name=>Array.isArray(saved.events[name]) && saved.events[name].length<=W.rates.maxEvents &&
+            saved.events[name].every(event=>{
+              const sample=event?.timing?.sample;
+              return integer(sample,0,saved.kernel.steps-1) &&
+                W.timedEvents.timeOf(event)===W.timedEvents.withinTime(sample*world.dt,(sample+1)*world.dt,event.timing.fraction);
+            })) : saved.events===undefined),'Checkpoint does not match this block playback');
+      const events=retainEvents?copy(saved.events):undefined;
+      session.restore(saved.kernel);
+      cursor=saved.kernel.steps;
+      queued=events;
+      Object.assign(levels,defaults);
+      next=0;
+      while(commands[next]?.sample<cursor) {
+        const {port,value}=commands[next++];
+        levels[port]=value;
+      }
+    }
+
+    function process(count,notify=true) {
       check(!running && integer(count,0,W.runtime.maxTick-cursor),'Invalid or reentrant block playback request');
       const target=cursor+count;
       running=true;
       try {
         while(cursor<target) {
+          const beforeCommands=next;
           while(commands[next]?.sample===cursor) {
             const {port,value}=commands[next++];
             levels[port]=value;
           }
           const start=cursor, end=Math.min(target,cursor+capacity,commands[next]?.sample??Infinity);
+          const collect=notify && queued && eventPorts.length;
+          const before=collect?session.snapshot():undefined;
           let outputs;
-          if(live) {
-            const status=processor.process(end-start);
-            if (status!=='ok'&&status!=='deadline') throw Error('Live block playback stopped at sample '+start+' ('+status+')');
-            outputs=processor.output;
-          } else outputs=session.advanceBlock({start,end,input:levels});
+          try {
+            if(live) {
+              const status=processor.process(end-start);
+              if (status!=='ok'&&status!=='deadline') throw Error('Live block playback stopped at sample '+start+' ('+status+')');
+              outputs=processor.output;
+            } else outputs=session.advanceBlock({start,end,input:levels});
+            if (collect) {
+              check(eventPorts.every(name=>queued[name].length+outputs[name].length<=W.rates.maxEvents),
+                'Block playback event queue is full');
+              for(const name of eventPorts) for(const event of outputs[name]) queued[name].push(event);
+            }
+          } catch(error) {
+            if (before) session.restore(before);
+            next=beforeCommands;
+            throw error;
+          }
           cursor=end;
-          onBlock?.(start,end,outputs,processor?.buffers);
+          if (notify) onBlock?.(start,end,outputs,processor?.buffers);
         }
         return cursor;
       } finally { running=false; }
@@ -51,16 +95,47 @@
     return {
       process,snapshot:session.snapshot,buffers:processor?.buffers,eventPorts,capacity,
       bufferLayout:processor?.report().memory.buffers,
-      identity:freeze({id:world.id,revision:world.simulationModel.revision,commands}),
+      identity,checkpoint,install,
+      reset() {
+        check(!running,'Invalid or reentrant block playback request');
+        session.reset();
+        Object.assign(levels,defaults);
+        cursor=next=0;
+        if (queued) queued=emptyEvents();
+      },
+      drainEvents() {
+        check(!running,'Invalid or reentrant block playback request');
+        if (!queued) return {};
+        const result=queued;
+        queued=emptyEvents();
+        return freeze(result);
+      },
       cursor:()=>cursor
     };
   }
 
   // Useful to a live host without the diagnostic capture or snapshot work on its process path.
-  function playback(model,{path='live',onBlock}={}) {
-    check(onBlock===undefined||typeof onBlock==='function','Block playback observer must be a function');
-    const {process,snapshot,buffers,capacity,cursor}=setup(model,path,onBlock);
-    return Object.freeze({process,snapshot,buffers,capacity,cursor});
+  function playback(model,{path='live',onBlock,checkpoint,retainEvents=checkpoint?.events!==undefined}={}) {
+    check((onBlock===undefined||typeof onBlock==='function')&&typeof retainEvents==='boolean',
+      'Invalid block playback observer or event retention');
+    const play=setup(model,path,onBlock,retainEvents);
+    if (checkpoint!==undefined) play.install(checkpoint);
+    function seek(sample,{checkpoint}={}) {
+      check(integer(sample,0,W.runtime.maxTick) && (checkpoint===undefined||checkpoint?.kernel?.steps<=sample),
+        'Invalid block seek or checkpoint after its target');
+      const before=play.checkpoint();
+      try {
+        if (checkpoint!==undefined) play.install(checkpoint);
+        else if (sample<play.cursor()) play.reset();
+        return play.process(sample-play.cursor(),false);
+      } catch(error) {
+        play.install(before);
+        throw error;
+      }
+    }
+    return Object.freeze({process:count=>play.process(count),snapshot:play.snapshot,buffers:play.buffers,
+      capacity:play.capacity,cursor:play.cursor,checkpoint:play.checkpoint,restore:play.install,
+      reset:play.reset,drainEvents:play.drainEvents,seek});
   }
 
   function prepareCapture(model,{samples,blocks,path='offline',buffers=[]}={}) {
@@ -254,5 +329,5 @@
       compareState:options.compareState,reference:{id:base.id,request:reference.request},cases})};
   }
 
-  W.blockReview=Object.freeze({format,traceFormat,playback,prepareCapture,capture,compare,review});
+  W.blockReview=Object.freeze({format,traceFormat,checkpointFormat,playback,prepareCapture,capture,compare,review});
 })(KIT);

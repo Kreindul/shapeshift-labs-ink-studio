@@ -13,10 +13,10 @@ const name = value => typeof value === 'string' && /^[a-z0-9][\w.-]{0,95}$/i.tes
 function validateTake(spec) {
   const refs = ['world', 'graph', 'audio', 'assetPack', 'checkpoint'];
   if (!plain(spec) || spec.format !== format || spec.version !== 1 ||
-      Object.keys(spec).some(key => !['format', 'version', 'id', 'clock', 'shots', ...refs].includes(key)) ||
+      Object.keys(spec).some(key => !['format', 'version', 'id', 'clock', 'shots', 'simulation', ...refs].includes(key)) ||
       spec.id !== undefined && !name(spec.id) ||
       refs.some(key => spec[key] !== undefined && (typeof spec[key] !== 'string' || !spec[key].trim())) ||
-      spec.assetPack !== undefined && spec.world === undefined ||
+      (spec.assetPack !== undefined || spec.simulation !== undefined) && spec.world === undefined ||
       spec.shots !== undefined && (!plain(spec.shots) || Object.keys(spec.shots).length > 1024 ||
         Object.entries(spec.shots).some(([key, file]) => !name(key) || typeof file !== 'string' || !file.trim())))
     throw new TypeError('Expected ink-studio/take version 1 with local document paths and named shots');

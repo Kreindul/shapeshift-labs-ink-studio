@@ -117,3 +117,6 @@ of an authored point. Compile a standalone timeline with
 `K.timeline.compile(definition, { exact: true })` and sample it with
 `timeline.forTake(frame)`. Native worlds configured by a take select exact
 timeline compilation automatically.
+
+Use [the native simulation policy](simulation-fast-checkpoints.md#set-a-takes-native-simulation-policy)
+for fast state at cuts, warm-up and loop wraps.

@@ -93,6 +93,9 @@ Use `KIT.world.runtime.verify(log, options)` for a structured report
 or `verifyAsync(log, options)` with browser workers. Custom systems use
 the same implementation factories during capture and verification.
 
+For sample-rate kernels, see [fast state checkpoints and take transport](simulation-fast-checkpoints.md).
+The world and its nested kernel states save together, including pending signal events.
+
 ## Interactive checkpoint branching
 
 `KIT.world.branches.create(source, options)` accepts a world manifest,
