@@ -234,6 +234,12 @@ const specifications = {
   'anim.frameBank': { inputs: { source: rgba, options: { tiles: { size: [2, 2], every: 4 } } } },
   'sim.define': { inputs: { kind: 'particles' } },
   'sim.run': { nodes: { recipe: { op: 'sim.define', inputs: { kind: 'particles' } } }, inputs: { recipe: link('recipe') } },
+  'sim.wave-sensors': { inputs: {
+    rig:{format:'ink-studio/sensor-rig',version:1,id:'audio-probe',revision:1,
+      sensors:{mic:{kind:'microphone',source:{kind:'wave',probe:'end'}}}},
+    trace:{format:'ink-studio/wave-trace',version:1,info:{sampleRate:24000},start:0,end:3,
+      pressure:{end:[.1,.2,-.03]}}
+  } },
   'sim.controller': { inputs: {
     controller:{format:'ink-studio/controller',version:1,id:'valve',revision:1,mode:'follow',limits:{rise:1}},
     samples:[{target:1},{target:1},{target:0}], options:{dt:.1}

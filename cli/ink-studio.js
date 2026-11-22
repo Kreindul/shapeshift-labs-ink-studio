@@ -1004,6 +1004,7 @@ const CMD = {
         '    sim integrate <plan.json> [--out trace.json]   integrate creator-authored state and locate substep events',
         '    sim grid-ops <plan.json> [--out report.json]   apply finite-volume operators to a compiled grid, chart, or mesh',
         '    sim diagnose <plan.json> [--out report.json --fail-on warning|error]   locate stability and conservation issues',
+        '    sim sensors <run.json> [--out report.json --wav microphones.wav]   record calibrated virtual sensors',
         '    sim controller <run.json> [--out trace.json]   replay target following, hysteresis, or PID',
         '    sim fit-targets <plan.json> [--out report.json --require-tolerance]   fit bounded controls to measured targets',
         '    sim input-compile <plan.json> [--out score.json]   compile text, IPA, MIDI, recordings, and cues',

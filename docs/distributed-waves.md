@@ -92,6 +92,9 @@ the node into its tubes, which is near zero at an unforced junction
 and negative at an absorbing outlet. A tube probe reports flow in
 the tube's oriented direction.
 
+[Virtual microphones, pressure taps and flow meters](virtual-sensors.md)
+record these probes with calibrated units and resumable sensor state.
+
 ## Blocks, checkpoints, and CLI
 
 ```js

@@ -34,6 +34,9 @@ publish named curve values to model operators.
 [Controllers and inverse targets](controllers-inverse-targets.md) can
 close feedback loops or fit bounded model inputs to measured outputs.
 
+[Virtual instruments](virtual-sensors.md) can turn native fields,
+geometry and events into reusable measured outputs.
+
 ## Author a model
 
 | Property | Contents |

@@ -71,6 +71,9 @@ arguments for the same path data. `band` chooses the route and the frequency
 band used for the threshold. It defaults to `mid`. All three gains refer to
 the selected route.
 
+A [virtual room microphone](virtual-sensors.md) records the same path
+gain, band level and delay over a native world run.
+
 ## Media, scale and cost
 
 `metersPerWorld` sets physical scale. `referenceDistance` is the distance

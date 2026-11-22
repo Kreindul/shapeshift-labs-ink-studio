@@ -525,6 +525,15 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
           'Simulation diagnostics reached '+report.status);
         return;
       }
+      case 'sensors': {
+        ensure(typeof file==='string'&&other===undefined&&(opt.wav===undefined||typeof opt.wav==='string')&&
+          (opt.wav===undefined||typeof opt.out!=='string'||path.resolve(opt.wav)!==path.resolve(opt.out)),
+          'Use sim sensors <run.json> [--out report.json --wav microphones.wav]');
+        const plan=read(file), sensors=require('./virtual-sensors.js');
+        const report=sensors.run(kit,plan,file,shot?.dependency);
+        if(opt.wav!==undefined)sensors.writeWav(opt.wav,report,plan.audio);
+        return respond(report);
+      }
       case 'controller': {
         ensure(typeof file==='string'&&other===undefined,'Use sim controller <run.json> [--out trace.json]');
         return respond(require('./controller-tools.js').run(kit,read(file),file,shot?.dependency));
