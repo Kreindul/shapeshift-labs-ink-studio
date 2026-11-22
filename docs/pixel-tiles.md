@@ -174,3 +174,7 @@ node cli/ink-studio.js clip examples/reconnecting-grids.js --w 272 --h 166 --px 
 node cli/ink-studio.js clip examples/reconnecting-grids.js --params '{"study":"glyphs"}' \
   --w 272 --h 166 --px 1 --from 0 --to 6.4 --fps 15 --out glyph-relay.png
 ```
+
+[Rule boards](rule-board.md) use the same socket conventions and integer
+turns to compile an editable arrangement of tiles and glyphs into a
+runnable graph.

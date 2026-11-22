@@ -302,6 +302,7 @@ paint and contour masks, or author held cels for depth-aware effects.
 the cels that make up a falling stream.
 [Animated pixel tiles](docs/pixel-tiles.md) join hand-drawn cels into
 circuits and frost that travel through corners and forks.
+[Rule boards](docs/rule-board.md) compile rotatable copper tracks and movable glyphs into inspectable rules.
 [Directional contact marks](docs/contact-marks.md) pin hand-drawn flashes
 and skids at the point of contact, with their own clock through a pose hold.
 

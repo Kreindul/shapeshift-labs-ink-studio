@@ -85,6 +85,16 @@ const PixelGridMotion = (() => {
     return {rows,coords,address,time,at};
   }
 
+  function matchSockets(slots, size, ports) {
+    const last=size-1, mid=size/2;
+    const edges=[i=>i,i=>i*size+last,i=>last*size+i,i=>i*size];
+    for (let side=0;side<4;side++) for (let i=0;i<size;i++) {
+      const socket=ports.includes('NESW'[side]) && (i===mid-1 || i===mid);
+      if ((slots[edges[side](i)]!==null)!==socket) return false;
+    }
+    return true;
+  }
+
   function blit(image, { rgba,width }, size, x, y, turn=0, mirror=false) {
     const last=size-1;
     if (!turn && !mirror) {
@@ -154,6 +164,6 @@ const PixelGridMotion = (() => {
     return Object.freeze({w,h,size,raster,sample:(x,y,time=0)=>state(timeline.address([x,y]),timeline.time(time))});
   }
 
-  return Object.freeze({ clock, blit, turnGrid });
+  return Object.freeze({ clock, matchSockets, blit, turnGrid });
 })();
 KIT.pixelGrid = Object.freeze({ turn: PixelGridMotion.turnGrid });

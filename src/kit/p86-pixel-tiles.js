@@ -40,12 +40,8 @@
   }
 
   function checkSockets(slots, size, ports) {
-    const last = size - 1, mid = size / 2;
-    const edges = [i => i, i => i * size + last, i => last * size + i, i => i * size];
-    for (let side = 0; side < 4; side++) for (let i = 0; i < size; i++) {
-      const socket = ports.includes(sides[side]) && (i === mid - 1 || i === mid);
-      check((slots[edges[side](i)] !== null) === socket, 'cel pixels must match the two center pixels of each ' + ports + ' socket');
-    }
+    check(PixelGridMotion.matchSockets(slots,size,ports),
+      'cel pixels must match the two center pixels of each ' + ports + ' socket');
   }
 
   function create({ width, height, size = 10, paths, style = 'copper', clips = {}, swatches,
