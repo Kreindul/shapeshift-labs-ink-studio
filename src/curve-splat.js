@@ -42,6 +42,32 @@ const CurveSplat = (() => {
   const isRow = (data, at) => sectionOf(data[at + 15]) >= 0 &&
     (data[at + 11] & 15) === 0 && data[at + 12] > 0 && data[at + 13] > 0;
 
+  const covarianceTerms = [[0, 0], [0, 1], [0, 2], [1, 1], [1, 2], [2, 2]];
+  function carrier(from, to, radius, profile) {
+    const delta = to.map((value, axis) => value - from[axis]);
+    const half = Math.hypot(...delta) / 2;
+    if (!(half > 0)) return null;
+    const center = from.map((value, axis) => value + delta[axis] * .5);
+    const axis = delta.map(value => value / (2 * half)), variance = radius * radius;
+    if (!profile) {
+      const along = half * half / 3;
+      return { center, half, covariance: covarianceTerms.map(([i, j]) => (i === j ? variance : 0) + along * axis[i] * axis[j]) };
+    }
+    const normal = cross(axis, profile.major), major = cross(normal, axis);
+    const along = variance * axialUnits(radius, half), minor = variance * profile.aspect ** 2;
+    return { center, half, normal, covariance: covarianceTerms.map(([i, j]) =>
+      along * axis[i] * axis[j] + variance * major[i] * major[j] + minor * normal[i] * normal[j]) };
+  }
+
+  function writeClips(rows, index, center, clips) {
+    const start = index * clipStride;
+    rows.fill(0, start, start + clipStride);
+    for (let i = 0; i < clips.length; i++) if (clips[i]) {
+      const { point, normal } = clips[i];
+      rows.set(point.map((v, k) => v - center[k]).concat(normal), start + i * 6);
+    }
+  }
+
   function joinGroups(data, first, count, nextGroup) {
     const remap = new Map();
     for (let i = first; i < first + count; i++) {
@@ -446,6 +472,6 @@ const CurveSplat = (() => {
     return hit;
   }
   return Object.freeze({ tag, joinGroups, axialUnits, minimum, clipStride, materialStride, lightingStride, clipPlanes,
-    emissionAt, lightingAt, isRow, prepare, sample, specular, directional });
+    emissionAt, lightingAt, isRow, carrier, writeClips, prepare, sample, specular, directional });
 })();
 if (typeof module !== 'undefined') module.exports = CurveSplat;

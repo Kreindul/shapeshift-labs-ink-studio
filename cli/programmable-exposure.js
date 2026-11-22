@@ -34,8 +34,10 @@ function readWorlds(source, options, kit, run) {
   if (factory !== undefined && typeof factory !== 'function') throw new TypeError('shutterWorld must sample a world by time');
   if (source.anim?.stateful && !factory) throw new RangeError('Stateful exposure requires a shutterWorld(time) sampler');
   const animated = !factory && typeof source.anim?.update === 'function';
-  const keys = ['data', 'rest', 'posedBuf', 'clock', 'clothClock'];
+  const keys = ['data', 'rest', 'posedBuf', 'curveClips', 'clock', 'clothClock'];
   const saved = animated && keys.map(key => [key, Object.hasOwn(source, key), source[key], source[key]?.slice?.()]);
+  const normals = animated && source.curveSplats && source.renderMetadata?.normals;
+  const savedNormals = normals && normals.slice();
   const direction = animated && source.anim.motionDirection, hadDirection = animated && Object.hasOwn(source.anim, 'motionDirection');
   let sampled = false;
   function at(time) {
@@ -63,6 +65,7 @@ function readWorlds(source, options, kit, run) {
           if (present) source[key] = value;
           else delete source[key];
         }
+        if (savedNormals) normals.set(savedNormals);
         if (hadDirection) source.anim.motionDirection = direction;
         else delete source.anim.motionDirection;
       }
@@ -94,6 +97,10 @@ function snapshot(world) {
   const { anim, data, rest } = world;
   const rig = anim?.rig;
   return { ...world, data: data.slice(0, world.count * stride), rest: rest?.slice?.(),
+    ...(world.curveClips && { curveClips: world.curveClips.slice() }),
+    ...(world.curveSplats && world.renderMetadata?.normals && {
+      renderMetadata: { ...world.renderMetadata, normals: world.renderMetadata.normals.slice() }
+    }),
     anim: anim && { ...anim, base: anim.base?.slice?.(), bones: anim.bones?.slice?.(),
       rig: rig && { ...rig, M: rig.M?.slice?.(), bid: rig.bid?.slice?.(), free: rig.free?.slice?.() } } };
 }

@@ -1068,33 +1068,21 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     return storage;
   }
   function curveSplat(from, to, radius, color, opacity, profile, edge, group, clips, finish, lighting) {
-    const delta = to.map((v, i) => v - from[i]), half = Math.hypot(...delta) / 2;
-    const center = from.map((v, i) => v + delta[i] * .5), axis = delta.map(v => v / (2 * half));
-    if (profile) {
-      const { major, aspect, flattened } = profile;
-      const normal = [axis[1] * major[2] - axis[2] * major[1],
-        axis[2] * major[0] - axis[0] * major[2], axis[0] * major[1] - axis[1] * major[0]];
-      const axial = radius * Math.sqrt(CurveSplat.axialUnits(radius, half));
-      dab(...center, normal, axis, axial, radius, radius * aspect, color, opacity,
-        { nd: true, ph: radius, sp: half, rg: aspect, ex: CurveSplat.tag(flattened ? 2 : 1, edge, group) });
-    } else {
-      stick(...center, axis, Math.hypot(radius, half / Math.sqrt(3)), radius, color, opacity,
-        { nd: true, ph: radius, sp: half, ex: CurveSplat.tag(0, edge, group) });
-    }
+    const { center, half, normal, covariance } = CurveSplat.carrier(from, to, radius, profile);
+    const section = profile ? (profile.flattened ? 2 : 1) : 0;
+    push(...center, ...covariance, color, opacity,
+      { nd: true, ph: radius, sp: half, rg: profile?.aspect, ex: CurveSplat.tag(section, edge, group) }, normal);
     hasCurveSplats = true;
     if (finish) curveMaterials = writeCurveRow(curveMaterials, CurveSplat.materialStride, finish);
     if (lighting) curveLighting = writeCurveRow(curveLighting, CurveSplat.lightingStride, lighting);
     if (clips) {
-      const stride = CurveSplat.clipStride, at = (n - 1) * stride;
+      const stride = CurveSplat.clipStride;
       if (!curveClips || curveClips.length < n * stride) {
         const storage = new Float32Array(Math.max(n * stride, curveClips ? curveClips.length * 2 : 256 * stride));
         if (curveClips) storage.set(curveClips);
         curveClips = storage;
       }
-      for (let i = 0; i < clips.length; i++) if (clips[i]) {
-        const { point, normal } = clips[i];
-        curveClips.set(point.map((v, k) => v - center[k]).concat(normal), at + i * 6);
-      }
+      CurveSplat.writeClips(curveClips, n - 1, center, clips);
     }
   }
   function finish(meta) {

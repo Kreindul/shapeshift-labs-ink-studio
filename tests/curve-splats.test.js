@@ -516,3 +516,103 @@ test('standalone curve scenes share editable named surface charts', () => {
   edited.strands[0].source.chart = 'missing';
   assert.throws(() => C.world(edited), /unknown surface chart missing/);
 });
+
+test('native bone binding bends curve rows while retaining their widths, paint and identities', () => {
+  const B = kit.makeBuilder(1, palette), source = { kind: 'path', id: 'ribbon', points: [[-2,0,0],[0,0,0],[2,0,0]] };
+  B.iso(-2, 0, 0, .12, B.P[1], 1);
+  const style = { object: 'actor', material: 'cord', section: 'elliptical', edge: 'hard', width: .21,
+    caps: 'blunt', twist: [[0, 0], [1, .8]], along: { pigment: { keys: [[0, '#f3b56b'], [.65, '#76d6ae']], interpolation: 'step' } } };
+  const binding = C.bind(B, source, C.drivers.bones([0, { bone: 0, second: 1, weight: .5 }, 1]), style);
+  const world = host(B), reference = world.data.slice(), ids = Array.from({ length: world.count }, (_, i) => i);
+  const tables = new Float32Array(24);
+  let angle = 0;
+  K.bones.bind(world, { ids, bid: new Uint16Array(ids.length), M: tables, curveBindings: [binding], pose() {
+    tables.set([...K.M.id(), 0,0,0]);
+    tables.set([...K.M.rot([0,0,1], angle), 0,.3,0], 12);
+  } });
+  assert.deepEqual([...world.anim.boned], [0]);
+  world.anim.update(0, 0);
+  const frame = ink.render(world, imageOptions);
+  const clips = world.curveClips.slice(), row = (binding.end - 1) * 16;
+  angle = Math.PI / 2;
+  world.anim.update(1/60, .2);
+  assert.ok(world.data[row + 1] > 2);
+  assert.ok(Math.abs(world.data[row]) < .02);
+  assert.notDeepEqual(world.curveClips, clips);
+  for (let i = binding.first; i < binding.end; i++)
+    for (const offset of [7, 12, 14, 15]) assert.equal(world.data[i * 16 + offset], reference[i * 16 + offset]);
+  assert.equal(binding.threads[0].id, 'ribbon');
+  assert.ok(world.renderMetadata.targets.some(target => target?.surface === 'ribbon'));
+  assert.notDeepEqual(ink.render(world, imageOptions).rgb, frame.rgb);
+});
+
+test('stage sockets and world query sockets supply live curve stations', () => {
+  const B = kit.makeBuilder(1, palette), rig = K.rig(B, {});
+  rig.part('arm');
+  const binding = C.bind(B, { kind: 'path', points: [[-1,0,0],[1,0,0]] },
+    C.drivers.sockets(['fixed', { socket: 'tip', offset: [0, .3, 0] }]), { edge: 'hard' });
+  const world = host(B), stage = K.stage(world);
+  rig.bind(stage);
+  stage.socket('fixed', [-1,0,0]);
+  stage.socket('tip', [1,0,0], 'arm');
+  stage.add(binding);
+  rig.set('arm', K.M.rot([0,0,1],Math.PI/2), [0,0,0], [0,0,0]);
+  stage.update(0, 0);
+  assert.ok(Math.abs(world.data[0] + .65) < 1e-6);
+  assert.ok(Math.abs(world.data[1] - .5) < 1e-6);
+  const other = C.drivers.sockets([[0,0,0], { entity: 'arm', socket: 'tip', offset: [.2,0,0] }]);
+  assert.deepEqual(other({ points: straight }, { query: { frame: () => ({ point: [0,1,0], rotation: K.M.id() }) } }).points[1], [.2,1,0]);
+});
+
+test('bound XPBD spans keep row slots through a tear and checkpoint restore', () => {
+  const B = kit.makeBuilder(1, palette), sim = K.xpbd.sim({ gravity: [0,0,0] });
+  const knots = [[-1,0,0],[0,0,0],[1,0,0]], ids = knots.map(p => sim.point(p, 0));
+  const links = [sim.link(0,1), sim.link(1,2)], clean = sim.motion();
+  const binding = C.bind(B, knots, C.drivers.xpbd(sim, ids, { links }), { width: .23, edge: 'hard' });
+  const world = host(B), stage = K.stage(world);
+  stage.add(binding);
+  stage.update(0, 0);
+  const initial = world.data.slice();
+  sim.breakLink(1);
+  sim.resetPose([-1,0,0,0,0,0,1,2,0]);
+  stage.update(.01, .01);
+  assert.equal(world.data[19], 0);
+  assert.equal(world.count, 2);
+  sim.restoreMotion(clean);
+  stage.update(.01, .02);
+  assert.deepEqual(world.data, initial);
+});
+
+test('cloth presents the attached UV stroke with both solver motion and an explicit review pose', () => {
+  const B = kit.makeBuilder(1, palette);
+  const cloth = K.cloth(B, { nu: 4, nv: 3, at: [-1,0,0], u: [2,0,0], v: [0,1,0],
+    pins: () => false, gravity: [0,0,0], pattern: () => [1,2] });
+  const stroke = cloth.bindStroke({ id: 'hem', points: [[0,.5],[1,.5]], lift: .04 },
+    { width: .14, edge: 'hard', color: '#76d6ae' });
+  const world = host(B), stage = K.stage(world);
+  const offset = stroke.first * 16, before = world.data.slice(offset, offset + 16);
+  const lifted = cloth.restPose().map((value, i) => i % 3 === 2 ? value + .4 : value);
+  cloth.drawPose(stage, lifted);
+  assert.ok(Math.abs(world.data[offset + 2] - .44) < 1e-6);
+  cloth.sim.resetPose(cloth.restPose());
+  stage.add(cloth);
+  stage.update(0, 0);
+  assert.deepEqual(world.data.slice(offset, offset + 16), before);
+});
+
+test('native hair can render stable styled curve strands from its groom solver', () => {
+  const B = kit.makeBuilder(1, palette), hair = K.hair(B, {
+    roots: [{ id: 'lock', p: [0,1,0], n: [1,0,0] }], segs: 5, len: .65, ramp: [1,2],
+    renderer: 'curve-splats', curveProfile: { width: .18, color: '#76d6ae', edge: 'hard' }
+  });
+  const world = host(B), st = K.stage(world);
+  st.add(hair);
+  const initial = world.data.slice(), count = world.count;
+  st.update(.05, 0);
+  st.update(.05, .05);
+  assert.equal(world.count, count);
+  assert.ok(world.curveSplats);
+  assert.ok(world.renderMetadata.targets.some(target => target?.surface === 'lock'));
+  assert.notDeepEqual(world.data, initial);
+  for (let i = 0; i < count; i++) assert.equal(world.data[i * 16 + 7], initial[i * 16 + 7]);
+});

@@ -351,6 +351,63 @@ Run the [curved-surface studies](../examples/surface-bound-strokes.js) with
 The CLI can render the same editable study with
 `node cli/ink-studio.js render examples/surface-bound-strokes.js --params '{"study":"groove"}' --raw --out groove.png`.
 
+## Drive strands from rigs and simulation
+
+`K.curveSplats.bind(builder, source, driver, appearance)` prepares the
+reference path and assigns its splat rows once. Each pose moves the knots and
+rebuilds the segment geometry in those rows. Width, taper, twist, caps,
+material tracks, and the strand's selection ID stay attached to the same
+places on the reference path. Patterns use reference arc length, so an
+extending span carries its bands with it.
+
+```js
+const C = K.curveSplats;
+const cord = C.bind(builder, { kind: 'path', id: 'lanyard', points: restPoints },
+  C.drivers.sockets(['belt', { socket: 'grip', offset: [0, .06, 0] }]),
+  { width: .07, lighting: 'matte-thread' });
+
+// Register the sockets and install the rig's pose system on the stage.
+stage.add(cord);
+```
+
+| Driver | Input |
+| --- | --- |
+| `drivers.bones(influences)` | One bone index or named stage rig part per reference knot. Use `{ bone, second, weight }` to blend two transforms at a knot. On a native bone table pass the handles in `K.bones.bind(world, { ..., curveBindings: [cord] })`. |
+| `drivers.sockets(anchors)` | Stage socket names, fixed XYZ points, or `{ socket, offset }` records. Supply `{ entity, socket, offset }` and a world query when posing from an entity socket. |
+| `drivers.xpbd(solver, indices, { links })` | Solver point indices per knot. The optional link list suppresses broken spans without changing row IDs. A callback can supply a saved solver motion record with `positions` and `broken`. |
+| `drivers.chart(chartOrCallback)` | Reprojects retained stroke UVs and their authored normal offsets onto a posed chart. Optional `chart.intact(uv)` controls whether spans render across damaged cells. |
+
+Pass the handle to `stage.add` to sample after the stage's pose and
+simulation systems. To present an external snapshot, call
+`handle.pose(world, { time, stage, query })` with the context your driver
+uses. A custom driver receives the frozen reference path and this context.
+It returns one XYZ point per retained knot, or
+`{ points, normals?, up?, active? }`. Use `active` to enable or hide each
+reference span. Keep the world and its native row range for the life of the
+binding. Use the curve driver for those rows and native rig ownership for
+the surrounding sculpt.
+
+A native cloth writes its posed UV strokes during the same presentation as
+its surface, including explicit cloth review poses.
+
+```js
+const hem = cloth.bindStroke({
+  id: 'hem', points: [[.08, .95], [.92, .95]], lift: .02
+}, { edge: 'hard', width: .05, color: '#ffc981' });
+stage.add(cloth);
+```
+
+For hair or tassels set `renderer: 'curve-splats'` in `K.hair` and pass any
+strand look in `curveProfile`. The groom solver and root rig bindings drive
+the segments. Supply a root `id` to select an individual lock. These options
+use the finite strand renderer in Node and the CLI. WebGL uses the moving
+Gaussian carriers.
+
+Run the four [editable binding studies](../examples/curve-splat-bindings.js)
+with `node examples/curve-splat-bindings.cjs studio/out/curve-splat-bindings`.
+The CLI can select an individual study with
+`--params '{"study":"bones"}'`, `sockets`, `cloth`, or `strands`.
+
 ## Render and compare
 
 The [editable example](../examples/curve-splat-scene.json) uses
