@@ -34,6 +34,7 @@ world position, arc distance, and textile UV when present.
 | Path | An array of 3D points, a compiled `K.curve.path`, or a `{ kind: 'path', points, closed }` record. |
 | Spline | `{ kind: 'spline', points, samples }` samples a Catmull–Rom spline through editable control points. `samples` is per pair of controls. |
 | Curve family | `{ kind: 'family', definition }` uses an existing `K.curve.create` definition. |
+| Strand bundle | `{ kind: 'bundle', style, guide, count, separation, lengthVariation, seed }` generates member paths from one guide. A version 1 `bundle-plan` can be drawn directly. |
 | Surface stroke | `{ kind: 'surface', chart, points, lift, inset }` follows an editable UV path on a chart. |
 | Textile | `{ kind: 'textile', plan }` reads a textile or interlace plan, keeping each strand's ID and width. Set `renderer: 'curve-splats'` in `K.textile.draw` appearance to opt in directly. Existing textile plans can still use `renderer: 'patches'`. |
 | Routed link | `{ kind: 'routed', link }` uses a sampled routed link's `paths`, material, and radius. Cut and broken links retain their separate spans. In simulation visuals set `visual.routedLinkRenderer: 'curve-splats'` alongside `visual.fields.routedLinks`. |
@@ -407,6 +408,52 @@ Run the four [editable binding studies](../examples/curve-splat-bindings.js)
 with `node examples/curve-splat-bindings.cjs studio/out/curve-splat-bindings`.
 The CLI can select an individual study with
 `--params '{"study":"bones"}'`, `sockets`, `cloth`, or `strands`.
+
+## Generate strand bundles from a guide
+
+Use a `kind: 'bundle'` source to draw multiple continuous strands from one
+editable guide. The guide can be a point list, native `K.curve.path`, spline,
+curve family, or surface stroke. A surface guide can use a chart from the
+standalone scene's `charts` map. The generated member paths carry stable
+`<id>:<index>` labels for picking and material callbacks.
+
+```js
+const source = {
+  kind: 'bundle', id: 'signal-cord', style: 'twisted-cable',
+  guide: { kind: 'spline', points: [[-2, 0, 0], [0, .6, .2], [2, 0, 0]] },
+  count: 4, separation: .18, turns: 3, lengthVariation: .08, seed: 31
+};
+K.curveSplats.draw(builder, source, {
+  edge: 'hard', lighting: 'metal-wire',
+  color: ({ index }) => ['#e1a267', '#b87853', '#995e50', '#f2c991'][index]
+});
+```
+
+| Style | How separation is measured | Additional controls |
+| --- | --- | --- |
+| `braid` | Distance between adjacent braid slots in the guide's transported frame. | Signed `word`, `repeats`, `clearance`, and `samplesPerCrossing` use the [interlacing solver](weaving-braiding.md#braid-around-a-path). |
+| `twisted-cable` | Distance between adjacent strand centres at each guide station. | Signed `turns` along the guide and optional `samples`. Use a whole number of turns on a closed guide. |
+| `clumped-hair` | Base spacing for the lock layout. | `clumps`, `tightness` from 0 to 1, `frizz` relative to separation, and `samples`. Colour callbacks can use the member's `clump` index. |
+| `frayed-hem` | Arc distance between roots centred along the guide. Omit it to distribute roots over the full guide. | Fibre `length` in world units, `frizz` relative to separation, and `samples` per fibre. Raw guides default to a downward fibre direction. Set `up` or supply a framed native guide to orient the fibres. |
+
+`lengthVariation` ranges from 0 to .9 and shortens each member by a seeded
+fraction of its own length. It leaves the root in place. For cable and braid
+loops, shortening opens the tips. Supply `radius` on the source to override
+the default member size. Braids check clearance with that declared radius.
+Width, taper, palette, and lighting are ordinary curve-splat appearance
+controls. The per-bundle `seed` takes precedence over the standalone scene
+seed when both are supplied.
+
+Use `K.curveSplats.bundle(source)` to generate an immutable, serializable
+plan. Each member has a path, length, radius, and ID. Braid plans also report
+over-under crossings. Pass the plan to `K.curveSplats.draw` or place it in a
+curve-splat scene as a `source`. Keep the guide recipe to regenerate after
+an edit.
+
+Run the [editable bundle studies](../examples/curve-splat-bundles.js) with
+`node examples/curve-splat-bundles.cjs studio/out/curve-splat-bundles`.
+Use `--params '{"style":"frayed-hem"}'` to select a study in CLI
+`render` and `clip` commands.
 
 ## Render and compare
 

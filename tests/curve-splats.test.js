@@ -616,3 +616,74 @@ test('native hair can render stable styled curve strands from its groom solver',
   assert.notDeepEqual(world.data, initial);
   for (let i = 0; i < count; i++) assert.equal(world.data[i * 16 + 7], initial[i * 16 + 7]);
 });
+
+test('twisted cable spacing, length variation and stable member IDs use the seed reproducibly', () => {
+  const settings = { guide: straight, style: 'twisted-cable', id: 'cord', seed: 91, count: 4,
+    radius: .08, separation: .25, turns: 2, samples: 64 };
+  const full = C.bundle(settings);
+  assert.ok(Object.isFrozen(full.strands[0].path.points[0]));
+  assert.ok(Math.abs(K.V.dist(full.strands[0].path.points[0], full.strands[1].path.points[0]) - .25) < 1e-10);
+  const shortened = C.bundle({ ...settings, lengthVariation: .38 });
+  assert.deepEqual(shortened, C.bundle({ ...settings, lengthVariation: .38 }));
+  assert.notDeepEqual(shortened, C.bundle({ ...settings, seed: 92, lengthVariation: .38 }));
+  assert.deepEqual(shortened.strands.map(strand => strand.id), ['cord:0', 'cord:1', 'cord:2', 'cord:3']);
+  assert.ok(shortened.strands.every((strand, i) => strand.length < full.strands[i].length &&
+    strand.length > .62 * full.strands[i].length && Math.abs(K.curve.length(strand.path.points) - strand.length) < 1e-8));
+  const ring = K.curve.path(Array.from({ length: 32 }, (_, i) => [Math.cos(i * Math.PI / 16), Math.sin(i * Math.PI / 16), 0]),
+    { closed: true, up: [0,0,1] });
+  const loop = C.bundle({ ...settings, guide: ring, turns: undefined });
+  assert.ok(loop.closed);
+  assert.ok(loop.strands.every(strand => K.V.dist(strand.path.points[0], strand.path.points.at(-1)) === 0));
+});
+
+test('braid bundles reuse the over-under plan and retain IDs through standalone drawing', () => {
+  const settings = { guide: straight, style: 'braid', id: 'braid', count: 3, separation: .36,
+    radius: .065, word: [1, -2], repeats: 2, clearance: .012, up: [0,1,0] };
+  const plan = C.bundle(settings);
+  assert.equal(plan.crossings.length, 4);
+  assert.equal(plan.crossings[0].over, 'braid:0');
+  assert.equal(plan.crossings[1].generator, -2);
+  assert.ok(K.procedural.interlace.checkClearance(plan.strands, { clearance: .012 }).ok);
+  const options = { width: .12, edge: 'hard', color: '#76d6ae' };
+  const direct = { source: { kind: 'bundle', ...settings }, ...options };
+  const compiled = { source: JSON.parse(JSON.stringify(plan)), ...options };
+  const a = C.world(scene([direct])), b = C.world(scene([compiled]));
+  assert.deepEqual(a.data, b.data);
+  assert.deepEqual(ink.render(a, imageOptions).rgb, ink.render(b, imageOptions).rgb);
+  assert.ok(a.renderMetadata.targets.some(target => target?.surface === 'braid:2'));
+});
+
+test('clumped hair gathers within a lock and fringe roots land at the authored separation', () => {
+  const hair = C.bundle({ guide: straight, style: 'clumped-hair', count: 8, clumps: 2, tightness: 1, frizz: 0, seed: 6 });
+  const [a, b, c] = hair.strands;
+  assert.equal(a.clump, c.clump);
+  assert.notEqual(a.clump, b.clump);
+  assert.ok(K.V.dist(a.path.points[0], c.path.points[0]) > .01);
+  assert.ok(K.V.dist(a.path.points.at(-1), c.path.points.at(-1)) < 1e-9);
+  assert.ok(K.V.dist(a.path.points.at(-1), b.path.points.at(-1)) > .12);
+  const B = kit.makeBuilder(1, palette), clumps = new Set();
+  C.draw(B, hair, { color: ({ clump }) => {
+    clumps.add(clump);
+    return clump ? '#f3b56b' : '#76d6ae';
+  } });
+  assert.deepEqual([...clumps], [0,1]);
+  const settings = { guide: straight, style: 'frayed-hem', count: 3, separation: .6, length: .5, frizz: 0 };
+  const fringe = C.bundle(settings);
+  const roots = fringe.strands.map(strand => strand.path.points[0]);
+  assert.ok(roots.every((root, i) => K.V.dist(root, [(i - 1) * .6, 0, 0]) < 1e-10));
+  assert.ok(fringe.strands.every(strand => strand.path.points.at(-1)[1] === -.5));
+  assert.throws(() => C.draw(B, { kind: 'bundle', ...settings, separation: 4 }), /root spacing/);
+});
+
+test('bundle guides can use a named surface chart and keep the world recipe editable', () => {
+  const recipe = {
+    ...scene([{ source: { kind: 'bundle', style: 'frayed-hem', id: 'tail', count: 5, length: .29,
+      guide: { kind: 'surface', chart: 'hem', points: [[.1,.5],[.9,.5]] } }, color: '#f3b56b', edge: 'hard' }]),
+    charts: { hem: { kind: 'plane', origin: [-2,-1,0], u: [4,0,0], v: [0,2,0] } }
+  };
+  const world = C.world(recipe);
+  assert.equal(world.curveSplatSource, recipe);
+  assert.notDeepEqual(C.world({ ...recipe, seed: 17 }).data, world.data);
+  assert.ok(ink.render(world, { ...imageOptions, transparent: true }).alpha.some(value => value === 255));
+  assert.ok(world.renderMetadata.targets.some(target => target?.surface === 'tail:4'));
+});

@@ -28,6 +28,32 @@
       frame: typeof path.frame === 'function' ? distance => path.frame(distance).N : undefined };
   }
 
+  function bundle(spec) {
+    check(spec && typeof spec === 'object' && !Array.isArray(spec), 'expected bundle settings');
+    const input = spec.guide;
+    check(Array.isArray(input) || input && ['path', 'spline', 'family', 'surface'].includes(input.kind ?? 'path'),
+      'a strand bundle needs one guide path, spline, family or surface stroke');
+    const guide = input.kind === 'family' ? K.curve.create(input.definition) : input;
+    const compiled = typeof guide.frame === 'function' && typeof guide.at === 'function';
+    const up = spec.up ?? (spec.style === 'frayed-hem' && !compiled && !guide.up ? [0, -1, 0] : undefined);
+    if (compiled) return CurveBundles.build(spec, K.curve.path(guide, up === undefined ? {} : { up }), segmentLimit);
+    const [source] = paths(guide);
+    return CurveBundles.build(spec, K.curve.path(points(source.points), {
+      ...(source.closed !== undefined && { closed: source.closed }),
+      ...((up ?? source.up) !== undefined && { up: up ?? source.up })
+    }), segmentLimit);
+  }
+
+  function bundlePaths(plan) {
+    check(Array.isArray(plan?.strands) && plan.strands.length > 0 && plan.strands.length <= 128 &&
+      plan.strands.every(strand => label(strand?.id) && strand.path) &&
+      new Set(plan.strands.map(strand => strand.id)).size === plan.strands.length,
+      'expected a bundle plan with distinct strand IDs');
+    return plan.strands.map(({ id, radius, family, index, clump, path }) => ({
+      ...pathSpec(path ?? {}), id, radius, family, index, clump
+    }));
+  }
+
   function paths(source) {
     if (Array.isArray(source)) return [{ points: source }];
     check(source && typeof source === 'object', 'expected a path or source document');
@@ -43,6 +69,10 @@
       }
       case 'family': return [pathSpec(K.curve.create(source.definition))];
       case 'surface': return [surfacePath(source)];
+      case 'bundle': return bundlePaths(bundle(source));
+      case 'bundle-plan':
+        check(source.version === 1, 'expected a version 1 bundle plan');
+        return bundlePaths(source);
       case 'textile': {
         const plan = source.plan;
         check(Array.isArray(plan?.threads ?? plan?.strands) && (plan.threads ?? plan.strands).length <= segmentLimit,
@@ -499,7 +529,7 @@
       check(!framed || point(initial) && K.V.len(initial) > 1e-8, 'invalid path frame up vector');
       const frames = framed && (!retainedFrame || retain) ? K.curve.frames(knots, Array.from(initial)) : null;
       const rest = retain && K.procedural.data.freeze({
-        id, index: strand.index ?? index, family: strand.family, points: knots, closed, autoClosed: Boolean(autoClosed),
+        id, index: strand.index ?? index, family: strand.family, clump: strand.clump, points: knots, closed, autoClosed: Boolean(autoClosed),
         up: Array.from(initial), ...(strand.uvs && { uvs: strand.uvs.map(v => Array.from(v)) }),
         ...(strand.normals && { normals: strand.normals.map(v => Array.from(v)) }),
         ...(strand.offsets && { offsets: strand.offsets.slice() })
@@ -518,7 +548,7 @@
           const next = stop < stops.length && stops[stop] < end - 1e-12 ?
             (stops[stop++] * total - distance) / length : 1;
           const middle = (previous + next) / 2, arc = distance + length * middle;
-          const sample = { id, family: strand.family, index: strand.index ?? index,
+          const sample = { id, family: strand.family, index: strand.index ?? index, clump: strand.clump,
             point: K.V.lerp(from, to, middle), distance: arc, u: arc / total,
             ...(a && b && { uv: a.map((v, k) => v + (b[k] - v) * middle) }) };
           while (ends?.runs[runIndex] && sample.u > ends.runs[runIndex].to) runIndex++;
@@ -695,13 +725,16 @@
       check(label(id), 'invalid surface chart ID');
       return [id, surfaceChart(input, id)];
     }));
+    function chartFor(source) {
+      if (source?.kind !== 'surface' || typeof source.chart !== 'string') return source;
+      check(carriers.has(source.chart), 'unknown surface chart ' + source.chart);
+      return { ...source, chart: carriers.get(source.chart) };
+    }
     let remaining = segmentLimit;
     const plans = recipe.strands.map(({ source, ...appearance }, i) => {
-      if (source?.kind === 'surface' && typeof source.chart === 'string') {
-        check(carriers.has(source.chart), 'unknown surface chart ' + source.chart);
-        source = { ...source, chart: carriers.get(source.chart) };
-      }
-      const plan = prepare(source, { object: 'curve:' + i, paletteRoles, ...appearance, maxSegments: remaining }, colors);
+      const input = source?.kind === 'bundle' ?
+        { ...source, seed: source.seed === undefined ? seed : source.seed, guide: chartFor(source.guide) } : chartFor(source);
+      const plan = prepare(input, { object: 'curve:' + i, paletteRoles, ...appearance, maxSegments: remaining }, colors);
       remaining -= plan.examined;
       return plan;
     });
@@ -720,5 +753,5 @@
     });
   }
 
-  K.curveSplats = Object.freeze({ format, segmentLimit, lightingPresets, surfacePath, carve, draw, bind, drivers: CurvePoseDrivers, world });
+  K.curveSplats = Object.freeze({ format, segmentLimit, lightingPresets, bundle, surfacePath, carve, draw, bind, drivers: CurvePoseDrivers, world });
 })(KIT);
