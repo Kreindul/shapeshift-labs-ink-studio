@@ -515,6 +515,10 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         return respond(require('./mass-properties.js').measure(kit,read(file),file,
           {dependency:shot?.dependency,assetPack:opt['asset-pack']}));
       }
+      case 'remap': {
+        ensure(typeof file==='string' && other===undefined,'Use sim remap <plan.json> [--out report.json]');
+        return respond(require('./state-remap.js').run(kit,read(file),file,shot?.dependency));
+      }
       case 'discretize': {
         ensure(typeof file==='string' && other===undefined,'Use sim discretize <plan.json> [--out compiled.json]');
         return respond(require('./discretization.js').compile(kit,read(file),file,shot?.dependency));

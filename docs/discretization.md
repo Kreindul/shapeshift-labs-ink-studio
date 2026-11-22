@@ -129,3 +129,6 @@ them. The demo uses the compiled face areas and normal distances in a
 two-point steady diffusion solve with inlet and outlet values and
 insulating walls. It writes the compiled JSON, an annotated board, a
 residual report, and an animated view of the solve.
+
+Use [conservative state remapping](state-remap.md) to transfer extensive
+state between compiled grids or tetrahedral volume meshes.

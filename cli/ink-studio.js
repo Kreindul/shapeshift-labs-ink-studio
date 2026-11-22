@@ -997,6 +997,7 @@ const CMD = {
         '    sim verify <run> [--workers N]   replay and check the recorded evidence',
         '    sim block-play <model> --samples N [--resume checkpoint --checkpoint file]   sample and checkpoint a fast kernel',
         '    sim mass-properties <plan.json> [--asset-pack pack.json --out report.json]   measure physical shape and material properties',
+        '    sim remap <plan.json> [--out report.json]   conservatively transfer extensive state across discretizations',
         '    sim discretize <plan.json> [--out compiled.json]   compile solver cells, face geometry, and boundary regions',
         '    sim domain <domain.json> [--world world.json --section tube/index]   assemble or trace sectioned tubes at named sockets',
         '    sim sections <plan.json> [--out report.json]   measure mesh, SDF, or contour sections along a path',

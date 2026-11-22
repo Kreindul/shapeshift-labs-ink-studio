@@ -165,3 +165,6 @@ model bindings.
 
 [Moving boundaries](moving-boundaries.md) turn socket and cloth motion into
 aperture, sealing, and displaced-volume signals for solvers.
+
+[Conservative state remapping](state-remap.md) transfers mass, heat and other
+extensive channels across resolution and moving-boundary changes.
