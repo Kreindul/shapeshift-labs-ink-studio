@@ -230,8 +230,11 @@ const AtlasSprites = (() => {
   function place(value) {
     if (value?.[placedBrand]) return value;
     const { atlas,at,mode,yaw=0,scale=1,opacity=1,frame,playback,depth=true,lighting=true,emission=true,
-      nativePixels=false,pixelOffset,visibleAt,objectId,materialId,clock='animation',shadowShell,
+      nativePixels=false,pixelOffset,visibleAt,objectId,materialId,budgetLayer,budgetId,budgetPriority=0,clock='animation',shadowShell,
       castsShadow=shadowShell!==undefined&&shadowShell!==false }=value??{};
+    if ((budgetLayer !== undefined && (typeof budgetLayer !== 'string' || !budgetLayer.trim())) ||
+        (budgetId !== undefined && (typeof budgetId !== 'string' || !budgetId.trim())) || !Number.isFinite(budgetPriority))
+      throw new RangeError('Invalid sprite atlas scanline budget layer, ID, or priority');
     const asset=compile(atlas), placementMode=mode===undefined?(asset.sceneryPlanes?'scenery':'impostor'):mode;
     if (!['card','impostor','scenery'].includes(placementMode)||placementMode==='scenery'&&!asset.sceneryPlanes||!Number.isFinite(opacity)||opacity<0||opacity>1||
         [depth,lighting,emission,nativePixels,castsShadow].some(value=>typeof value!=='boolean')||
@@ -257,6 +260,8 @@ const AtlasSprites = (() => {
       yaw:finite(yaw,'Sprite placement yaw'), scale:positive(scale,'Sprite placement scale'),
       opacity,frame,depth,lighting,emission,...(nativePixels&&{nativePixels}),...(pixelOffset&&{pixelOffset}),
       ...(clock==='interface'&&{clock}),
+      ...(budgetLayer!==undefined&&{budgetLayer}),...(budgetId!==undefined&&{budgetId}),
+      ...(budgetPriority!==0&&{budgetPriority}),
       ...(castsShadow&&{castsShadow}),...(shell&&{shadowShell:shell}),
       ...(visibleAt&&{visibleAt}),...(playback!==undefined&&{frameAt:asset.playback(playback)}),
       ...(objectId!==undefined&&{objectId}),...(materialId!==undefined&&{materialId}) });

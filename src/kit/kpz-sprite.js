@@ -191,6 +191,7 @@
     );
   K.pixelStamps = PixelStamps;
   K.sprite = {
+    scanlineBudget: SpriteScanlineBudget,
     atlas: AtlasSprites.compile,
     placeAtlas: AtlasSprites.place,
     reconstruction: SpriteReconstruction,

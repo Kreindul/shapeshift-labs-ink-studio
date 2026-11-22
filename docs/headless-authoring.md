@@ -672,6 +672,7 @@ Use another `data.record` to name those layers and `data.collect` with a
 | `raster.crop` | Set `x`, `y`, `width`, and `height` of an in-bounds rectangle. |
 | `raster.resize` | Set `width` and `height`. Choose `nearest` (default) or `bilinear` for `filter`. Bilinear filters colors with premultiplied alpha by default. Set `premultiply: false` for independent numerical channels. |
 | `raster.nineSlice` | Set `width`, `height`, and `insets: [left, top, right, bottom]`. Choose `stretch` or `repeat` for `fill`. Corners retain their original dimensions. |
+| `raster.spriteLayer` | Composite individually placed sprites into one transparent layer with optional per-row admission, priority, and rotation. Read dropped rows from the `report` port. [Sprite scanline budgets](sprite-scanline-budgets.md) |
 | `raster.spriteStack` | Pass one raster or a bottom-to-top array as `source`. Set the repeat `count`, per-slice pixel `shift`, rotation `angle` in radians, first or last slice `anchor`, base `tint`, or `endOpacity`. Set `size` and optional `position` for a fixed canvas. Omit them to fit the full stack. |
 | `raster.pack` | Set `sprites` and options such as `maxWidth`, `maxHeight`, transparent `padding`, edge `extrude`, and alpha `trim`. Outputs the color raster, native `atlas` and `metadata`. |
 

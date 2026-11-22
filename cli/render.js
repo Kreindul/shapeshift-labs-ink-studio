@@ -894,7 +894,12 @@ function renderFrame(world, o, preparedPalettes) {
     objectDither: anchorSpaces.has('object'), shutterTime: shutterRows?.atlasTime,
     subject: protection?.match,
     visibility:(position)=>(cloudShadow?.(...position)??1)*(exposure?.light?.(...position)??1),
-    clip:geometryClip, captureIds:Boolean(deep)
+    clip:geometryClip, captureIds:Boolean(deep), artScale:o.artGridScale || 1,
+    budgets:!reflectionPlane && !probeView && (o.spriteAtlasBudgets === true ? world.spriteAtlasBudgets :
+      o.spriteAtlasBudgets ?? world.spriteAtlasBudgets),
+    budgetTime:o.interfaceTime ?? sceneTime,
+    budgetFrame:!reflectionPlane && !probeView && !o.captureCoverage && (!o.samples || o[coverageLane] === 'native')
+      ? o.spriteAtlasBudgetFrame : undefined
   });
   for(const sample of surfaceFragments)if(!sample.sdf)sprites.push(sample);
   sprites.sort((a,b)=>b.z-a.z);

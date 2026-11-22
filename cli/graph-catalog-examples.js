@@ -126,6 +126,7 @@ const specifications = {
   'raster.stack': { inputs: { layers: [{ source: rgba }] } },
   'raster.depth': { inputs: { layers: [{ source: rgba, depth: 2 }] } },
   'raster.height': { inputs: { layers: [{ source: rgba, height: .5 }] } },
+  'raster.spriteLayer': { inputs: { sprites: [{ id: 'tile', source: rgba }], options: { budget: { limit: 8 } } } },
   'raster.spriteStack': { inputs: { source: rgba, options: { count: 2 } } },
   'raster.pack': { inputs: { sprites: [{ id: 'tile', source: rgba }] } },
   'raster.frame': { inputs: { source: clip } },

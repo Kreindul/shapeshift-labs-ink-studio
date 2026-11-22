@@ -1,4 +1,5 @@
 const Atlas = require('../src/atlas-sprites.js');
+const SpriteBudget = require('../src/sprite-scanline-budget.js');
 const { dot,basis,vector }=Atlas;
 const clamp=(value,min,max)=>Math.min(max,Math.max(min,value));
 const combine=(axes,v)=>axes.right.map((n,i)=>n*v[0]+axes.up[i]*v[1]+axes.normal[i]*v[2]);
@@ -12,8 +13,21 @@ function heading(v) {
 }
 
 function rasterize(placements, settings) {
-  if (!placements.length) return [];
-  const {eye,V,W,H,focal,ortho,near,rayAt,time:sceneTime,interfaceTime,override,sun,visibility,clip,objectDither,subject,captureIds,shutterTime,reconstructed,spriteLOD}=settings;
+  const {eye,V,W,H,focal,ortho,near,rayAt,time:sceneTime,interfaceTime,override,sun,visibility,clip,objectDither,
+    subject,captureIds,shutterTime,reconstructed,spriteLOD,budgets,budgetTime,budgetFrame,artScale=1}=settings;
+  const layers = new Map();
+  if (budgets !== undefined && budgets !== false) {
+    if (!budgets || typeof budgets !== 'object' || Array.isArray(budgets))
+      throw new TypeError('Sprite atlas budgets need a record by layer name');
+    for (const [name, options] of Object.entries(budgets)) {
+      if (!name.trim()) throw new TypeError('Sprite atlas budget layers need a name');
+      if (options !== false) layers.set(name, { budget: SpriteBudget.prepare(options), entries: [] });
+    }
+  }
+  if (!placements.length && !layers.size) return [];
+  const deferred = layers.size ? [] : null;
+  const artHeight = Math.ceil(H / artScale);
+  const artRow = y => Math.floor((H - 1 - y) / artScale);
   if (override!==undefined&&!['card','impostor','scenery'].includes(override))
     throw new RangeError('Sprite atlas mode must be card, impostor or scenery');
   const results=[];
@@ -37,7 +51,12 @@ function rasterize(placements, settings) {
     return clip&&!clip(position)?null:{z,position};
   }
   const sample={ color:[0,0,0],normal:[0,0,0],emission:[0,0,0] };
-  for (const placement of placements) {
+  for (const [placementIndex, placement] of placements.entries()) {
+    const layer = layers.get(placement.budgetLayer);
+    const budgetIndex = layer?.entries.length;
+    const entry = layer && { id: placement.budgetId ?? String(placementIndex), priority: placement.budgetPriority,
+      top: artHeight, bottom: artHeight };
+    if (entry) layer.entries.push(entry);
     const lod=reconstructed?.get(placement);
     const time = lod ? sceneTime :
       placement.clock === 'interface' ? interfaceTime ?? sceneTime : shutterTime?.(placement) ?? sceneTime;
@@ -88,55 +107,75 @@ function rasterize(placements, settings) {
       }
       left=clamp(left,0,W); right=clamp(right,0,W);
       bottom=clamp(bottom,0,H); top=clamp(top,0,H);
-      for (let y=bottom;y<top;y++) for (let x=left;x<right;x++) {
-        if(lod&&!spriteLOD.sprite(lod,x,y))continue;
-        const ray=rayAt(x+.5,y+.5), facing=-dot(ray.direction,axes.normal);
-        if (facing<=1e-7) continue;
-        const origin=ray.origin.map((n,i)=>n-anchor[i]), plane=dot(origin,axes.normal)/facing;
-        const uAt=exact?x-rasterX+.5:px+(dot(origin,axes.right)+plane*dot(ray.direction,axes.right))/units;
-        const vAt=exact?height-1-(y-rasterY)+.5:py-(dot(origin,axes.up)+plane*dot(ray.direction,axes.up))/units;
-        const u=Math.floor(uAt), v=Math.floor(vAt);
-        const inside=u>=u0&&u<u1&&v>=v0&&v<v1;
-        const strands=fringe?.at(u,v);
-        if (!inside&&!strands&&!transition) continue;
-        const p=y*W+x;
-        if ((inside||transition) && atlas.sample(tile,u,v,placement,sample,id,transition) && (!lod || spriteLOD.alpha(sample.alpha,lod,x,y))) {
-          const hit=fragmentAt(ray,fixed?plane:plane+placement.scale*sample.depth/facing);
-          if (hit) {
-            const {position}=hit;
-            let normal;
-            if (sample.hasNormal) {
-              if (mode==='card') {
-                const inView=atlas.normalSpace==='view'?sample.normal:local(tile.basis,sample.normal);
-                normal=unit(combine(axes,inView));
-              } else normal=unit(combine(atlas.normalSpace==='view'?normalAxes:rotation,sample.normal));
+      if (left>=right || bottom>=top) continue;
+      if (entry) {
+        const y0 = artRow(top-1), y1 = artRow(bottom)+1;
+        entry.bottom = entry.top === artHeight ? y1 : Math.max(entry.bottom, y1);
+        entry.top = Math.min(entry.top, y0);
+      }
+      function draw() {
+        for (let y=bottom;y<top;y++) {
+          if (layer && !layer.plan.allows(budgetIndex, artRow(y))) continue;
+          for (let x=left;x<right;x++) {
+            if(lod&&!spriteLOD.sprite(lod,x,y))continue;
+            const ray=rayAt(x+.5,y+.5), facing=-dot(ray.direction,axes.normal);
+            if (facing<=1e-7) continue;
+            const origin=ray.origin.map((n,i)=>n-anchor[i]), plane=dot(origin,axes.normal)/facing;
+            const uAt=exact?x-rasterX+.5:px+(dot(origin,axes.right)+plane*dot(ray.direction,axes.right))/units;
+            const vAt=exact?height-1-(y-rasterY)+.5:py-(dot(origin,axes.up)+plane*dot(ray.direction,axes.up))/units;
+            const u=Math.floor(uAt), v=Math.floor(vAt);
+            const inside=u>=u0&&u<u1&&v>=v0&&v<v1;
+            const strands=fringe?.at(u,v);
+            if (!inside&&!strands&&!transition) continue;
+            const p=y*W+x;
+            if ((inside||transition) && atlas.sample(tile,u,v,placement,sample,id,transition) && (!lod || spriteLOD.alpha(sample.alpha,lod,x,y))) {
+              const hit=fragmentAt(ray,fixed?plane:plane+placement.scale*sample.depth/facing);
+              if (hit) {
+                const {position}=hit;
+                let normal;
+                if (sample.hasNormal) {
+                  if (mode==='card') {
+                    const inView=atlas.normalSpace==='view'?sample.normal:local(tile.basis,sample.normal);
+                    normal=unit(combine(axes,inView));
+                  } else normal=unit(combine(atlas.normalSpace==='view'?normalAxes:rotation,sample.normal));
+                }
+                const gain=sun&&normal&&placement.lighting ?
+                  sun.ambient+sun.intensity*Math.max(0,dot(normal,sun.direction))*(visibility?.(position,normal)??1) : 1;
+                const emission=sample.hasEmission?sample.emission.slice():null;
+                const color=sample.color.map((value,c)=>{
+                  const glow=emission?.[c]??0;
+                  if (atlas.emissionMode==='add') return clamp(value*gain+glow,0,1);
+                  return gain===1 ? value : clamp(Math.max(0,value-glow)*gain+glow,0,1);
+                });
+                results.push({p,...hit,...ids,alpha:lod?1:sample.alpha*opacity,color,normal,emission,protection,swatches:atlas.swatches,
+                  objectPosition:local(rotation,position.map((n,i)=>(n-at[i])/placement.scale)), objectScale:placement.scale,
+                  ...(objectDither && mode==='card' && { patternPosition:[(uAt-px)*tile.unitsPerPixel,(py-vAt)*tile.unitsPerPixel,0] })});
+              }
             }
-            const gain=sun&&normal&&placement.lighting ?
-              sun.ambient+sun.intensity*Math.max(0,dot(normal,sun.direction))*(visibility?.(position,normal)??1) : 1;
-            const emission=sample.hasEmission?sample.emission.slice():null;
-            const color=sample.color.map((value,c)=>{
-              const glow=emission?.[c]??0;
-              if (atlas.emissionMode==='add') return clamp(value*gain+glow,0,1);
-              return gain===1 ? value : clamp(Math.max(0,value-glow)*gain+glow,0,1);
-            });
-            results.push({p,...hit,...ids,alpha:lod?1:sample.alpha*opacity,color,normal,emission,protection,swatches:atlas.swatches,
-              objectPosition:local(rotation,position.map((n,i)=>(n-at[i])/placement.scale)), objectScale:placement.scale,
-              ...(objectDither && mode==='card' && { patternPosition:[(uAt-px)*tile.unitsPerPixel,(py-vAt)*tile.unitsPerPixel,0] })});
+            const alpha=inside&&effect?.sample(u,v,effectColor);
+            if (alpha&&(!lod||spriteLOD.alpha(alpha,lod,x,y))) {
+              const hit=fragmentAt(ray,plane+(placement.depth?placement.scale*effect.depth/facing:0));
+              if (hit) results.push({p,...hit,...ids,alpha:lod?1:alpha*opacity,color:effectColor.slice(),protection,effect:true});
+            }
+            if (strands) for (const strand of strands) {
+              if (lod&&!spriteLOD.alpha(strand.alpha,lod,x,y)) continue;
+              const hit=fragmentAt(ray,plane+(placement.depth?placement.scale*strand.depth/facing:0));
+              if (hit) results.push({p,...hit,...ids,alpha:lod?1:strand.alpha*opacity,color:strand.color,protection,effect:true,
+                emission:placement.emission&&strand.emission?strand.color.map(n=>n*strand.emission):null});
+            }
           }
         }
-        const alpha=inside&&effect?.sample(u,v,effectColor);
-        if (alpha&&(!lod||spriteLOD.alpha(alpha,lod,x,y))) {
-          const hit=fragmentAt(ray,plane+(placement.depth?placement.scale*effect.depth/facing:0));
-          if (hit) results.push({p,...hit,...ids,alpha:lod?1:alpha*opacity,color:effectColor.slice(),protection,effect:true});
-        }
-        if (strands) for (const strand of strands) {
-          if (lod&&!spriteLOD.alpha(strand.alpha,lod,x,y)) continue;
-          const hit=fragmentAt(ray,plane+(placement.depth?placement.scale*strand.depth/facing:0));
-          if (hit) results.push({p,...hit,...ids,alpha:lod?1:strand.alpha*opacity,color:strand.color,protection,effect:true,
-            emission:placement.emission&&strand.emission?strand.color.map(n=>n*strand.emission):null});
-        }
       }
+      if (deferred) deferred.push(draw);
+      else draw();
     }
+  }
+  if (deferred) {
+    for (const [name, layer] of layers) {
+      layer.plan = SpriteBudget.evaluate(layer.entries, {height: artHeight, budget: layer.budget, time: budgetTime ?? sceneTime});
+      budgetFrame?.({layer: name, ...layer.plan.report});
+    }
+    for (const draw of deferred) draw();
   }
   return results.sort((a,b)=>b.z-a.z);
 }

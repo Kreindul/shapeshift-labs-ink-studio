@@ -18,6 +18,8 @@ Use `K.sprite.atlas({ metadata, images })` with decoded RGBA byte buffers. `imag
 
 Use [sprite-based object reconstruction](sprite-reconstruction.md) when one atlas should stand in for named native geometry at a distance in the headless or WebGL renderer.
 
+Group placements into [sprite scanline budgets](sprite-scanline-budgets.md#an-atlas-placement-layer) to cap them per art row and inspect which rows were dropped.
+
 ## Map and view conventions
 
 | Channel | Encoding |

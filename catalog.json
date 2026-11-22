@@ -1702,6 +1702,17 @@
       "tags": ["camera", "raster", "depth", "picking", "compositing"]
     },
     {
+      "id": "render.spriteScanlineBudgets",
+      "kind": "api",
+      "status": "ready",
+      "title": "Sprite scanline budgets",
+      "what": "Limit a sprite layer per native art row, honor authored priority, and rotate tied sprites. Inspect dropped row runs by sprite and overflow counts by row.",
+      "use": "raster.spriteLayer({ width, height, sprites, budget }) or spriteAtlasBudgets on a headless world",
+      "where": "src/sprite-scanline-budget.js, cli/atlas-sprites.js",
+      "example": "examples/sprite-scanline-budget.cjs",
+      "tags": ["sprites", "scanlines", "raster", "pixel-art", "inspection"]
+    },
+    {
       "id": "render.tileRaycaster",
       "kind": "api",
       "status": "ready",

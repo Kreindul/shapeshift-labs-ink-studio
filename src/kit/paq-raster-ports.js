@@ -39,6 +39,11 @@
     'raster.stack': stack('stack'),
     'raster.depth': stack('depth'),
     'raster.height': stack('height'),
+    'raster.spriteLayer': {
+      inputs: {width: 'number', height: 'number', sprites: 'array<record>', options},
+      outputs: {value: 'raster', report: 'record'}, time: true,
+      run({width, height, sprites, options}, {time}) { return R.spriteLayer({time, ...options, width, height, sprites}); }
+    },
     'raster.spriteStack': {
       inputs: {source: 'any', options}, outputs: {value: 'raster'},
       run({source, options}) { return {value: R.spriteStack(source, options)}; }
