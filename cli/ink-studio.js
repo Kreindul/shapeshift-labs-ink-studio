@@ -1089,7 +1089,7 @@ const CMD = {
         '  paint export <id> [--layer name] [view options]  capture a view and the surface under each pixel',
         '  paint absorb <id> [--layer name] [--png file] [--paint-mask file]  pin the painted pixels to the surface',
         '  paint layers|tune|clear <id> [--layer name]  list, adjust or clear corrections',
-        '  paint cause <id> <recipe.json> [--replace]   bake solid edges, contacts and shelter into paint layers',
+        '  paint cause <id> <recipe.json> [--events <run.json>] [--replace]   bake geometry or committed events into paint layers',
         '    layer controls: --angle degrees --feather degrees --opacity fraction --region JSON|file|off',
         '  lint <id ...> [--map]              pixel-art lint: orphans, doubles, jaggies, banding, pillow shading, noise, colours',
         '  review <id> [--ref pic --px 2]     a sheet of fixed shots (four sides, top, low, far, near, close), beside the last one',
@@ -3224,8 +3224,9 @@ const CMD = {
       );
     const Paint = require('../src/paint-corrections.js'), name = opt.layer;
     if (name !== undefined && !Paint.idOK(name)) die('Paint layer needs a lowercase ID');
-    if (sub === 'cause' && (pos.length !== 3 || name !== undefined || opt.replace !== undefined && opt.replace !== true))
-      die('paint cause <scene> <recipe.json> [--dir path] [--replace]');
+    if (sub === 'cause' && (pos.length !== 3 || name !== undefined || opt.replace !== undefined && opt.replace !== true ||
+        opt.events !== undefined && typeof opt.events !== 'string'))
+      die('paint cause <scene> <recipe.json> [--events <run-or-checkpoint.json>] [--dir path] [--replace]');
     if (sub === 'tune' && name === undefined) die('Paint tune needs --layer name');
     if (sub === 'absorb' && !name && ['angle', 'feather', 'opacity', 'region'].some(key => opt[key] !== undefined))
       die('Paint controls need a named layer');
@@ -3263,19 +3264,50 @@ const CMD = {
     }
     if (sub === 'cause') {
       const recipe = JSON.parse(fs.readFileSync(path.resolve(pos[2]),'utf8'));
-      const generated = lib().KIT.surfaceMarks.bake(world,recipe);
+      const { surfaceMarks, world: { runtime } } = lib().KIT;
+      const source = opt.events && JSON.parse(fs.readFileSync(path.resolve(opt.events),'utf8'));
+      function* committedEvents() {
+        if (source?.version === 1 && source.format === runtime.checkpointFormat &&
+            Array.isArray(source.history) && Array.isArray(source.events)) {
+          yield* source.history;
+          yield* source.events;
+          return;
+        }
+        if (source?.format !== runtime.runFormat) die('--events needs a world run recording or checkpoint');
+        const run = runtime.openRecording(source);
+        yield* run.events;
+        while (run.view().tick < source.end.tick) {
+          run.step();
+          yield* run.events;
+        }
+        if (!runtime.checkpointsEqual(run.checkpoint(),source.end)) die('Event recording diverged from its saved end checkpoint');
+      }
+      const generated = opt.events ? surfaceMarks.bakeEvents(world,committedEvents(),recipe) : surfaceMarks.bake(world,recipe);
       const existing = readPaint(dfile);
       const doc = Array.isArray(existing) ? {decals:existing} : existing;
       const layers = Paint.layers(doc);
+      const added = [], kept = [], report = ({ id, decals, sourceEvent }) => ({
+        id, samples:decals.length, ...(sourceEvent && { sourceEvent })
+      });
       for (const layer of generated.layers) {
         const slot=layers.findIndex(entry=>entry.id===layer.id);
         if (slot<0) layers.push(layer);
-        else if (opt.replace) layers[slot]=layer;
-        else die('Paint layer '+layer.id+' already exists. Use --replace to rebake it.');
+        else if (layer.sourceEvent && JSON.stringify(layers[slot].sourceEvent) === JSON.stringify(layer.sourceEvent)) {
+          if (opt.replace) layers[slot]=layer;
+          else {
+            kept.push(report(layers[slot]));
+            continue;
+          }
+        } else if (opt.replace && !layer.sourceEvent) layers[slot]=layer;
+        else die('Paint layer '+layer.id+' already exists.' + (layer.sourceEvent ? ' Give this run or rule a distinct ID.' :
+          ' Use --replace to rebake it.'));
+        added.push(report(layer));
       }
-      fs.mkdirSync(dir,{recursive:true});
-      save({ ...doc,id:world.id,detail:world.detail,layers });
-      console.log(JSON.stringify({file:dfile,layers:generated.layers.map(layer=>({id:layer.id,samples:layer.decals.length}))},null,2));
+      if (added.length) {
+        fs.mkdirSync(dir,{recursive:true});
+        save({ ...doc,id:world.id,detail:world.detail,layers });
+      }
+      console.log(JSON.stringify({file:dfile,layers:added,...(kept.length && {kept})},null,2));
       return;
     }
     if (sub === 'layers') {
@@ -3444,7 +3476,7 @@ const CMD = {
       kept = old.filter(d => !fresh.some(e => near(d, e)) && !erase.some(e => near(d, e))),
       decals = kept.concat(fresh);
     if (name) {
-      const placement = surface ? {type:'surface'} : {view:source,time:meta.t};
+      const placement = surface ? {type:'surface',sourceEvent:prior.sourceEvent} : {view:source,time:meta.t};
       const correction = Paint.layer({ id: name, ...placement, ...controls(prior), decals });
       if (slot < 0) layers.push(correction);
       else layers[slot] = correction;
