@@ -182,3 +182,6 @@ tagged boundary application, and conservative finite-volume transport.
 [Linear and bracketed nonlinear solves](numerical-solvers.md) add dense,
 tridiagonal, and sparse matrix solves plus scalar root finding with
 residuals and work limits.
+
+[Lumped effort/flow networks](lumped-networks.md) compose storage, resistance,
+inertance, springs, dampers, and sources with junction and energy balance.

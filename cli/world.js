@@ -515,6 +515,10 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         return respond(require('./mass-properties.js').measure(kit,read(file),file,
           {dependency:shot?.dependency,assetPack:opt['asset-pack']}));
       }
+      case 'network': {
+        ensure(typeof file==='string' && other===undefined,'Use sim network <run.json> [--out trace.json]');
+        return respond(require('./lumped-network.js').run(kit,read(file),file,shot?.dependency));
+      }
       case 'solve': {
         ensure(typeof file==='string' && other===undefined &&
           (opt['require-convergence']===undefined||opt['require-convergence']===true),
