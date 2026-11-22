@@ -234,6 +234,16 @@ const specifications = {
   'anim.frameBank': { inputs: { source: rgba, options: { tiles: { size: [2, 2], every: 4 } } } },
   'sim.define': { inputs: { kind: 'particles' } },
   'sim.run': { nodes: { recipe: { op: 'sim.define', inputs: { kind: 'particles' } } }, inputs: { recipe: link('recipe') } },
+  'sim.controller': { inputs: {
+    controller:{format:'ink-studio/controller',version:1,id:'valve',revision:1,mode:'follow',limits:{rise:1}},
+    samples:[{target:1},{target:1},{target:0}], options:{dt:.1}
+  } },
+  'sim.fit-targets': { inputs: { plan:{
+    format:'ink-studio/inverse-target-plan',version:1,id:'level',parameters:{drive:{min:0,max:1}},
+    targets:{level:{value:.8,tolerance:.0001}},
+    evaluator:{kind:'world',world:{dt:.02,systems:{plant:{kind:'control',config:{op:'scale',scale:2}}}},
+      inputs:{drive:'plant/value'},outputs:{level:{port:'plant/value',tick:1}}}
+  } } },
   'input.compile': { inputs: { plan: {
     format:'ink-studio/input-compile-plan',version:1,id:'spoken-cue',
     sources:{voice:{kind:'ipa',text:'a m',targets:{a:{jaw:.8},m:{jaw:.1}}}}

@@ -525,6 +525,18 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
           'Simulation diagnostics reached '+report.status);
         return;
       }
+      case 'controller': {
+        ensure(typeof file==='string'&&other===undefined,'Use sim controller <run.json> [--out trace.json]');
+        return respond(require('./controller-tools.js').run(kit,read(file),file,shot?.dependency));
+      }
+      case 'fit-targets': {
+        ensure(typeof file==='string'&&other===undefined&&(opt['require-tolerance']===undefined||opt['require-tolerance']===true),
+          'Use sim fit-targets <plan.json> [--out report.json --require-tolerance]');
+        const report=require('./controller-tools.js').fit(kit,read(file),file,shot?.dependency);
+        respond(report);
+        if(opt['require-tolerance'])ensure(report.converged,'Inverse target fit ended with status '+report.status);
+        return;
+      }
       case 'input-compile': {
         ensure(typeof file==='string'&&other===undefined,'Use sim input-compile <plan.json> [--out score.json]');
         return respond(require('./input-compiler.js').load(kit,read(file),file,shot?.dependency));

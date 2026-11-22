@@ -31,6 +31,9 @@ as typed controls for model operators.
 [Input compilers](input-compilers.md) import editable timed events and
 publish named curve values to model operators.
 
+[Controllers and inverse targets](controllers-inverse-targets.md) can
+close feedback loops or fit bounded model inputs to measured outputs.
+
 ## Author a model
 
 | Property | Contents |

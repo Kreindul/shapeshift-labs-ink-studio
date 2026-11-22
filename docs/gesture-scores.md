@@ -136,6 +136,9 @@ checkpoint sets the earliest tick the node can visit.
 Use [input compilers](input-compilers.md) to turn imported control
 curves into named gesture-score channels.
 
+Use [controllers](controllers-inverse-targets.md) when a gesture target
+needs measured feedback or the receiving actuator has limits.
+
 ## Demos
 
 ```sh
