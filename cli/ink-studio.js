@@ -88,8 +88,12 @@ function meshScene(file) {
 /* a diorama written as data (see lab/data-shrine.json). --style puts it in another style; meshes it names are looked for beside the file */
 function dataScene(file, override, { installedPacks = false } = {}) {
   const K = lib().KIT,
-    source = override ?? JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')),
-    bundles = K.authoring.projectBundles,
+    source = override ?? JSON.parse(fs.readFileSync(path.resolve(file), 'utf8'));
+  if (source?.format === K.curveSplats.format)
+    return { id: source.id, name: source.name ?? source.id, seed: source.seed, build: seed => K.curveSplats.world({
+      ...source, seed: seed ?? source.seed
+    }) };
+  const bundles = K.authoring.projectBundles,
     project = bundles && source?.format === bundles.format ? bundles.open(source) : undefined,
     spec = project ? project.scene() : { ...source },
     dir = path.dirname(path.resolve(file));
@@ -777,6 +781,7 @@ const view = extra =>
       splatCoverage: opt['splat-coverage'],
       translucentSilhouettes: translucentSilhouettesOption(),
       splatFootprints: onOffOption('splat-footprints'),
+      curveSplats: onOffOption('curve-splats'),
       paletteSampling: onOffOption('palette-sampling'),
       brushwork: onOffOption('brushwork'),
       shadowBandPaint: onOffOption('shadow-band-paint'),
@@ -1293,6 +1298,7 @@ const CMD = {
         'bounce options: --sky-bounce color|preset|off --ground-bounce color|preset|off --sky-bounce-intensity n --ground-bounce-intensity n',
         'cloud options: --cloud-field cirrus|coastal-stratus|cumulus|storm-front|file.json|off --cloud-representation auto|card|impostor|volume|off --cloud-self-shadows on|off --cloud-shadows on|off --cloud-shadow-strength 0..1 --cloud-shadow-softness units',
         'translucent silhouette options: --translucent-silhouettes file.json|off',
+        'curve splats: render or clip a curve-splat-scene JSON. --curve-splats off shows the Gaussian carriers.',
         'motional pixel coverage: --motional-coverage on|off|file.json',
         'celestial options: --celestial-tracks on|off|file.json',
         'sky options: --sky-environment file.json|off --sky-time seconds --sky-profile track=profile --sky-transitions file.json|off --sky-reflections scene|material',

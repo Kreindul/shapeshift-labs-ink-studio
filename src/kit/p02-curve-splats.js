@@ -1,0 +1,147 @@
+/* Adapt editable paths and sampled strand sources to finite Gaussian segments. */
+(function (K) {
+  const format = 'ink-studio/curve-splat-scene';
+  const coordinateLimit = 1e5, segmentLimit = 60000;
+  const array = value => Array.isArray(value) || ArrayBuffer.isView(value) && !(value instanceof DataView);
+  const finite = (value, min, max) => Number.isFinite(value) && value >= min && value <= max;
+  const point = value => array(value) && value.length === 3 && Array.from(value).every(n => finite(n, -coordinateLimit, coordinateLimit));
+  const label = value => typeof value === 'string' && value.length > 0 && value.length <= 128;
+  function check(condition, message) {
+    if (!condition) throw new RangeError('Curve splats: ' + message);
+  }
+  function rgb(value) {
+    if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value))
+      return [1, 3, 5].map(i => parseInt(value.slice(i, i + 2), 16));
+    check(array(value) && value.length === 3 && Array.from(value).every(n => Number.isInteger(n) && n >= 0 && n <= 255),
+      'expected an RGB colour');
+    return Array.from(value);
+  }
+  function points(input) {
+    check(Array.isArray(input) && input.length <= segmentLimit + 1, 'expected a bounded point array');
+    return Array.from(input, value => {
+      check(point(value), 'points need three finite world coordinates');
+      return Array.from(value);
+    });
+  }
+  function paths(source) {
+    if (Array.isArray(source)) return [{ points: source }];
+    check(source && typeof source === 'object', 'expected a path or source document');
+    switch (source.kind ?? 'path') {
+      case 'path':
+        check(source.closed === undefined || typeof source.closed === 'boolean', 'invalid closure');
+        return [{ points: source.points, closed: source.closed }];
+      case 'spline': {
+        const controls = points(source.points), per = source.samples ?? 6;
+        check(controls.length >= 2 && Number.isSafeInteger(per) && per >= 1 && per <= 128 &&
+          per * (controls.length - 1) <= segmentLimit, 'invalid spline controls or sample count');
+        return [{ points: K.curve.spline(controls, per) }];
+      }
+      case 'family': return [{ points: K.curve.create(source.definition).points }];
+      case 'textile': {
+        const plan = source.plan;
+        check(Array.isArray(plan?.threads ?? plan?.strands) && (plan.threads ?? plan.strands).length <= segmentLimit,
+          'expected a textile or interlace plan');
+        return (plan.threads ?? plan.strands).map(strand => ({
+          id: strand.id, radius: strand.radius, family: strand.family, index: strand.index,
+          points: strand.stations?.map(station => station.p) ?? strand.path?.points,
+          uvs: strand.stations?.map(station => station.uv)
+        }));
+      }
+      case 'routed': {
+        const { link } = source;
+        check(Array.isArray(link?.paths) && link.paths.length <= segmentLimit, 'expected a routed link sample');
+        return link.paths.map((points, i) => ({ id: String(i), points, radius: link.radius }));
+      }
+      case 'trail': {
+        check(Array.isArray(source.samples) && source.samples.length <= segmentLimit + 1, 'expected a bounded trail sample list');
+        const spans = [{ points: [] }];
+        for (const sample of source.samples) {
+          if (sample === null) {
+            if (spans.at(-1).points.length) spans.push({ points: [] });
+          } else spans.at(-1).points.push(sample?.point ?? sample);
+        }
+        return spans.map((span, i) => ({ ...span, id: String(i) }));
+      }
+      default: throw new TypeError('Unknown curve splat source ' + source.kind);
+    }
+  }
+
+  function prepare(source, options = {}) {
+    const link = source?.kind === 'routed' ? source.link : undefined;
+    const { radius, opacity = .94, color = '#eab876', object = link?.id ?? 'curve',
+      material = link?.material ?? 'strand', target, maxSegments = segmentLimit } = options;
+    check((radius === undefined || finite(radius, 1e-6, 100)) && finite(opacity, 0, 1) && label(object) && label(material) &&
+      Number.isSafeInteger(maxSegments) && maxSegments >= 0 && maxSegments <= segmentLimit,
+      'invalid strand appearance or segment budget');
+    const fixedColor = typeof color === 'function' ? null : rgb(color);
+    let segments = 0, samples = 0;
+    const strands = paths(source).map((strand, index) => {
+      const width = radius ?? strand.radius ?? .03, id = strand.id ?? String(index);
+      check(finite(width, 1e-6, 100) && label(id), 'invalid strand radius or ID');
+      const knots = points(strand.points), rows = [];
+      if (strand.closed && knots.length >= 2 && K.V.dist(knots[0], knots.at(-1)) > 1e-8) knots.push(knots[0]);
+      samples += knots.length;
+      check(samples <= 2 * segmentLimit, 'point budget exceeded');
+      let distance = 0;
+      for (let i = 1; i < knots.length; i++) {
+        const from = knots[i - 1], to = knots[i], length = K.V.dist(from, to);
+        if (length < 1e-7) continue;
+        check(++segments <= maxSegments, 'segment budget exceeded');
+        const shade = fixedColor ?? rgb(color({ id, family: strand.family, index: strand.index ?? index,
+          point: K.V.lerp(from, to, .5), distance: distance + length / 2,
+          ...(strand.uvs?.[i - 1] && strand.uvs[i] && { uv: strand.uvs[i - 1].map((v, k) => (v + strand.uvs[i][k]) / 2) }) }));
+        rows.push({ from, to, shade });
+        distance += length;
+      }
+      return { id, width, rows };
+    });
+    return { object, material, target, opacity, strands, segments };
+  }
+
+  function emit(builder, plan) {
+    check(typeof builder?.curveSplat === 'function', 'expected a native splat builder');
+    const first = builder.count(), threads = [];
+    for (const { id, width, rows } of plan.strands) {
+      const start = builder.count();
+      for (const { from, to, shade } of rows) builder.curveSplat(from, to, width, shade, plan.opacity);
+      const end = builder.count();
+      builder.describeSplats?.(start, end, {
+        object: plan.object, material: plan.material, target: { entity: plan.object, ...plan.target, surface: id }
+      });
+      threads.push({ id, first: start, end });
+    }
+    return { first, end: builder.count(), threads, segments: plan.segments };
+  }
+
+  function draw(builder, source, options) {
+    return emit(builder, prepare(source, options));
+  }
+
+  function world(recipe) {
+    check(recipe?.format === format && recipe.version === 1 && label(recipe.id) &&
+      Array.isArray(recipe.strands) && recipe.strands.length > 0 && recipe.strands.length <= 1024,
+      'expected a version 1 curve splat scene with named strands');
+    const { seed = 1, background = '#172332', palette = [], camera = {}, look = {} } = recipe;
+    check(Number.isSafeInteger(seed) && Array.isArray(palette) && palette.length <= 255, 'invalid seed or palette');
+    const packed = color => rgb(color).reduce((sum, value) => sum * 256 + value, 0);
+    let remaining = segmentLimit;
+    const plans = recipe.strands.map(({ source, ...appearance }, i) => {
+      const plan = prepare(source, { object: 'curve:' + i, ...appearance, maxSegments: remaining });
+      remaining -= plan.segments;
+      return plan;
+    });
+    const colors = new Set([packed(background), ...Array.from(palette, packed)]);
+    if (!palette.length) {
+      for (const plan of plans) for (const strand of plan.strands) for (const row of strand.rows)
+        if (colors.size < 256) colors.add(packed(row.shade));
+    }
+    const builder = makeBuilder(seed, [...colors]);
+    for (const plan of plans) emit(builder, plan);
+    return builder.finish({
+      id: recipe.id, curveSplatSource: recipe, cam: { target: [0, 0, 0], dist: 7, yaw: 0, pitch: 0, ...camera }, radius: 10,
+      fog: { c: 0, start: 1, max: 0 }, dither: 0, look: { pixelSize: 1, ...look }
+    });
+  }
+
+  K.curveSplats = Object.freeze({ format, segmentLimit, draw, world });
+})(KIT);

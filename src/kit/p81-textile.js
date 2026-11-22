@@ -259,7 +259,8 @@
       threadPitch = 0.16,
       object = 'textile',
       material = 'yarn',
-      maxMarks = 180000
+      maxMarks = 180000,
+      renderer = 'patches'
     } = {}
   ) {
     check(
@@ -272,12 +273,16 @@
         number(twist, 0, 0.5) &&
         number(threadPitch, 0.001, 100) &&
         integer(maxMarks, 1, MAX_MARKS) &&
+        ['patches', 'curve-splats'].includes(renderer) &&
         [object, material].every(s => typeof s === 'string' && s.length > 0 && s.length <= 128),
       'invalid draw settings'
     );
     const explicitColor = color === undefined || typeof color === 'function' ? null : rgb(color);
-    const threads = checkedThreads(plan),
-      limit = threads.reduce((n, s) => n + s.stations.length * sides * 2, 0);
+    const threads = checkedThreads(plan);
+    if (renderer === 'curve-splats') return K.curveSplats.draw(B, { kind: 'textile', plan: { threads } }, {
+      color: color ?? (sample => defaultColors[sample.family]), object, material, maxSegments: Math.min(maxMarks, K.curveSplats.segmentLimit)
+    });
+    const limit = threads.reduce((n, s) => n + s.stations.length * sides * 2, 0);
     check(limit <= maxMarks, 'native mark budget exceeded before drawing');
 
     const L = V.norm(light),

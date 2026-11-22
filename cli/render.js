@@ -6,6 +6,7 @@ const PassQuality = require('../src/pass-quality.js');
 const FOV = (38 * Math.PI) / 180;
 const RenderGrid = require('../src/render-grid.js');
 const SplatFootprints = require('../src/splat-footprints.js');
+const CurveSplat = require('../src/curve-splat.js');
 const Engraving=require('../src/engraving.js');
 const PixelLook = require('../src/pixel-look.js');
 const RenderStages = require('../src/render-stages.js');
@@ -347,8 +348,9 @@ function renderFrame(world, o, preparedPalettes) {
   const transparency = SplatOrder.transparency(o.stableTransparency ?? look.stableTransparency);
   const blendDepth = transparency?.mode === 'blend' ? transparency.depthTolerance : 0;
   const planarFootprints=(o.splatFootprints??look.splatFootprints)!==false&&world.splatFootprints?.styles?.some(p=>p.depth==='plane');
+  const curves = world.curveSplats && (o.curveSplats ?? look.curveSplats ?? true);
   const deepPlan = o[deepScope];
-  const sortedSurfaces = Boolean(deepPlan) || orderMode === 'surface' || blendDepth > 0 || planarFootprints;
+  const sortedSurfaces = curves || Boolean(deepPlan) || orderMode === 'surface' || blendDepth > 0 || planarFootprints;
   const fragmentBudget = o.fragmentBudget ?? 500000;
   if (!['center', 'surface'].includes(orderMode) ||
       ((sortedSurfaces || useSdf || areaLights.length) && (!Number.isSafeInteger(fragmentBudget) || fragmentBudget < 1 || fragmentBudget > 2e6)))
@@ -782,6 +784,7 @@ function renderFrame(world, o, preparedPalettes) {
     tp = 1 / tangent,
     asp = W / H,
     baseCount = world.count;
+  const curveCamera = curves && { view: V, near, focal, width: W, height: H, ortho };
   const ditherView = anchorSpaces.has('view') ? ArtStability.viewProjection(V) : undefined;
   if(!o.reflectionPlane&&!probeView)o.cameraFrame?.({time:camera.time,pose:CameraLens.fromView(V),motion:camera.motion});
   if (!o.reflectionPlane && !probeView) o[captureCamera]?.({width: W, height: H, view: V, tangent: ortho ? oh : tangent, aspect: asp, ortho,
@@ -1498,6 +1501,8 @@ function renderFrame(world, o, preparedPalettes) {
     FPAL = FN ? world.pal.map((h, i) => hex(i)) : null;
   let deferred = sortedSurfaces || sdf || emitterHits ? new Map() : null, deferredCount = 0, orderFallback = false;
   function countDeferred() {
+    if (curves && deferredCount >= fragmentBudget)
+      throw new RangeError('Curve splat rendering exceeded the fragment budget. Raise fragmentBudget or reduce resolution.');
     if(planarFootprints&&deferredCount>=fragmentBudget)throw new RangeError('Surface-plane rendering exceeded the fragment budget. Raise fragmentBudget or reduce resolution.');
     if (deep && deferredCount >= fragmentBudget)
       throw new RangeError('Deep compositing exceeded the fragment budget. Raise fragmentBudget or reduce resolution.');
@@ -1654,7 +1659,7 @@ function renderFrame(world, o, preparedPalettes) {
     while (spriteIndex<sprites.length && sprites[spriteIndex].z>=through) {
       const sprite=sprites[spriteIndex++], sample=spriteSample(sprite);
       if (deferred && (queued || sdf?.hits[sprite.p] || emitterHits?.[sprite.p])) {
-        if (deep || blendDepth) countDeferred();
+        if (deep || blendDepth || curves) countDeferred();
         if (!deferred.has(sprite.p)) deferred.set(sprite.p,[]);
         deferred.get(sprite.p).push({ sort:sprite.z,index:spriteIndex-sprites.length-1,center:sprite.z,sample });
       } else composite(sprite.p,...sample);
@@ -1692,7 +1697,7 @@ function renderFrame(world, o, preparedPalettes) {
   // Carriers are below the original color fragments at the same traced depth.
   for (const sample of sdf?.samples ?? []) {
     if (sample.z > surfaceDepth[sample.p]+1e-5) continue;
-    if (deep || blendDepth) countDeferred();
+    if (deep || blendDepth || curves) countDeferred();
     deferred.set(sample.p,[{sort:sample.z,center:sample.z,index:-1e9,transparent:false,sample:spriteSample(sample)}]);
   }
   for (let n = 0; n < order.length; n++) {
@@ -1713,9 +1718,14 @@ function renderFrame(world, o, preparedPalettes) {
         (reflectionPlane.select && !reflectionPlane.select(i, x, y, z, world)))
     )
       continue;
-    const cx = V[0] * x + V[4] * y + V[8] * z + V[12],
-      cy = V[1] * x + V[5] * y + V[9] * z + V[13],
-      cz = V[2] * x + V[6] * y + V[10] * z + V[14];
+    let curve;
+    if (curveCamera && CurveSplat.isRow(d, q)) {
+      curve = CurveSplat.prepare(d, q, [x, y, z], SC[i], al, curveCamera);
+      if (!curve || curve.bounds[0] >= W || curve.bounds[1] >= H || curve.bounds[2] <= 0 || curve.bounds[3] <= 0) continue;
+    }
+    const cx = curve ? curve.middle[0] : V[0] * x + V[4] * y + V[8] * z + V[12],
+      cy = curve ? curve.middle[1] : V[1] * x + V[5] * y + V[9] * z + V[13],
+      cz = curve ? curve.middle[2] : V[2] * x + V[6] * y + V[10] * z + V[14];
     if (cz > -near) continue;
     const kraw = Math.round(d[q + 11]),
       kind = kraw % 16,
@@ -1726,9 +1736,9 @@ function renderFrame(world, o, preparedPalettes) {
     const correction = paint && d[q + 14] === paint.marker;
     const translucent = al < 1 && d[q+3] < 1 || opticalActive || (kraw & 16) && (kraw & 256);
     const silhouette = silhouetteAt && !fieldParticle && !correction && !(kraw & (64 | 2048)) &&
-      !silhouetteBackground?.has(i) && translucent ? silhouetteAt(i) : null;
+      !silhouetteBackground?.has(i) && translucent && !curve ? silhouetteAt(i) : null;
     const silhouetteFilter = silhouette ? silhouette.filter*silhouetteWeight : 0;
-    const edgeStrength = !silhouette && edgeStrengthAt && !fieldParticle && !kind && !(kraw & (32 | 64 | 256 | 2048 | 32768)) &&
+    const edgeStrength = !curve && !silhouette && edgeStrengthAt && !fieldParticle && !kind && !(kraw & (32 | 64 | 256 | 2048 | 32768)) &&
       !opticalActive && !(paint && d[q + 14] === paint.marker) ? edgeStrengthAt(i) : 0;
     const footprintMargin = silhouetteFilter ? exportOffsets.at(-1) :
       integrateFootprint ? .25 : edgeStrength > 0 ? exportOffsets.at(-1) : 0;
@@ -1818,7 +1828,7 @@ function renderFrame(world, o, preparedPalettes) {
       w0 = c00 * b0 + c01 * b1 + c02 * b2,
       w1 = c01 * b0 + c11 * b1 + c12 * b2,
       w2 = c02 * b0 + c12 * b1 + c22 * b2;
-    const geometryDetail = stableDetail?.geometry && !fieldParticle && !opticalActive && StableDetail.strokeEligible(kraw) &&
+    const geometryDetail = !curve && stableDetail?.geometry && !fieldParticle && !opticalActive && StableDetail.strokeEligible(kraw) &&
       !(paint && d[q + 14] === paint.marker) && !world.effectParticles?.some(({first,count}) => i>=first && i<first+count);
     const projectedA = a0 * u0 + a1 * u1 + a2 * u2, projectedC = b0 * w0 + b1 * w1 + b2 * w2;
     let A = projectedA + filterVariance,
@@ -1908,7 +1918,8 @@ function renderFrame(world, o, preparedPalettes) {
       ex += extra;
       ey += extra;
     }
-    if (sx + ex < 0 || sx - ex > W || sy + ey < 0 || sy - ey > H) continue;
+    if (!curve && (sx + ex < 0 || sx - ex > W || sy + ey < 0 || sy - ey > H)) continue;
+    const minimumAlpha = curve ? CurveSplat.minimum : ContributionRules.minimum;
     let coverage = 1,
       glint = 0,
       centerPalette = 0;
@@ -1947,10 +1958,10 @@ function renderFrame(world, o, preparedPalettes) {
     const solid = al >= 1,
       writesDepth = !opticalActive && solid && coverage === 1 && !(flags & 1) && mode !== ContributionRules.softCoverage,
       glass = (flags & 16) !== 0,
-      x0 = Math.max(0, Math.floor(sx - ex)),
-      x1 = Math.min(W - 1, Math.ceil(sx + ex)),
-      y0 = Math.max(0, Math.floor(sy - ey)),
-      y1 = Math.min(H - 1, Math.ceil(sy + ey));
+      x0 = Math.max(0, Math.floor(curve ? curve.bounds[0] : sx - ex)),
+      x1 = Math.min(W - 1, Math.ceil(curve ? curve.bounds[2] : sx + ex)),
+      y0 = Math.max(0, Math.floor(curve ? curve.bounds[1] : sy - ey)),
+      y1 = Math.min(H - 1, Math.ceil(curve ? curve.bounds[3] : sy + ey));
     let glassLook;
     if (glass && glassIndex) {
       const target = glassIndex.row(i);
@@ -2022,9 +2033,11 @@ function renderFrame(world, o, preparedPalettes) {
         const planeRay=planeFrame&&rayAt(ix+.5,iy+.5);
         const planeHit=planeRay&&SplatFootprints.planeSample(shapeCenter,frame,planeRay.origin,planeRay.direction);
         if(planeFrame&&!planeHit)continue;
-        const planeDepth=planeHit?planeHit.t*planeRay.axial:undefined;
+        const curveHit = curve && CurveSplat.sample(curve, rayAt(ix + .5, iy + .5), near);
+        if (curve && !curveHit) continue;
+        const planeDepth = curveHit ? curveHit.depth : planeHit ? planeHit.t * planeRay.axial : undefined;
         if(planeHit&&planeDepth<near)continue;
-        const centerAlpha = shaped ? Math.min(.99,shapeGain*(planeHit?planeMask(planeHit):SplatFootprints.sample(shaped,shapeMap,dx,dy))**shapeExponent) :
+        const centerAlpha = curveHit ? curveHit.alpha : shaped ? Math.min(.99,shapeGain*(planeHit?planeMask(planeHit):SplatFootprints.sample(shaped,shapeMap,dx,dy))**shapeExponent) :
           ContributionRules.alpha(pw, gain, hard, edgeStyle, continuousCoverage);
         let a = centerAlpha;
         if (silhouetteFilter) {
@@ -2044,7 +2057,7 @@ function renderFrame(world, o, preparedPalettes) {
             average=total/(exportOffsets.length**2);
           }
           a+=(average-a)*silhouetteFilter;
-        } else if (!shaped && !silhouette && integrateFootprint) a = footprint(dx, dy, k0, k1, k2, al, hard, edgeStyle, continuousCoverage);
+        } else if (!curve && !shaped && !silhouette && integrateFootprint) a = footprint(dx, dy, k0, k1, k2, al, hard, edgeStyle, continuousCoverage);
         else if (!shaped && edgeStrength > 0) {
           const average = footprint(dx, dy, k0, k1, k2, al, hard, edgeStyle, continuousCoverage, exportOffsets);
           a += (average - a) * edgeStrength;
@@ -2057,7 +2070,7 @@ function renderFrame(world, o, preparedPalettes) {
         }
         const filteredEdge = (edgeStrength > 0 || coverageWeight > 0) && Math.abs(a - centerAlpha) >= edgeCoverageThreshold;
         a *= geometryWeight;
-        if (a < ContributionRules.minimum) continue;
+        if (a < minimumAlpha) continue;
         const p = iy*W+ix, sdfRow = sdf?.rows[i], sdfHit = sdf?.hits[p];
         const preciseDepth = sdfHit || emitterHits?.[p];
         const exact = sdfRow && sdf.fragment(sdfRow,p,rayAt(ix+.5,iy+.5),-cz);
@@ -2216,17 +2229,17 @@ function renderFrame(world, o, preparedPalettes) {
           pb+=(bb-pb)*sectionTint;
         }
         a *= alpha;
-        if (a < 0.004) continue;
+        if (a < minimumAlpha) continue;
         const wd = writesDepth && alpha === 1 && !exact;
         const surfaceZ = sectionZ ?? exact?.z ?? planeDepth ?? (wantsDepth ?
           sampledDepth(rayAt(ix + .5, iy + .5), probeNormal, probeCenter, -cz, probeReach) : -cz);
         if (preciseDepth && surfaceDepth && surfaceZ>surfaceDepth[p]+1e-5) continue;
         if (probe) probe(p, i, -cz, surfaceZ, pr, pg, pb, a);
-        if (!deep && !blendDepth && !planarFootprints && deferred && deferredCount >= fragmentBudget) {
+        if (!deep && !blendDepth && !planarFootprints && !curves && deferred && deferredCount >= fragmentBudget) {
           playFragments(false,-cz);
           orderFallback = true;
         }
-        const opticalDepth = planeHit || cutaway || deep || blendDepth || aerial || cloudView || preciseDepth ? surfaceZ : undefined;
+        const opticalDepth = planeHit || curveHit || cutaway || deep || blendDepth || aerial || cloudView || preciseDepth ? surfaceZ : undefined;
         if (deferred && (sortedSurfaces || preciseDepth)) {
           const entry = { sort: (flags & 4 || (deep || blendDepth) && backRows?.has(i)) ? Infinity : surfaceZ, index: n, center: exact?.z ?? -cz,
             transparent: !wd && !exact && !(flags & 4) && !(blendDepth && backRows?.has(i)), opacity: a,

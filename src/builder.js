@@ -1057,6 +1057,14 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
       else fallingSnowRanges.push({ first, end });
     }
   }
+  let hasCurveSplats = false;
+  function curveSplat(from, to, radius, color, opacity) {
+    const delta = to.map((v, i) => v - from[i]), half = Math.hypot(...delta) / 2;
+    const center = from.map((v, i) => v + delta[i] * .5), axis = delta.map(v => v / (2 * half));
+    stick(...center, axis, Math.hypot(radius, half / Math.sqrt(3)), radius, color, opacity,
+      { nd: true, ph: radius, sp: half, ex: CurveSplat.marker });
+    hasCurveSplats = true;
+  }
   function finish(meta) {
     const pending = globalThis.INK_DECAL_NEXT;
     if (pending) globalThis.INK_DECAL_NEXT = null;
@@ -1082,6 +1090,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
       {
         data: data.subarray(0, n * 16),
         count: n,
+        ...(hasCurveSplats && { curveSplats: true }),
         ...(paintDecals.length && { paintDecals }),
         ...(correctionRows.length && { paintCorrections: PaintCorrections.bind(correctionRows) }),
         renderMetadata: renderRows(),
@@ -1264,6 +1273,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     disc,
     dab,
     stick,
+    curveSplat,
     axial,
     setLight,
     lit,

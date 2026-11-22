@@ -83,6 +83,7 @@ const SplatProvenance = (() => {
       throw new RangeError('Joined splat chunks must share a palette');
     const count = parts.reduce((n, part) => n + part.count, 0);
     const result = { ...meta, ...(pal && { pal }), count };
+    if (parts.some(part => part.curveSplats)) result.curveSplats = true;
     const footprintAPI = typeof SplatFootprints === 'undefined' ? require('./splat-footprints.js') : SplatFootprints;
     const footprints = footprintAPI.join(parts);
     if (footprints) result.splatFootprints = footprints;

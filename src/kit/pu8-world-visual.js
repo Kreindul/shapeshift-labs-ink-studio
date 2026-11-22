@@ -307,8 +307,15 @@
     for(const field of linkFields){
       const read=query.probe(field);
       if(read.status!=='ok')continue;
-      for(const {id,entity,material,radius,paths,look} of Object.values(read.value)){
+      for(const link of Object.values(read.value)){
+        const {id,entity,material,radius,paths,look}=link;
         const first=B.count(), target=targetFor(entity), ramp=look??[19,20,21,22,23];
+        if (config.routedLinkRenderer === 'curve-splats') {
+          K.curveSplats.draw(B, { kind: 'routed', link }, {
+            color: B.P[ramp[Math.floor(ramp.length / 2)]] ?? B.P[1], target
+          });
+          continue;
+        }
         for(const points of paths)for(let i=1;i<points.length;i++){
           const a=points[i-1], b=points[i], d=V.sub(b,a), length=V.len(d);
           if(length<1e-6)continue;
