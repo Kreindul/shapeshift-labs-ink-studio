@@ -1,5 +1,9 @@
 # Stability and conservation diagnostics
 
+Use [named simulation measurements](simulation-measurements.md) to gate a
+specific diagnostic alongside timing, frequency, decay, tracking, or force
+checks in one CI report.
+
 Use `ink-studio sim diagnose <plan.json>` with a solver plan already used
 by `sim grid-ops`, `sim waves`, `sim network`, `sim integrate`,
 `sim solve`, or `sim remap`. The command writes a version 1

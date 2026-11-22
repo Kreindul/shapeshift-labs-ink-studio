@@ -515,6 +515,19 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         return respond(require('./mass-properties.js').measure(kit,read(file),file,
           {dependency:shot?.dependency,assetPack:opt['asset-pack']}));
       }
+      case 'measure': {
+        ensure(typeof file==='string'&&other===undefined&&Object.keys(opt).every(key=>['out','json'].includes(key)),
+          'Use sim measure <run.json> [--out report.json]');
+        const destination=typeof opt.out==='string'?path.resolve(opt.out):undefined;
+        ensure(opt.out===undefined||destination&&destination!==path.resolve(file),'Measurement report needs a separate output file');
+        const report=require('./simulation-measurements.js').run(kit,read(file),file,source=>{
+          ensure(path.resolve(source)!==destination,'Measurement report must be separate from its source assets');
+          shot?.dependency?.(source);
+        });
+        respond(report);
+        if(!report.passed)process.exitCode=2;
+        return;
+      }
       case 'diagnose': {
         const failOn=opt['fail-on'];
         ensure(typeof file==='string'&&other===undefined&&(failOn===undefined||['warning','error'].includes(failOn)),
