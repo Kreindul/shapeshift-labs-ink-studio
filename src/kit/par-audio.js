@@ -165,6 +165,28 @@
       inputs: {source:'audio',options}, outputs: {value:'audio',report:'record'},
       run({source,options}) {return A.warpAudio(source,options);}
     },
+    'music.atmosphereReference': {
+      description:'Read the audio clock and performed note gates for a pinned atmosphere score.',
+      inputs:{score:'audio',performance:'record'},outputs:{value:'record'},
+      run({score,performance}) {return {value:A.atmosphere.reference(score,performance)};}
+    },
+    'music.planAtmosphere': {
+      description:'Place crossfaded beds, calls in score gaps and recurring gestures with automatic perspective.',
+      inputs:{source:'record',assets:'record',settings:'record'},outputs:{value:'record'},
+      run({source,assets,settings}) {return {value:A.atmosphere.plan(source,assets,settings)};}
+    },
+    'music.renderAtmosphere': {
+      description:'Render an editable atmosphere plan over pinned score audio and optionally export its role stems.',
+      inputs:{source:'record',score:'audio',assets:'record',options},
+      outputs:{value:'audio',atmosphere:'audio',stems:'record',report:'record'},
+      run({source,score,assets,options}) {return A.atmosphere.render(source,score,assets,options);}
+    },
+    'music.auditionAtmosphere': {
+      description:'Compare alternate atmosphere densities and gains against the same score with shared playback gain.',
+      inputs:{source:'record',score:'audio',assets:'record',settings:'record',options:{type:'record'}},
+      outputs:{value:'audio',report:'record'},
+      run({source,score,assets,settings,options}) {return A.atmosphere.audition(source,score,assets,settings,options);}
+    },
     'music.branchResamplingJam': {
       description:'Fork named playback treatments or expand a rack macro sweep over one pinned pad performance.',
       inputs:{source:'record',request:'record'},outputs:{value:'record',added:'array<record>'},
