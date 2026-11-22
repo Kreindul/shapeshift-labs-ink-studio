@@ -50,6 +50,16 @@
         shape(['env']);
         args={env:envelope(raw.env)};
         break;
+      case 'curve': {
+        shape(['points','clock']);
+        const clock=raw.clock ?? 'gate', points=raw.points;
+        check(['gate','seconds'].includes(clock) && Array.isArray(points) && integer(points.length,1,64) &&
+          Array.from(points).every((point,i)=>Array.isArray(point) && point.length===2 &&
+            finite(point[0],0,clock==='gate' ? 1 : 60) && finite(point[1],-48,48) &&
+            (!i || point[0]>points[i-1][0])),'Invalid instrument curve on '+name);
+        args={clock,points:points.map(point=>point.slice())};
+        break;
+      }
       case 'mix':
         shape(['inputs']);
         check(Array.isArray(raw.inputs) && integer(raw.inputs.length,1,16),'Mix needs 1–16 inputs on '+name);
@@ -230,6 +240,19 @@
         break;
       }
       case 'envelope': process=()=>level(row.env,state.t,gate);break;
+      case 'curve': {
+        let next=1;
+        const {points,clock}=row;
+        process=()=>{
+          const time=clock==='gate' ? state.controls.phase : state.t;
+          while (next<points.length && time>points[next][0]) next++;
+          const [start,a]=points[next-1];
+          if (time<=start || next===points.length) return a;
+          const [stop,b]=points[next];
+          return a+(b-a)*(time-start)/(stop-start);
+        };
+        break;
+      }
       case 'mix': process=()=>refs.reduce((sum,at)=>sum+values[at],0);break;
       case 'gain': process=()=>read()*params.amount();break;
       case 'drive': process=()=>Math.tanh(read()*params.amount());break;
@@ -306,8 +329,9 @@
     const {active,outputs,tail,controls}=model(base,bank);
     const order=active.map(({name})=>name);
     return {output:outputs,tail,controls,assets:[...new Set(I.assetNames(raw))],
-      inactive:Object.keys(base.nodes).filter(name=>!order.includes(name)),order,nodes:active.map(({name,type,inputs,params})=>({name,type,inputs,
-        ...(type==='delay' && {writesAfterFrame:true}),parameters:Object.fromEntries(Object.entries(params)
+      inactive:Object.keys(base.nodes).filter(name=>!order.includes(name)),order,nodes:active.map(({name,type,inputs,params,...spec})=>({name,type,inputs,
+        ...(type==='delay' && {writesAfterFrame:true}),
+        ...(type==='curve' && {clock:spec.clock,points:spec.points}),parameters:Object.fromEntries(Object.entries(params)
           .map(([key,{base,by,from}])=>[key,{base,by:Object.fromEntries(by),from:Object.fromEntries(from)}]))}))};
   }
   P.musicInstrumentGraph=Object.freeze({compile,articulate,inspect});
