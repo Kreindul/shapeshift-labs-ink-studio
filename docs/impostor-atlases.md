@@ -267,6 +267,34 @@ node cli/ink-studio.js clip examples/face-transition-cels.js --w 316 --h 190 --p
   --raw --from 0 --to 6 --fps 20 --out wrong-password.apng
 ```
 
+## Native-size cel preview
+
+Scrub a sprite atlas one art pixel at a time with the [cel preview example](../examples/sprite-cel-preview.cjs).
+The clean pane always shows the export raster at 1×. The onion pane also
+supports integer zoom. Cyan marks the previous drawing and pink marks the
+next. **Changes only** highlights the pixels that differ from the current
+drawing. **Distinct drawings** skips identical holds. **Export frames**
+compares with the immediately adjacent samples.
+
+```sh
+node examples/sprite-cel-preview.cjs cinder-courier.html
+node examples/sprite-cel-preview.cjs actor-preview.html --atlas actor.json \
+  --width 128 --height 128 --fps 12 --frames 48 --yaw 0 --pitch 0
+```
+
+Open the generated HTML in a browser. The first command generates a
+head-turn study with a deliberate one-pixel iris shift on frame 9.
+The second loads your atlas, including any transition cels in its sidecar.
+Angles are in radians. Use `--mode card` for a front-facing card.
+
+Call `KIT.sprite.celPreview.create({ atlas, width, height, fps, count })`
+to sample a registered sprite against its pivot, including transition cels
+and painted fringes. Set `origin: [x, y]` in art pixels to offset the pivot,
+or supply `viewAt(time, index)` for a changing view angle. To inspect frames
+that already include scene shading or compositing, pass their aligned
+native RGBA buffers to `KIT.sprite.celPreview.fromFrames({ width, height, fps, frames })`.
+Both work with `mountSpriteCelPreview(host, { preview })` from `webgl.mjs`.
+
 ## Painted sprite fringes
 
 Add `fringe` to the same `cels` sidecar used for replacements and

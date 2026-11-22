@@ -1614,6 +1614,17 @@
       "tags": ["sprites", "impostor", "lod", "reconstruction"]
     },
     {
+      "id": "kit.sprite.celPreview",
+      "kind": "api",
+      "status": "ready",
+      "title": "Native-size sprite cel preview",
+      "what": "Scrub registered sprite drawings with previous and next onion skins, integer zoom and a clean 1× pane. Skip held drawings or inspect every export frame.",
+      "use": "K.sprite.celPreview.create({ atlas, width, height, fps, count })",
+      "where": "src/kit/kpzz-sprite-preview.js",
+      "example": "examples/sprite-cel-preview.cjs",
+      "tags": ["sprites", "pixel-art", "animation", "onion-skin"]
+    },
+    {
       "id": "render.textile",
       "kind": "api",
       "status": "ready",

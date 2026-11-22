@@ -62,8 +62,9 @@ function rasterize(placements, settings) {
     const {x:tileX,y:tileY,width,height}=tile.rect, px=tile.pivot.x,py=tile.pivot.y;
     // Round the card origin once. Every texel then gets one integer art-pixel address.
     const offset=exact&&placement.pixelOffset?placement.pixelOffset(time):null;
-    const rasterX=exact?Math.round(anchorScreen[0]-px)+(offset?.[0]??0):0;
-    const rasterY=exact?Math.round(anchorScreen[1]+py-height)-(offset?.[1]??0):0;
+    const originPixel=exact?Atlas.nativeOrigin(tile,anchorScreen[0],H-anchorScreen[1]):null;
+    const rasterX=exact?originPixel[0]+(offset?.[0]??0):0;
+    const rasterY=exact?H-originPixel[1]-height-(offset?.[1]??0):0;
     const planes=fixed&&placement.depth?atlas.sceneryPlanes:[{depth:0}];
     for (const {id,depth,bounds} of planes) {
       const anchor=depth?at.map((n,i)=>n-depth*placement.scale*axes.normal[i]):at;

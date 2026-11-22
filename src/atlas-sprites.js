@@ -25,6 +25,11 @@ const AtlasSprites = (() => {
     return {right:[z,0,-x],up:[-x*s,c,-z*s],normal:[x*c,s,z*c]};
   }
 
+  // Native cards snap their bottom-up render origin. Recover the same top-down grid here.
+  function nativeOrigin(view,x,y) {
+    return [Math.round(x-view.pivot.x),-Math.round(view.pivot.y-y)];
+  }
+
   function paintedScenery(settings, width, height, maps) {
     const { bands, base, depthPaint = [], lightPaint = [] } = settings ?? {};
     const names = bands && typeof bands === 'object' && !Array.isArray(bands) ? Object.keys(bands) : [];
@@ -258,6 +263,6 @@ const AtlasSprites = (() => {
     return source.map(place);
   }
 
-  return Object.freeze({compile,place,placements,basis,dot,vector});
+  return Object.freeze({compile,place,placements,basis,nativeOrigin,dot,vector});
 })();
 if (typeof module !== 'undefined') module.exports = AtlasSprites;
