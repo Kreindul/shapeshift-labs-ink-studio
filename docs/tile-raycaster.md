@@ -5,6 +5,9 @@ view. One ray per art column finds the first wall or sliding door.
 Directional sprites share the view’s depth buffer, so an open sliver of
 a door can reveal just a few sprite columns.
 
+Use [sector-based rooms](sector-raycaster.md) for a polygon floor plan with
+separate floor and ceiling heights and linked doorways.
+
 ```js
 const stamp = (...rows) => ({ width: rows[0].length, height: rows.length, rows });
 const hall = KIT.tileRaycaster.create({

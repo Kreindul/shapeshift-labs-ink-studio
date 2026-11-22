@@ -1735,6 +1735,17 @@
       "tags": ["tilemap", "raycasting", "sprites", "pixel-art", "perspective"]
     },
     {
+      "id": "render.sectorRaycaster",
+      "kind": "api",
+      "status": "ready",
+      "title": "Sector-based rooms",
+      "what": "Render a polygon floor plan with independent room heights, indexed light bands, painted walls and directional sprites. Doorways clip the view into connected rooms.",
+      "use": "K.sectorRaycaster.create({ sectors, portals, palette }) or tileRaycaster with mode: 'sectors'",
+      "where": "src/kit/paz-sector-raycaster.js, docs/sector-raycaster.md",
+      "example": "examples/sector-raycaster.cjs",
+      "tags": ["raycasting", "rooms", "portals", "floor-plan", "pixel-art"]
+    },
+    {
       "id": "render.projectedStage",
       "kind": "api",
       "status": "ready",

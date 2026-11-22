@@ -1,43 +1,13 @@
 /* Indexed tile walls, sliding panels and directional sprite columns on a native art grid. */
 (function (K) {
   const finite = Number.isFinite, sides = ['north','east','south','west'];
+  const Art = IndexedRayArt, { index, record, tuple } = Art;
   const unit = n => finite(n) && n>=0 && n<=1;
-  const tuple = (a,n) => Array.isArray(a) && a.length===n && Array.from(a).every(finite);
   const fract = n => n-Math.floor(n);
   const texel = (n, size) => Math.min(size-1,Math.max(0,Math.floor(n*size)));
-  const opaque = index => index>=0;
-  const index = (n,length) => Number.isInteger(n) && n>=0 && n<length;
-  const record = value => value && [Object.prototype,null].includes(Object.getPrototypeOf(value));
 
   function check(condition, message) {
     if (!condition) throw new RangeError('Tile raycaster: ' + message);
-  }
-
-  function swatch(color) {
-    return typeof color==='string' && /^#[\da-f]{6}$/i.test(color) ? parseInt(color.slice(1),16) : color;
-  }
-
-  function lights(definition,palette) {
-    const { distances = [], ramps = {}, sideBias = {} } = definition;
-    check(Array.isArray(distances) && distances.length<=15 && Array.from(distances).every((d,i) =>
-      finite(d) && d>0 && (!i || d>distances[i-1])) && record(ramps) && record(sideBias) &&
-      Object.keys(sideBias).every(key => ['x','z'].includes(key) && index(sideBias[key],distances.length+1)),
-      'shade needs increasing positive distances and a nonnegative wall side bias');
-    const keys = distances.slice();
-    const table = palette.map((_,color) => {
-      const ramp = Object.hasOwn(ramps,color) ? ramps[color] : undefined;
-      if (ramp===undefined) return keys.map(() => color).concat(color);
-      check(Array.isArray(ramp) && ramp.length===keys.length+1 && Array.from(ramp).every(n=>index(n,palette.length)),
-        'each shade ramp needs one palette index per distance band');
-      return ramp.slice();
-    });
-    check(Object.keys(ramps).every(key => /^(0|[1-9]\d*)$/.test(key) && index(+key,palette.length)), 'shade ramp index is outside the palette');
-    const bias = { x:sideBias.x??0,z:sideBias.z??0 };
-    return { table,bias,band(depth) {
-      let band=0;
-      while (band<keys.length && depth>=keys[band]) band++;
-      return band;
-    } };
   }
 
   function create({ map, palette, tiles = {}, doors = [], sprites = [], floor, ceiling, background = null,
@@ -46,44 +16,18 @@
     check(Array.isArray(map) && index(columns-1,128) && index(rows-1,128) &&
       Array.from(map).every(row => typeof row==='string' && row.length===columns && /^[\x21-\x7e]+$/.test(row)),
       'use a rectangular map of 1–128 printable cells per side');
-    check(Array.isArray(palette) && index(palette.length-1,256) &&
-      Array.from(palette).every(value => index(swatch(value),0x1000000)), 'supply 1–256 RGB palette swatches');
+    const swatches = Art.palette(palette,check);
     check(finite(wallHeight) && wallHeight>0 && (background===null || index(background,palette.length)) &&
       record(tiles) && Array.isArray(doors) && doors.length<=1024 && Array.isArray(sprites) && sprites.length<=512,
       'invalid wall height, background, tiles, doors or sprites');
-    const swatches = palette.map(swatch), shading = lights(shade,swatches);
-    const images = new WeakMap(), owners=[null], names=new Set();
+    const shading = Art.lights(shade,swatches,check), picture = Art.textures(K,swatches,check);
+    const owners=[null], names=new Set();
     const cells = new Array(columns*rows).fill(null);
-    let artPixels=0;
     function owner(id,kind) {
       check(typeof id==='string' && id.trim() && !names.has(id), 'surface IDs must be distinct names');
       names.add(id);
       owners.push({id,kind});
       return owners.length-1;
-    }
-
-    function picture(source, solid) {
-      check(record(source), 'provide an indexed stamp for each texture');
-      if (!images.has(source)) {
-        const {width,height,entries,at,palette:colors} = K.pixelStamps.prepare(source);
-        artPixels += width*height*entries.length;
-        check(artPixels<=8*1024*1024,'textures exceed the art-pixel budget');
-        const remap = colors?.map(color => {
-          const target=typeof color==='string'?swatches.indexOf(swatch(color)):color;
-          check(index(target,swatches.length),'texture palette colors must reference the scene palette');
-          return target;
-        });
-        const frames=entries.map(({slots}) => Int16Array.from(slots,slot => {
-          if (slot===null) return -1;
-          const value=remap?remap[slot]:slot;
-          check(index(value,swatches.length),'texture has a slot outside the scene palette');
-          return value;
-        }));
-        images.set(source,{width,height,frames,at,solid:frames.every(pixels=>pixels.every(opaque))});
-      }
-      const texture=images.get(source);
-      check(!solid || texture.solid,'wall, door and plane paint must cover every texel');
-      return texture;
     }
 
     const legend = new Map(Object.entries(tiles).map(([key, tile]) => {
@@ -108,21 +52,7 @@
       cells[at[1]*columns+at[0]]=door;
       return door;
     });
-    function pose(value,what) {
-      check(typeof value==='function' || (what==='position'?tuple(value,3):finite(value)), 'invalid sprite '+what);
-      return Array.isArray(value)?value.slice():value;
-    }
-    const actors=Array.from(sprites, ({id,at,yaw=0,height=1,views}={}) => {
-      check(finite(height) && height>0 && Array.isArray(views) && index(views.length-1,32),
-        'sprites need a positive height and 1–32 directional views');
-      const directions=Array.from(views, ({yaw=0,paint,pivot}={}) => {
-        const texture=picture(paint,false);
-        const pin=pivot??[texture.width/2,texture.height];
-        check(finite(yaw) && tuple(pin,2),'sprite view needs a finite yaw and pixel pivot');
-        return {yaw,texture,pivot:pin.slice()};
-      });
-      return {id:owner(id,'sprite'),at:pose(at,'position'),yaw:pose(yaw,'yaw'),height,directions};
-    });
+    const actors=Art.sprites(sprites,picture,owner,check);
     const planes = [floor,ceiling].map((paint,i) => paint==null?null:
       { id:owner(i?'ceiling':'floor',i?'ceiling':'floor'),texture:picture(paint,true) });
     const inside = (x,z) => x>=0 && x<columns && z>=0 && z<rows;
@@ -252,43 +182,15 @@
         }
       }
 
-      let work=0;
-      const sprites=actors.map(actor => {
-        const point=typeof actor.at==='function'?actor.at(time):actor.at;
-        check(tuple(point,3),'sprite position callback must return XYZ');
-        const x=point[0]-ox,z=point[2]-oz;
-        return {actor,point,x,z,distance:x*forward[0]+z*forward[2]};
-      }).sort((a,b)=>a.distance-b.distance);
-      for (const {actor,point,x,z,distance} of sprites) {
-        if (distance<near || distance>far) continue;
-        const heading=typeof actor.yaw==='function'?actor.yaw(time):actor.yaw;
-        check(finite(heading),'sprite yaw callback must return a finite angle');
-        const angle=Math.atan2(-x,-z)-heading;
-        const view=actor.directions.reduce((best,cel)=>
-          Math.cos(cel.yaw-angle)>Math.cos(best.yaw-angle)+1e-12?cel:best);
-        const {texture,pivot}=view;
-        const scale=actor.height*focal/distance/texture.height;
-        if (!(scale*texture.height>=.5)) continue;
-        const h=Math.max(1,Math.round(texture.height*scale)),w=Math.max(1,Math.round(texture.width*scale));
-        const left=Math.round(center+(x*right[0]+z*right[2])*focal/distance-pivot[0]*w/texture.width);
-        const top=Math.round(horizon-(point[1]-oy)*focal/distance-pivot[1]*h/texture.height);
-        check([left,top,w,h].every(finite),'sprite exceeds the finite screen range');
-        const x0=Math.max(0,left),x1=Math.min(width,left+w),y0=Math.max(0,top),y1=Math.min(height,top+h);
-        if (x0>=x1 || y0>=y1) continue;
-        work+=(x1-x0)*(y1-y0);
-        check(work<=32*1024*1024,'sprites exceed the frame work budget');
-        const art=paint(texture), band=shading.band(distance);
-        let visiblePixels=0;
-        for (let col=x0;col<x1;col++) for (let row=y0;row<y1;row++) {
-          if (write(row*width+col,distance,actor.id,(col+.5-left)/w,(row+.5-top)/h,texture,art,band)) visiblePixels++;
-        }
-        placements.push({id:owners[actor.id].id,yaw:view.yaw,rect:[left,top,w,h],visiblePixels});
-      }
+      Art.drawSprites(actors,{time,at,forward,right,width,height,center,horizon,focal,near,far,
+        paint,write,shade:(_sector,z)=>shading.band(z),owners,placements,check});
       return K.renderOutputs.create({width,height,data,depth,ids,uv,owners,placements,
         camera:{origin:at,right,up:[0,1,0],forward,center:[center,horizon],scale:[focal,focal]}});
     }
     return Object.freeze({columns,rows,wallHeight,cast,render});
   }
 
-  K.tileRaycaster = Object.freeze({create});
+  K.tileRaycaster = Object.freeze({create(options) {
+    return options?.mode==='sectors' ? K.sectorRaycaster.create(options) : create(options);
+  }});
 })(KIT);
