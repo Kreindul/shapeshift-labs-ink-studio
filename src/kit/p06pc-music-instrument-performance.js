@@ -83,5 +83,5 @@
       'The groove makes no timing changes in either rhythm');
     return P.data.freeze(P.data.clone({variants,report:{timing,combined}}));
   }
-  P.musicProduction=Object.freeze({...A,instrumentPresets:presets,planPocket});
+  P.musicProduction=Object.freeze({...A,instrumentPresets:presets,inspectInstrumentGraph:P.musicInstrumentGraph.inspect,planPocket});
 })(KIT.procedural);

@@ -1,7 +1,10 @@
 /* Per-voice automation on the performed gate, with integrated pitch travel. */
 (function (P) {
   const {fields,finite,check}=P.musicInstruments;
-  const limits={gainDb:[-60,12],pitchCents:[-1200,1200],cutoffHz:[40,24000]};
+  const controls=Object.freeze({pressure:.5,breath:0,damping:.25,contact:.5});
+  const names=Object.keys(controls);
+  const limits={gainDb:[-60,12],pitchCents:[-1200,1200],cutoffHz:[40,24000],
+    ...Object.fromEntries(names.map(name=>[name,[0,1]]))};
 
   function validate(raw) {
     check(fields(raw,Object.keys(limits)) && Object.keys(raw).length>0,'Use named per-note expression curves');
@@ -40,8 +43,13 @@
     const pitch=raw.pitchCents && curve(raw.pitchCents,gate,n=>2**(n/1200));
     const amp=raw.gainDb && curve(raw.gainDb,gate,n=>n);
     const filter=raw.cutoffHz && curve(raw.cutoffHz,gate,n=>Math.log(Math.min(n,rate*.47)));
-    return {gain:amp && (t=>10**(amp.value(t)/20)),
+    const motion=Object.fromEntries(names.filter(name=>raw[name]).map(name=>{
+      const lane=curve(raw[name],gate,n=>n);
+      return [name,t=>lane.value(t)];
+    }));
+    return {controls:motion,gain:amp && (t=>10**(amp.value(t)/20)),
       pitchTime:pitch && (t=>pitch.value(t,true)),
+      pitchRatio:pitch && (t=>pitch.value(t)),
       pitchMax:pitch?.max ?? 1,
       filter:filter && (t=>1-Math.exp(-2*Math.PI*Math.exp(filter.value(t))/rate))};
   }
@@ -55,5 +63,5 @@
     }
     return (lo+hi)*.5;
   }
-  P.musicNoteExpression=Object.freeze({validate,compile,duration});
+  P.musicNoteExpression=Object.freeze({validate,compile,duration,controls,names});
 })(KIT.procedural);

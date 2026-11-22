@@ -36,12 +36,13 @@
     };
   }
 
-  function lowpass(rate,resonance) {
-    const damping=1/resonance;
-    let z1=0,z2=0,last,g,a,b,c;
-    return (input,hertz)=>{
-      if (hertz!==last) {
-        last=hertz;
+  function filterState(rate,mode,resonance) {
+    let z1=0,z2=0,lastHz,lastQ,damping,g,a,b,c;
+    return (input,hertz,q=resonance)=>{
+      if (hertz!==lastHz || q!==lastQ) {
+        lastHz=hertz;
+        lastQ=q;
+        damping=1/q;
         g=Math.tan(Math.PI*hertz/rate);
         a=1/(1+g*(g+damping));
         b=g*a;
@@ -52,7 +53,7 @@
       const low=z2+b*z1+c*residual;
       z1=2*band-z1;
       z2=2*low-z2;
-      return low;
+      return mode==='bandpass' ? band : mode==='highpass' ? input-damping*band-low : low;
     };
   }
 
@@ -87,7 +88,7 @@
       const maximum=Math.max(frequency,start)+vibratoHz+frequency*Math.max(0,pitchMax-1);
       const widthSpeed=osc.pulse ? tau*lfo.depth*lfo.rate : 0;
       const saw=osc.saw || osc.pulse ? sawBand((maximum+widthSpeed)/rate) : null;
-      const filter=bypass ? null : lowpass(rate,tone.resonance);
+      const filter=bypass ? null : filterState(rate,'lowpass',tone.resonance);
       const ceiling=Math.min(24000,.46*rate);
       const cutoffBase=Math.log2(tone.cutoff)+tone.keyTrack*Math.log2(note.frequency/referenceHz)+
         (tone.velocity*(note.velocity-.65)+24*(brightness-.5))/12;
@@ -129,5 +130,5 @@
     };
   }
 
-  P.musicSubtractive=Object.freeze({compile,articulate});
+  P.musicSubtractive=Object.freeze({compile,articulate,sawBand,filterState});
 })(KIT.procedural);

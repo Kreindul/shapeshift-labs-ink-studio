@@ -290,6 +290,10 @@ const specifications = {
     template:{format:'ink-studio/performance-groove',version:1,id:'take',step:.25,length:2,
       lanes:{keys:[{slot:3,offset:.035,accent:.9,length:.21}]}},roles:{lead:{lane:'keys'}}
   }}},
+  'music.inspectInstrumentGraph': {inputs:{patch:{type:'graph',output:'amp',nodes:{
+    tone:{type:'oscillator',wave:'sine'},shape:{type:'envelope'},
+    amp:{type:'gain',input:'tone',amount:{base:0,from:{shape:.6},by:{pressure:.2}}}
+  }}}},
   'music.instrumentPresets': {inputs:{}},
   'music.planPocket': {inputs:{source:production,brief:{
     rhythm:{edits:[{part:'lead',section:'opening',scope:'section',adopt:{length:4,events:[

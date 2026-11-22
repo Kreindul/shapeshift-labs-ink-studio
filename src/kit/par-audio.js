@@ -567,6 +567,11 @@
         return {value,session:value.session,winners:value.winners,report:value.report};
       }
     },
+    'music.inspectInstrumentGraph': {
+      description:'Validate a modular instrument and report its signal order, feedback and expression routing.',
+      inputs:{patch:'record',assets:options},outputs:{value:'record'},
+      run({patch,assets}) {return {value:P.musicProduction.inspectInstrumentGraph(patch,assets)};}
+    },
     'music.instrumentPresets': {
       description:'Get editable stock reed, electric tines and bass patches with contextual articulation maps.',
       inputs:{},outputs:{value:'record'},

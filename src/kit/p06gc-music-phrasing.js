@@ -1,6 +1,6 @@
 /* Contextual articulation and release on a score voice's performed clock. */
 (function (P) {
-  const {fields,finite,integer,id,check}=P.musicInstruments;
+  const {fields,finite,integer,id,check,sampleZones}=P.musicInstruments;
   const round=n=>Number(n.toFixed(9)), eps=1e-7;
 
   function compile(raw,patch) {
@@ -11,7 +11,7 @@
     check(finite(gap,0,1) && integer(interval,0,127) && finite(fade,0,.25) && finite(repeatGap,0,2),
       'Invalid note connection or repeat window');
     const names=new Set(Object.keys(patch.articulations ?? {}));
-    for (const zone of patch.zones ?? []) if (zone.articulation) names.add(zone.articulation);
+    for (const zone of sampleZones(patch)) if (zone.articulation) names.add(zone.articulation);
     const rules=Array.from(raw.rules ?? [],row=>{
       check(fields(row,['when','interval','articulation','attackLead','glide','level','curves']) &&
         ['attack','repeat','legato','release'].includes(row.when) &&

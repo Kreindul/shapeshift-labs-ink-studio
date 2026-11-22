@@ -185,6 +185,7 @@
   function instrument(raw,assets) {
     check(record(raw),'Expected a music instrument');
     if (raw.type==='sample') return sampler(raw,assets);
+    if (raw.type==='graph') return P.musicInstrumentGraph.compile(raw,assets);
     if (raw.type==='drum') return drum(raw);
     if (raw.type==='keys') return keys(raw);
     if (raw.type==='subtractive') return P.musicSubtractive.compile(raw);
@@ -198,10 +199,13 @@
     check(base.type!=='sample' && record(articulations) && Object.keys(articulations).length<=16 &&
       Object.entries(articulations).every(([name,value])=>id(name) && record(value) && value.type===undefined),
       'Invalid instrument articulations');
-    const variants=Object.fromEntries(Object.entries(articulations).map(([name,value])=>[
-      name,instrument(base.type==='subtractive' ? P.musicSubtractive.articulate(base,value) :
-        {...base,...value,...(value.env && {env:{...base.env,...value.env}})},assets)
-    ]));
+    function override(value) {
+      if (base.type==='subtractive') return P.musicSubtractive.articulate(base,value);
+      if (base.type==='graph') return P.musicInstrumentGraph.articulate(base,value);
+      return {...base,...value,...(value.env && {env:{...base.env,...value.env}})};
+    }
+    const variants=Object.fromEntries(Object.entries(articulations)
+      .map(([name,value])=>[name,instrument(override(value),assets)]));
     return {prepare(note,...args) {
       const name=note.play.articulation;
       return (Object.hasOwn(variants,name) ? variants[name] : patch).prepare(note,...args);
@@ -258,5 +262,14 @@
     }};
   }
 
-  P.musicInstruments=Object.freeze({compile,record,fields,finite,integer,id,check,clamp,db,hz,hash,options,envelope,level,phase});
+  function sampleZones(patch) {
+    const zones=row=>Array.isArray(row?.zones) ? row.zones : [];
+    if (patch?.type==='sample') return zones(patch);
+    if (patch?.type==='graph') return [patch,...Object.values(patch.articulations ?? {})].flatMap(row=>
+      Object.values(row?.nodes ?? {}).flatMap(zones));
+    return [];
+  }
+  const assetNames=patch=>sampleZones(patch).flatMap(zone=>Array.isArray(zone?.samples) ? zone.samples : []);
+
+  P.musicInstruments=Object.freeze({compile,sampler,noise,sampleZones,assetNames,record,fields,finite,integer,id,check,clamp,db,hz,hash,options,envelope,level,phase});
 })(KIT);
