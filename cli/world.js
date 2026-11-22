@@ -56,6 +56,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
     else process.stdout.write(JSON.stringify(value,null,opt.json?0:2)+'\n');
   };
   function document(world, file) {
+    if (world.format === W.models.format) world = W.models.compile(world);
     if (file !== undefined && world.dataInputs !== undefined) world = { ...world,
       dataInputs: require('./data-inputs.js').embed(kit.KIT.dataInputs, world.dataInputs, file, shot?.dependency) };
     if (opt['asset-pack'] === undefined) return {world};
@@ -66,11 +67,11 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
     ensure(typeof file === 'string','Expected a scene or run file');
     if (/\.(js|cjs)$/i.test(file)) {
       const factory = require(path.resolve(file)), value = typeof factory === 'function' ? factory(kit) : factory;
-      return value.format===W.format ? document(value,file) : value.simulation ? document(value.simulation,file) : {legacy:file};
+      return [W.format,W.models.format].includes(value.format) ? document(value,file) : value.simulation ? document(value.simulation,file) : {legacy:file};
     }
     if (/\.json$/i.test(file)) {
       const { value,store } = readCheckpointFile(file);
-      if (value.format === W.format) return document(value,file);
+      if ([W.format,W.models.format].includes(value.format)) return document(value,file);
       if (!lookPreview && [R.checkpointFormat,R.runFormat].includes(value.format))
         ensure(opt['asset-pack']===undefined,'Recorded runs and checkpoints keep their original asset packs');
       if (value.format === R.checkpointFormat) return {world:value.world,checkpoint:value,store};
@@ -84,6 +85,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
   function sourceWorld(input) {
     ensure(input.world,'The scene must expose an Ink Studio world manifest');
     if (input.checkpoint) ensure(opt.seed===undefined && opt.dt===undefined,'A resumed run uses its checkpoint seed and timestep');
+    if (input.world.simulationModel) ensure(opt.seed===undefined && opt.dt===undefined,'A simulation model pins its seed and timestep');
     return !input.checkpoint && (opt.seed !== undefined || opt.dt !== undefined)
       ? {...input.world,...(opt.seed===undefined?{}:{seed:Number(opt.seed)}),...(opt.dt===undefined?{}:{dt:Number(opt.dt)})}
       : input.world;
@@ -288,7 +290,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
       ...(chunkLevels&&{chunkLevels}),
       ...(workerPool&&{partitions:run.partitions()}),
       systems:Object.keys(checkpoint.states),commands:run.commandCounts(),events:checkpoint.history.length,historyDropped:checkpoint.dropped,
-      scenario:run.scenario,...(checks?{checks}:{}),...(opt.profile?{profile:run.profile()}:{})};
+      scenario:run.scenario,...(world.simulationModel&&{model:W.models.sample(run)}),...(checks?{checks}:{}),...(opt.profile?{profile:run.profile()}:{})};
   }
   function saveCheckpoints(sourceStore) {
     const directory=opt['checkpoint-store']==='off'?undefined:opt['checkpoint-store']??sourceStore;
@@ -475,8 +477,24 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
       for(const pool of pools)pool.close();
     }
   }
+  function modelCommand(mode,file) {
+    ensure(['validate','inspect','compile'].includes(mode) && typeof file === 'string',
+      'Use sim model validate|inspect|compile <model.json>');
+    const source = read(file);
+    ensure(source?.format === W.models.format, 'Expected an Ink Studio simulation model');
+    const world = R.validate(source,{workerPool});
+    if (mode === 'compile') return respond(world);
+    const {id,version,revision,inputs,outputs,probes} = world.simulationModel;
+    if (mode === 'validate') return respond({valid:true,id,version,revision});
+    const operators = Object.fromEntries(Object.entries(world.systems).map(([name, spec]) =>
+      [name,{kind:spec.kind,revision:spec.operatorRevision,schedule:spec.schedule??{}}]));
+    return respond({id,version,revision,seed:world.seed,numerics:source.numerics,domain:source.domain,
+      parameters:source.parameters,initial:source.initial,boundaries:source.boundaries,
+      operators,inputs,outputs,probes});
+  }
   function runSimulation([mode,file,other]) {
     switch (mode) {
+      case 'model': return modelCommand(file,other);
       case 'run':
       case 'resume':
       case 'fork': {
@@ -623,7 +641,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         shot?.finish(output,{suffixes});
         break;
       }
-      default: throw Error('Use sim run|resume|fork|reset|replay|verify|scrub|take|diff|sweep|render|plan|dependencies|regions|regions-apply');
+      default: throw Error('Use sim model|run|resume|fork|reset|replay|verify|scrub|take|diff|sweep|render|plan|dependencies|regions|regions-apply');
     }
   }
   function applyEdits(input, edits, { dryRun = false } = {}) {

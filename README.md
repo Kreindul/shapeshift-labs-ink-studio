@@ -748,6 +748,8 @@ sample withdrawal.
 
 [Headless worlds](docs/headless-worlds.md) adds declarative simulation scenes,
 shared world queries, timed actions, checkpoints, replay and branch comparison.
+[Versioned simulation models](docs/simulation-models.md) package domains, parameters,
+operator revisions, clocks, and named measurements in a runnable JSON asset.
 [System contracts](docs/headless-worlds.md#compose-system-contracts) expose
 typed connections, state reads, event kinds, and execution dependencies.
 [Spatial field coupling](docs/headless-worlds.md#spatial-field-coupling) shares

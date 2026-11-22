@@ -9,6 +9,7 @@ const { groupEntries, groupReference, groupDocument, requireGroupReference } = r
 const formats = {
   'ink-studio/take': 'take',
   'ink-studio/world': 'world',
+  'ink-studio/simulation-model': 'world',
   'ink-studio/graph-project': 'graph',
   'ink-studio/graph-group': 'group',
   'ink-studio/scene-audio': 'audio',

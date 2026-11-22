@@ -3,7 +3,6 @@
   const W = K.world, P = K.procedural, Q = W.query, freeze = P.data.freeze;
   const {check,record,id,vector,own,copy,equal,endpoint,portOf} = W.data;
   const factories = new Map();
-  const bundledPartitions = new Set();
   const clock = () => typeof performance === 'undefined' ? Date.now() : performance.now();
   const maxTick = 10000000;
   const tickOK = value => Number.isSafeInteger(value) && value >= 0 && value <= maxTick;
@@ -43,7 +42,7 @@
       let provider=providers.get(name);
       if(!provider){
         const spec=world.systems[name];
-        const factory=own(implementations,spec.kind)?implementations[spec.kind]:factories.get(spec.kind);
+        const factory=factoryFor(spec,implementations);
         provider=factory?.(spec.config??{},{world,id:name,catalog});
         check(provider?.partitionStep===true,'System cannot run in a worker partition: '+name);
         providers.set(name,provider);
@@ -71,10 +70,23 @@
     };
   }
 
-  function register(kind, factory, { worker = false } = {}) {
-    check(id(kind) && typeof factory === 'function' && !factories.has(kind), 'Invalid or duplicate system kind ' + kind);
-    factories.set(kind,factory);
-    if(worker)bundledPartitions.add(kind);
+  function register(kind, factory, { worker = false, revision = 1 } = {}) {
+    const versions = factories.get(kind) ?? new Map();
+    check(id(kind) && typeof factory === 'function' && Number.isSafeInteger(revision) && revision > 0 &&
+      !versions.has(revision), 'Invalid or duplicate system kind ' + kind + ' revision ' + revision);
+    versions.set(revision, {factory, worker});
+    factories.set(kind, versions);
+  }
+  function registration(spec) {
+    const versions = factories.get(spec.kind);
+    return spec.operatorRevision === undefined ? versions?.values().next().value : versions?.get(spec.operatorRevision);
+  }
+  function factoryFor(spec, implementations) {
+    if (spec.operatorRevision === undefined && own(implementations, spec.kind)) return implementations[spec.kind];
+    const resolved = registration(spec);
+    check(spec.operatorRevision === undefined || resolved,
+      'Unregistered simulation operator ' + spec.kind + ' revision ' + spec.operatorRevision);
+    return resolved?.factory;
   }
   const types = {
     bool:value => typeof value === 'boolean',
@@ -93,7 +105,7 @@
     const catalog = W.materials.catalog(world);
     const ports = {inputs:{},outputs:{}};
     for (const name of ordered(world.systems)) {
-      const spec = world.systems[name], factory = own(implementations,spec.kind) ? implementations[spec.kind] : factories.get(spec.kind);
+      const spec = world.systems[name], factory = factoryFor(spec,implementations);
       check(name !== 'world' && id(spec.kind) && typeof factory === 'function', 'Unknown or reserved system ' + name + ' (' + spec.kind + ')');
       check(record(spec.config??{}),'Invalid config for '+name);
       const system = factory(spec.config ?? {},{world,id:name,catalog});
@@ -205,6 +217,7 @@
       if (delay === 0 && sample !== 'average' && systems[from].combinational)
         phaseEdges.push({kind:'signal',from,to,output:edge.from,input:edge.to});
     }
+    if (world.simulationModel) W.models.checkInterface(world,ports,incoming,systems);
     for (const {from,to} of phaseEdges) {
       indegree.set(to,indegree.get(to)+1);
       edges.get(from).push(to);
@@ -301,7 +314,8 @@
     });
   }
   function prepare(source,{implementations} = {}) {
-    const world = W.manifest(source), plan = compile(world,implementations);
+    const world = source?.format === W.models.format ? W.models.compile(source) : W.manifest(source);
+    const plan = compile(world,implementations);
     for (const command of world.commands) actionCheck(command,plan);
     scenarioCheck(world.scenario,plan);
     const catalog = W.materials.catalog(world);
@@ -354,9 +368,10 @@
     const debug=traceSteps===undefined?null:W.stepDebug.capture(traceSteps);
     const observers=names.filter(name=>systems[name].afterStep);
     const partitioned=workerPool&&new Set(names.filter(name=>{
-      const {kind}=world.systems[name];
-      return systems[name].partitionStep===true&&!Object.keys(contracts.get(name)?.reads??{}).length&&(own(installed,kind)?
-        own(modules,kind)&&installed[kind]===modules[kind]:bundledPartitions.has(kind));
+      const spec=world.systems[name], {kind}=spec;
+      return systems[name].partitionStep===true&&!Object.keys(contracts.get(name)?.reads??{}).length&&
+        (spec.operatorRevision===undefined&&own(installed,kind)?
+          own(modules,kind)&&installed[kind]===modules[kind]:registration(spec)?.worker);
     }));
     const partitionBarriers=workerPool&&new Set();
     if(partitioned?.size)for(const {from,to} of phaseEdges)

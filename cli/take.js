@@ -20,8 +20,9 @@ function createTake({ clock: definition = {}, world, graph } = {}, {
   const settings = K.procedural.data.freeze(K.procedural.data.clone(definition));
   const clock = K.timeDomains.take(settings);
   if (world !== undefined && !W.data.record(world)) throw new TypeError('Expected an Ink Studio world manifest');
-  const source = world === undefined ? undefined :
-    W.manifest({ ...world, dt: world.dt ?? clock.dt, takeClock: settings });
+  const manifest = world?.format === W.models.format ? W.models.compile(world) : world;
+  const source = manifest === undefined ? undefined :
+    W.manifest({ ...manifest, dt: manifest.dt ?? clock.dt, takeClock: settings });
   if (source && source.dt !== clock.dt) throw new RangeError('Take simulation rate must match the world timestep');
   const identity = createHash('sha256').update(JSON.stringify([settings, source, graph?.plan().projectHash])).digest('hex');
   const restore = saved => runtime.create(saved.world, { checkpoint: saved });

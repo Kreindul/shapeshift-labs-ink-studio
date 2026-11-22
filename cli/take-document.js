@@ -26,8 +26,8 @@ function readTakeWorld(file, spec, kit, dependency = () => {}) {
   if (spec.world === undefined) return;
   const location = path.resolve(path.dirname(file), spec.world);
   dependency(location);
-  const world = JSON.parse(fs.readFileSync(location, 'utf8'));
-  const K = kit.KIT;
+  const document = JSON.parse(fs.readFileSync(location, 'utf8')), K = kit.KIT;
+  const world = document?.format === K.world.models.format ? { ...K.world.models.compile(document) } : document;
   if (world.dataInputs !== undefined) world.dataInputs = embed(K.dataInputs, world.dataInputs, location, dependency);
   if (spec.assetPack !== undefined) {
     const pack = path.resolve(path.dirname(file), spec.assetPack);
