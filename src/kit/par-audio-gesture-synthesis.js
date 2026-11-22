@@ -99,7 +99,7 @@
       Object.hasOwn(models,options.model),'Choose the breath, scrape or metal gesture model');
     const {model,sampleRate=24000,seed=0,parameters={},room=0}=options, spec=models[model];
     const duration=options.duration ?? spec.duration;
-    check(integer(sampleRate,8000,96000) && integer(seed,0,0xffffffff) && finite(duration,.04,5) &&
+    check(integer(sampleRate,8000,96000) && Number.isSafeInteger(seed) && finite(duration,.04,5) &&
       finite(room,0,1) && fields(parameters,Object.keys(spec.parameters)),'Invalid gesture synthesis options');
     const state=Object.fromEntries(Object.entries(spec.parameters).map(([name,[fallback,min,max]])=>{
       const value=parameters[name] ?? fallback;

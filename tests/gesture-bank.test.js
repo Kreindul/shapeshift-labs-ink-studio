@@ -94,6 +94,9 @@ test('recorded and procedural descriptors support explainable search, aperiodic 
   assert.deepEqual(bank.generate({session,id:'lift',samplePrefix:'lift',synthesis:breath({}, {room:.65})}).slices[0],
     bank.get('models/lift/gesture'));
   assert.notDeepEqual(A.synthesizeGesture({model:'metal',seed:1}).value,A.synthesizeGesture({model:'metal',seed:2}).value);
+  const signed=A.synthesizeGesture({model:'metal',seed:-23});
+  assert.equal(signed.report.seed,-23);
+  assert.deepEqual(A.synthesizeGesture({model:signed.report.model,seed:signed.report.seed}).value,signed.value);
 });
 
 test('music gestures CLI generates, searches, auditions and keeps across processes',t=>{
