@@ -107,3 +107,6 @@ the phase, filter, delay line, write head and noise state. The world save
 also holds two notes for a slow meter and a two-tick level delay. The
 board compares resumed and uninterrupted samples and shows the local
 sample position through carry, reset, and loop boundaries.
+
+[Controlled model changes](simulation-model-changes.md) also checkpoint parameter
+ramps and both prepared kernels during a topology crossfade.

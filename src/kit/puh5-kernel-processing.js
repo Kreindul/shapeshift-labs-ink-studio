@@ -24,7 +24,7 @@
     const inputPorts=Object.entries(spec.inputs), outputPorts=Object.entries(spec.outputs);
     const input=Object.fromEntries(inputPorts.map(([name,port])=>[name,port.default]));
     const published=Object.fromEntries(outputPorts.map(([name,port])=>[name,port.default]));
-    const staged={...published}, state={}, publicBuffers={}, layout={}, backups=[];
+    const staged={...published}, previous={...published}, state={}, publicBuffers={}, layout={}, backups=[];
     let allocatedBytes=0, stateBytes=0, rollbackBytes=0, allocating=true, running=false;
     function allocate(name,type,length,role='scratch') {
       check(allocating && id(name) && !own(layout,name) && own(arrays,type) &&
@@ -66,7 +66,7 @@
       {get:()=>published[name],enumerable:true}]))));
     let position=0, end=0, requests=0, completed=0, processedSamples=0,
       sampleOverruns=0, workOverruns=0, deadlines=0, faults=0,
-      peakSamples=0, peakWork=0, peakMs=null, lastMs=null, status='ready', work=0, refused=false, lastRequestedSamples=0, lastWork=null;
+      peakSamples=0, peakWork=0, peakMs=null, lastMs=null, status='ready', work=0, refused=false, lastRequestedSamples=0, lastWork=null, undoCount=0;
     const context=Object.freeze({get start(){return position;},get end(){return end;},dt,input,output:staged,
       charge(units) {
         check(running && Number.isSafeInteger(units) && units>=0,'Invalid prepared work charge');
@@ -104,19 +104,35 @@
       prepared.reset?.(staged);
       publish();
       position=0;
+      undoCount=0;
     }
     function install(buffers,outputs,at) {
       check(!running,'Prepared kernel is already processing');
       for (const name of Object.keys(state)) state[name].set(buffers[name]);
       for (const [name] of outputPorts) published[name]=outputs[name];
       position=at;
+      undoCount=0;
     }
     function restoreWorkingBuffers() {
       for (let i=0;i<backups.length;i++) backups[i][0].set(backups[i][1]);
     }
-    function process(count) {
+    function rollbackLast() {
+      check(!running && undoCount>0,'No prepared block to roll back');
+      restoreWorkingBuffers();
+      for (let i=0;i<outputPorts.length;i++) {
+        const name=outputPorts[i][0];
+        published[name]=previous[name];
+      }
+      position-=undoCount;
+      processedSamples-=undoCount;
+      completed--;
+      undoCount=0;
+      status='rolled-back';
+    }
+    function process(count,forPair=false) {
       check(!running && Number.isSafeInteger(count) && count>=0 && Number.isSafeInteger(position+count),
         'Invalid prepared process range');
+      undoCount=0;
       requests++;
       lastRequestedSamples=count;
       const requestedWork=count===0 ? 0 : workPerBlock+workPerSample*count;
@@ -137,7 +153,11 @@
         if (!finite(port[1].type,input[port[0]])) throw Error('Invalid prepared input '+port[0]);
       }
       for (let i=0;i<backups.length;i++) backups[i][1].set(backups[i][0]);
-      for (let i=0;i<outputPorts.length;i++) staged[outputPorts[i][0]]=undefined;
+      for (let i=0;i<outputPorts.length;i++) {
+        const name=outputPorts[i][0];
+        if (forPair) previous[name]=published[name];
+        staged[name]=undefined;
+      }
       end=position+count;
       work=workPerBlock+workPerSample*count;
       refused=false;
@@ -160,6 +180,7 @@
       } finally {
         running=false;
       }
+      if (forPair) undoCount=count;
       position+=count;
       completed++;
       processedSamples+=count;
@@ -184,7 +205,7 @@
     const report=()=>({capacity:planned,memory,
       observed:{requests,completed,cursor:position,processedSamples,peakSamples,peakWork,peakMs,
         lastMs,lastRequestedSamples,lastWork,status,overruns:{samples:sampleOverruns,work:workOverruns,deadline:deadlines},faults}});
-    return Object.freeze({process,reset,install,input,output:levels,buffers:Object.freeze(publicBuffers),state:Object.freeze(state),
+    return Object.freeze({process,rollbackLast,reset,install,input,output:levels,buffers:Object.freeze(publicBuffers),state:Object.freeze(state),
       report,capacity:planned,position:()=>position});
   }
 

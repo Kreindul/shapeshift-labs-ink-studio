@@ -532,6 +532,20 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         return respond({id:saved.identity.id,sample:play.cursor(),capacity:play.capacity,
           outputs:saved.kernel.outputs,pendingEvents:saved.events,...(Object.keys(storage).length&&{storage})});
       }
+      case 'model-changes': {
+        ensure(typeof file==='string' && (opt.samples===undefined||typeof opt.samples==='string' && /^\d+$/.test(opt.samples)) &&
+          (opt.resume===undefined||typeof opt.resume==='string') &&
+          (opt.checkpoint===undefined||typeof opt.checkpoint==='string') &&
+          (opt.samples!==undefined||opt.resume===undefined&&opt.checkpoint===undefined),
+        'Use sim model-changes <plan.json> [--samples N --resume file.json --checkpoint file.json]');
+        const source=embedModels(read(file),file,shot?.dependency);
+        const {value:checkpoint,store}=opt.resume===undefined?{}:readCheckpointFile(opt.resume);
+        const play=W.modelChanges.create(source,{checkpoint});
+        if (opt.samples!==undefined) play.process(Number(opt.samples)-play.cursor());
+        const {storage,save}=saveCheckpoints(store);
+        if (opt.checkpoint!==undefined) save('checkpoint',opt.checkpoint,play.checkpoint());
+        return respond({...play.inspect(),...(Object.keys(storage).length&&{storage})});
+      }
       case 'block-check': {
         ensure(typeof file==='string' && typeof other==='string' &&
           (opt.candidate===undefined||typeof opt.candidate==='string'),

@@ -43,6 +43,15 @@ function mapModels(document, resolve) {
 
   const withModules = mapSection(document, 'modules', modelDefinition);
   if (isModel(document)) return mapSection(withModules, 'operators', system);
+  if (document.format==='ink-studio/simulation-model-changes') {
+    const plan=mapSection(document,'variants',modelDefinition);
+    if (!Array.isArray(plan.changes)) return plan;
+    const changes=plan.changes.map(change=>{
+      const model=modelDefinition(change?.model);
+      return model===change?.model?change:{...change,model};
+    });
+    return changes.some((change,i)=>change!==plan.changes[i])?{...plan,changes}:plan;
+  }
   return mapSection(mapSection(withModules, 'systems', system), 'prefabs',
     prefab => record(prefab) ? mapSection(prefab, 'systems', system) : prefab);
 }

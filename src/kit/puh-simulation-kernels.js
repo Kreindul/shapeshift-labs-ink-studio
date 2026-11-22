@@ -8,7 +8,7 @@
   const defaults = {number:0, bool:false, vec3:[0,0,0], record:{}, event:[]};
   const arrays = {Int8Array,Uint8Array,Uint8ClampedArray,Int16Array,Uint16Array,Int32Array,Uint32Array,Float32Array,Float64Array};
   const littleEndian = new Uint8Array(Uint16Array.of(1).buffer)[0] === 1;
-  const kernels = new Map(), operations = new Map();
+  const kernels = new Map(), operations = new Map(), processors = new WeakMap();
   const storageType = value => ArrayBuffer.isView(value) && Object.prototype.toString.call(value).slice(8,-1);
   const isFloat = type => type === 'Float32Array' || type === 'Float64Array';
   const positiveRevision = value => Number.isSafeInteger(value) && value > 0;
@@ -128,7 +128,7 @@
     check(!spec.block || typeof kernel.advanceBlock === 'function', 'Block kernel prepare must return advanceBlock');
     const reactive = Object.values(spec.inputs).some(port=>port.timing==='split');
     check(!reactive || typeof kernel.react==='function','Timed kernel inputs need a react hook');
-    let current, shape;
+    let current, shape, dirty=false;
 
     function state(outputs, steps) {
       const snap = kernel.snapshot();
@@ -158,8 +158,10 @@
     }
 
     function snapshot() {
-      if (processing && current && current.steps!==processing.position())
+      if (processing && current && (dirty || current.steps!==processing.position())) {
         current=state(values(spec.outputs,processing.output,true),processing.position());
+        dirty=false;
+      }
       return current;
     }
     function install(saved,{outputs,payload}) {
@@ -247,11 +249,58 @@
       });
     }
     reset();
-    const processor=processing && Object.freeze({process:processing.process,input:processing.input,
+    const processor=processing && Object.freeze({process:count=>processing.process(count),input:processing.input,
       output:processing.output,buffers:processing.buffers,capacity:processing.capacity,report:processing.report,
       snapshot,reset,restore});
+    if (processor) processors.set(processor,{processing,markDirty:()=>{dirty=true;}});
     return Object.freeze({advance,reset,snapshot,restore,...(spec.block && {advanceBlock}),...(reactive && {react}),
       ...(processor && {processor})});
+  }
+
+  function prepareStateTransfer(source,target,mapping) {
+    const from=processors.get(source), to=processors.get(target);
+    check(from && to && from!==to && Array.isArray(mapping) && mapping.length>0 && mapping.length<=64,
+      'State remapping needs two prepared kernels and 1–64 spans');
+    const spans=mapping.map(row=>{
+      check(keys(row,['from','to','source','target','count']) && id(row.from) && id(row.to),
+        'Invalid state remap span');
+      const src=from.processing.state[row.from], dst=to.processing.state[row.to];
+      const {source:a=0,target:b=0,count}=row;
+      check(src && dst && src.constructor===dst.constructor && [a,b,count].every(Number.isSafeInteger) &&
+        a>=0 && b>=0 && count>0 && count<=src.length-a && count<=dst.length-b,
+      'State remap type or range mismatch for '+row.from+' → '+row.to);
+      return {source:src.subarray(a,a+count),dst,start:b,end:b+count};
+    });
+    for (let i=0;i<spans.length;i++) for (let j=0;j<i;j++) {
+      const a=spans[i], b=spans[j];
+      check(a.dst!==b.dst || a.start>=b.end || b.start>=a.end,'State remap target ranges overlap');
+    }
+    return Object.freeze({copy() {
+      for (let i=0;i<spans.length;i++) {
+        const {source,dst,start}=spans[i];
+        dst.set(source,start);
+      }
+      to.markDirty();
+    }, elements:spans.reduce((sum,span)=>sum+span.source.length,0)});
+  }
+
+  function processPair(source,target,count) {
+    const first=processors.get(source)?.processing, second=processors.get(target)?.processing;
+    check(first && second && first!==second && Number.isSafeInteger(count) && count>0,
+      'Paired processing needs two prepared kernels and a positive block size');
+    const firstStatus=first.process(count,true);
+    if (firstStatus!=='ok' && firstStatus!=='deadline') return firstStatus;
+    let secondStatus;
+    try { secondStatus=second.process(count); }
+    catch(error) {
+      first.rollbackLast();
+      throw error;
+    }
+    if (secondStatus!=='ok' && secondStatus!=='deadline') {
+      first.rollbackLast();
+      return secondStatus;
+    }
+    return firstStatus==='deadline'?'deadline':secondStatus;
   }
 
   function worldProvider(spec) {
@@ -366,6 +415,6 @@
     return name;
   }
 
-  W.kernels = Object.freeze({register,prepare,inspectBuffers,format,maxBlockSize,operation:name => operations.get(name),
+  W.kernels = Object.freeze({register,prepare,prepareStateTransfer,processPair,inspectBuffers,format,maxBlockSize,operation:name => operations.get(name),
     graphOperations:() => Object.fromEntries(operations)});
 })(KIT);

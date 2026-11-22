@@ -752,6 +752,7 @@ shared world queries, timed actions, checkpoints, replay and branch comparison.
 operator revisions, clocks, and named measurements in a runnable JSON asset.
 [Reusable simulation modules](docs/simulation-modules.md) combine those models through named ports with independent instance settings and state.
 [Creator-authored simulation kernels](docs/simulation-kernels.md) add typed solver buffers, portable snapshots, and registered graph nodes.
+[Controlled model changes](docs/simulation-model-changes.md) add sample-timed parameter ramps and prepared topology swaps with state remapping or crossfades.
 [System contracts](docs/headless-worlds.md#compose-system-contracts) expose
 typed connections, state reads, event kinds, and execution dependencies.
 [Spatial field coupling](docs/headless-worlds.md#spatial-field-coupling) shares
