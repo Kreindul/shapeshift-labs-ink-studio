@@ -780,6 +780,7 @@
               }
             }
             rows.push({ from: start, to: end, shade, radius: size, opacity: rowOpacity, profile, finish, lighting,
+              arc: [distance + previous * length, distance + next * length, total],
               clips: left || right ? [left, right] : undefined,
               pattern: patternRow,
               ...(timing && { timeRange: [(distance + previous * length) / total, (distance + next * length) / total,
@@ -790,7 +791,7 @@
         } while (previous < 1);
         distance += length;
       }
-      return { id, rows, rest, followNormals: Boolean(chartNormals), ...(lod?.aggregate && { knots,
+      return { id, rows, rest, length: total, followNormals: Boolean(chartNormals), ...(lod?.aggregate && { knots,
         maxRadius: rows.reduce((best, row) => Math.max(best, row.radius), 0) }) };
     });
     const plan = { object, material, target, edge, strands, segments, examined, timing, pattern, shadows, lod };
@@ -801,19 +802,21 @@
     return plan;
   }
 
-  function emit(builder, plan) {
+  function emit(builder, plan, aggregate = false) {
     check(typeof builder?.curveSplat === 'function', 'expected a native splat builder');
     const first = builder.count(), threads = [];
     const groups = plan.edge === 'hard' ? plan.strands.filter(strand => strand.rows.length).length : 0;
     let nextGroup = groups ? builder.reserveCurveGroups(groups) : 0;
     const timing = plan.timing && plan.segments ? builder.registerCurveTiming(plan.timing) : undefined;
     const program = plan.pattern && plan.segments ? builder.registerCurvePattern(plan.pattern) : undefined;
-    for (const { id, rows } of plan.strands) {
+    for (const { id, rows, length } of plan.strands) {
       const start = builder.count();
       const group = nextGroup && rows.length ? nextGroup++ : undefined;
-      for (const { from, to, shade, radius, opacity, profile, clips, finish, lighting, timeRange, pattern } of rows)
+      const strand = rows.length && builder.registerCurveStrand?.({ name: id, object: plan.object,
+        material: plan.material, length, ...(aggregate && { aggregate: true }) });
+      for (const { from, to, shade, radius, opacity, profile, clips, finish, lighting, timeRange, pattern, arc } of rows)
         builder.curveSplat(from, to, radius, shade, opacity, profile, plan.edge, group, clips, finish, lighting,
-          timing && [timing, ...timeRange], pattern && { ...pattern, program }, plan.shadows);
+          timing && [timing, ...timeRange], pattern && { ...pattern, program }, plan.shadows, strand ? [strand, ...arc] : undefined);
       const end = builder.count();
       builder.describeSplats?.(start, end, {
         object: plan.object, material: plan.material, target: { entity: plan.object, ...plan.target, surface: id }
@@ -825,7 +828,7 @@
       const runs = plan.lod.simplify ? simplificationRuns(plan.strands, threads) : [];
       let aggregate;
       if (plan.proxy) {
-        proxy = emit(builder, plan.proxy.plan);
+        proxy = emit(builder, plan.proxy.plan, true);
         aggregate = { detail: threads.filter(thread => thread.end > thread.first).map(thread => [thread.first, thread.end]),
           proxy: [proxy.first, proxy.end], pitch: plan.proxy.pitch, opacity: plan.proxy.opacity,
           transition: plan.proxy.settings.transition };
@@ -906,6 +909,7 @@
             if (geometry.normal) world.renderMetadata?.normals?.set(geometry.normal, indexOfRow * 3);
             for (let k = 0; k < slots.length; k++) data[q + slots[k]] = geometry.covariance[k];
             data[q + 13] = geometry.half;
+            world.curveStations?.set(geometry.axis, indexOfRow * CurveSplat.stationStride + 4);
             if (row.timeRange) world.curveTiming.set(geometry.axis, indexOfRow * CurveSplat.timingStride + 5);
             if (row.pattern) {
               const at = indexOfRow * CurvePattern.stride;
@@ -941,6 +945,7 @@
           data[q + 13] = geometry?.half ?? 0;
           if (geometry) {
             data.set(geometry.center, q);
+            world.curveStations?.set(geometry.axis, i * CurveSplat.stationStride + 4);
             for (let k = 0; k < slots.length; k++) data[q + slots[k]] = geometry.covariance[k];
             data[q + 12] = coarse.radius;
           }

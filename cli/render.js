@@ -15,6 +15,7 @@ const TargetSelectors = require('../src/target-selectors.js');
 const { createArtPasses, sampleFrames, selectVisibleSubjects } = require('./art-passes.js');
 const ArtPasses = require('../src/art-passes.js');
 const PartMotion = require('./part-motion.js');
+const StrandPasses = require('./strand-passes.js');
 const { createEnvironmentPasses } = require('./environment-passes.js');
 const ArtInk = require('../src/art-ink.js');
 const ArtDirection = require('../src/art-direction.js');
@@ -147,8 +148,13 @@ function sequenceHistory(kit) {
     transparencyHistory: kit.stableTransparency.history(),
     colorClusterHistory: ColorClusters.history(),
     motionalCoverageHistory: MotionalCoverage.history(),
-    partMotionHistory: PartMotion.history()
+    partMotionHistory: PartMotion.history(),
+    strandMotionHistory: PartMotion.history()
   };
+}
+
+function sequenceOutput(history, draw) {
+  return history.partMotionHistory.output(() => history.strandMotionHistory.output(draw));
 }
 
 function render(world, o, preparedPalettes) {
@@ -250,7 +256,8 @@ function render(world, o, preparedPalettes) {
       base.w, base.h, (sample, settings) => render(sample, { ...settings,
         [shutterPlan]: null, [captureCamera]: undefined, [probeCaptures]: undefined, [deepScope]: undefined, [matteScope]:null,
         [reconstructionSource]: undefined, [sampledPresentation]: false, [afterimageRows]: undefined,
-        motionalCoverageHistory: undefined, colorClusterHistory: undefined, partMotionHistory: undefined, capturePartMotion: false
+        motionalCoverageHistory: undefined, colorClusterHistory: undefined, partMotionHistory: undefined, capturePartMotion: false,
+        strandMotionHistory: undefined, captureStrandMotion: false, strandPixel: undefined
       }, preparedPalettes), kit) : o[Shutter.passImages];
     const frame = { ...base, ...runGraph(graph, base, world, time, kit.poly2.text, camera,
       (spec,ctx) => kit.annotations.anchor(spec,{ ...ctx,sceneTime:o?.t ?? ctx.sceneTime }),
@@ -291,7 +298,8 @@ function render(world, o, preparedPalettes) {
         ...(nominal ? { [deferredShotCorrection]: apply => { applyCorrection = apply; } } : {
           shotCorrections: false, captureShotCorrectionSurface: false, [deferredShotCorrection]: undefined,
           [captureCamera]: undefined, [deepScope]: undefined, [matteScope]:null, [sampledPresentation]: false,
-          motionalCoverageHistory: undefined, colorClusterHistory: undefined, partMotionHistory: undefined, capturePartMotion: false })
+          motionalCoverageHistory: undefined, colorClusterHistory: undefined, partMotionHistory: undefined, capturePartMotion: false,
+          strandMotionHistory: undefined, captureStrandMotion: false, strandPixel: undefined })
       }, preparedPalettes), kit);
     return applyCorrection ? applyCorrection(integrated) : integrated;
   }
@@ -629,7 +637,7 @@ function renderFrame(world, o, preparedPalettes) {
       frame.paletteInventory = { base:basePalette, colors:[...declared].filter(Number.isInteger) };
     }
     if (o.captureScenePalette) frame.scenePalette = legacyLook && !tone ? basePalette : null;
-    if (!o.captureMotion && !o.capturePartMotion) delete frame.motionReference;
+    if (!o.captureMotion && !o.capturePartMotion && !o.captureStrandMotion) delete frame.motionReference;
     if (requestedPasses.length) frame.passes = ArtPasses.subset(passes, requestedPasses);
     if (readabilitySelectors && frame.readabilityMask) o.captureReadabilityFrame?.(frame);
     return frame;
@@ -696,6 +704,11 @@ function renderFrame(world, o, preparedPalettes) {
   const partView = (!o.samples || o[nativePartMotion]) && !o.captureCoverage && !o.reflectionPlane && !probeView;
   const captureParts = partView && (!!o.capturePartMotion || ArtPasses.needsPartMotion(requestedPasses));
   if (partView && !captureParts && (o.resetRenderHistory || o.resetPartMotion)) o.partMotionHistory?.clear();
+  const captureStrandMotion = partView && (!!o.captureStrandMotion || ArtPasses.needsStrandMotion(requestedPasses));
+  const strandReset = o.resetRenderHistory || o.resetStrandMotion;
+  if (partView && !captureStrandMotion && strandReset) o.strandMotionHistory?.clear();
+  const captureStrands = partView && (captureStrandMotion || o.strandPixel !== undefined ||
+    requestedPasses.some(channel => ArtPasses.strands.includes(channel)));
   const focus = !o.captureCoverage && protection?.focus && (o[subjectFocusPass] !== undefined ? o[subjectFocusPass] :
     SubjectFocus.frame(protection.focus,renderFrame(world,{
       ...o, [subjectFocusPass]:false, px, samples:true, worked:false, artInkActive:!!ink || o.artInkActive,
@@ -729,7 +742,8 @@ function renderFrame(world, o, preparedPalettes) {
         volumeHistory: null,
         artInkActive: !!ink,
         [subjectFocusPass]:focus,
-        captureMotion: false, capturePartMotion:false, motionFrom: undefined, effectPaletteCapture: null, reflectionTint: effects?.reflection,
+        captureMotion: false, capturePartMotion:false, captureStrandMotion:false, strandPixel:undefined,
+        motionFrom: undefined, effectPaletteCapture: null, reflectionTint: effects?.reflection,
         passes: specializedResolve ? ['coverage'] : false,
         lookAudit: false
       })
@@ -762,6 +776,7 @@ function renderFrame(world, o, preparedPalettes) {
       evaluatedPalette && !local && { palette: evaluatedPalette },
       !specializedResolve && native.detail && { detail: native.detail },
       native.motionReference && { motionReference: native.motionReference },
+      native.strandPixel && { strandPixel: native.strandPixel },
       native.deep && { deep: native.deep },
       native.objectMattes && { objectMattes:native.objectMattes },
       native.silhouetteMask && { silhouetteMask:native.silhouetteMask },
@@ -796,7 +811,7 @@ function renderFrame(world, o, preparedPalettes) {
   const curveCamera = curves && { view: V, near, focal, width: W, height: H, ortho, artScale: o.artGridScale || 1 };
   const curveLightSample = curves && [1, 0, 0];
   const curvePigmentSample = curves && [1];
-  const curveFrames = (curves && (world.curveClips || world.curvePattern) || curveScene && (world.curveTiming || shutterRows)) &&
+  const curveFrames = (curves && (world.curveClips || world.curvePattern || captureStrands) || curveScene && (world.curveTiming || shutterRows)) &&
     (world.anim?.rig || world.anim?.bones || world.reconstructionPose) &&
     sampleFrames(world, t);
   const ditherView = anchorSpaces.has('view') ? ArtStability.viewProjection(V) : undefined;
@@ -907,7 +922,7 @@ function renderFrame(world, o, preparedPalettes) {
   const glassIndex = optics && TargetSelectors.index(world);
   const glassLooks = glassIndex && new Map();
   const centers = captureMotion ? new Float32Array(N * 2).fill(NaN) : null;
-  const motionReference = (centers || captureParts) && { w: W, h: H, ...(centers && {centers}),
+  const motionReference = (centers || captureParts || captureStrandMotion) && { w: W, h: H, ...(centers && {centers}),
     ...(birthIds && { birthIds, baseCount, splatSource, emitterSource }) };
   const partSource = o[reconstructionSource] ?? captureWorld;
   const partCapture = captureParts && {
@@ -915,8 +930,13 @@ function renderFrame(world, o, preparedPalettes) {
     camera:{view:V.slice(),focal,ortho,near}, time:sceneTime, reset:o.resetRenderHistory || o.resetPartMotion,
     previous:o.motionFrom?.partMotion ?? o.partMotionHistory?.previous()
   };
+  const strandTrace = captureStrands && StrandPasses.create(world, passSelection, W, H, {
+    pixel:o.strandPixel, motion:captureStrandMotion, camera:{view:V,focal,ortho,near}, time:sceneTime,
+    source:o.strandMotionSource ?? partSource.rest ?? partSource.data, reset:strandReset,
+    previous:o.motionFrom?.strandMotion ?? o.strandMotionHistory?.previous()
+  });
   const art = createArtPasses([...passSelection].filter(name => name !== 'target' && name !== 'mask' && name !== 'paletteOwner' &&
-    !ArtPasses.environment.includes(name)), W, H, trackGlow && emissive?.slots, partCapture);
+    !ArtPasses.environment.includes(name) && !ArtPasses.strands.includes(name)), W, H, trackGlow && emissive?.slots, partCapture);
   const environmentPasses = createEnvironmentPasses(passSelection, W, H, world);
   const skyPass = environmentPasses?.passes.sky, fogPass = environmentPasses?.passes.fogTransmittance;
   const reflectPass = environmentPasses?.passes.reflections;
@@ -1225,11 +1245,14 @@ function renderFrame(world, o, preparedPalettes) {
   const timePrograms = curveScene && (world.curveTiming || shutterRows) && new Map();
   const curveWindows = curves && timePrograms && new Array(baseCount);
   let carrierDataCopied = d !== baseData;
+  function posedDirection(direction, frame) {
+    if (!frame) return direction;
+    const m = frame.basis().anchor;
+    return [0, 3, 6].map(k => m[k] * direction[0] + m[k + 1] * direction[1] + m[k + 2] * direction[2]);
+  }
   function posedWindow(window, frame) {
     if (!window || !frame || window.first === 0 && window.last === 1) return window;
-    const { direction } = window, m = frame.basis().anchor;
-    return { ...window, direction: [0, 3, 6].map(k =>
-      m[k] * direction[0] + m[k + 1] * direction[1] + m[k + 2] * direction[2]) };
+    return { ...window, direction: posedDirection(window.direction, frame) };
   }
   for (let i = 0, q = 0; i < N; i++, q += 16) {
     if (qualityRows && !qualityRows.keep[i] || geometryMask && spriteLOD.hidden(geometryMask.codes[i])) continue;
@@ -1382,7 +1405,7 @@ function renderFrame(world, o, preparedPalettes) {
     const window = posedWindow(curveWindows?.[i], frame);
     const pattern = CurvePattern.attach(carrier, i, frame, camera, forShadow);
     return CurveSplat.prepare(replacement?.data ?? d, replacement ? 0 : i * 16, position, replacement ? 1 : SC[i], AL[i], camera, clips, window,
-      forShadow ? undefined : curveWidthAt?.(i), pattern);
+      forShadow ? undefined : curveWidthAt?.(i), pattern, !forShadow && strandTrace);
   }
   const probes = ProbeLighting.create(world,o.bounceProbes,baseSky,sun,o[reconstructionSource]);
   function receivesDiffuse(i) {
@@ -1596,7 +1619,7 @@ function renderFrame(world, o, preparedPalettes) {
   }
   const foregroundDepth = z => z - (eyeD-dist);
   function composite(p, i, z, dn, a, pr, pg, pb, wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, mark,
-    opticalDepth = z, sprite, haze = 0, rule, reflected, filteredEdge = false, refraction = 1, sectionEdge = false, claim, baseColor, surfaceMatte, emissionTint) {
+    opticalDepth = z, sprite, haze = 0, rule, reflected, filteredEdge = false, refraction = 1, sectionEdge = false, claim, baseColor, surfaceMatte, emissionTint, strandHit) {
     if (surfaceDepth && (!sprite?.surface || sdf) && opticalDepth > surfaceDepth[p]+1e-5) return;
     if (focus?.rain || fallingCoverage) {
       const kind = i < 0 ? 0 : Math.round(d[i*16+11])%16;
@@ -1607,6 +1630,7 @@ function renderFrame(world, o, preparedPalettes) {
       if (fallingCoverage) fallingCoverage[p] = (kind === 2 || kind === 15 ? a : 0)+fallingCoverage[p]*(1-a);
     }
     const p3 = p * 3, ia = 1 - a;
+    if (strandTrace) strandTrace.fragment(p, a, opticalDepth, strandHit);
     if (counters) {
       counters.fragments++;
       if (!wd && a < 1) counters.translucentFragments++;
@@ -1809,9 +1833,9 @@ function renderFrame(world, o, preparedPalettes) {
         (reflectionPlane.select && !reflectionPlane.select(i, x, y, z, world)))
     )
       continue;
-    let curve, curveStrength, curveMargin = 0, roughness, curveEmission, curveLight, curveReceives;
+    let curve, curveWorld, curveSpan, curveStrength, curveMargin = 0, roughness, curveEmission, curveLight, curveReceives;
     if (curveCamera && CurveSplat.isRow(d, q)) {
-      const curveWorld = shutterRows?.pose(i) ?? world;
+      curveWorld = shutterRows?.pose(i) ?? world;
       curve = prepareCurve(i, curveCamera, curveWorld, false, coarse);
       if (!curve) continue;
       curveStrength = !opticalActive && edgeStrengthAt && edgeStrengthAt(i);
@@ -2140,9 +2164,11 @@ function renderFrame(world, o, preparedPalettes) {
         const planeRay=planeFrame&&rayAt(ix+.5,iy+.5);
         const planeHit=planeRay&&SplatFootprints.planeSample(shapeCenter,frame,planeRay.origin,planeRay.direction);
         if(planeFrame&&!planeHit)continue;
-        const curveFootprint = curveStrength && CurveCoverage.footprint(curve, rayAt, ix + .5, iy + .5, near, curveNormal, curveStrength);
+        const p = iy * W + ix;
+        const wantStation = curve && strandTrace && strandTrace.wants(p);
+        const curveFootprint = curveStrength && CurveCoverage.footprint(curve, rayAt, ix + .5, iy + .5, near, curveNormal, curveStrength, wantStation);
         const curveHit = curveStrength ? curveFootprint?.hit :
-          curve && CurveSplat.sampleAt(curve, rayAt, ix + .5, iy + .5, near, curveNormal, false, !!curve.group);
+          curve && CurveSplat.sampleAt(curve, rayAt, ix + .5, iy + .5, near, curveNormal, false, !!curve.group, wantStation);
         if (curve && !curveHit) continue;
         const planeDepth = curveHit ? curveHit.depth : planeHit ? planeHit.t * planeRay.axial : undefined;
         if(planeHit&&planeDepth<near)continue;
@@ -2181,7 +2207,7 @@ function renderFrame(world, o, preparedPalettes) {
           Math.abs(a - (curveFootprint ? curveFootprint.centerAlpha : centerAlpha)) >= edgeCoverageThreshold;
         a *= geometryWeight;
         if (a < minimumAlpha) continue;
-        const p = iy*W+ix, sdfRow = sdf?.rows[i], sdfHit = sdf?.hits[p];
+        const sdfRow = sdf?.rows[i], sdfHit = sdf?.hits[p];
         const preciseDepth = sdfHit || emitterHits?.[p];
         const exact = sdfRow && sdf.fragment(sdfRow,p,rayAt(ix+.5,iy+.5),-cz);
         if (exact === false || exact && pixelSurface && PIX[exact.row.i*8]) continue;
@@ -2392,6 +2418,11 @@ function renderFrame(world, o, preparedPalettes) {
         }
         const opticalDepth = planeHit || curveHit || cutaway || deep || blendDepth || aerial || cloudView || preciseDepth ? surfaceZ : undefined;
         if (deferred && (sortedSurfaces || preciseDepth)) {
+          if (wantStation && !curveSpan) {
+            const frame = curveFrames && curveFrames(i);
+            curveSpan = strandTrace.span(i, curveWorld, curve, coarse?.endIndex ?? i, direction => posedDirection(direction, frame));
+          }
+          const strandHit = wantStation ? strandTrace.hit(curveSpan, curveHit.station) : undefined;
           const entry = { sort: (flags & 4 || (deep || blendDepth) && backRows?.has(i)) ? Infinity : surfaceZ, index: n, center: exact?.z ?? -cz,
             transparent: !wd && !exact && !(flags & 4) && !(blendDepth && backRows?.has(i)), opacity: a,
             pane: blendDepth && glass && bend ? renderMeta?.objectIds?.[i] || -pk - 1 : 0,
@@ -2399,7 +2430,7 @@ function renderFrame(world, o, preparedPalettes) {
             sample: [i, surfaceZ, normalizedDepth(surfaceZ), a, pr, pg, pb,
               wd, emits, highlight, paletteId, detailParticle, projected, coat, glass, lookPass && { ...lookPass.mark },
               opticalDepth, undefined, fogMix, rule, reflected?.slice(), filteredEdge, 1, sectionTint>0, claim,
-              paintStage && paintColor(samplePaint), surfaceMatte, curveEmission] };
+              paintStage && paintColor(samplePaint), surfaceMatte, curveEmission, strandHit] };
           if (!deferred.has(p)) deferred.set(p, []);
           const layers = deferred.get(p);
           if (entry.curveGroup) {
@@ -2980,6 +3011,14 @@ function renderFrame(world, o, preparedPalettes) {
   let passes = art?.finalize(world, t, { x: X, y: Y, z: Z, scale:SC, rayAt, span: R,
     detail, sprM, surfaceGlint, centers, ditherView, motionFrom:o.resetRenderHistory ? undefined : o.surfaceMotionFrom ?? motionFrom,
     emissionMotionFrom:motionFrom, motionReference, ditherPixelStep: spatialFade ? artScale : 0 });
+  const strand = strandTrace && strandTrace.finalize();
+  if (strand) {
+    passes = { ...strand.passes, ...passes };
+    if (strand.snapshot) {
+      motionReference.strandMotion = strand.snapshot;
+      o.strandMotionHistory?.store(strand.snapshot, strandReset);
+    }
+  }
   if (lightingEffects) effectSignals.lightAt = (p,bottom)=>PaletteComposition.lighting(passes,bottom,p,{
     live,sun,contact,probes,probeReceiver,cloudShadow,cloudsReceive:i=>!(Math.round(d[i*16+11]) & (32 | 64))
   });
@@ -3064,6 +3103,7 @@ function renderFrame(world, o, preparedPalettes) {
     if (partCapture) o.partMotionHistory?.store(motionReference.partMotion, partCapture.reset);
     return {
       w: W, h: H, color: Uint8Array.from(c2, v => Math.round(clamp(v, 0, 1) * 255)), depth: dep, drawn,
+      ...(strand?.inspected && { strandPixel: strand.inspected }),
       ...(deepFrame && { deep: deepFrame }),
       ...(objectMattes && {objectMattes}),
       ...(o.resolveDetailCleanup && pixelBudgets && { cleanDetail: cleanPixels }),
@@ -3412,6 +3452,7 @@ function renderFrame(world, o, preparedPalettes) {
   if (paletteTrace) paletteTrace.steps.push(...paletteTrace.mask);
   const frame = finishLook({
     w: W, h: H, px, rgb: out, drawn, use,
+    ...(strand?.inspected && { strandPixel: strand.inspected }),
     ...(deepFrame && { deep: deepFrame }),
     ...(objectMattes && {objectMattes}),
     ...(lightPlate && {lightPlate}),
@@ -3519,4 +3560,4 @@ function grid(imgs, cols, labels) {
   });
   return out;
 }
-module.exports = { render, resize, pixelIndex, upscale, grid, label, viewMatrix, FOV, cameraCapture, sequenceHistory };
+module.exports = { render, resize, pixelIndex, upscale, grid, label, viewMatrix, FOV, cameraCapture, sequenceHistory, sequenceOutput };

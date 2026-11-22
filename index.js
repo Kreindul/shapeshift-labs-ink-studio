@@ -164,6 +164,7 @@ module.exports = {
   render: require('./cli/render.js').render,
   createMotionalCoverageHistory: require('./src/motional-coverage.js').history,
   createPartMotionHistory: require('./cli/part-motion.js').history,
+  createStrandMotionHistory: require('./cli/part-motion.js').history,
   createGraphProject: require('./cli/graph-project.js').createGraphProject,
   createGraphWorkers: require('./cli/graph-workers.js').createGraphWorkers,
   readGraphProject: require('./cli/graph-project.js').readGraphProject,

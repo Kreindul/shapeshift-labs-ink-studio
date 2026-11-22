@@ -10,7 +10,7 @@ const offsets = strata.flatMap((u, x) => strata.map((v, y) => [
 offsets.unshift([0, 0]);
 const samples = offsets.length - 1, margin = .5;
 
-function footprint(strand, rayAt, x, y, near, normal, strength) {
+function footprint(strand, rayAt, x, y, near, normal, strength, station) {
   const soft = !strand.group;
   const center = CurveSplat.sampleAt(strand, rayAt, x, y, near, false, soft, !soft);
   const depths = strand.group && new Float64Array(offsets.length);
@@ -36,7 +36,8 @@ function footprint(strand, rayAt, x, y, near, normal, strength) {
     }
   }
   if (!representative) return null;
-  const hit = normal ? CurveSplat.sampleAt(strand, rayAt, x + offset[0], y + offset[1], near, true) : representative;
+  const hit = normal || station ?
+    CurveSplat.sampleAt(strand, rayAt, x + offset[0], y + offset[1], near, normal, false, false, station) : representative;
   const centerAlpha = center?.alpha ?? 0;
   // Optical depths add across segments, so splitting a soft curve does not
   // change its filtered density.

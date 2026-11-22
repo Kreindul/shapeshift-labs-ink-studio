@@ -121,7 +121,7 @@ function frame(records, camera, { data, x, y, z, alpha, scale, windows, rig }) {
           for (let k = 0; k < covarianceSlots.length; k++) dataRow[covarianceSlots[k]] = row.covariance[k];
           dataRow[12] = radius;
           dataRow[13] = row.half;
-          geometry.set(i, { data: dataRow, center: row.center });
+          geometry.set(i, { data: dataRow, center: row.center, endIndex: removed.at(-1) ?? i });
           for (const i of removed) hidden.add(i);
           stats.removedSegments += removed.length;
         });

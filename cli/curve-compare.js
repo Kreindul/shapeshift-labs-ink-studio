@@ -61,8 +61,8 @@ function run(world, {
 
   for (let index = 0; index < count; index++) {
     const requestedTime = start + index / fps;
-    const matched = replay ? histories[0].partMotionHistory.output(() =>
-      histories[1].partMotionHistory.output(() => replay.sample(requestedTime, draw))) : draw(requestedTime, index === 0);
+    const matched = replay ? R.sequenceOutput(histories[0], () =>
+      R.sequenceOutput(histories[1], () => replay.sample(requestedTime, draw))) : draw(requestedTime, index === 0);
     const { time, camera: sampledCamera, images: [splats, curves] } = matched;
     const row = { index, requestedTime, time, camera: sampledCamera, changedPixels: changedPixels(splats, curves) };
     report.frames.push(row);

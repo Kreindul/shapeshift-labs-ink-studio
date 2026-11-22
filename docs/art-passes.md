@@ -68,6 +68,58 @@ across pulses. [Persistent pixel scans](pixel-scanner.md)
 
 With [mixed-resolution compositing](mixed-resolution.md), the color export uses the output grid and diagnostic passes retain their own `w` and `h` on the world grid.
 
+## Strand passes and pixel inspection
+
+Request `['strands']` or individual channels for finite curve splats in
+the headless renderer. ID, depth, tangent, path position, and motion describe
+the frontmost contributing strand. Coverage combines strand layers after
+attenuation by closer geometry. The passes use the native art grid and the
+direct camera ray at the nominal sample time, before fog, refraction,
+reflections, and image effects.
+
+| Channel | Data |
+| --- | --- |
+| `strandId` | Unsigned integer. Zero means empty. Index `strands` for the authored path name, object, material, and length. Paths with the same name have distinct IDs. |
+| `strandDepth` | Camera-axis depth in scene units. Empty pixels use positive infinity. |
+| `strandCoverage` | Float from zero to one, including translucent crossings and filtered edges. |
+| `strandTangent` | Three floats for the unit world-space tangent in the authored path direction. Empty pixels use zeros. |
+| `strandU` | Normalized authored distance from zero to one. Empty pixels use −1. Posed strands keep their reference distances. Simplified segments interpolate across their source distance range. Aggregates have their own paths and IDs. |
+| `strandMotion` | XY displacement of the same path station through the current and previous poses and cameras, in native art pixels. Positive X is right and positive Y is down. |
+| `strandMotionValid` | 255 means the reprojected station matched a visible strand at compatible depth. 0 means invalid, including the first frame, cuts, and newly revealed or occluded stations. Invalid vectors use zero. |
+
+`render(world, { passes: ['strands'], strandPixel: [88, 50] })` also
+returns `frame.strandPixel`. Contributors are in front-to-back compositing
+order. Each hit includes its path and splat IDs, normalized and absolute
+distance, depth, opacity, visible coverage, tangent, and motion when
+available. On a filtered pixel, the path station comes from the
+representative covered sample. Coordinates start at the top left.
+
+Use `strandMotionHistory: ink.createStrandMotionHistory()` for consecutive
+frames, and `resetStrandMotion: true` or `resetRenderHistory: true` at a cut.
+For an explicit pair, set `captureStrandMotion: true` on the prior frame and
+pass its `motionReference` as `motionFrom` on the next. Motion describes
+centerline displacement at the corresponding station. The pair needs the
+same art dimensions and projection, stable splat slots, and unchanged span
+ranges. A host that replaces source buffers can use the same
+`strandMotionSource` token across samples.
+
+```sh
+ink-studio passes examples/strand-inspection.js --channels strands --previous .33 --t .55 \
+  --w 176 --h 108 --px 1 --px1 --out strand-check
+ink-studio strand-pixel examples/strand-inspection.js --at 88,50 --previous .33 --t .55 \
+  --w 176 --h 108 --px 1
+ink-studio export-layers examples/strand-inspection.js --strand-passes on --from 0 --to 2 --n 24 \
+  --w 176 --h 108 --px 1 --out strand-take
+```
+
+`passes` writes PNG previews and lossless strand data. `export-layers` writes the
+lossless data for each sample. The `strandData` manifest gives native dimensions
+and file paths. The files use top-down rows, interleaved components, and zero
+header bytes. IDs are little-endian uint32, validity is uint8, and the other
+channels are little-endian float32. Use `clip --passes strands` for animated
+previews. Recipe graphs can request the channels in `scene.render` and read
+exact values in `scene.pass`.
+
 ## Deep compositing
 
 Use `render(world, { deepComposite: true })` to retain four fragments per

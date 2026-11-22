@@ -2,8 +2,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const PNG = require('./png.js');
 const { json } = require('./asset-files.js');
-const { render, cameraCapture, pixelIndex } = require('./render.js');
-const { depthRange } = require('./pass-preview.js');
+const { render, cameraCapture, pixelIndex, sequenceOutput } = require('./render.js');
+const { depthRange, writeStrandData } = require('./pass-preview.js');
 const ArtPasses = require('../src/art-passes.js');
 const PartMotion = require('./part-motion.js');
 const ObjectMattes = require('./object-mattes.js');
@@ -142,11 +142,13 @@ function writeFrame(frame, camera, w, h, write, lighting) {
   }
   return { width: w, height: h, surfaceSize: [data.w, data.h], camera: { ...camera, view: Array.from(camera.view) },
     files, depthRange: range, objects: data.objects.slice(), materials: data.materials.slice(), materialMasks,
+    ...(data.strands && { strands:data.strands, strandData:writeStrandData(data, (channel, ext, bytes) =>
+      write('strands/' + channel, ext, bytes)) }),
     ...(data.parts && {parts:data.parts}), ...writeCompositing(frame,lighting,w,h,write) };
 }
 
 function exportLayers(world, { out, view = {}, times = [view.time ?? view.t ?? world?.lookSnapshot?.time ?? 0],
-  native = false, pose, replay, partMotion = false, compositing } = {}) {
+  native = false, pose, replay, partMotion = false, strandPasses = false, compositing } = {}) {
   if (typeof out !== 'string' || !out.trim()) throw new TypeError('Layered exports need an output directory');
   if (!Array.isArray(times) || !times.length || !Array.from(times).every((t, i) =>
       Number.isFinite(t) && (!i || t >= times[i - 1])))
@@ -158,8 +160,8 @@ function exportLayers(world, { out, view = {}, times = [view.time ?? view.t ?? w
   const directory = path.resolve(out);
   fs.mkdirSync(directory, { recursive: true });
   const take = fs.mkdtempSync(path.join(directory, 'take-')), prefix = path.basename(take);
-  const partMotionHistory = partMotion ? PartMotion.history() : undefined;
-  const requested = partMotion ? [...passes,...ArtPasses.partMotion] : passes;
+  const histories = { partMotionHistory:PartMotion.history(), strandMotionHistory:PartMotion.history() };
+  const requested = [...passes, ...(partMotion ? ArtPasses.partMotion : []), ...(strandPasses ? ArtPasses.strands : [])];
   const manifest = { version: 1, rows: 'top-down',
     encodings: structuredClone({ ...encodings, ...(partMotion && motionEncodings),
       ...(mattes && {objectMattes:compEncodings.objectMattes}), ...(groups.length && {lightGroups:compEncodings.lightGroups}) }), frames: [] };
@@ -167,14 +169,14 @@ function exportLayers(world, { out, view = {}, times = [view.time ?? view.t ?? w
     pose?.(world, time);
     let camera;
     const frame = render(world, { ...view, w: width, h: height, time, t: time, transparent: true,
-      passes:requested, resetRenderHistory, partMotionHistory, objectMattes:mattes?.objects,
+      passes:requested, resetRenderHistory, ...histories, objectMattes:mattes?.objects,
       ...cameraCapture(view, result => { camera ??= result; }) });
     return { frame, camera, sampledTime:time };
   }
   try {
     for (const [index, time] of times.entries()) {
       const sample = () => replay.sample(time,draw);
-      const { frame, camera, sampledTime } = replay ? partMotionHistory ? partMotionHistory.output(sample) : sample() :
+      const { frame, camera, sampledTime } = replay ? sequenceOutput(histories, sample) :
         draw(time, view.resetRenderHistory);
       const deep = view.deepComposite ?? world.look?.deepComposite;
       const lighting = groups.length ? LightGroups.captureLightGroups(world,{groups,view:{

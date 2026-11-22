@@ -908,6 +908,15 @@ function sceneEmbedConfig() {
 function sequenceHistory() {
   return R.sequenceHistory(lib().KIT);
 }
+function priorArtReference(world, time, capture) {
+  const previous = num('previous');
+  if (!Number.isFinite(time) || opt.t === true) die('--t needs a time in seconds');
+  if (previous === undefined) return;
+  if (opt.previous === true || !Number.isFinite(previous) || previous >= time)
+    die('--previous needs a time earlier than --t');
+  pose(world, previous);
+  return R.render(world, view({ t: previous, ...capture })).motionReference;
+}
 function feedbackReplay(world, start, frame) {
   const api = lib().KIT.renderGraph;
   const graph = frame.renderGraph ?? world.look?.renderGraph;
@@ -1285,7 +1294,8 @@ const CMD = {
         '    [--source-map file.json --target-map file.json] [--travel scaled|unscaled|in-place] [--fps rate]',
         '    [--bake clip.json] [--preview directory] [--at seconds|--frames count] [--direction index] [--out report.json]',
         '  retarget --profiles  show built-in role templates',
-        '  passes <id> [--channels depth,normal,part-motion] [--previous seconds]   save art-pixel render pass previews',
+        '  passes <id> [--channels depth,normal,part-motion,strands] [--previous seconds]   save art-pixel render passes',
+        '  strand-pixel <id> --at x,y [--t seconds] [--previous seconds]   inspect visible strand hits on the native art grid',
         '  export-layers <id> [--t 0,1,2 | --from 0 --to 2 --n 3] [--part-motion on] [--compositing file.json] [--out directory]   export RGBA and compositing layers',
         '  export-scene <scene|world|take> --out directory [--formats still,loop,replay,embed]',
         '    --audio soundtrack.json [--mux CODEC --adapters host.cjs]   export aligned WAV stems and optional video',
@@ -2502,20 +2512,27 @@ const CMD = {
   },
   passes() {
     const w = buildPreview(), t = num('t', 0);
-    const passes = opt.channels ? String(opt.channels).split(',') : true;
-    const previous = num('previous');
-    if (opt.previous !== undefined && (opt.previous === true || !Number.isFinite(previous) || previous >= t))
-      die('--previous needs a time earlier than --t');
-    let motionFrom;
-    if (previous !== undefined) {
-      pose(w, previous);
-      motionFrom = R.render(w, view({ t:previous, captureMotion:true, capturePartMotion:true })).motionReference;
-    }
+    const art = require('../src/art-passes.js');
+    const passes = art.select(opt.channels ? String(opt.channels).split(',') : true);
+    const motionFrom = priorArtReference(w, t, { captureMotion:true, capturePartMotion:true,
+      captureStrandMotion:art.needsStrandMotion(passes) });
     pose(w, t);
     const im = R.render(w, view({ t, passes, motionFrom }));
     const directory = opt.out ? path.resolve(opt.out) : path.join(OUT, w.id + '-passes');
     require('./pass-preview.js').writePasses(directory, im, opt.px1 ? 1 : im.px);
     console.log('wrote', directory);
+  },
+  'strand-pixel'() {
+    if (pos.length !== 1 || typeof opt.at !== 'string' || !/^\d+,\d+$/.test(opt.at) || opt.out === true)
+      die('Use strand-pixel <scene> --at x,y [--t seconds] [--previous seconds] [--out inspection.json]');
+    const world = buildPreview(), t = num('t', 0);
+    const motionFrom = priorArtReference(world, t, { captureStrandMotion: true });
+    pose(world, t);
+    const frame = R.render(world, view({ t, strandPixel: list('at'), motionFrom,
+      captureStrandMotion: !!motionFrom }));
+    const report = { scene: world.id, ...frame.strandPixel };
+    if (opt.out) require('./asset-files.js').json(path.resolve(opt.out), report);
+    else process.stdout.write(JSON.stringify(report, null, 2) + '\n');
   },
   'export-layers'() {
     if (pos.length !== 1 || opt.out === true)
@@ -2531,7 +2548,7 @@ const CMD = {
     const out = opt.out ?? path.join(OUT, world.id + '-layers');
     const { file, manifest } = require('./export-layers.js').exportLayers(world, {
       out, view: frame, times: ts, native: !!opt.px1, pose, replay: feedbackReplay(world, ts[0], frame),
-      partMotion: onOffOption('part-motion') === true, compositing
+      partMotion: onOffOption('part-motion') === true, strandPasses: onOffOption('strand-passes') === true, compositing
     });
     console.log('wrote', file, manifest.frames.length, 'frame(s)');
   },
@@ -2768,7 +2785,7 @@ const CMD = {
       return R.render(w, view({ ...frame, t, resetRenderHistory }));
     }
     for (const t of ts) {
-      const im = replay ? frame.partMotionHistory.output(()=>replay.sample(t, draw)) : draw(t);
+      const im = replay ? R.sequenceOutput(frame, ()=>replay.sample(t, draw)) : draw(t);
       diagnostics?.capture(im, opt.px1 ? 1 : im.px);
       imgs.push(displayFrame(im, w));
     }
@@ -2959,7 +2976,7 @@ const CMD = {
     }
     for (let k = 0; k < n; k++) {
       const t = from + k / fps;
-      const im = replay ? frame.partMotionHistory.output(()=>replay.sample(t, draw)) : draw(t, undefined, k / (n - 1));
+      const im = replay ? R.sequenceOutput(frame, ()=>replay.sample(t, draw)) : draw(t, undefined, k / (n - 1));
       diagnostics?.capture(im, opt.px1 ? 1 : im.px);
       ts.push(t);
       frames.push(displayFrame(im, w));

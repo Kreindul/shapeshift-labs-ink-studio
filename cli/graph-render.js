@@ -4,12 +4,12 @@ const { layer: graphDeepLayer } = require('./deep-composite.js');
 const { objectMatte } = require('./object-mattes.js');
 const { history } = require('../src/render-graph.js');
 const { pose } = require('./diarama-pose.js');
-const { select, needsPartMotion } = require('../src/art-passes.js');
+const { select, needsPartMotion, needsStrandMotion } = require('../src/art-passes.js');
 const { encode, depthRange, labels } = require('./pass-preview.js');
 
 const defaults = ['coverage', 'depth', 'normal', 'objectId', 'materialId', 'emission'];
 const positionPass = new Set(['position', 'objectPosition']);
-const finitePass = new Set(['depth', 'emissionDepth', 'previousDepth']);
+const finitePass = new Set(['depth', 'emissionDepth', 'previousDepth', 'strandDepth']);
 
 function renderGraphScene(source, { camera, lights, channels = defaults, options = {}, renderGraphInputs, renderGraphCapture,
   take, time = take?.start ?? 0, kit } = {}) {
@@ -53,12 +53,14 @@ function createSceneSampler(kit) {
     const channels = select(settings.channels);
     const motion = channels.some(channel => channel === 'motion' || channel === 'emissionMotion');
     const parts = needsPartMotion(channels);
+    const strands = needsStrandMotion(channels);
     const result = renderGraphScene(source, { ...settings, time, take, kit, options: {
-      ...((motion || parts) && at > previousTime && { motionFrom: previousMotion }), ...options,
+      ...((motion || parts || strands) && at > previousTime && { motionFrom: previousMotion }), ...options,
       ...(motion && { captureMotion: true }), ...(parts && { capturePartMotion:true }),
+      ...(strands && { captureStrandMotion:true }),
       renderHistory: retained, renderHistoryKey: retained
     } });
-    previousMotion = motion || parts ? result.motionReference : undefined;
+    previousMotion = motion || parts || strands ? result.motionReference : undefined;
     previousTime = at;
     return result;
   }
@@ -119,10 +121,16 @@ function graphRenderPass(frame, channel, { emptyDepth = 1e9, kit } = {}) {
     if (!owner) throw new RangeError('Position preview needs its matching depth pass');
     for (let p = 0; p < size; p++) if (!Number.isFinite(owner[p])) valid[p] = 0;
   }
+  if (channel === 'strandId' || channel === 'strandU' || channel === 'strandTangent') {
+    for (let p = 0; p < size; p++)
+      if (channel === 'strandId' ? raw[p] === 0 : channel === 'strandU' ? raw[p] < 0 :
+        !(raw[p * 3] || raw[p * 3 + 1] || raw[p * 3 + 2])) valid[p] = 0;
+  }
   const preview = positions ? positionPreview(raw, valid, width, height) :
     { image: api.rasterFrame(encode({ w: width, h: height, passes: frame.passes }, channel)),
       ...(depth && { range: depthRange(raw) }) };
-  const names = { objectId: 'objects', materialId: 'materials', partId: 'parts', target: 'targets', paletteOwner: 'paletteOwners' }[channel];
+  const names = { objectId: 'objects', materialId: 'materials', partId: 'parts', strandId: 'strands',
+    target: 'targets', paletteOwner: 'paletteOwners' }[channel];
   const legend = names ? labels(frame.passes)[names] : undefined;
   return { value: preview.image, data: { width, height, channels, data: buffer }, valid: { width, height, channels: 1, data: valid },
     report: { channel, width, height, ...(preview.range !== undefined && { range: preview.range }),

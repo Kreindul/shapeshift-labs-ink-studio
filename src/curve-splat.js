@@ -3,6 +3,7 @@ const CurveSplat = (() => {
   // Kind zero leaves the motion payload free. Preserve the tag through native row copies.
   const marker = -161291.375, minimum = 1e-5, clipStride = 12, materialStride = 4, lightingStride = 7, timingStride = 8;
   const hardBase = 1 << 20, maxHardGroups = (1 << 20) - 1;
+  const stationStride = 7;
   const castShadow = 1, receiveShadow = 2;
   const overlapsDepth = (a, b) => a[0] <= b[1] + 1e-6 && b[0] <= a[1] + 1e-6;
   const betaRadius = Math.sqrt(6), betaIntegral = 5 * Math.PI / 16;
@@ -230,7 +231,7 @@ const CurveSplat = (() => {
     } };
   }
 
-  function prepare(data, at, position, scale, opacity, camera, clips, window, widthPolicy, pattern) {
+  function prepare(data, at, position, scale, opacity, camera, clips, window, widthPolicy, pattern, track) {
     const { view, near, focal, width, height, ortho } = camera;
     const packed = data[at + 15], section = sectionOf(packed);
     if (section < 0) return null;
@@ -270,6 +271,9 @@ const CurveSplat = (() => {
     const middle = a.map((v, i) => v + (first + last) / 2 * (b[i] - v));
     const fixed = projectedWidth?.constant ?? 1, fixedFade = projectedWidth?.fade ? fixed : 1;
     return { from, axis, radius: projectedWidth?.fade ? radius : radius * fixed, length, bounds, middle,
+      ...(track && { track: { start: position.map((v, i) => v - half * axis[i]),
+        end: position.map((v, i) => v + half * axis[i]),
+        first: begin + (finish - begin) * first, last: begin + (finish - begin) * last } }),
       major: shape.major, minor: shape.minor, flattened, group, beta, opacity: opacity * fixedFade, clips,
       projectedWidth, pattern: pattern?.(axis, position, half, scale),
       tau: -Math.log1p(-Math.min(.999, opacity)) * fixedFade };
@@ -506,7 +510,7 @@ const CurveSplat = (() => {
       materials.subarray(at + 1, at + 4) : undefined;
   }
 
-  function sample(strand, { origin, direction, axial }, near, wantNormal, wantDensity, wantExit) {
+  function sample(strand, { origin, direction, axial }, near, wantNormal, wantDensity, wantExit, wantStation) {
     const { from, axis, radius, length, major, minor, flattened, beta, group, clips } = strand;
     if (clips && !group && !insideProjectedCaps(clips, origin, direction)) return null;
     const offsetFromEye = [from[0] - origin[0], from[1] - origin[1], from[2] - origin[2]];
@@ -527,6 +531,7 @@ const CurveSplat = (() => {
       const t = hardEntry(start, ray, along, radius, length, flattened, interval[0] * scale);
       if (!Number.isFinite(t) || t > interval[1] * scale + 1e-9 || strand.opacity < minimum) return null;
       const hit = { alpha: strand.opacity, depth: t * axial / scale };
+      if (wantStation) hit.station = Math.max(0, Math.min(1, (axialSlope * t / scale - dot(offsetFromEye, axis)) / length));
       if (wantExit) {
         const reverse = ray.map(value => -value);
         const far = -hardEntry(start, reverse, along, radius, length, flattened, -Infinity);
@@ -552,13 +557,14 @@ const CurveSplat = (() => {
       const coverage = -Math.expm1(-density);
       if (!(coverage >= minimum)) return null;
       const sample = { alpha: coverage, depth: Math.max(near, axial * (axialStart + hit.at * axialSlope)) };
+      if (wantStation) sample.station = hit.at / length;
       if (wantNormal) sample.normal = softNormal(strand, start, ray, along, near / axial * scale);
       if (wantDensity) sample.density = density;
       return sample;
     }
 
     // Integrate parallel strips before turning optical depth into a single fragment.
-    let amount = 0, weightedDepth = 0;
+    let amount = 0, weightedDepth = 0, weightedStation = 0;
     const lateral = dot(major, direction);
     for (const [offset, weight] of ribbonSamples) {
       const shift = offset * radius, whitened = shift / flatBlur, alongRay = whitened * ray[1];
@@ -568,24 +574,26 @@ const CurveSplat = (() => {
       const mass = weight * hit.amount;
       amount += mass;
       weightedDepth += mass * (axialStart + shift * lateral + hit.at * axialSlope);
+      if (wantStation) weightedStation += mass * hit.at;
     }
     const normalization = beta ? 35 / (32 * betaRadius * flatBlur) : flatNormalization;
     const density = tau * normalization * amount;
     const coverage = -Math.expm1(-density);
     if (coverage < minimum) return null;
     const hit = { alpha: coverage, depth: Math.max(near, axial * weightedDepth / amount) };
+    if (wantStation) hit.station = weightedStation / (amount * length);
     if (wantNormal) hit.normal = softNormal(strand, start, ray, along, near / axial * scale);
     if (wantDensity) hit.density = density;
     return hit;
   }
-  function sampleAt(strand, rayAt, x, y, near, wantNormal, wantDensity, wantExit) {
+  function sampleAt(strand, rayAt, x, y, near, wantNormal, wantDensity, wantExit, wantStation) {
     const style = strand.projectedWidth, weight = style?.weight?.(x, y) ?? 1;
     if (weight === 0) return null;
     const section = weight === 1 ? strand : style.fade ?
       { ...strand, opacity: strand.opacity * weight, tau: strand.tau * weight } :
       { ...strand, radius: strand.radius * weight };
     const ray = rayAt(x, y), dash = section.pattern?.dash;
-    const hit = sample(section, ray, near, wantNormal, wantDensity || dash && !section.group, wantExit);
+    const hit = sample(section, ray, near, wantNormal, wantDensity || dash && !section.group, wantExit, wantStation);
     if (!hit || !dash) return hit;
     const site = section.pattern.coordinates(ray, hit.depth / ray.axial, x, y);
     const gain = section.pattern.opacity(site);
@@ -600,7 +608,7 @@ const CurveSplat = (() => {
     return hit.alpha >= minimum ? hit : null;
   }
   return Object.freeze({ tag, joinGroups, axialUnits, minimum, castShadow, receiveShadow, overlapsDepth,
-    clipStride, materialStride, lightingStride, timingStride, clipPlanes,
+    clipStride, materialStride, lightingStride, timingStride, stationStride, clipPlanes,
     emissionAt, lightingAt, isRow, carrier, roundSpan, writeClips, timeWindow, timedOpacity, timedCarrier, prepare, sample, sampleAt, specular, directional });
 })();
 if (typeof module !== 'undefined') module.exports = CurveSplat;

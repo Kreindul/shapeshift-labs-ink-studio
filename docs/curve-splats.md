@@ -769,6 +769,10 @@ legacy Gaussian fallback used in WebGL. The matched comparison is headless and w
 orthographic views. Use `--fragment-budget` when a large export with overlapping
 strands needs more depth-sorted fragments.
 
+Use `passes --channels strands` to export strand IDs, depth, coverage,
+tangents, and motion. `strand-pixel --at x,y` reports the contributing
+paths and their stations at an art pixel. See [strand passes](art-passes.md#strand-passes-and-pixel-inspection).
+
 The integration follows the finite Gaussian segment in
 [Shramko et al., *Spaghetti Splatting*](https://arxiv.org/html/2611.12716v1).
 Ink starts from authored or simulated paths. The implementation is
