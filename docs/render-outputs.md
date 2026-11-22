@@ -2,8 +2,9 @@
 
 Use `KIT.renderOutputs` to send the same miniature render to a camera
 atlas, a world monitor, an inspection tool, and a render graph.
-[Projected routes](projected-routes.md) and the [tilemap raycaster](tile-raycaster.md)
-return the shared format directly. Renderers with their own
+[Projected routes](projected-routes.md), [projected stages](projected-stage.md),
+and the [tilemap raycaster](tile-raycaster.md) return the shared format
+directly. Renderers with their own
 rasterizer can publish it with `renderOutputs.create(fields)`.
 
 All planes use the same top-down native pixel grid and dimensions.

@@ -1669,6 +1669,17 @@
       "tags": ["tilemap", "raycasting", "sprites", "pixel-art", "perspective"]
     },
     {
+      "id": "render.projectedStage",
+      "kind": "api",
+      "status": "ready",
+      "title": "Projected stage layers",
+      "what": "Paint upright scenery and repeating ground layers with one shared horizon, registered props and floor-bound planar reflections.",
+      "use": "K.projectedStage.create({ layers, props })",
+      "where": "src/kit/paz-projected-stage.js",
+      "example": "examples/projected-stage.js",
+      "tags": ["stage", "perspective", "parallax", "pixel-art", "reflections"]
+    },
+    {
       "id": "render.textile",
       "kind": "api",
       "status": "ready",
