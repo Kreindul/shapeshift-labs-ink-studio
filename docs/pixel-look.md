@@ -366,7 +366,7 @@ optional `default` policy to cover foreground surfaces without a target.
 - `none`, `checker`, `bayer`, and seeded `blue-noise` set the threshold
   pattern. Strength 0 picks the nearest swatch. Increasing strength lets
   more art pixels pick the second swatch near a transition. CLI renders
-  can use the existing screen, world, or object dither coordinates.
+  can use screen, world, object, or view-direction dither coordinates.
 - Explicit target palettes take precedence over a surface layer's
   `outputPalette` in CLI renders. Layer palettes take precedence over
   `default`. Outlines and finish overlays use their existing paths.

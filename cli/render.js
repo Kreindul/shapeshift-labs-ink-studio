@@ -414,7 +414,7 @@ function renderFrame(world, o, preparedPalettes) {
   }
   const anchorSpaces = new Set(anchoring ? stable.anchorSpaces : []);
   function addAnchorSpace(space) {
-    if (space === 'world' || space === 'object') anchorSpaces.add(space);
+    if (space === 'world' || space === 'object' || space === 'view') anchorSpaces.add(space);
   }
   let ditherRegions = styled && stages?.ditherRegions, ditherFade = styled && stages?.ditherFade;
   if (!o.raw && !o.captureCoverage) {
@@ -436,7 +436,7 @@ function renderFrame(world, o, preparedPalettes) {
   const spatialFade = ditherFade && anchorSpaces.size > 0;
   if (anchorSpaces.size || ditherRegions) {
     passSelection.add('depth');
-    if (anchorSpaces.has('world') || ditherRegions || spatialFade) passSelection.add('position');
+    if (anchorSpaces.has('world') || anchorSpaces.has('view') || ditherRegions || spatialFade) passSelection.add('position');
     if (anchorSpaces.has('object') || ditherRegions) passSelection.add('objectPosition');
     if (ditherRegions) passSelection.add('normal');
     if (anchoring && stable.rules.some(rule => rule.object !== undefined)) passSelection.add('objectId');
@@ -735,6 +735,7 @@ function renderFrame(world, o, preparedPalettes) {
     tp = 1 / tangent,
     asp = W / H,
     baseCount = world.count;
+  const ditherView = anchorSpaces.has('view') ? ArtStability.viewProjection(V) : undefined;
   if(!o.reflectionPlane&&!probeView)o.cameraFrame?.({time:camera.time,pose:CameraLens.fromView(V),motion:camera.motion});
   if (!o.reflectionPlane && !probeView) o[captureCamera]?.({width: W, height: H, view: V, tangent: ortho ? oh : tangent, aspect: asp, ortho,
     clipNear: near, clipFar: 400, distance: eyeD, setback: eyeD - dist, depthRange: [eyeD - R, eyeD + R],
@@ -1408,12 +1409,12 @@ function renderFrame(world, o, preparedPalettes) {
     return maskFrames.get(i);
   }
   function stageSample(i, point, p) {
-    if (i >= baseCount) return { position: point, worldPosition: point, normal: null, time: t };
+    if (i >= baseCount) return { position: point, worldPosition: point, normal: null, ditherView, time: t };
     const { rest, normal, localOffset } = stageFrame(i);
     const offset = localOffset(point[0] - X[i], point[1] - Y[i], point[2] - Z[i]);
-    return { position: Array.from(rest, (n, k) => n + offset[k]), worldPosition: point, normal, time: t,
+    return { position: Array.from(rest, (n, k) => n + offset[k]), worldPosition: point, normal, ditherView, time: t,
       ...(spatialFade && p !== undefined && { footprint: space => ditherFootprint(rayAt, p % W + .5,
-        Math.floor(p / W) + .5, point, normal, artScale, space === 'object' ? localOffset : undefined) }) };
+        Math.floor(p / W) + .5, point, normal, artScale, space === 'object' ? localOffset : space === 'view' ? ditherView : undefined) }) };
   }
   const renderMeta = world.renderMetadata;
   function fragmentRule(i) {
@@ -2750,7 +2751,7 @@ function renderFrame(world, o, preparedPalettes) {
   const effectSignals = effectRules && { rules: effectRules, sky: showSky && !!sky, backdropCloud, media: effectMedia,
     haze: hazeCoverage, darkAt: EffectPalettes.bindDarks(effectRules,world) };
   let passes = art?.finalize(world, t, { x: X, y: Y, z: Z, scale:SC, rayAt, span: R,
-    detail, sprM, surfaceGlint, centers, motionFrom:o.resetRenderHistory ? undefined : o.surfaceMotionFrom ?? motionFrom,
+    detail, sprM, surfaceGlint, centers, ditherView, motionFrom:o.resetRenderHistory ? undefined : o.surfaceMotionFrom ?? motionFrom,
     emissionMotionFrom:motionFrom, motionReference, ditherPixelStep: spatialFade ? artScale : 0 });
   if (lightingEffects) effectSignals.lightAt = (p,bottom)=>PaletteComposition.lighting(passes,bottom,p,{
     live,sun,contact,probes,probeReceiver,cloudShadow,cloudsReceive:i=>!(Math.round(d[i*16+11]) & (32 | 64))
@@ -2781,7 +2782,8 @@ function renderFrame(world, o, preparedPalettes) {
     }
   }
   SubjectFocus.grade(col,W,H,focus,focusPixel,fallingCoverage);
-  const masks = overlay && createMaskResolve(world, { w: W, h: H, time: t, x: X, y: Y, z: Z, depth, rayAt, span: R, ditherPixelStep: artScale },
+  const masks = overlay && createMaskResolve(world, { w: W, h: H, time: t, x: X, y: Y, z: Z, depth, rayAt, span: R,
+    ditherView, ditherPixelStep: artScale },
     overlay, localConstraints, o.maskGrade ?? (!tone && grade), lookPass?.local,paletteTrace);
   const paletteState = paletteCapture && { capture:paletteCapture,mask:masks?.output,maskedSlots:overlay?.slots,
     outlined:paletteOutlines,resolved:retainContributions ? undefined : localAt };

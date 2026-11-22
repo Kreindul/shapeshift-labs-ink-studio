@@ -322,7 +322,7 @@ lantern hand distinct while letting the cloak and far aqueduct soften.
 Author the profile in `finish.look.ink` or override it for a shot with
 `--ink file.json`. Use `--ink off` to bypass selective ink.
 
-See [Stable dithering and camera review](stable-dithering.md) for per-object anchors and native-resolution pan and orbit clips. Camera snapping applies to orthographic projection. World-space dithering samples at the visible surface. Object-space dithering maps the sample back to the splat's rest frame, using the rig transform where available. Screen-space dithering follows the art grid. Use `--ortho --snap`, `--dither-space screen|world|object`, and `--resolve native|coverage|clusters`. The coverage and cluster modes render four subpixels per art pixel and can protect named objects, materials, glints and small emissive details.
+See [Stable dithering and camera review](stable-dithering.md) for per-object anchors and native-resolution pan and orbit clips. Camera snapping applies to orthographic projection. World-space dithering samples at the visible surface. Object-space dithering maps the sample back to the splat's rest frame, using the rig transform where available. Screen-space dithering follows the art grid. View-direction dithering projects the surface hit onto a plane chosen from the camera heading and elevation. Use `--ortho --snap`, `--dither-space screen|world|object|view`, and `--resolve native|coverage|clusters`. The coverage and cluster modes render four subpixels per art pixel and can protect named objects, materials, glints and small emissive details.
 
 ## Art-pixel effects
 

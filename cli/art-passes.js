@@ -107,6 +107,7 @@ function createArtPasses(request, w, h, emissiveSlots, capturePartMotion) {
       return out;
     };
     const result = { w, h };
+    if (geometry.ditherView) result.ditherView = geometry.ditherView;
     if (coverage) result.coverage = topDown(coverage, 1);
     if (emission) result.emission = topDown(emission, 3);
     if (scopedOwners) result.scopedEmission = { slots:topDown(scopedOwners,1), coverage:topDown(scopedCoverage,1) };
@@ -175,7 +176,8 @@ function createArtPasses(request, w, h, emissiveSlots, capturePartMotion) {
           const atlas = atlasOwners?.get(bottom);
           const frame = frames.get(owner[bottom]);
           const footprint = ditherFootprint(geometry.rayAt, x + .5, y + .5, result.position.subarray(p * 3, p * 3 + 3),
-            atlas ? atlas.normal : frame?.normal, geometry.ditherPixelStep, space === 'object' ? frame?.localOffset : undefined);
+            atlas ? atlas.normal : frame?.normal, geometry.ditherPixelStep,
+            space === 'object' ? frame?.localOffset : space === 'view' ? geometry.ditherView : undefined);
           return space === 'object' && atlas?.objectScale ? footprint / atlas.objectScale : footprint;
         };
       }

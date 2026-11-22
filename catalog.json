@@ -991,6 +991,17 @@
       ]
     },
     {
+      "id": "look.viewDither",
+      "kind": "material",
+      "status": "ready",
+      "title": "View-direction dithering",
+      "what": "Project a palette dither grid onto a fixed plane selected by camera direction. Compare it with screen, world and rest-space anchoring over the same turn.",
+      "use": "look.stable.dither = 'view' or palette.dither.space = 'view'",
+      "where": "src/art-stability.js, cli/render.js",
+      "example": "examples/view-direction-dithering.js",
+      "tags": ["dither", "palette", "camera", "pixel-art"]
+    },
+    {
       "id": "look.translucent",
       "kind": "material",
       "status": "ready",
