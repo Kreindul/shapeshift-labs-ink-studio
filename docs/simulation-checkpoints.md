@@ -114,6 +114,7 @@ worker pool as `options.runtime` when opening portable data.
 | `queue({inputs, edits, actions}, {branch, tick})` | Queue typed input changes, live entity or metadata patches, and system actions as one validated batch. The default boundary is the selected branch's next tick. |
 | `view(id)`, `query(id)`, `checkpoint(id)`, `recording(id)` | Read any branch without switching or advancing it. Omitting the ID reads the active branch. |
 | `diff(left, right)` | Compare two branch heads at the same tick. |
+| `forecast(options, {branch})`, `forecastAsync(options, {branch})` | Preview pending commands from a branch head with [in-scene forecast overlays](simulation-forecasts.md). |
 | `status()`, `subscribe(callback)` | Read current playback state, branch lineage, ticks, pending command counts, and available marks. |
 | `save()` | Export the whole session as portable JSON. Reopen it with `KIT.world.branches.create(saved)`. Playback opens paused. |
 

@@ -69,6 +69,10 @@ actions shared range, access, duration, and effects.
 [First-divergence debugging](first-divergence.md) compares timelines
 tick by tick and reports actual inputs and changed state paths.
 
+[In-scene simulation forecasts](simulation-forecasts.md) preview pending
+commands from the current checkpoint and draw paths, flow, and the first
+visible change in the scene.
+
 ## Run and compare a watershed
 
 Save the starting checkpoint after the reservoir has settled.

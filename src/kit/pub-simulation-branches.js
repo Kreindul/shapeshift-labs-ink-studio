@@ -176,6 +176,8 @@
       view:branchId=>branch(branchId).run.view(), query:branchId=>branch(branchId).run.query(),
       checkpoint:branchId=>branch(branchId).run.checkpoint(), recording:branchId=>branch(branchId).run.recording(),
       diff:(a,b)=>R.diff(branch(a).run.checkpoint(),branch(b).run.checkpoint()),
+      forecast:(options,{branch:branchId=active}={})=>W.forecast.run(branch(branchId).run,options),
+      forecastAsync:(options,{branch:branchId=active}={})=>W.forecast.runAsync(branch(branchId).run,options),
       subscribe(listener,{immediate=true}={}){
         check(typeof listener==='function','Branch subscription needs a callback');
         if (immediate) listener(status());

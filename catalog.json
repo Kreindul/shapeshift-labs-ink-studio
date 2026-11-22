@@ -1735,6 +1735,17 @@
       "tags": ["tilemap", "raycasting", "sprites", "pixel-art", "perspective"]
     },
     {
+      "id": "sim.inSceneForecast",
+      "kind": "api",
+      "status": "ready",
+      "title": "In-scene simulation forecasts",
+      "what": "Compare pending commands from the current checkpoint. Draw future positions, field arrows and the earliest visible difference in the same scene.",
+      "use": "KIT.world.forecast.run(runtime, { actions, tracks, flows, compareView })",
+      "where": "src/kit/pud-simulation-forecast.js, docs/simulation-forecasts.md",
+      "example": "examples/simulation-forecast.cjs",
+      "tags": ["simulation", "checkpoint", "branching", "overlays", "forecast"]
+    },
+    {
       "id": "render.sectorRaycaster",
       "kind": "api",
       "status": "ready",
