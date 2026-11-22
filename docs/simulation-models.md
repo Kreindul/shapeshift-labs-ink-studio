@@ -175,3 +175,6 @@ and sampled responses into smaller assets with recorded fitting ranges and error
 [General state integrators](state-integrators.md) provide fixed RK4,
 semi-implicit Euler, adaptive RK4, and time-localized reactions for
 creator-authored equations.
+
+[Grid and mesh operators](grid-operators.md) provide field reconstruction,
+tagged boundary application, and conservative finite-volume transport.

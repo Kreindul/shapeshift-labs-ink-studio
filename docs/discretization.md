@@ -132,3 +132,7 @@ residual report, and an animated view of the solve.
 
 Use [conservative state remapping](state-remap.md) to transfer extensive
 state between compiled grids or tetrahedral volume meshes.
+
+Use [grid and mesh operators](grid-operators.md) to reconstruct fields,
+compute oriented fluxes, and advance conservative advection and diffusion
+on the compiled cells.

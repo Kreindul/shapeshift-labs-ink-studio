@@ -515,6 +515,10 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         return respond(require('./mass-properties.js').measure(kit,read(file),file,
           {dependency:shot?.dependency,assetPack:opt['asset-pack']}));
       }
+      case 'grid-ops': {
+        ensure(typeof file==='string' && other===undefined,'Use sim grid-ops <plan.json> [--out report.json]');
+        return respond(require('./grid-operators.js').run(kit,read(file),file,shot?.dependency));
+      }
       case 'integrate': {
         ensure(typeof file==='string' && other===undefined,'Use sim integrate <plan.json> [--out trace.json]');
         return respond(require('./state-integrators.js').run(kit,read(file),file,shot?.dependency));
