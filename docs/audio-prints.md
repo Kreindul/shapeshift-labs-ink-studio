@@ -8,6 +8,10 @@ the takes to your sample library with the same decoded audio.
 ink-studio music samples print library recipe.json --out prints/relay
 ```
 
+Use a [resampling jam](resampling-jam.md) to branch a pinned performance
+through playback and rack treatments and recover the editable source
+directly from a kept print.
+
 A recipe names the graph relative to the recipe file and selects each tap.
 Use `output` for a named graph output, or `node` and an optional `port`
 for an internal output. A node path such as `rack/fx` reaches inside a

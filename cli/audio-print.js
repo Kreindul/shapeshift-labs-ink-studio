@@ -24,13 +24,17 @@ function printAudio(file,out,library,kit) {
     sample,range,markers,source:{reference:graph},projectHash:tapped.projectHash,
     seed:tapped.seed,time:tapped.time,traces:tapped.traces
   });
+  return publishAudioPrint({audio,entries,report},folder,library,P.mediaGraph);
+}
+
+function publishAudioPrint({audio,entries,report},folder,library,A) {
   const names=Object.keys(audio);
   const waves=names.map(name=>WAV.encode(audio[name],{encoding:'pcm24'}));
   const stored=library.addBatch(names.map((name,i)=>({value:WAV.decode(waves[i]),entry:entries[name]})));
   const takes=Object.fromEntries(names.map((name,i)=>{
     const {entry}=stored[i], file=name+'.wav', edit=name+'.edit.json';
     write(path.join(folder,file),waves[i]);
-    json(path.join(folder,edit),P.mediaGraph.audioPrint.edit(entry));
+    json(path.join(folder,edit),A.audioPrint.edit(entry));
     return [name,{file,sha256:sha(waves[i]),edit,entry}];
   }));
   const manifest=path.join(folder,'print.json');
@@ -77,4 +81,4 @@ function readAudioPrint(file,kit) {
   };
 }
 
-module.exports={printAudio,readAudioPrint};
+module.exports={printAudio,readAudioPrint,publishAudioPrint};

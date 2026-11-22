@@ -165,6 +165,21 @@
       inputs: {source:'audio',options}, outputs: {value:'audio',report:'record'},
       run({source,options}) {return A.warpAudio(source,options);}
     },
+    'music.branchResamplingJam': {
+      description:'Fork named playback treatments or expand a rack macro sweep over one pinned pad performance.',
+      inputs:{source:'record',request:'record'},outputs:{value:'record',added:'array<record>'},
+      run({source,request}) {return A.resamplingJam.branch(source,request);}
+    },
+    'music.renderResamplingJam': {
+      description:'Render a pinned pad phrase through a playback branch and rack, retaining its dry tap and event clock.',
+      inputs:{source:'record',assets:'record',options},outputs:{value:'audio',dry:'audio',report:'record'},
+      run({source,assets,options}) {return A.resamplingJam.render(source,assets,options);}
+    },
+    'music.auditionResamplingJam': {
+      description:'Compare the same sample range across jam branches in a level-matched reel.',
+      inputs:{source:'record',assets:'record',options},outputs:{value:'audio',report:'record'},
+      run({source,assets,options}) {return A.resamplingJam.audition(source,assets,options);}
+    },
     'music.renderSampleKit': {
       description: 'Play a sample kit from timed pad or MIDI events with layers, articulation, inserts and return buses.',
       inputs:{source:'record',assets:'record',events:'array<record>',options},
