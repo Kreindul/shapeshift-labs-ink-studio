@@ -17,6 +17,10 @@ const sampleCapture = {op:'audio.captureSample',inputs:{source:audio,settings:{
   sample:{id:'tone',label:'Bench tone',material:'synth',pitch:'A4',license:{id:'CC0-1.0'}},
   source:{kind:'graph',name:'oscillator'},firstSample:16,endSample:48
 }}};
+const resamplingJam = {format:'ink-studio/resampling-jam',version:1,id:'bench',
+  kit:{id:'bench',pads:{hit:{articulations:{default:[{id:'layer',takes:[{asset:'tone'}]}]}}}},
+  performance:{events:[{id:'first',pad:'hit',time:0}],options:{sampleRate:8000,duration:.04}},
+  branches:[{id:'slow',speed:.65}]};
 const slicedAudio = {format:'ink-studio/sample-edit',version:1,
   source:{id:'recording',sampleRate:8000,channels:1,frames:128},
   markers:[{id:'middle',at:64}],
@@ -313,6 +317,9 @@ const specifications = {
   'audio.buildSampleInstrument': {inputs:{assets:{tone:audio},source:{zones:[{id:'tiny',takes:['tone'],low:60,high:60,root:null}]}}},
   'audio.warp': {nodes:{edited:{op:'audio.renderSampleEdit',inputs:{source:audio,edit:slicedAudio}}},
     inputs:{source:link('edited'),options:{mode:'repitch',speed:.8}}},
+  'music.branchResamplingJam': {inputs:{source:resamplingJam,request:{branches:[{id:'fast',from:'slow',speed:1.5}]}}},
+  'music.renderResamplingJam': {inputs:{source:resamplingJam,assets:{tone:audio},options:{branch:'slow'}}},
+  'music.auditionResamplingJam': {inputs:{source:resamplingJam,assets:{tone:audio},options:{branches:['source','slow']}}},
   'music.renderSampleKit': {nodes:{
     hit:{op:'audio.renderSampleEdit',inputs:{source:audio,edit:slicedAudio,options:{slice:'middle'}}},
     bank:{op:'data.record',inputs:{hit:link('hit')}}, pads:padPattern

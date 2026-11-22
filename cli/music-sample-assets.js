@@ -27,19 +27,22 @@ function resolveSampleAssets(entries,file,library,kit,{allowWav=false}={}) {
   }
   for (const [name,ref] of Object.entries(entries)) {
     check(id(name),'Invalid sample source name');
-    if (allowWav && (typeof ref==='string' || fields(ref,['wav','fromSample','toSample']) && text(ref.wav))) {
+    if (allowWav && (typeof ref==='string' || fields(ref,['wav','fromSample','toSample','sha256']) && text(ref.wav))) {
       const row=typeof ref==='string' ? {wav:ref} : ref, filePath=path.resolve(path.dirname(file),row.wav);
-      if (!waves.has(filePath)) {
-        const pcm=WAV.read(filePath);
+      check(row.sha256===undefined || typeof row.sha256==='string' && /^[a-f0-9]{64}$/.test(row.sha256),
+        'A WAV hash must be a SHA-256 digest');
+      const key=filePath+'\0'+(row.sha256 ?? '');
+      if (!waves.has(key)) {
+        const pcm=WAV.read(filePath,{sha256:row.sha256});
         originalSamples+=pcm.samples.length;
         check(originalSamples<=32000000,'Sample recipe exceeds its original PCM budget');
-        waves.set(filePath,pcm);
+        waves.set(key,pcm);
       }
-      const pcm=waves.get(filePath), frames=pcm.samples.length/pcm.channels;
+      const pcm=waves.get(key), frames=pcm.samples.length/pcm.channels;
       const {fromSample=0,toSample=frames}=row;
       check(integer(fromSample,0,frames-1) && integer(toSample,fromSample+1,frames),'Invalid WAV slice range');
       assets[name]={...pcm,samples:pcm.samples.subarray(fromSample*pcm.channels,toSample*pcm.channels)};
-      sources[name]={wav:row.wav,fromSample,toSample};
+      sources[name]={wav:row.wav,fromSample,toSample,...(row.sha256!==undefined && {sha256:row.sha256})};
       samples+=assets[name].samples.length;
       check(samples<=32000000,'Sample recipe exceeds its source PCM budget');
       continue;

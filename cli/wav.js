@@ -1,5 +1,6 @@
 /* Native little-endian RIFF/WAVE I/O for normalized, interleaved audio. */
 const fs = require('node:fs');
+const { createHash } = require('node:crypto');
 
 const maxSamples = 32000000;
 const maxBytes = 8 * maxSamples + 65536;
@@ -150,7 +151,10 @@ function encode(source, { encoding = 'pcm16', bwf } = {}) {
 
 function read(file, options) {
   if (fs.statSync(file).size > maxBytes) throw new RangeError('WAV file exceeds the audio budget');
-  return decode(fs.readFileSync(file), options);
+  const bytes=fs.readFileSync(file);
+  if (options?.sha256!==undefined && createHash('sha256').update(bytes).digest('hex')!==options.sha256)
+    throw new RangeError('WAV hash does not match its reference');
+  return decode(bytes, options);
 }
 
 module.exports = { decode, encode, read, maxSamples, maxBytes, encodings: Object.freeze(Object.keys(encodings)) };
