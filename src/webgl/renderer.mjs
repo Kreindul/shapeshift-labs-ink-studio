@@ -1,3 +1,4 @@
+import { createGaussianHarmonics } from './gaussian-harmonics.mjs';
 import {createEngravingBinding} from './engraving.mjs';
 import { createFootprintBinding } from './footprints.mjs';
 import { createArtPixelFinish } from './art-pixel-finish.mjs';
@@ -131,6 +132,8 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
     const maxSize = gl.getParameter(gl.MAX_TEXTURE_SIZE), maxBuffers = gl.getParameter(gl.MAX_DRAW_BUFFERS);
     const targets = createTargets(gl, resources);
     const { target, table, textureUnit } = targets;
+    // The material-controls pass uses unit 31 before the splat draw.
+    const bindGaussians = createGaussianHarmonics(gl, resources, 31, maxSize);
     const environment = createEnvironment(gl,resources,targets,maxSize,toolkit);
     const emitterLighting=createLightEmitters(gl,resources,targets,maxSize,toolkit);
     const highlightAPI = toolkit.KIT?.highlightCels;
@@ -748,7 +751,12 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       const camera = cameraOverride ?? makeCamera(world, frame, width, height);
       if (world.shadowLod && frame.shadowArt !== false)
         world = toolkit.KIT?.shadowArt?.frame(world, camera.shadowFootprint) ?? world;
-      const { raw = false, outline = true, dither = 0.35, scale = 1 } = frame;
+      const harmonics = world.gaussianHarmonics;
+      const colorMode = frame.gaussianColor ?? harmonics?.colorMode ?? 'baked';
+      if (!['baked', 'rgb', 'palette'].includes(colorMode) || colorMode !== 'baked' && !harmonics)
+        throw new TypeError('Gaussian RGB and palette modes need live imported harmonics');
+      const raw = colorMode === 'baked' ? frame.raw ?? false : colorMode === 'rgb';
+      const { outline = true, dither = 0.35, scale = 1 } = frame;
       const look = world.look ?? {};
       let engraved=frame.engraving!==false&&!!world.engraving;
       let engravingUniforms;
@@ -1155,8 +1163,10 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       gl.colorMask(true, true, true, true);
       gl.depthMask(true);
       gl.blendEquation(gl.FUNC_ADD);
+      const gaussianUniforms = bindGaussians(harmonics, colorMode !== 'baked');
       const shader = pipeline.programFor({
         water: !!wet, airPockets: wet?.airPockets, layered: wet?.layered, atlas: wet?.atlas, portal: plane !== zero || !!cover,
+        gaussianDegree: gaussianUniforms ? harmonics.degree : undefined,
         instances: !!plan, contributions:coverage && !!constraints, masked, textured:constraints?.textured, layeredGlass,
         engraving:engraved, footprints, materialStyles, facingColors:facing && facingAPI, environment:env?.media,emitterFog:!!env?.lit, relighting, optical:opticalMaterials, cutaway:!!section, spriteReconstruction:!!spriteMask
       });
@@ -1165,6 +1175,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       const growth = world.grow ?? {};
       shader.set({
         u_data: 0, u_bones: 4, u_fine: 7,
+        ...(gaussianUniforms && { ...gaussianUniforms, u_eye: camera.eye }),
         ...(facing && { u_facingRows: facingUnit, u_facingCount: facing.count, u_disabledViewColors: disabledViewColors, u_facingPattern: patterned }), ...(spriteMask && {u_spriteLod:spriteLodUnit,u_spriteLodCount:spriteMask.codes.length}), ...(plan && { u_instances: 15 }), u_fineOn: +hasFine, u_fpal: pal, u_view: camera.view,
         ...(materialStyles && { u_materialStyles: 16, u_materialPatterned: patterned, u_materialStylesOn: !raw }),
         u_proj: camera.projection, u_time: time, u_scale: scale, u_ortho: +camera.ortho,

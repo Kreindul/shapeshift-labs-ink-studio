@@ -1,4 +1,21 @@
 const sh0 = 0.28209479177387814;
+const degree = 2, terms = (degree + 1) ** 2 - 1;
+
+export const pelagicPalette = [
+  0x0b1523, 0x132a3c, 0x24465c, 0x376981, 0x4089a8, 0x60acc1, 0x86d3d3, 0xbaebe4,
+  0x302b4e, 0x50467a, 0x79609a, 0xa18abc, 0xc9acd4, 0xead7ed,
+  0x402c42, 0x674659, 0xa15d67, 0xcd7e7b, 0xedac94, 0xffd5b0
+];
+
+function harmonics([x, y, z]) {
+  const longitude = Math.atan2(z, x);
+  const ripple = .7 + .27 * Math.cos(5 * longitude + 2 * y);
+  return [
+    [.12, .17, .20], [.08, -.22, .22], [.96 * ripple, -.54 * ripple, -.85 * ripple],
+    [.04, -.10, .19], [.10, .06, -.08], [.03, .12, -.03], [.15, -.12, -.17],
+    [-.08, .21 * Math.sin(longitude * 3), .20]
+  ];
+}
 
 function points() {
   const cloud = [];
@@ -32,16 +49,20 @@ function points() {
 export function samplePly() {
   const cloud = points();
   const fields = ['x', 'y', 'z', 'scale_0', 'scale_1', 'scale_2',
-    'rot_0', 'rot_1', 'rot_2', 'rot_3', 'opacity', 'f_dc_0', 'f_dc_1', 'f_dc_2'];
+    'rot_0', 'rot_1', 'rot_2', 'rot_3', 'opacity', 'f_dc_0', 'f_dc_1', 'f_dc_2',
+    ...Array.from({ length: terms * 3 }, (_, i) => 'f_rest_' + i)];
   const header = new TextEncoder().encode(['ply', 'format binary_little_endian 1.0', 'element vertex ' + cloud.length,
     ...fields.map(name => 'property float ' + name), 'end_header', ''].join('\n'));
   const result = new Uint8Array(header.length + cloud.length * fields.length * 4);
   result.set(header);
   const data = new DataView(result.buffer);
   let offset = header.length;
-  for (const [x, y, z, sx, sy, sz, alpha, r, g, b] of cloud) {
+  for (const point of cloud) {
+    const [x, y, z, sx, sy, sz, alpha, r, g, b] = point;
+    const sh = harmonics(point);
     const values = [x, y, z, Math.log(sx), Math.log(sy), Math.log(sz), 1, 0, 0, 0,
-      Math.log(alpha / (1 - alpha)), ...[r, g, b].map(c => (c - .5) / sh0)];
+      Math.log(alpha / (1 - alpha)), ...[r, g, b].map(c => (c - .5) / sh0),
+      ...[0, 1, 2].flatMap(channel => sh.map(row => row[channel]))];
     for (const value of values) {
       data.setFloat32(offset, value, true);
       offset += 4;
@@ -52,12 +73,14 @@ export function samplePly() {
 
 export async function sampleSpz() {
   const cloud = points(), count = cloud.length;
-  const bytes = new Uint8Array(16 + count * 20), data = new DataView(bytes.buffer);
+  const bytes = new Uint8Array(16 + count * (20 + terms * 3)), data = new DataView(bytes.buffer);
   const alphaStart = 16 + count * 9, colorStart = alphaStart + count;
   const scaleStart = colorStart + count * 3, rotationStart = scaleStart + count * 3;
+  const shStart = rotationStart + count * 4;
   data.setUint32(0, 0x5053474e, true);
   data.setUint32(4, 3, true);
   data.setUint32(8, count, true);
+  bytes[12] = degree;
   bytes[13] = 12;
   for (let i = 0; i < count; i++) {
     const point = cloud[i];
@@ -69,6 +92,10 @@ export async function sampleSpz() {
       bytes[p + 2] = fixed >> 16 & 255;
       bytes[scaleStart + i * 3 + j] = Math.round((Math.log(point[3 + j]) + 10) * 16);
       bytes[colorStart + i * 3 + j] = Math.round((.5 + .15 * (point[7 + j] - .5) / sh0) * 255);
+    }
+    for (const [term, rgb] of harmonics(point).entries()) {
+      for (let channel = 0; channel < 3; channel++)
+        bytes[shStart + (i * terms + term) * 3 + channel] = Math.round(128 + rgb[channel] * 128);
     }
     bytes[alphaStart + i] = Math.round(point[6] * 255);
     data.setUint32(rotationStart + i * 4, 0xc0000000, true);

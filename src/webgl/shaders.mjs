@@ -1,3 +1,4 @@
+import { gaussianHarmonicGLSL } from './gaussian-harmonics.mjs';
 import {engravingVertexUniforms,engravingVertex,engravingFragment} from './engraving-shaders.mjs';
 // Shared draw and resolve shaders extracted from Inkwell Rebirth's WebGL renderer.
 // Hosts provide the ASCII shader hooks and Ink Studio's shared PixelLook GLSL.
@@ -31,7 +32,7 @@ vec4 relightAt(int row) { return texelFetch(u_relight, ivec2(row & 511, row >> 9
 export function splatShaderSources(ascii, sampleCoverage, {
   water = false, airPockets = false, layered = false, atlas = false, portal = false, instances = false,
   contributions = false, masked = false, textured = false, layeredGlass = false, coverageRules, materialStyles = false,
-  environment = false, emitterFog=false, relighting = false, optical = false, stableDetail, cutaway, airflow, footprints = false, footprintGLSL, engraving=false, screenPrintGLSL, spriteReconstruction, facingColors = false
+  environment = false, emitterFog=false, relighting = false, optical = false, stableDetail, cutaway, airflow, footprints = false, footprintGLSL, engraving=false, screenPrintGLSL, spriteReconstruction, facingColors = false, gaussianDegree
 } = {}) {
   if (footprints && typeof footprintGLSL !== 'string') throw new Error('Footprint shaders need SplatFootprints.glsl');
   const coverageStride = coverageRules?.coverageStride ?? 4;
@@ -43,6 +44,7 @@ export function splatShaderSources(ascii, sampleCoverage, {
 precision highp float; precision highp int;
 uniform highp sampler2D u_data;
 ${facingColors ? facingColors.splatVertexGLSL : ''}
+${gaussianDegree !== undefined ? gaussianHarmonicGLSL(gaussianDegree) : ''}
 ${spriteReconstruction ? 'uniform highp sampler2D u_spriteLod; uniform int u_spriteLodCount; flat out int v_spriteLod;' : ''}
 uniform mat4 u_view, u_proj;
 uniform bool u_geometryDepth;
@@ -280,6 +282,12 @@ ${environment ? '  v_envAxial = -cam.z;' : ''}
   ${contributions || masked ? 'v_policySlot = contributionSlot(a_index);' : ''}
   ${masked ? 'if (u_idx < 2.5) placeMask(a_index, v_policySlot, pos, cam.xyz, abs(determinant(FM)) > 1e-8 ? inverse(FM) : mat3(1.0), mat3(u_view));' : ''}
   ${!portal || layeredGlass ? `v_ownerDepth = ${layeredGlass ? '' : 'u_idx > 1.5 ? '}clip.z / clip.w * 0.5 + 0.5${layeredGlass ? '' : ' : 0.0'};` : ''}
+  ${gaussianDegree !== undefined ? `
+  if (u_idx < 0.5 && record < u_gaussianCount${instances ? ' && a_instance == 0' : ''}) {
+    vec3 ray = u_ortho > 0.5 ? -vec3(u_view[0].z, u_view[1].z, u_view[2].z) : pos - u_eye;
+    color = gaussianRgb(record, ray);
+    color0 = color;
+  }` : ''}
   float dn = clamp((-cam.z - u_fogp.z) / (u_fogp.w - u_fogp.z), 0.0, 1.0);
   if (u_lampN > 0 && (flags & 22) == 0 && alpha >= 1.0) {
     float tr = cov[0][0] + cov[1][1] + cov[2][2], pp = tr / 2.4253, add = 0.0;   // (a dab is a disc, thin the way it faces: from its shape, how squarely it faces a light)
