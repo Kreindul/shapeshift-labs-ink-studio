@@ -1166,6 +1166,8 @@ const CMD = {
         '  music critique plan <recipe.json> <brief.json>   measure a passage and propose editable comparisons',
         '  music critique listen <recipe.json> <plan.json> [settings.json] --out directory   export a blind listening pack',
         '  music critique keep <recipe.json> <review-key.json> <decision.json> --out directory   keep a voted edit and reason',
+        '  music critique remember <memory-directory> <reference.json>   archive a contextual blind decision',
+        '  music critique recall <memory-directory> <query.json>   recall matching blind choices and reasons',
         '  music critique tag <source.wav> <settings.json> --out directory   keep a tagged listening excerpt',
         '  music critique find <index.json> [query.json]   find listening clips and past decisions by intent',
         '  music rehearsal capture <world.run.json> <settings.json>   capture exact world music and cue events',

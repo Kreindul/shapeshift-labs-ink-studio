@@ -98,6 +98,14 @@ const motionSoundPlan={format:'ink-studio/motion-sound-plan',version:1,id:'wheel
   lanes:{level:{source:'speed',input:[0,1],output:[0,.8]}}};
 
 const blindCritique={op:'music.blindCritique',inputs:{source:production,plan:link('plan')}};
+const memoryContext={scene:'intimate',moment:'pickup',role:'lead'};
+const memoryPlan={op:'music.planCritique',inputs:{...critiquePlan.inputs,brief:{...critiquePlan.inputs.brief,
+  listeningContext:memoryContext}}};
+const keepMemoryExample={op:'music.keepCritique',inputs:{source:production,key:link('blind','key'),
+  token:link('blind','token'),selection:{take:'a',reason:'The held breath makes the pickup easier to follow.',
+    votes:[{listener:'example',trial:'pair-1',preferences:{shape:'a'}}]}}};
+const rememberExample={op:'music.rememberListeningPreference',inputs:{reference:link('decision','reference')}};
+
 const cameraGrid = { op: 'coord.cameraGrid', inputs: { width: 64, height: 48, camera: { dist: 4 } } };
 const param = input => ({ input });
 const group = (inputs, op, values) => ({
@@ -417,6 +425,10 @@ const specifications = {
   'music.keepCritique': {nodes:{plan:critiquePlan,blind:blindCritique},inputs:{source:production,
     key:link('blind','key'),token:link('blind','token'),selection:{take:'a',reason:'The empty beat makes the pluck easier to follow.',
       votes:[{listener:'demo',trial:'pair-1',preferences:{shape:'a'}}]}}},
+  'music.rememberListeningPreference': {nodes:{plan:memoryPlan,blind:blindCritique,decision:keepMemoryExample},
+    inputs:rememberExample.inputs},
+  'music.recallListeningPreferences': {nodes:{plan:memoryPlan,blind:blindCritique,decision:keepMemoryExample,remember:rememberExample},
+    inputs:{memory:link('remember'),query:{context:memoryContext,criterion:'shape',moves:['reference','empty-beat']}}},
   'music.tagListeningReference': {inputs:{source:audio,settings:referenceSettings}},
   'music.findListeningReferences': {inputs:{references:[{format:'ink-studio/critique-reference',version:1,...referenceSettings}],
     options:{tags:['short tail']}}},
