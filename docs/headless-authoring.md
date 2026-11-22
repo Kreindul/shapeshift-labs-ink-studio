@@ -908,6 +908,7 @@ outside the original image.
 | `fx.pathBlur` | Link a 2D `path`. It samples the path at equal arc-length intervals. Set `samples`, `anchor: "start" \| "center" \| "end"`, `falloff: "uniform" \| "start" \| "end"`, and `filter: "linear" \| "nearest"`. Path coordinates are pixel displacements relative to the anchor. |
 | `fx.outline` | Set `outer`, `inner`, and `feather` in pixels, plus `color` and `innerColor`. The `outer` and `inner` outputs are separate byte masks. |
 | `fx.bevel` | Set `width`, 2D light `direction`, `strength` from 0 to 1, and `highlight` and `shadow` colours. The `height` output is a one-channel relief map in 0–1. |
+| `fx.emissionBands` | Send [palette bands through a distance field](emission-bands.md) with a sharp crest, a transparent gap, and independent emission and halo outputs. |
 | `fx.glow` | Blur a selected `channel` above `threshold` using `radius`, `sigma`, `strength` and `color`. Set `placement: "behind"` for a sprite halo or `"over"` with `mode: "screen" \| "add" \| "normal"` for an opaque image. Exports the separate `glow` raster and byte `mask`. |
 | `fx.erode` | Recede from exposed edges by a Euclidean `radius` in pixels. Returns the edited raster and its surviving byte `mask`. |
 | `fx.repair` | Use `method: "close"` and a Euclidean `radius` for holes and narrow gaps, or `"bridge"` and `maxGap` for breaks along rows, columns or diagonals. New pixels take the nearest selected source colour or an explicit `color`. Inspect them in the separate `added` mask. |

@@ -816,6 +816,9 @@ const report = K.renderGraph.resources(K.renderGraph.prepare(graph), 1280, 720);
 
 The scene and each named image remain full resolution. A small RGBA work packet carries only the effect contribution; reconstruction composites it onto the untouched full-resolution input. Unselected pixels under `maskMode:'both'` remain byte-exact. Effects preserve input alpha. Bloom/halation add linear-light radiance inside the existing frame coverage; they do not manufacture alpha outside a transparent frame.
 
+Use [traveling emission bands](emission-bands.md) for sharp palette fronts
+with their own crest and halo layers.
+
 ### Effect controls
 
 | Pass | Controls | Behavior |

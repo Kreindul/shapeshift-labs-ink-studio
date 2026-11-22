@@ -85,6 +85,16 @@
     },
     'fx.tileStrideSlip':raster(E.tileStrideSlip,{value:'raster',addresses:'raster'}),
     'fx.scanlineRemap':raster(E.scanlineRemap,{value:'raster',addresses:'raster'}),
+    'fx.emissionBands': {
+      description: 'Send colored contour waves through a distance field with separate crest and halo rasters.',
+      inputs: { source: { type: 'any', default: null }, mask: { type: 'any', default: null }, options },
+      outputs: { value: 'raster', crest: 'raster', mask: 'raster', halo: 'raster' }, time: true,
+      run({ source, mask, options }, { time }) {
+        const { width, height, ...settings } = options;
+        return KIT.emissionBands.create({ ...settings, field: source ?? undefined, mask: mask ?? undefined })
+          .frame({ width, height, time });
+      }
+    },
     'fx.rasterSchedule':{
       description:'Write palette slots, source offsets and pixel sizes on specified output rows.',
       inputs:{source:'raster',options},outputs:{value:'displayRaster'},time:true,
