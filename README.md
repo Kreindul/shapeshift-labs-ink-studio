@@ -769,6 +769,8 @@ links selected objects and regions to recorded actions, transfers, and prior sta
 reuse measurements across seeds and settings and report aligned results.
 [Persistent simulation places](docs/portals.md#persistent-simulation-places)
 keep terrain, surface, and object edits across saves, travel, and resumed region streams.
+[Painted nested portals](docs/portals.md#paint-an-aperture-and-show-a-second-doorway)
+compose two live views through pixel-painted openings with foreground occlusion.
 
 [Scene-aware streaming](docs/procedural.md#scene-aware-streaming) prioritizes nearby detail, selected subjects, and visible portal destinations within memory and frame budgets.
 

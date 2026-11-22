@@ -62,7 +62,7 @@ uniform vec3 u_eye,u_plane,u_back,u_fog,u_sun;
 uniform vec4 u_range,u_splatPlane;
 uniform vec2 u_surfaceViewport,u_artScale,u_sunGain;
 uniform int u_phase,u_step;
-uniform bool u_ortho,u_depth,u_normal,u_emission,u_baked,u_effect,u_index,u_graphDepth;
+uniform bool u_ortho,u_depth,u_normal,u_emission,u_baked,u_effect,u_index,u_graphDepth,u_portalCover;
 uniform float u_scale,u_effectDepth;
 ${wet ? waterGLSL(wet.airPockets, wet.layered, wet.atlas) : 'uniform vec4 u_arrivalPlane;'}
 ${section ? cutaway : ''}
@@ -104,7 +104,7 @@ void main(){
   ${env?.media ? 'if(!u_index)rgb=envMedia(rgb,gl_FragCoord.xy,u_surfaceViewport,axial);' : ''}
   rgb=mix(rgb,u_fog,fog);
   ${section ? 'rgb=mix(rgb,u_sectionEdge.rgb,sectionInk(margin));' : ''}
-  color=u_index?vec4(0):vec4(rgb,1);
+  color=u_index?vec4(float(u_portalCover)):vec4(rgb,1);
   depth=vec4(d,0,0,1);
   water=vec4(mark,1);
   if(u_index&&u_graphDepth){
@@ -137,6 +137,7 @@ void main(){
         section,
         index,
         graphDepth,
+        portalCover,
         arrivalPlane,
         clip
       } = frame;
@@ -159,6 +160,7 @@ void main(){
         u_surfaceViewport: [width, height],
         u_index: !!index,
         u_graphDepth: !!graphDepth,
+        u_portalCover: !!portalCover,
         u_arrivalPlane: arrivalPlane,
         u_splatPlane: clip,
         ...water,

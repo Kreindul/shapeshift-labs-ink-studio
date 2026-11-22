@@ -28,6 +28,8 @@ import { createViewerInput } from './viewer-input.mjs';
 const zero = new Float32Array(4);
 const empty = new Float32Array(0);
 const reconstructionSource = Symbol('reconstruction source');
+const portalDepth = Symbol('portal depth');
+const portalLimit = 2;
 
 function reconstruct(toolkit, world, frame, definition) {
   const api = toolkit.KIT?.reconstruction;
@@ -140,7 +142,8 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
     const dryGeometry = target(2), dryContours = target(2), plainOwner = target(), key = target(1, { integer: true });
     const wetVariants = new Map();
     let graphOwnership, wetGeometry, wetContours, waterTexture, packedWater, maskOwner, glassBoundary, dryGlassGeometry, wetGlassGeometry;
-    let portalSource, portalDestination, portalMask, portalSpriteLayer, portalProgram;
+    let portalSource, portalMask, portalSpriteLayer, portalProgram;
+    const portalDestinations = [], portalApertures = [];
     let lastWater, lastWaterTime, uploadedWater, waterWidth = 0, waterHeight = 0;
     let waterLookSource, waterLookPlan, waterOpticalPlan, mappedWater;
     let opticsDefinition, opticsWorld, opticsPlan, opticsTime;
@@ -168,13 +171,16 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
     let rasterKey = 0;
     const sort = createDepthSorter(), transparencyAPI = toolkit.KIT?.procedural?.splatOrder;
     const afterimagesAPI = toolkit.KIT?.afterimages;
-    const afterimageHistory = afterimagesAPI?.history(), portalAfterimages = afterimagesAPI?.history();
-    const mainTransparency = new WeakMap(), portalTransparency = new WeakMap();
     const previewPipelines = [];
     let surfacePipeline,emitterSurfacePipeline, reflectionTarget, secondaryReflectionTarget, reflectionAtlas, reflectionAtlasSize, reflectionAtlasFramebuffer;
     let artPixelFinish;
     const clusterAPI = toolkit.KIT?.colorClusters, boundaryAPI = toolkit.KIT?.boundaryCels;
-    const clusterHistory = clusterAPI?.history(), portalClusterHistory = clusterAPI?.history();
+    const historiesByDepth = [];
+    function historiesAt(depth) {
+      return historiesByDepth[depth] ??= {
+        transparency: new WeakMap(), afterimages: afterimagesAPI?.history(), clusters: clusterAPI?.history()
+      };
+    }
     let post, simpleUnavailable = false, keyProgram, damp, copy, spriteProgram, spriteEnvProgram, spriteLayer, spriteTable, anchors;
     let lastWorld, lastData, lastCount, lastOutput, lastDetail, lastEnvironment, lastStaged, fineValues, materials, anchorCount = 0;
     let packed = empty, historyIndex = 0, historyValid = false, previousVP, previousPalette, previousDetailRanges, previousSection, lastQualityKey;
@@ -591,6 +597,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       gl.useProgram(shader.p);
       shader.set({
         ...options,u_geometryDepth:+(hasSurfaces||hasPlanes),
+        u_portalCoverPlane: options.u_portalCoverPlane ?? zero,
         u_paintPass: !!options.u_paintPass,
         u_materialGridScale: options.u_materialGridScale ?? 1,
         u_spriteLodGrid: options.spriteGrid ?? [1,1],
@@ -712,7 +719,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       return plan;
     }
 
-    const reconstructionInstances = createExpandedInstances(), portalReconstructionInstances = createExpandedInstances();
+    const reconstructionInstances = createExpandedInstances(), portalReconstructionInstances = [];
     function reconstructFrame(world, frame, expand) {
       const definition = frame.reconstruction ?? world.look?.reconstruction;
       if (definition === undefined || definition === false) return { world, frame };
@@ -727,7 +734,9 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
     function render(world, frame, width, height, output, cameraOverride, plane = zero, cover, reflectionCapture = false,
       reflectedTrailStart = 0) {
       const reconstruction = frame[reconstructionSource];
-      const source = reconstruction?.source ?? world, histories = plane === zero ? mainTransparency : portalTransparency;
+      const source = reconstruction?.source ?? world;
+      const viewHistories = historiesAt(plane === zero ? 0 : frame[portalDepth] ?? 1);
+      const histories = viewHistories.transparency;
       const camera = cameraOverride ?? makeCamera(world, frame, width, height);
       if (world.shadowLod && frame.shadowArt !== false)
         world = toolkit.KIT?.shadowArt?.frame(world, camera.shadowFootprint) ?? world;
@@ -743,7 +752,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       if (boundaryDefinition !== undefined && boundaryDefinition !== false && !boundaryAPI)
         throw new Error('Boundary cels need the Ink Studio KIT');
       const boundaries = boundaryAPI?.prepare(boundaryDefinition, { scenePalette: world.pal, paletteRoles: world.paletteRoles });
-      const coherenceHistory = plane === zero ? frame.colorClusterHistory ?? clusterHistory : portalClusterHistory;
+      const coherenceHistory = plane === zero ? frame.colorClusterHistory ?? viewHistories.clusters : viewHistories.clusters;
       if (!reflectionCapture && !clusters?.coherent) coherenceHistory?.clear();
       const clock = contract?.clock(world, frame);
       const t = clock?.time ?? frame.time ?? world.lookSnapshot?.time ?? 0;
@@ -805,7 +814,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         frame = { ...frame, changedRows:expanded.changedRows };
         group = undefined;
       }
-      const trailHistory = frame.afterimageHistory ?? (plane === zero ? afterimageHistory : portalAfterimages);
+      const trailHistory = frame.afterimageHistory ?? viewHistories.afterimages;
       let trailStart = reflectedTrailStart;
       if (!reflectionCapture && (frame.resetAfterimages || !rules.length)) trailHistory?.clear();
       if (rules.length) {
@@ -1180,7 +1189,8 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       frame[graphOwner]?.(world, owner.textures[0], frame[graphOwner].depth ? owner.textures[2] : undefined, camera);
       if (cover)
         drawGeometry(shader, cover.buffer, width, height,
-          { u_idx: 2, u_snap: +(!raw && !colored), u_hard: 0, u_splatPlane: cover.plane, tangent, surfaces, scaleSurfaces, spriteRows, surfaceFrame:{...surfaceFrame,index:true,clip:cover.plane} });
+          { u_idx: 2, u_snap: +(!raw && !colored), u_hard: 0, u_portalCoverPlane: cover.plane, tangent,
+            surfaces, scaleSurfaces, spriteRows, surfaceFrame: { ...surfaceFrame, index: true, portalCover: true, clip: cover.plane } });
       gl.disable(gl.BLEND);
       textureUnit(1, geometry.textures[0]);
       textureUnit(2, geometry.textures[1]);
@@ -1371,13 +1381,32 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       return spriteCover;
     }
 
-    function present(world, frame, width, height, output) {
-      const { portal, fade = 0 } = frame;
-      if (!portal && !fade) return render(world, frame, width, height, output);
-      const camera = makeCamera(world, frame, width, height), opening = portal?.opening;
+    function bindPortalAperture(mask, depth, fallback) {
+      if (!mask) {
+        textureUnit(4, fallback);
+        return;
+      }
+      const { width, height, data } = mask;
+      if (width > maxSize || height > maxSize) throw new RangeError('Portal aperture exceeds the WebGL texture size limit');
+      gl.activeTexture(gl.TEXTURE4);
+      const slot = portalApertures[depth] ??= { texture: resources.texture() };
+      textureUnit(4, slot.texture);
+      if (slot.mask === mask) return;
+      const alignment = gl.getParameter(gl.UNPACK_ALIGNMENT);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE, Uint8Array.from(data));
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, alignment);
+      slot.mask = mask;
+    }
+
+    function present(world, frame, width, height, output, camera, entryPlane = zero, depth = 0) {
+      const portal = depth < portalLimit ? frame.portal : undefined, fade = depth === 0 ? frame.fade ?? 0 : 0;
+      if (!portal && !fade) return render(world, frame, width, height, output, camera, entryPlane);
+      camera ??= makeCamera(world, frame, width, height);
+      const opening = portal?.opening;
       const front = opening && planeInView(anchorPlane(opening.from), camera);
       const visible = front && (camera.ortho ? front[2] > 1e-7 : front[3] > 1e-6);
-      if (!visible && !fade) return render(world, frame, width, height, output, camera);
+      if (!visible && !fade) return render(world, frame, width, height, output, camera, entryPlane);
       if (width > maxSize || height > maxSize || width > viewportLimit[0] || height > viewportLimit[1])
         throw new RangeError('Ink Studio frame exceeds the WebGL viewport or texture size limit');
       if (!output) {
@@ -1386,31 +1415,37 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       }
       portalSource ??= target();
       portalSource.resize(width, height);
+      let destinationBuffer;
       if (visible) {
-        portalDestination ??= target();
+        destinationBuffer = portalDestinations[depth] ??= target();
+        destinationBuffer.resize(width, height);
         portalMask ??= target();
-        portalDestination.resize(width, height);
         portalMask.resize(width, height);
         const nextCamera = withCameraPose(camera, opening.camera(cameraPose(camera)));
         const { raw, outline, dither, scale, clean, lineClean, colored, tone, edges, water, time, skyTime, cameraTime,
           stepAnimation, artDirection, renderStages, strictContract, environment, colorClusters, boundaryCels,
           stableTransparency, resetTransparency, stableDetail, passQuality, silhouetteProtection, scalePreviews } = frame;
+        const expand = portalReconstructionInstances[depth] ??= createExpandedInstances();
         const destination = reconstructFrame(portal.destination, { raw, outline, dither, scale, clean, lineClean, colored, tone,
           edges, water, time, skyTime, cameraTime, stepAnimation, artDirection, renderStages, strictContract,
           environment, colorClusters, boundaryCels, stableTransparency, resetTransparency, stableDetail, passQuality,
-          silhouetteProtection, scalePreviews, ...portal.destinationFrame, damp: false },
-          portalReconstructionInstances);
-        render(destination.world, destination.frame, width, height, portalDestination.framebuffer, nextCamera, anchorPlane(opening.to));
+          silhouetteProtection, scalePreviews, ...portal.destinationFrame, damp: false, [portalDepth]: depth + 1 }, expand);
+        // Resolve the deeper view before reusing the source and coverage targets.
+        present(destination.world, destination.frame, width, height, destinationBuffer.framebuffer,
+          nextCamera, anchorPlane(opening.to), depth + 1);
       }
       const spriteCover = render(world, visible ? { ...frame, damp: false } : frame, width, height,
-        portalSource.framebuffer, camera, zero, visible ? { buffer: portalMask, plane: front } : undefined);
+        portalSource.framebuffer, camera, entryPlane, visible ? { buffer: portalMask, plane: front } : undefined);
       portalProgram ??= program(portalComposite);
-      textureUnit(0, portalSource.textures[0]);
-      textureUnit(1, visible ? portalDestination.textures[0] : portalSource.textures[0]);
-      textureUnit(2, visible ? portalMask.textures[0] : portalSource.textures[0]);
-      textureUnit(3, spriteCover || portalSource.textures[0]);
+      const source = portalSource.textures[0], mask = visible ? opening.mask : undefined;
+      textureUnit(0, source);
+      textureUnit(1, destinationBuffer?.textures[0] ?? source);
+      textureUnit(2, visible ? portalMask.textures[0] : source);
+      textureUnit(3, spriteCover || source);
+      bindPortalAperture(mask, depth, source);
       fullscreen(portalProgram, output, width, height, { u_source: 0, u_destination: 1,
         u_cover: 2, u_spriteCover: 3, u_hasSpriteCover: +!!spriteCover,
+        u_aperture: 4, u_painted: +!!mask, u_entryPlane: entryPlane,
         u_opening: visible ? (opening.shape === 'ellipse' ? 2 : 1) : 0, u_size: [width, height], u_fade: fade,
         ...(visible ? { u_origin: opening.from.origin, u_right: opening.from.right, u_up: opening.from.up,
           u_normal: opening.from.normal, u_half: [opening.halfWidth, opening.halfHeight],
@@ -1601,11 +1636,14 @@ export function createRenderer(canvas, { toolkit, specialize = true, reuseOrder 
       if (disposed) throw new Error('The Ink Studio renderer has been disposed');
       if (gl.isContextLost()) throw new Error('The Ink Studio WebGL context is lost');
       validateWorld(world, frame);
-      if (frame.portal) {
-        const { source, destination, opening, destinationFrame = {} } = frame.portal;
-        if ((source && source !== world) || typeof opening?.camera !== 'function' || !opening.from || !opening.to)
+      let portal = frame.portal, portalWorld = world;
+      for (let depth = 0; portal && depth < portalLimit; depth++) {
+        const { source, destination, opening, destinationFrame = {} } = portal;
+        if ((source && source !== portalWorld) || typeof opening?.camera !== 'function' || !opening.from || !opening.to)
           throw new TypeError('Expected an oriented portal view for the rendered world');
         validateWorld(destination, destinationFrame);
+        portalWorld = destination;
+        portal = destinationFrame.portal;
       }
       if (frame.fade !== undefined && (!Number.isFinite(frame.fade) || frame.fade < 0 || frame.fade > 1))
         throw new RangeError('Scene fade opacity must be in [0, 1]');

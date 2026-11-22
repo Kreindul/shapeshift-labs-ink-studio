@@ -81,7 +81,8 @@ layout(location=1) in int a_index;
 ${instances ? 'layout(location=2) in int a_instance; uniform highp sampler2D u_instances;' : ''}
 ${footprints ? 'uniform highp sampler2D u_footprintRows,u_footprintParams; flat out vec4 v_footprintMap; flat out vec2 v_footprintStyle, v_footprintZ; flat out vec4 v_footprintPlane;' : ''}
 out vec2 v_d; out vec3 v_conic; out vec4 v_color; out float v_depth;
-${portal ? 'flat out vec3 v_portalDepth;' : 'flat out float v_ownerDepth;'}
+${portal ? 'flat out vec3 v_portalDepth;' : ''}
+${!portal || layeredGlass ? 'flat out float v_ownerDepth;' : ''}
 ${cutaway ? 'flat out vec4 v_sectionSample;' : ''}
 out float v_gl; out float v_as; out float v_ast; uniform vec4 u_az[4]; uniform int u_azn; uniform float u_asoft, u_azst;
 ${water && !portal ? 'flat out float v_waterAxial;' : ''}
@@ -277,7 +278,7 @@ ${environment ? '  v_envAxial = -cam.z;' : ''}
   v_glassNearDepth = nearGlass.z / nearGlass.w * 0.5 + 0.5;` : ''}
   ${contributions || masked ? 'v_policySlot = contributionSlot(a_index);' : ''}
   ${masked ? 'if (u_idx < 2.5) placeMask(a_index, v_policySlot, pos, cam.xyz, abs(determinant(FM)) > 1e-8 ? inverse(FM) : mat3(1.0), mat3(u_view));' : ''}
-  ${portal ? '' : `v_ownerDepth = ${layeredGlass ? '' : 'u_idx > 1.5 ? '}clip.z / clip.w * 0.5 + 0.5${layeredGlass ? '' : ' : 0.0'};`}
+  ${!portal || layeredGlass ? `v_ownerDepth = ${layeredGlass ? '' : 'u_idx > 1.5 ? '}clip.z / clip.w * 0.5 + 0.5${layeredGlass ? '' : ' : 0.0'};` : ''}
   float dn = clamp((-cam.z - u_fogp.z) / (u_fogp.w - u_fogp.z), 0.0, 1.0);
   if (u_lampN > 0 && (flags & 22) == 0 && alpha >= 1.0) {
     float tr = cov[0][0] + cov[1][1] + cov[2][2], pp = tr / 2.4253, add = 0.0;   // (a dab is a disc, thin the way it faces: from its shape, how squarely it faces a light)
@@ -414,7 +415,8 @@ ${spriteReconstruction}` : ''}
 ${footprints ? 'uniform highp sampler2D u_footprintAtlas; uniform float u_footprintColumns; flat in vec4 v_footprintMap; flat in vec2 v_footprintStyle, v_footprintZ; flat in vec4 v_footprintPlane;' : ''}
 in vec2 v_d; in vec3 v_conic; in vec4 v_color; in float v_depth; flat in int v_coverage;
 ${stableDetail ? 'flat in float v_detailGeometry, v_detailTexture;' : ''}
-${portal ? 'flat in vec3 v_portalDepth; uniform vec4 u_splatPlane;' : 'flat in float v_ownerDepth;'}
+${portal ? 'flat in vec3 v_portalDepth; uniform vec4 u_splatPlane, u_portalCoverPlane;' : ''}
+${!portal || layeredGlass ? 'flat in float v_ownerDepth;' : ''}
 ${portal || cutaway || footprints ? 'uniform mat4 u_proj; uniform float u_ortho;' : ''}
 ${footprints ? 'uniform float u_focal;' + (!cutaway ? 'uniform bool u_geometryDepth;' : '') : ''}
 ${cutaway ? cutaway + `
@@ -503,6 +505,14 @@ ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + 
   gl_FragDepth = u_geometryDepth ? clamp(sectionZ,0.0,1.0) : gl_FragCoord.z;
   float sectionDepth = clamp((sectionAxial - u_fogp.z) / (u_fogp.w - u_fogp.z), 0.0, 1.0);
   ` : ''}
+  ${portal ? `
+  float axial = v_portalDepth.x + dot(v_portalDepth.yz, v_d);
+  bool clipped = any(notEqual(u_splatPlane.xyz, vec3(0.0))) || any(notEqual(u_portalCoverPlane.xyz, vec3(0.0)));
+  if (clipped) {
+    vec4 at = vec4(axialPosition(gl_FragCoord.xy, axial, u_viewport), 1.0);
+    if (axial <= 0.0 || dot(u_splatPlane, at) < 0.0 || dot(u_portalCoverPlane, at) < 0.0) discard;
+  }
+  ` : ''}
   ${footprints ? `if(u_idx>3.5){
     if(!footprintPlane||v_coverage==${softMode}||v_color.a<1.0||g<0.5${optical?'||hasOptical':''})discard;
     o=vec4(0.0);od=vec4(0.0);oa=vec4(0.0);return;
@@ -518,11 +528,6 @@ ${ascii ? ascii.fsMain : ''}  float power = -0.5 * (v_conic.x * v_d.x * v_d.x + 
     return;
   }` : ''}
   ${portal ? `
-  float axial = v_portalDepth.x + dot(v_portalDepth.yz, v_d);
-  bool clipped = any(notEqual(u_splatPlane.xyz, vec3(0.0)));
-  if (clipped) {
-    if (axial <= 0.0 || dot(u_splatPlane, vec4(axialPosition(gl_FragCoord.xy, axial, u_viewport), 1.0)) < 0.0) discard;
-  }
   if (u_idx > 1.5) {
     if (v_coverage == ${softMode} || v_color.a < 0.5 || (continuous ? surfaceAlpha <= 0.5 : g < 0.38)${optical ? ' || hasOptical' : ''}) discard;
     o = vec4(1.0); od = vec4(0.0); oa = vec4(0.0);

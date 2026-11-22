@@ -58,7 +58,7 @@ uniform vec4 u_range,u_splatPlane;
 ${wet ? waterGLSL(wet.airPockets, wet.layered, wet.atlas) : 'uniform vec4 u_arrivalPlane;'}
 uniform vec2 u_surfaceViewport;
 uniform vec3 u_fog;
-uniform bool u_index, u_graphDepth;
+uniform bool u_index, u_graphDepth, u_portalCover;
 uniform bool u_uvSlip;
 uniform vec4 u_uvTransform, u_uvBounds;
 ${paletteSampling ? `uniform float u_samplingScale;
@@ -103,7 +103,7 @@ void main(){
   ${environment?.media ? 'if(!u_index)rgb=envMedia(rgb,gl_FragCoord.xy,u_surfaceViewport,v_depth);' : ''}
   rgb=mix(rgb,u_fog,fog);
   ${section ? 'rgb=mix(rgb,u_sectionEdge.rgb,sectionInk(margin));' : ''}
-  color=u_index?vec4(0.0):vec4(rgb,1.0);
+  color=u_index?vec4(float(u_portalCover)):vec4(rgb,1.0);
   depth=vec4(d,0.0,0.0,1.0);water=vec4(mark,1.0);
   if(u_index&&u_graphDepth){float z=round(d*16777215.0);water=vec4(mod(z,256.0),mod(floor(z/256.0),256.0),floor(z/65536.0),255.0)/255.0;}
 }`
@@ -403,6 +403,7 @@ in vec3 v_world;flat in vec3 v_normal;out vec4 color;void main(){color=vec4(eLig
         fog,
         index = false,
         graphDepth = false,
+        portalCover = false,
         arrivalPlane = [0, 0, 0, 0],
         clip = [0, 0, 0, 0],
         water,
@@ -455,6 +456,7 @@ in vec3 v_world;flat in vec3 v_normal;out vec4 color;void main(){color=vec4(eLig
         u_surfaceLit: 24,
         u_index: +index,
         u_graphDepth: graphDepth,
+        u_portalCover: portalCover,
         u_arrivalPlane: arrivalPlane,
         u_splatPlane: clip,
         u_surfaceViewport: [width, height],
