@@ -31,13 +31,23 @@ function stateBytes(state) {
   check(bytes.length<=stateLimit && bytes.toString('base64')===state,'Invalid or oversized CLAP state');
   return bytes;
 }
-function encodeJob({sampleRate,state,input,key,frames=0,latency=0,tail=0,parameters}) {
+function encodeJob({sampleRate,state,input,key,frames=0,latency=0,tail=0,parameters,notes=[],transport,kind}) {
   const saved=stateBytes(state), header=Buffer.alloc(36), entries=Object.entries(parameters);
-  check(rateOk(sampleRate) && entries.length<=64 && entries.every(([id])=>numeric(id)),
+  check((kind===undefined || kind==='instrument') && rateOk(sampleRate) && entries.length<=64 && entries.every(([id])=>numeric(id)),
     'CLAP requires numeric parameter IDs and a valid render sample rate');
   [0x314b4e49,sampleRate,frames,(input?.length ?? 0)/2,(key?.length ?? 0)/2,saved.length,
     entries.length,latency,tail].forEach((value,i)=>header.writeUInt32LE(value,4*i));
+  const instrument=kind==='instrument';
+  check(notes.length<=2000000 && (instrument || !notes.length),'Invalid CLAP note event budget');
   const chunks=[header];
+  if (instrument) {
+    header.writeUInt32LE(0x324b4e49,0);
+    const count=Buffer.alloc(12);
+    count.writeUInt32LE(notes.length,0);
+    count.writeUInt32LE(transport?.meter ?? 4,4);
+    count.writeUInt32LE(transport?.changes.length ?? 0,8);
+    chunks.push(count);
+  }
   for (const [name,{points,curve}] of entries) {
     const row=Buffer.alloc(12+12*points.length);
     row.writeUInt32LE(Number(name),0);
@@ -48,6 +58,28 @@ function encodeJob({sampleRate,state,input,key,frames=0,latency=0,tail=0,paramet
       row.writeDoubleLE(value,16+12*i);
     }
     chunks.push(row);
+  }
+  if (instrument) {
+    const events=Buffer.alloc(notes.length*24);
+    for (let i=0;i<notes.length;i++) {
+      const {sample,id,key,type,value}=notes[i], at=i*24;
+      events.writeUInt32LE(sample,at);
+      events.writeInt32LE(id,at+4);
+      events.writeInt16LE(key,at+8);
+      events.writeInt16LE(type,at+10);
+      events.writeDoubleLE(value,at+16);
+    }
+    chunks.push(events);
+    if (transport) {
+      const map=Buffer.alloc(transport.changes.length*20);
+      for (const [i,{sample,beat,tempo}] of transport.changes.entries()) {
+        const at=i*20;
+        map.writeUInt32LE(sample,at);
+        map.writeDoubleLE(beat,at+4);
+        map.writeDoubleLE(tempo,at+12);
+      }
+      chunks.push(map);
+    }
   }
   chunks.push(saved);
   for (const samples of [input,key]) if (samples?.length) {
@@ -101,12 +133,13 @@ function load(file) {
   }
   function describe(request) {
     const row=plugin(request.plugin), data={...request,parameters:initial(request.initial)};
-    const cacheKey=JSON.stringify([row.identity,request.sampleRate,request.state,request.initial]);
+    const cacheKey=JSON.stringify([row.identity,request.sampleRate,request.kind,request.state,request.initial]);
     if (probes.has(cacheKey)) return probes.get(cacheKey);
     const result=execute('probe',row,data,(_audio,meta)=>{
       const [head,...rows]=fs.readFileSync(meta,'utf8').trim().split('\n');
-      const [latency,tail,key]=head.trim().split(' ').map(Number);
-      return {latency,tail,sidechain:key!==0,identity:row.identity,parameters:Object.fromEntries(rows.map(line=>{
+      const [latency,tail,key,dialect]=head.trim().split(' ').map(Number);
+      return {latency,tail,sidechain:key!==0,identity:row.identity,
+        ...(request.kind==='instrument' && {notes:dialect===1 ? 'clap' : dialect===2 ? 'midi' : null}),parameters:Object.fromEntries(rows.map(line=>{
         const [id,min,max,automatable,stepped]=line.trim().split(' ').map(Number);
         return [id,{min,max,automatable:automatable===1,stepped:stepped===1}];
       }))};
@@ -124,16 +157,16 @@ function load(file) {
     });
   }
   function snapshot(alias,settings={}) {
-    check(fields(settings,['sampleRate','state','parameters']),'Invalid plugin state settings');
-    const {sampleRate=48000,state,parameters={}}=settings, row=plugin(alias);
-    const saved=execute('snapshot',row,{sampleRate,state,parameters:initial(parameters)},output=>fs.readFileSync(output,'base64'));
+    check(fields(settings,['sampleRate','state','parameters','kind']),'Invalid plugin state settings');
+    const {sampleRate=48000,state,parameters={},kind}=settings, row=plugin(alias);
+    const saved=execute('snapshot',row,{sampleRate,state,kind,parameters:initial(parameters)},output=>fs.readFileSync(output,'base64'));
     return {plugin:alias,identity:row.identity,state:saved};
   }
   function inspect(plugin,settings={}) {
-    check(fields(settings,['sampleRate','state','parameters']),'Invalid plugin inspection settings');
-    const {sampleRate=48000,state,parameters:initial={}}=settings;
-    return {plugin,...describe({plugin,sampleRate,state,initial})};
+    check(fields(settings,['sampleRate','state','parameters','kind']),'Invalid plugin inspection settings');
+    const {sampleRate=48000,state,parameters:initial={},kind}=settings;
+    return {plugin,...describe({plugin,sampleRate,state,initial,kind})};
   }
-  return {adapters:{clap:{describe,render}},snapshot,inspect};
+  return {adapters:{clap:{describe,render}},snapshot,inspect,pluginId:alias=>plugin(alias).id};
 }
 module.exports={load};

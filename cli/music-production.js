@@ -287,7 +287,8 @@ module.exports=function command([mode,file,config],opt,kit) {
       const result=mode==='timeline' ?
         P.renderTimeline(sources,timeline,adaptiveIntents(kit.KIT,recipe),assets,{...recipe.options,stems:true}) :
         recipe.lockedArrangement ? P.renderLockedArrangement(recipe.lockedArrangement,assets,recipe.options) :
-          P.render(production,assets,{stems:true,...recipe.options});
+          P.render(production,assets,{stems:true,...recipe.options},
+            opt['clap-host']===undefined ? undefined : require('./clap-adapter').load(opt['clap-host']));
       writeTake(folder,result.value,result.stems,result.report,mode==='render' && !recipe.lockedArrangement ? production : undefined,paths);
       if (mode==='render' && recipe.lockedArrangement)
         write(path.join(folder,'production.json'),{...recipe,assets:relativeAssets(folder,paths)});

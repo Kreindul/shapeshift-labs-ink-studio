@@ -505,6 +505,7 @@ const specifications = {
   'music.timbrePalette': {inputs:{name:'broken-beat',options:{sampleRate:8000}}},
   'music.planTimbreOrchestration': {inputs:{source:audio,production,settings:{placements:[{section:'opening'}],
     takes:[{id:'air',tail:{part:'lead'}}]}}},
+  'music.handoffEditSession': {inputs:{source:editSession}},
   'music.inspectEditSession': {inputs:{source:editSession}},
   'music.editSession': {inputs:{source:editSession,edits:[{op:'pin',lane:'lead',mode:'pitch'}]}},
   'music.renderEditSession': {inputs:{source:editSession,options:{preview:{from:{beat:0},to:{beat:1}}}}},

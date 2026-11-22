@@ -158,7 +158,7 @@
     return result;
   }
 
-  function compile(source,assets={}) {
+  function compile(source,assets={},host) {
     check(fields(source,['arrangement','patches','tracks','room','gain','seed','cueMap','grooveMap']) &&
       Number.isSafeInteger(source.seed ?? 0), 'A production needs an arrangement, patches and tracks');
     const written=source.arrangement?.format==='ink-studio/phrase-arrangement' ?
@@ -196,7 +196,7 @@
         highpass:number(raw,'highpass',0,0,4000),lowpass:number(raw,'lowpass',20000,80,24000),
         send:number(raw,'send',0,0,1),choke:raw.choke,duck};
       const patch=patches[raw.patch];
-      return [name,{patch:raw.patch,play:patch.player,performance:patch.performance,mix,echo:patch.echo,color:patch.color,
+      return [name,{patch:raw.patch,play:patch.player,external:patch.external,performance:patch.performance,mix,echo:patch.echo,color:patch.color,
         gestures:G.score(raw.gestures,patch,plan,clock),
         clips:raw.clips===undefined ? null : N.rows(raw.clips,clock,program,plan.sections.at(-1).end),
         groove:groove(raw.groove),pad:raw.pad===undefined ? null : pad(raw.pad,plan.sections)}];
@@ -273,7 +273,7 @@
             ...(track.performance && !row.clip && row.voice!==undefined && {voice:row.voice}),
             ...(style.gesture && {gesture:style.gesture}),...(connected && r===0 && {connected:true})};
           const cut=next(cuts,onset)?.startTime;
-          if (cut!==undefined && (track.performance || onset+track.play.prepare(note,48000,note.gate).duration>cut))
+          if (cut!==undefined && (track.external || track.performance || onset+track.play.prepare(note,48000,note.gate).duration>cut))
             note.choke=cut;
           notes.push(note);
           if (r===0 && phrasing?.reference) hits.push({beat:note.beat,midi:note.midi,time:note.time,...phrasing.reference});
@@ -312,7 +312,7 @@
       }
       evidence={id:ensemble.id,matches,references};
     }
-    return {arrangement:plan,events,end,program,clock,tracks,room,gain,cue,...(evidence && {ensemble:evidence})};
+    return {arrangement:plan,events,end,program,clock,tracks,room,gain,cue,host,...(evidence && {ensemble:evidence})};
   }
 
   function applyChokes(tracks,events) {
@@ -381,6 +381,7 @@
     check(n>0 && stereoFrames*2<=36e6 && stop*names.length<=48e6,'Production exceeds its sample budget');
     const buffers={}, mix=sessionSource ? null : new Float32Array(n*2), feed=sessionSource ? null : new Float32Array(stop*2);
     const data=new Float32Array(stop*2);
+    const instruments={};
     const fadeDuration=tail ? 0 : music.arrangement.score.endFade ?? .09;
     for (const name of names) {
       const track=music.tracks[name], local=music.cue?.perTrack[name];
@@ -388,7 +389,12 @@
       data.fill(0);
       const onset=note=>note.start ?? note.time;
       const events=track.performance ? music.events[name].slice().sort((a,b)=>onset(a)-onset(b)) : music.events[name];
-      for (const note of events) {
+      if (track.external) {
+        const rendered=P.musicClap.render(music,track.external,events,{end,gateEnd,stop,sampleRate,tails});
+        data.set(rendered.pcm);
+        instruments[name]=rendered.info;
+      }
+      for (const note of track.external ? [] : events) {
         const start=onset(note);
         if (start>=end) break;
         const first=Math.ceil(start*sampleRate-1e-7);
@@ -538,10 +544,10 @@
     }
     if (wet) buffers.room={sampleRate,channels:2,samples:wet};
     return {value:{sampleRate,channels:2,samples:mix},stems:buffers,
-      report:{sampleRate,firstSample:begin,endSample:stop,peak,rms:Math.sqrt(power/(2*n)),clipped}};
+      report:{sampleRate,firstSample:begin,endSample:stop,peak,rms:Math.sqrt(power/(2*n)),clipped,...(Object.keys(instruments).length && {instruments})}};
   }
 
-  function render(source,assets,options) {return renderCompiled(compile(source,assets),options);}
+  function render(source,assets,options,host) {return renderCompiled(compile(source,assets,host),options);}
   function mapCue(source,map,assets) {
     const production={...source,cueMap:P.data.clone(map)}, music=compile(production,assets);
     return {production:P.data.freeze(P.data.clone(production)),report:Q.report(music)};

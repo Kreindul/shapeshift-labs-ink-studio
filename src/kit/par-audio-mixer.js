@@ -268,7 +268,7 @@
     renderPremix:(source,assets,buses)=>render(source,assets,undefined,buses),
     renderForDelivery:(source,assets,roles={},buses)=>render(source,assets,undefined,buses,roles),
     deliveryRoles});
-  S.renderMixerTransport=(source,assets,ranges)=>render(source,assets,undefined,undefined,undefined,ranges);
+  S.renderMixerTransport=(source,assets,ranges,host)=>render(source,assets,host,undefined,undefined,ranges);
   S.prepareSessionMixer=(source,assets,clock)=>{
     const {order,master,exports}=compile({...source,end:{samples:1},tail:'cut'},assets,
       undefined,undefined,undefined,()=>clock);

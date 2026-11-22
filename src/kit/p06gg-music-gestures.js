@@ -40,8 +40,9 @@
       check(finite(tape.delay,.025,1.5) && finite(tape.feedback,0,.8) &&
         ['damping','wow','flutter','width','send'].every(name=>finite(tape[name],0,1)),'Invalid tape echo parameter');
     }
-    const player=I.compile(instrument,assets);
-    return {player,performance:P.musicPhrasing.compile(performance,instrument),gestures:curves,echo:tape,
+    const external=instrument.type==='clap' ? P.musicClap.patch(instrument) : undefined;
+    const player=external ? null : I.compile(instrument,assets);
+    return {player,external,performance:P.musicPhrasing.compile(performance,instrument),gestures:curves,echo:tape,
       color:instrument.color ?? (instrument.type==='drum' ? .55 : instrument.type==='keys' ? .5 : .6)};
   }
 

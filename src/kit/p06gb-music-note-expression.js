@@ -3,7 +3,7 @@
   const {fields,finite,check}=P.musicInstruments;
   const controls=Object.freeze({pressure:.5,breath:0,damping:.25,contact:.5});
   const names=Object.keys(controls);
-  const limits={gainDb:[-60,12],pitchCents:[-1200,1200],cutoffHz:[40,24000],amplitude:[0,1],roughness:[0,1],
+  const limits={gainDb:[-60,12],pitchCents:[-1200,1200],cutoffHz:[40,24000],amplitude:[0,1],roughness:[0,1],brightness:[0,1],
     ...Object.fromEntries(names.map(name=>[name,[0,1]]))};
 
   function validate(raw) {
