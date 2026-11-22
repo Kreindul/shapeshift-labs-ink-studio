@@ -268,7 +268,7 @@
         const moments=[...base.program.events,...program.events,...written.cues.filter(row=>row.part===name)];
         check(tracks[name] ? JSON.stringify(base.events[name])===JSON.stringify(events[name]) &&
           (!cue || cue.perTrack[name].room.every(row=>row.send.every(value=>value===tracks[name].mix.send)) &&
-          !cue.perTrack[name].cuts.length) :
+          !cue.perTrack[name].cuts.length && cue.perTrack[name].level.every(row=>row.gainDb===0)) :
           moments.every(row=>JSON.stringify(base.program.pitch(name,row.time))===JSON.stringify(program.pitch(name,row.time))),
         (cue ? 'Cue map or groove changes pinned part ' : 'Groove changes pinned part ')+name);
       }
@@ -341,6 +341,7 @@
       let echo=G.tapeEcho(track.echo,sampleRate), cutting=false;
       const cut=Q.cursor(music.cue?.perTrack[name].cuts ?? []);
       const roomSend=Q.cursor(music.cue?.perTrack[name].room ?? []);
+      const level=Q.cursor(music.cue?.perTrack[name].level ?? []);
       const coefficient=frequency=>1-Math.exp(-2*Math.PI*Math.min(sampleRate*.49,frequency)/sampleRate);
       const high=coefficient(desk.highpass), low=coefficient(desk.lowpass);
       const dry=stems ? new Float32Array(n*2) : null;
@@ -360,6 +361,11 @@
         cutting=false;
         const settings=automation?.(time), cutoff=settings ? coefficient(settings.cutoff) : low;
         let l=data[index],r=data[index+1], volume=gain;
+        const ride=level?.(time);
+        if (ride) {
+          const edge=Math.min(time-ride.startTime,ride.endTime-time);
+          volume*=db(ride.gainDb*(ride.fadeSeconds ? clamp(edge/ride.fadeSeconds) : 1));
+        }
         highL+=(l-highL)*high; highR+=(r-highR)*high;
         lowL+=(l-highL-lowL)*cutoff; lowR+=(r-highR-lowR)*cutoff;
         if (anchors?.length) {

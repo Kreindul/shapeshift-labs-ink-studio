@@ -58,6 +58,10 @@ const producerPlan = {op:'music.planProducer',inputs:{source:production,brief:{
     ]
   }]
 }}};
+const critiquePlan={op:'music.planCritique',inputs:{source:production,brief:{section:'opening',kind:'arrival',
+  goal:'Make space before the pluck answers.',offsetBeats:1,focusBeats:2,sampleRate:8000}}};
+const referenceSettings={id:'tone',title:'Dry pluck',source:'Bench PCM',note:'The short tail leaves the downbeat clear.',
+  tags:['short tail'],firstSample:16,endSample:112};
 const transientAudio = { sampleRate: 8000, channels: 1,
   samples: Array.from({ length: 80 }, (_, i) => i === 32 ? .9 : 0) };
 const diorama = { id: 'node-catalog', seed: 1, style: 'slate', solids: [
@@ -65,6 +69,7 @@ const diorama = { id: 'node-catalog', seed: 1, style: 'slate', solids: [
 ] };
 
 const link = (node, port = 'value') => ({ node, port });
+const blindCritique={op:'music.blindCritique',inputs:{source:production,plan:link('plan')}};
 const cameraGrid = { op: 'coord.cameraGrid', inputs: { width: 64, height: 48, camera: { dist: 4 } } };
 const param = input => ({ input });
 const group = (inputs, op, values) => ({
@@ -292,6 +297,14 @@ const specifications = {
     source:production,session:link('plan'),options:{end:.25,sampleRate:8000,focus:[{id:'lead',tracks:['lead']}]}}},
   'music.keepProducer': {nodes:{plan:producerPlan},inputs:{source:production,session:link('plan'),
     selection:{keep:[{take:'echo',component:'room-send'}],reason:'Give the held notes a trailing reflection.'}}},
+  'music.planCritique': {inputs:critiquePlan.inputs},
+  'music.blindCritique': {nodes:{plan:critiquePlan},inputs:blindCritique.inputs},
+  'music.keepCritique': {nodes:{plan:critiquePlan,blind:blindCritique},inputs:{source:production,
+    key:link('blind','key'),token:link('blind','token'),selection:{take:'a',reason:'The empty beat makes the pluck easier to follow.',
+      votes:[{listener:'demo',trial:'pair-1',preferences:{shape:'a'}}]}}},
+  'music.tagListeningReference': {inputs:{source:audio,settings:referenceSettings}},
+  'music.findListeningReferences': {inputs:{references:[{format:'ink-studio/critique-reference',version:1,...referenceSettings}],
+    options:{tags:['short tail']}}},
   'music.renderTransitions': { inputs:{sources:{score:production},
     timeline:{entry:'opening',end:.25,segments:{opening:{source:'score'}}},options:{sampleRate:8000}} },
   'music.arrange': { inputs:{source:arrangement} },
