@@ -5,6 +5,9 @@ named pads and MIDI pitches. It can combine one-shot percussion and
 gated pitched instruments. The same kit definition accepts different
 performances, including those generated or revised by another tool.
 
+Use the [instrument builder](sample-instrument-builder.md) to audition and
+bake pitched registers with independent pitch, duration, and formants.
+
 ```sh
 ink-studio music samples kit library kit.json performance.json --out take
 ```

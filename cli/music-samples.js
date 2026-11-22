@@ -6,7 +6,8 @@ const {openSampleLibrary} = require('./sample-library.js');
 const {readGraphProject} = require('./graph-project.js');
 const {readSceneAudio} = require('./scene-audio.js');
 const {assetPaths} = require('./music-production.js');
-const {printAudio,readAudioPrint}=require('./audio-print.js');
+const {printAudio}=require('./audio-print.js');
+const {openEdit,resolveSampleAssets}=require('./music-sample-assets.js');
 const read = file => JSON.parse(fs.readFileSync(file,'utf8'));
 const text = value => typeof value==='string' && value.trim().length>0;
 
@@ -55,12 +56,6 @@ function capture(file, recipe, kit) {
     firstSample:input.firstSample,endSample:input.endSample});
 }
 
-function openEdit(file,library,tool) {
-  const edit=tool.validate(read(file)), found=library.get(edit.source.id);
-  if (found.entry.asset!==edit.source.asset) throw new RangeError('Sample edit source hash does not match the library');
-  return edit;
-}
-
 function editCommand(mode,file,settings,out,library,tool) {
   if (!file) throw new TypeError('Pass a sample ID or sample edit project');
   if (mode==='slice') {
@@ -107,49 +102,13 @@ function warpCommand(file,config,out,library,tools) {
 function kitCommand(file,performance,out,library,kit) {
   if (!file || !performance || typeof out!=='string')
     throw new TypeError('Pass a kit recipe, performance file and --out directory');
-  const procedural=kit.KIT.procedural,{fields,record,id,check}=procedural.musicInstruments;
-  const {sampleEdit,sampleKit}=procedural.mediaGraph;
+  const procedural=kit.KIT.procedural,{fields,record,check}=procedural.musicInstruments;
+  const {sampleKit}=procedural.mediaGraph;
   const recipe=read(file), score=read(performance);
   check(fields(recipe,['kit','assets']) && record(recipe.assets) && Object.keys(recipe.assets).length<=512,
     'A kit recipe needs a kit and a table of sample sources');
   check(fields(score,['events','options']) && Array.isArray(score.events),'A kit performance needs events and optional render options');
-  const buffers=new Map(), prints=new Map(), assets={}, sources={};
-  let samples=0, originalSamples=0;
-  function readSample(name) {
-    if (!buffers.has(name)) {
-      const source=library.load(name);
-      originalSamples+=source.value.samples.length;
-      check(originalSamples<=32000000,'Kit recipe exceeds its original PCM budget');
-      buffers.set(name,source);
-    }
-    return buffers.get(name);
-  }
-  for (const [name,ref] of Object.entries(recipe.assets)) {
-    check(id(name) && (fields(ref,['sample','asset']) && id(ref.sample) ||
-      fields(ref,['edit','slice']) && text(ref.edit) && (ref.slice===undefined || id(ref.slice)) ||
-      fields(ref,['print','take','slice']) && text(ref.print) && (ref.slice===undefined || id(ref.slice))),
-    'Use a catalog sample, sample edit or printed take for '+name);
-    if (ref.print!==undefined) {
-      const filePath=path.resolve(path.dirname(file),ref.print);
-      if (!prints.has(filePath)) prints.set(filePath,readAudioPrint(filePath,kit));
-      const {entry,value}=prints.get(filePath).load(ref.take,ref.slice);
-      assets[name]=value;
-      sources[name]={id:entry.id,asset:entry.asset,print:ref.print,take:entry.print.take,
-        ...(ref.slice!==undefined && {slice:ref.slice})};
-    } else if (ref.edit!==undefined) {
-      const edit=openEdit(path.resolve(path.dirname(file),ref.edit),library,sampleEdit);
-      const {value}=readSample(edit.source.id);
-      assets[name]=sampleEdit.render(value,edit,ref.slice===undefined ? {} : {slice:ref.slice}).value;
-      sources[name]={id:edit.source.id,asset:edit.source.asset,...ref};
-    } else {
-      const {value,entry}=readSample(ref.sample);
-      check(ref.asset===undefined || entry.asset===ref.asset,'Kit sample hash does not match the library');
-      assets[name]=value;
-      sources[name]={id:entry.id,asset:entry.asset};
-    }
-    samples+=assets[name].samples.length;
-    check(samples<=32000000,'Kit recipe exceeds its source PCM budget');
-  }
+  const {assets,sources}=resolveSampleAssets(recipe.assets,file,library,kit);
   const result=sampleKit.render(recipe.kit,assets,score.events,score.options), folder=path.resolve(out);
   const audio=path.join(folder,'kit.wav'), report=path.join(folder,'report.json');
   write(audio,WAV.encode(result.value,{encoding:'float64'}));

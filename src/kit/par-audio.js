@@ -117,6 +117,26 @@
       outputs:{value:'audio',before:'audio',session:'record',report:'record'},
       run({source,assets,revision}) {return A.audioEditorial.reconform(source,assets,revision);}
     },
+    'audio.shapeInstrumentSample': {
+      description:'Shape sample pitch, duration and formants independently while preserving its attack.',
+      inputs:{source:'audio',options},outputs:{value:'audio',report:'record'},
+      run({source,options}) {return A.shapeInstrumentSample(source,options);}
+    },
+    'audio.analyzeInstrumentSamples': {
+      description:'Propose roots and identify voiced, noisy and transient regions in a take bank.',
+      inputs:{assets:'record',options},outputs:{value:'record'},
+      run({assets,options}) {return {value:A.sampleInstrument.analyze(assets,options)};}
+    },
+    'audio.auditionInstrumentRange': {
+      description:'Render an aligned range test across named takes and transpositions.',
+      inputs:{assets:'record',options},outputs:{value:'audio',report:'record'},
+      run({assets,options}) {return A.sampleInstrument.audition(assets,options);}
+    },
+    'audio.buildSampleInstrument': {
+      description:'Bake a labeled key map into a standard Ink sampler patch and playable assets.',
+      inputs:{assets:'record',source:'record'},outputs:{value:'record',assets:'record',report:'record'},
+      run({assets,source}) {return A.sampleInstrument.build(assets,source);}
+    },
     'audio.warp': {
       description: 'Fit audio to tempo or sample and picture pins with beat, tonal, speech or varispeed processing.',
       inputs: {source:'audio',options}, outputs: {value:'audio',report:'record'},
