@@ -1,5 +1,6 @@
 /* Headless stock simulation nodes keep their sessions between graph samples. */
-(function (P) {
+(function (K) {
+  const P = K.procedural;
   const S = P.rasterSimulation, A = P.animationGraph, T = P.takeTime;
   function tickAt(time, dt, take) {
     if (take === undefined) return S.tickAt(time, dt);
@@ -32,6 +33,38 @@
         };
       }
     },
+    'sim.model': {
+      description: 'Sample a versioned simulation model and its named outputs and probes on the graph clock.',
+      inputs: {
+        model: {type:'record', description:'An ink-studio/simulation-model, such as a JSON graph asset.'},
+        commands: {type:'array<record>', default:[], description:'Named input commands at absolute model ticks.'},
+        checkpoint: {...options, description:'Resume from a checkpoint of this model.'},
+        options: {...options, properties:{
+          tick:{type:'number', unit:'model tick', constraints:{integer:true,min:0}},
+          checkpointEvery:{type:'number', unit:'model ticks', constraints:{integer:true,min:1}},
+          checkpointCache:{type:'number', unit:'checkpoints', constraints:{integer:true,min:0,max:128}}
+        }}
+      },
+      outputs: {value:'record', outputs:'record', probes:'record', checkpoint:'record'}, time: true,
+      instantiate() {
+        let current, prior;
+        return ({model, commands, checkpoint, options}, {time, take}) => {
+          const {tick, checkpointEvery, checkpointCache} = options;
+          if (Object.keys(options).some(key => !['tick','checkpointEvery','checkpointCache'].includes(key)))
+            throw new TypeError('Unknown simulation model graph option');
+          const settings = [model, commands, checkpoint, checkpointEvery, checkpointCache];
+          if (!prior || settings.some((value, i) => value !== prior[i])) {
+            current = K.world.models.session(model, {
+              commands, checkpoint: Object.keys(checkpoint).length ? checkpoint : undefined, checkpointEvery, checkpointCache
+            });
+            prior = settings;
+          }
+          current.seek(tick === undefined ? tickAt(time, current.view().world.dt, take) : tick);
+          const value = K.world.models.sample(current);
+          return {value, outputs:value.outputs, probes:value.probes, checkpoint:current.checkpoint()};
+        };
+      }
+    },
     'anim.feedback': {
       seed: true,
       inputs: { frames: 'array<raster>', flow: { type: 'array<raster>', default: [] }, options }, outputs, time: true,
@@ -58,4 +91,4 @@
   A.operations = Object.freeze(A.operations);
   A.groupOperators = Object.freeze(['anim.retime']);
   delete P.rasterSimSupport;
-})(KIT.procedural);
+})(KIT);

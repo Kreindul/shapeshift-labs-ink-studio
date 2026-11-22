@@ -291,7 +291,7 @@ function readSceneAudio(file, { kit = require('../index.js').load(), ...graphOpt
   if (world !== undefined) {
     if (!token(world)) throw new TypeError('Sound world must be a file path');
     const worldFile = path.resolve(folder, world);
-    soundWorld = read(worldFile);
+    soundWorld = require('./simulation-model-files.js').embedModels(read(worldFile), worldFile);
     if (soundWorld.dataInputs !== undefined)
       soundWorld.dataInputs = embed(kit.KIT.dataInputs, soundWorld.dataInputs, worldFile);
   }

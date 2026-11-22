@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const CheckpointStore = require('../src/simulation-checkpoint-store.js');
+const {embedModels} = require('./simulation-model-files.js');
 
 const read = file => JSON.parse(fs.readFileSync(path.resolve(file),'utf8'));
 const parse = input => JSON.parse(String(input));
@@ -56,6 +57,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
     else process.stdout.write(JSON.stringify(value,null,opt.json?0:2)+'\n');
   };
   function document(world, file) {
+    if (file !== undefined) world = embedModels(world, file, shot?.dependency);
     if (world.format === W.models.format) world = W.models.compile(world);
     if (file !== undefined && world.dataInputs !== undefined) world = { ...world,
       dataInputs: require('./data-inputs.js').embed(kit.KIT.dataInputs, world.dataInputs, file, shot?.dependency) };
@@ -480,7 +482,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
   function modelCommand(mode,file) {
     ensure(['validate','inspect','compile'].includes(mode) && typeof file === 'string',
       'Use sim model validate|inspect|compile <model.json>');
-    const source = read(file);
+    const source = embedModels(read(file), file, shot?.dependency);
     ensure(source?.format === W.models.format, 'Expected an Ink Studio simulation model');
     const world = R.validate(source,{workerPool});
     if (mode === 'compile') return respond(world);
@@ -859,7 +861,7 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
       respond({valid:true,format:raw.format});
       return true;
     }
-    if (raw.format!==W.format && raw.format!==R.checkpointFormat && raw.format!==R.runFormat) return false;
+    if (raw.format!==W.format && raw.format!==W.models.format && raw.format!==R.checkpointFormat && raw.format!==R.runFormat) return false;
     const run = raw.format===R.runFormat ? R.replay(raw) :
       raw.format===R.checkpointFormat ? R.create(raw.world,{checkpoint:raw}) : undefined;
     const world = run?.view().world ?? R.validate(document(raw,file).world);

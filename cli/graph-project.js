@@ -7,6 +7,7 @@ const WAV = require('./wav.js');
 const { createGraphHost } = require('./graph-host.js');
 const { clip } = require('./graph-clip.js');
 const { resolveCheckpoint } = require('./checkpoint-file.js');
+const { embedModels, isModel } = require('./simulation-model-files.js');
 const { loadGraphGroups, groupFor, groupUsage, groupDependencies } = require('./graph-groups.js');
 const { snapshotFormat } = require('./graph-diff.js');
 const { fingerprint } = require('./graph-artifact-cache.js');
@@ -281,7 +282,7 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
     if ((format==='wav' || format==='codec') && fs.statSync(full).size>WAV.maxBytes)
       throw new RangeError('Graph media asset exceeds its byte budget');
     const bytes=fs.readFileSync(full);
-    let value, kind;
+    let value, kind, modelHash;
     if (format==='png') {
       const {w,h,data,max}=planAssets ? PNG.layout(bytes) : PNG.raster(bytes);
       value=planAssets ? {width:w,height:h} : {width:w,height:h,
@@ -300,10 +301,14 @@ function createGraphProject(source, { kit=require('../index.js').load(), baseDir
       kind=type;
     } else {
       const parsed=JSON.parse(bytes.toString('utf8'));
-      value=format==='inputs' ? mediaGraph.recording(parsed) :
-        data.freeze(data.clone(resolveCheckpoint(full,parsed,{onBlock:block=>paths.add(block)})));
+      if (format === 'inputs') value = mediaGraph.recording(parsed);
+      else if (isModel(parsed)) {
+        const embedded = embedModels(parsed, full, file => paths.add(file));
+        if (embedded !== parsed) modelHash = sha256(jsonBytes(embedded));
+        value = data.freeze(data.clone(embedded));
+      } else value = data.freeze(data.clone(resolveCheckpoint(full,parsed,{onBlock:block=>paths.add(block)})));
     }
-    return [name,{format,file,sha256:sha256(bytes),value,...(kind && {type:kind}),...(codec && {codec})}];
+    return [name,{format,file,sha256:sha256(bytes),value,...(modelHash && {modelHash}),...(kind && {type:kind}),...(codec && {codec})}];
   }));
   const {stock,overrides:ops}=operationRegistry(kit,operations,assets);
   const scopes=new Map(), preparedGroups=new Map(), visiting=new Set();

@@ -51,10 +51,11 @@ function createTake({ clock: definition = {}, world, graph } = {}, {
       throw new RangeError('Take seek exceeds the simulation tick budget');
     const result = graph?.run({ take: frame, ...(inputs !== undefined && { inputs }), ...(seed !== undefined && { seed }) });
     const previous = active?.checkpoint();
-    let view, timeline;
+    let view, timeline, model;
     try {
       view = active?.advance(frame.tick);
       timeline = active?.timeline?.forTake(frame);
+      if (view?.world.simulationModel) model = W.models.sample(active);
     } catch (error) {
       if (active === run && run.view().tick !== previous.tick) run = restore(previous);
       throw error;
@@ -63,6 +64,7 @@ function createTake({ clock: definition = {}, world, graph } = {}, {
     lastFrame = index;
     run = active;
     return { frame, timeline, world: view, events: active?.events, query: active?.query(), graph: result,
+      ...(model && {model}),
       render: { take: frame, resetRenderHistory: discontinuity } };
   }
   return Object.freeze({
@@ -114,10 +116,10 @@ function command(pos, opt, settings) {
       other?.ino === existing[paths.length + i].ino && other.dev === existing[paths.length + i].dev)))
     throw new Error('Take outputs must use separate files from each other and their sources');
   const sample = take.seek(Number(opt.frame));
-  const { frame, timeline, world, events, graph } = sample;
+  const { frame, timeline, world, events, graph, model } = sample;
   const report = { format: 'ink-studio/take-frame', version: 1, frame, timeline,
     ...(world && { world: { tick: world.tick, time: frame.simulationTime, events } }),
-    ...(graph && { graph: graph.report }) };
+    ...(graph && { graph: graph.report }), ...(model && {model}) };
   if (opt.checkpoint !== undefined) files.json(path.resolve(opt.checkpoint), take.checkpoint());
   if (opt.out !== undefined) files.json(path.resolve(opt.out), report);
   else process.stdout.write(JSON.stringify(report, null, 2) + '\n');

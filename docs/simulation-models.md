@@ -69,3 +69,79 @@ of one kind can coexist. Supply the pinned revision in every host that
 loads the model or replays its checkpoint. Increment an operator's revision
 when its numerical behaviour changes. Unpinned world manifests still use the
 first registered implementation or their host override.
+
+## Instantiate a model in a world
+
+Add a `simulation-model` system. Reference the model relative to the
+world file and supply its revision, or put the complete model JSON in
+`config.model`. From the library, use
+`W.models.system(model, { drive: ['gateOpening'] })` to build the system
+record from an already loaded model.
+
+```json
+{
+  "systems": {
+    "sluice": {
+      "kind": "simulation-model",
+      "config": { "model": { "file": "sluice.json", "revision": 1 } }
+    },
+    "overflow": { "kind": "control", "config": { "op": "threshold", "threshold": 0.05 } }
+  },
+  "connections": [{ "from": "sluice/outletDepth", "to": "overflow/value" }]
+}
+```
+
+Each instance keeps its own clock, seed, and checkpoint. It advances to the
+last completed model tick at the current world boundary. Its named inputs
+and outputs are ordinary typed world ports. Its named probes are available
+as fields such as `sluice/outletFlow`, evaluated at the targets in the model.
+The inner bodies, fields, and layouts stay in the model's domain. Publish a
+port or a probe for the data a surrounding scene needs.
+
+Unconnected inputs follow the model's authored settings and commands. A
+connection drives its input during the model ticks covered by each world
+step. List an unconnected input in `config.drive` to drive it with the host's
+`world/input` commands. Driven levels take precedence over the model's
+authored levels at those ticks. Event inputs queue until the next model
+tick, and event outputs collect the events from all model ticks advanced by
+that step.
+
+The [sluice world](../examples/simulation-models/sluice.world.json) runs
+at 10 Hz while the model runs at 20 Hz. The world checkpoint embeds the
+resolved model definition, so resume and replay use the original definition
+even after editing or removing the source file.
+
+## Sample a model in a graph
+
+Load the same file with `jsonAsset` and connect it to `sim.model`'s
+`model` port. `value` contains the named outputs and probe results plus
+the model ID, revision, and tick. Separate `outputs`, `probes`, and
+`checkpoint` ports make those results reusable by other nodes. Add
+`commands` as a full schedule of records with a named `input`, `tick`, and
+`value`. A supplied `checkpoint` must belong to the model, and added commands
+must follow the checkpoint tick.
+
+The node samples the last completed model tick at the graph's time or take
+frame start. Supply `options.tick` for an explicit model tick. It supports
+backward seeks using the same checkpoint cache as
+`W.models.session(model, { commands, checkpoint })`.
+
+## Run the same model four ways
+
+The [sample graph](../examples/simulation-models/sluice.graph.json) and
+[sample take](../examples/simulation-models/sluice.take.json) refer to the
+same [sluice model](../examples/simulation-models/sluice.json). At the take's
+frame 12, its embedded world and graph both reach model tick 12.
+
+```sh
+ink-studio sim run examples/simulation-models/sluice.json --ticks 12
+ink-studio probe examples/simulation-models/sluice.world.json --field sluice/outletFlow --ticks 6
+ink-studio graph run examples/simulation-models/sluice.graph.json --time 0.6
+ink-studio take sample examples/simulation-models/sluice.take.json --frame 12
+```
+
+A take that directly uses a model as its world also reports the model's
+named results in `take sample`. A graph node in a take runs its own model
+instance. To compare it with a model driven by a world, feed it the same
+input schedule. Portable take bundles keep the model files referenced
+through both the world and the graph.

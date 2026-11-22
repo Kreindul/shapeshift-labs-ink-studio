@@ -16,7 +16,7 @@
 
   function bindings(value, source) {
     if (Array.isArray(value)) return value.map(item => bindings(item, source));
-    if (!record(value)) return value;
+    if (!record(value) || value.format === format) return value;
     if (own(value, '$model')) {
       check(Object.keys(value).length === 1 && typeof value.$model === 'string',
         'Expected a single $model JSON Pointer');
@@ -92,10 +92,12 @@
     const {world, tick, time, signals} = run.view(), model = world.simulationModel;
     check(model, 'This run has no simulation model interface');
     const outputs = Object.fromEntries(Object.entries(model.outputs).map(([name, port]) => [name, signals[port]]));
-    const query = run.query();
-    const probes = Object.fromEntries(Object.entries(model.probes).map(([name, spec]) =>
+    return freeze({id: model.id, revision: model.revision, tick, time, outputs, probes: sampleProbes(model, run.query())});
+  }
+
+  function sampleProbes(model, query) {
+    return Object.fromEntries(Object.entries(model.probes).map(([name, spec]) =>
       [name, query.probe(spec.field, spec.at, spec.args)]));
-    return freeze({id: model.id, revision: model.revision, tick, time, outputs, probes});
   }
 
   function command(world, input, value, tick) {
@@ -104,5 +106,22 @@
     return {tick, action: 'world/input', args: {port: port[input], value: copy(value)}};
   }
 
-  W.models = Object.freeze({format, compile, checkInterface, sample, command});
+  function session(model, {checkpoint, commands = [], checkpointEvery, checkpointCache} = {}) {
+    const world = compile(model);
+    check(checkpoint === undefined || checkpoint.format === W.runtime.checkpointFormat &&
+      W.data.equal(checkpoint.world, world), 'Checkpoint does not match this simulation model');
+    check(Array.isArray(commands), 'Expected model input commands');
+    const scheduled = commands.map(row => {
+      check(fields(row, ['tick', 'input', 'value', 'id']) && own(row, 'value'), 'Invalid model input command');
+      return {...command(world, row.input, row.value, row.tick), ...(row.id !== undefined && {id:row.id})};
+    });
+    return W.scrub.create(checkpoint ?? world, {commands:scheduled, checkpointEvery, checkpointCache});
+  }
+
+  function system(model, {drive = []} = {}) {
+    check(model?.format === format, 'A simulation-model system needs an embedded model definition');
+    return {kind: 'simulation-model', config: {model, drive}};
+  }
+
+  W.models = Object.freeze({format, compile, checkInterface, sample, command, session, system});
 })(KIT);

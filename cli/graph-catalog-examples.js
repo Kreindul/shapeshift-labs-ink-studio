@@ -212,6 +212,7 @@ const specifications = {
   'anim.frameBank': { inputs: { source: rgba, options: { tiles: { size: [2, 2], every: 4 } } } },
   'sim.define': { inputs: { kind: 'particles' } },
   'sim.run': { nodes: { recipe: { op: 'sim.define', inputs: { kind: 'particles' } } }, inputs: { recipe: link('recipe') } },
+  'sim.model': { inputs: { model: require('../examples/simulation-models/sluice.json'), options: {tick:12} } },
   'anim.feedback': { inputs: { frames: [rgba, rgba] } },
   'music.clock': { inputs: { map: { tempo: 120, swing: .625, changes: [{ beat: 4, tempo: 150 }] },
     options: { time: 2.4 } } },

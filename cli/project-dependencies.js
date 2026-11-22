@@ -4,6 +4,7 @@ const { createHash } = require('node:crypto');
 const Shot = require('./shot-recipes.js');
 const { validateTake } = require('./take-document.js');
 const { resolveCheckpoint } = require('./checkpoint-file.js');
+const { isModel, mapModels, requireRevision } = require('./simulation-model-files.js');
 const { groupEntries, groupReference, groupDocument, requireGroupReference } = require('./graph-groups.js');
 
 const formats = {
@@ -31,6 +32,7 @@ const values = value => Object.values(value ?? {});
 function collectDependencies(bundles, entry, get, attachments = {}) {
   const { resolvePath } = bundles, visited = new Map(), atlasPaths = new Set(), activeGroups = new Set();
   const virtualRoot = path.resolve(path.sep, 'ink-project');
+  const activeModels = new Set();
   const requireFile = name => {
     const value = get(name);
     if (!value) throw new Error('Missing project file: ' + name);
@@ -108,7 +110,8 @@ function collectDependencies(bundles, entry, get, attachments = {}) {
       document && (file === entry || Array.isArray(document.solids) || document.brushRegion || document.prefabLibrary || document.instances)
         ? 'scene' : undefined;
     if (expected && expected !== kind) throw new TypeError('Unexpected project dependency type: ' + file);
-    const dependency = { kind, ...(kind === 'group' && { group: groupDocument(document, bytes(raw), file) }) };
+    const dependency = {kind, ...(kind === 'group' && {group:groupDocument(document, bytes(raw), file)}),
+      ...(isModel(document) && {model:document})};
     visited.set(file, dependency);
     const follow = (ref, type) => { if (ref !== undefined) visit(resolvePath(file, ref), type); };
 
@@ -138,6 +141,14 @@ function collectDependencies(bundles, entry, get, attachments = {}) {
       }
     } else if (kind === 'world') {
       datasetFiles(file, document.dataInputs);
+      activeModels.add(file);
+      mapModels(document, ref => {
+        const target = resolvePath(file, ref.file);
+        if (activeModels.has(target)) throw new Error('Simulation model file cycle at ' + target);
+        requireRevision(ref, visit(target, 'world').model, target);
+        return ref;
+      });
+      activeModels.delete(file);
     } else if (kind === 'shot') {
       shot(file, document);
     } else if (kind === 'checkpoints') {
