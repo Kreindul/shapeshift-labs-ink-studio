@@ -13,6 +13,9 @@ uniform highp sampler2D u_source;
 uniform highp sampler2D u_rows, u_schedulePalette;
 uniform bool u_scheduleIndexed, u_addressLinear;
 uniform ivec2 u_addressEdges;
+uniform vec4 u_windowCrop, u_windowDest, u_windowLine, u_windowInk;
+uniform float u_windowBorder, u_windowLeader;
+uniform bool u_windowLinear, u_windowHasSourceMask;
 uniform highp sampler3D u_cube;
 uniform vec2 u_size, u_passSize, u_offset, u_amplitude;
 uniform bool u_packedDepth, u_depthMask, u_depthInvert, u_background, u_displayMask, u_budgetLinear;
@@ -72,6 +75,42 @@ vec4 textureAddress(vec2 uv) {
   vec2 f = fract(at);
   return mix(mix(addressedColor(p, size), addressedColor(p + ivec2(1, 0), size), f.x),
     mix(addressedColor(p + ivec2(0, 1), size), addressedColor(p + ivec2(1), size), f.x), f.y);
+}
+
+vec4 windowTap(ivec2 site, ivec2 size) {
+  site = clamp(site, ivec2(0), size - 1);
+  site.y = size.y - 1 - site.y;
+  vec4 sampleColor = texelFetch(u_source, site, 0);
+  return u_windowHasSourceMask ? sampleColor * texelFetch(u_auxMask, site, 0).r : sampleColor;
+}
+
+vec4 windowPixel(vec2 pixel) {
+  vec2 local = pixel - u_windowDest.xy;
+  if (all(greaterThanEqual(local, vec2(0.0))) && all(lessThan(local, u_windowDest.zw))) {
+    vec2 edges = min(local, u_windowDest.zw - local);
+    if (min(edges.x, edges.y) < u_windowBorder) return u_windowInk;
+    ivec2 size = textureSize(u_source, 0);
+    if (!u_windowLinear) {
+      if (any(lessThanEqual(u_windowCrop.xy + u_windowCrop.zw, vec2(0.0))) ||
+          any(greaterThanEqual(u_windowCrop.xy, vec2(size)))) return vec4(0.0);
+      ivec2 donor = ivec2(u_windowCrop.xy) + (2 * ivec2(local) + 1) * ivec2(u_windowCrop.zw) / (2 * ivec2(u_windowDest.zw));
+      return any(lessThan(donor, ivec2(0))) || any(greaterThanEqual(donor, size)) ? vec4(0.0) : windowTap(donor, size);
+    }
+    vec2 at = u_windowCrop.xy + local * u_windowCrop.zw / u_windowDest.zw;
+    if (any(lessThan(at, vec2(0.0))) || any(greaterThanEqual(at, vec2(size)))) return vec4(0.0);
+    at -= .5;
+    ivec2 p = ivec2(floor(at));
+    vec2 f = fract(at);
+    return mix(mix(windowTap(p, size), windowTap(p + ivec2(1, 0), size), f.x),
+      mix(windowTap(p + ivec2(0, 1), size), windowTap(p + ivec2(1), size), f.x), f.y);
+  }
+  if (u_windowLeader > 0.0) {
+    vec2 line = u_windowLine.zw - u_windowLine.xy;
+    vec2 from = pixel - u_windowLine.xy;
+    vec2 delta = from - line * clamp(dot(from, line) / dot(line, line), 0.0, 1.0);
+    if (dot(delta, delta) <= u_windowLeader * u_windowLeader * .25) return u_windowInk;
+  }
+  return vec4(0.0);
 }
 
 void main() {
@@ -248,7 +287,11 @@ void main() {
   weight *= u_opacity;
   color = inputColor;
   if (weight <= 0.0) return;
-  if (u_operation == 2) {
+  if (u_operation == 19) {
+    vec2 center = vec2(pos.x, int(u_passSize.y) - 1 - pos.y) + .5;
+    vec4 overlay = windowPixel(center) * weight;
+    color = floor((overlay + inputColor * (1.0 - overlay.a)) * 255.0 + .50001) / 255.0;
+  } else if (u_operation == 2) {
     if (inputColor.a <= 0.0) return;
     vec3 lookup = (clamp(inputColor.rgb / inputColor.a, 0.0, 1.0) * (u_cubeSize - 1.0) + 0.5) / u_cubeSize;
     color.rgb = mix(inputColor.rgb, texture(u_cube, lookup).rgb * inputColor.a, weight);
@@ -491,6 +534,10 @@ export function createRenderGraph(gl, { api, program, resources, target, texture
         const layer =
           node.enabled && node.layer && (!feedback || memory.capture) &&
           api.layer(node, w, h, world, time, camera, gl, frame.time, frame.renderGraphInputs);
+        const window = node.window && node.opacity && api.windowFrame(node.window, {
+          world, time, sceneTime: frame.time, width: w, height: h, camera
+        });
+        const sourceMask = window && outputs.get(node.window.sourceMask);
         const scanlines = api.rowTable(node.rows, w, h, time, node.rowEdits);
         const schedule = node.schedule && api.scheduleTable(node.schedule, w, h, time);
         const indexed = node.indices !== undefined && api.indexedSchedule(node, frame.renderGraphInputs, schedule);
@@ -514,7 +561,7 @@ export function createRenderGraph(gl, { api, program, resources, target, texture
         } else if (rawMotion) {
           textureUnit(1, raster);
           gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, rawMotion);
-        } else textureUnit(1, (outputs.get(node.source ?? node.field) ?? scene).textures[0]);
+        } else textureUnit(1, (outputs.get(window?.source ?? node.source ?? node.field) ?? scene).textures[0]);
         if (table && table !== lastCube) {
           gl.activeTexture(gl.TEXTURE4);
           gl.texImage3D(
@@ -552,7 +599,7 @@ export function createRenderGraph(gl, { api, program, resources, target, texture
         textureUnit(6, depth ?? scene.textures[0]);
         const addresses = node.address && api.addressRaster(node, frame.renderGraphInputs, w, h);
         const registers = addresses || (schedule?.registers ?? scanlines);
-        textureUnit(8, registers ? rows : scene.textures[0]);
+        textureUnit(8, registers ? rows : (sourceMask ?? scene).textures[0]);
         if (registers) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, addresses ? w : 2, h, 0, gl.RGBA, gl.FLOAT, registers);
         const values = {
           u_input: 0,
@@ -563,7 +610,18 @@ export function createRenderGraph(gl, { api, program, resources, target, texture
           u_selected: 5,
           u_size: [w, h],
           u_passSize: [w, h],
-          u_operation: node.operation,
+          u_operation: node.window && !window ? 0 : node.operation,
+          ...(window && {
+            u_windowCrop: window.crop,
+            u_windowDest: window.dest,
+            u_windowLine: window.line,
+            u_windowInk: window.ink?.rgba.map(n => n / 255) ?? [0, 0, 0, 0],
+            u_windowBorder: window.ink?.border ?? 0,
+            u_windowLeader: window.leader,
+            u_windowLinear: window.linear,
+            u_windowHasSourceMask: Boolean(sourceMask),
+            u_auxMask: 8
+          }),
           u_opacity: opacity,
           u_enabled: node.enabled,
           u_hasMask: Boolean(mask),

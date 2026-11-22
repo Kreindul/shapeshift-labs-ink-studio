@@ -22,6 +22,7 @@ const RenderGraph = (() => {
     schedules = require('./raster-schedule.js');
     addressing = require('./texture-address.js');
   }
+  const tracked = typeof TrackedWindow === 'undefined' ? require('./tracked-window.js') : TrackedWindow;
   const operations = Object.freeze({
     mask: 1,
     grade: 2,
@@ -40,7 +41,8 @@ const RenderGraph = (() => {
     motionSmear: 15,
     frameBank: 16,
     rasterSchedule: 17,
-    textureAddress: 18
+    textureAddress: 18,
+    trackedWindow: 19
   });
   const fields = {
     mask: ['rect', 'feather', 'invert', 'volume', 'raster'],
@@ -50,6 +52,7 @@ const RenderGraph = (() => {
     composite: ['source', 'layer', 'blend', 'isolated'],
     rasterSchedule: ['source', 'indices', 'schedule', 'palette', 'cycles', 'blend', 'wrap'],
     textureAddress: ['source', 'field', 'filter', 'edge', 'edgeU', 'edgeV', 'blend'],
+    trackedWindow: ['source', 'switches', 'at', 'crop', 'place', 'sourceMask', 'filter', 'chrome'],
     history: ['mode', 'halfLife', 'cameraMotion'],
     frameAge: ['fps', 'regions', 'source', 'cameraMotion'],
     frameBank: ['fps', 'tiles', 'regions', 'refresh', 'source', 'cameraMotion'],
@@ -396,6 +399,11 @@ const RenderGraph = (() => {
             address: addressing.settings({ filter, edge, edgeU, edgeV }), blend });
           break;
         }
+        case 'trackedWindow': {
+          node.window = tracked.prepare(pass, reference);
+          node.needsCamera = node.window.needsCamera;
+          break;
+        }
         case 'history': {
           const { mode = 'persistence', halfLife = 0.45, cameraMotion = 'reset' } = pass;
           if (
@@ -529,6 +537,7 @@ const RenderGraph = (() => {
         ...new Set(
           node.enabled
             ? [node.isolated ? undefined : input, mask, node.source, node.field, node.refresh,
+                node.window?.source, node.window?.sourceMask, ...(node.window?.cues.map(([, source]) => source) ?? []),
                 ...(node.regions?.map(region => region.mask) ?? []), ...(node.bank?.masks ?? [])].filter(Boolean)
             : [input].filter(Boolean)
         )
@@ -607,6 +616,7 @@ const RenderGraph = (() => {
             ? Math.min(node.span, budget.maxSamples)
             : (budget?.maxSamples ?? 1);
       const age = node.type === 'frameAge';
+      const pane = node.window;
       const cost =
         !node.enabled && node.type !== 'mask'
           ? 0
@@ -623,7 +633,9 @@ const RenderGraph = (() => {
               : node.bank ? width * height * (1 + Number(Boolean(node.bank.grid)) + node.bank.rules.length +
                 Number(Boolean(node.bank.refresh))) + full
               : node.type === 'motionSmear' ? width * height * 4 + full * 4 :
-                node.address ? full * (node.address.filter === 'linear' ? 5 : 2) : full;
+                node.address ? full * (node.address.filter === 'linear' ? 5 : 2) :
+                  pane ? full + Math.min(w, pane.place.size[0]) * Math.min(h, pane.place.size[1]) *
+                    (pane.linear ? 4 : 1) * (pane.sourceMask ? 2 : 1) : full;
       work += cost;
       if (node.enabled || node.type === 'mask') {
         const buffer = free.length ? free.pop() : allocated++;
@@ -1078,6 +1090,8 @@ const RenderGraph = (() => {
     layer,
     motionRaster,
     addressRaster,
+    windowFrame: tracked.frame,
+    paintWindow: tracked.paint,
     scheduleTable: schedules.table,
     indexedSchedule,
     history,

@@ -18,6 +18,8 @@ const {
   resources,
   ownerGroups,
   motionRaster,
+  windowFrame,
+  paintWindow,
   effects
 } = require('../src/render-graph.js');
 const wrap = (n, size) => n - Math.floor(n / size) * size;
@@ -108,6 +110,10 @@ function runGraph(plan, frame, world, time, text, camera, resolve, options, proc
         Number(chosenAt(x, y)) *
         (mask ? mask[Math.floor(y) * w + Math.floor(x)] / 255 : 1) *
         effects.depthWeight(node.depth, depth?.[at(x, y)]);
+      if (node.window && opacity) {
+        const pose = windowFrame(node.window, { world, time, sceneTime: options.t, width: w, height: h, camera, resolve });
+        if (pose) paintWindow(pose, outputs.get(pose.source), outputs.get(node.window.sourceMask), output, w, h, weightAt, opacity);
+      }
       if (smear) {
         const field = node.motion ? motionRaster(node, options.renderGraphInputs, w, h) : outputs.get(node.field);
         smearFrame(node, work, input, field, outputs.get(node.refresh), output, weightAt, openHistory(node), w, h);
@@ -253,7 +259,7 @@ function runGraph(plan, frame, world, time, text, camera, resolve, options, proc
       const readAddress = addresses && TextureAddress.sampler(source, w, h, node.address);
       const theta = node.type === 'distortion' ? 2 * Math.PI * ((node.phase + time * node.rate) % 1) : 0;
       const frequency = (2 * Math.PI) / node.period;
-      if (!node.effect && !budgetedMemory && !age && !smear && !node.bank)
+      if (!node.effect && !budgetedMemory && !age && !smear && !node.bank && !node.window)
         for (let y = 0.5, p = 0; y < h; y++)
           for (let x = 0.5; x < w; x++, p++) {
             const native = nativeIndex(x, y, p);

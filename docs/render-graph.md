@@ -11,6 +11,7 @@ The graph contains an ordered `passes` list of up to 32 entries and an optional 
 | `reflection` | Mirrors the current image or a named `source` along `axis` (`x` or `y`). `line` sets the reflection line in output pixels and defaults to the midpoint. |
 | `distortion` | Samples the input or a named `source` using an XY `offset`, wave `amplitude`, or [scanline controls](#scanline-distortion). `period` is in pixels, and `phase` and `rate` are in cycles and cycles per second. |
 | `textureAddress` | [Sample an image through a signed UV field](#bind-a-programmable-texture-address-field) with independent edge and filter policies. |
+| `trackedWindow` | [Reveal a named image](#tracked-source-windows) through a tracked crop with its own placement, matte, and source cues. |
 | `rasterSchedule` | Applies [discrete register writes](#copper-style-raster-schedules) for indexed palette entries, source offsets, and pixel size. |
 | `composite` | Blends a named `source` image using `over` or `add`, or draws a single [mixed-resolution layer](mixed-resolution.md) from `layer` using its own resolution, filtering and blend settings. Use `isolated: true` to start this pass on transparent pixels. |
 | `history` | Captures the visible pixels of a required target selector. Choose `hold` or `persistence`. An optional mask controls capture coverage. The current depth owner scopes the history overlay. |
@@ -61,6 +62,68 @@ to the graph definition. The two graphs sample the scene at the same take
 time. Screen-space layers composite after scene optics. Use
 `warp.surface` to place a procedural texture on a depth-tested world
 surface when glass or rain should cover it.
+
+## Tracked source windows
+
+A `trackedWindow` composites a crop from an earlier image over its `input`.
+Use the same screen anchor for sampling and placement to reveal a registered
+layer in place. Give the placement a different anchor for a floating callout
+or an enlargement in a fixed part of the frame.
+
+```js
+const detailWindow = {
+  id: 'ceramic-detail',
+  type: 'trackedWindow',
+  input: 'false-color',
+  source: 'scene',
+  switches: [[1.75, 'prior-scan'], [4.65, 'scene']],
+  at: { entity: 'vessel', socket: 'painted-moon' },
+  crop: { size: [32, 24], offset: [0, -3] },
+  place: { at: [264, 106], size: [64, 48] },
+  sourceMask: 'ceramic-alpha',
+  chrome: { color: '#b6ecd8', border: 1, leader: true }
+};
+```
+
+- `at` is the feature pin. Use output-pixel XY, world-space XYZ, or a
+  [world annotation binding](view-annotations.md),
+  such as a rig part, entity socket, splat or data mark.
+- `crop` and `place` take a center anchor in `at`, an XY pixel `offset`,
+  and integer `size: [width, height]`. Both anchors default to the feature
+  pin, and `place.size` defaults to `crop.size`. For a retained frame,
+  give `crop.at` its own tracked position at the recorded time.
+- Any anchor can be a function returning XY, XYZ, a binding, or `null`
+  to hide the window. The callback receives `{ world, time, sceneTime,
+  camera, width, height, source, project }`. `project(xyz)` returns XY
+  or `null` outside the camera's near and far planes. Missing world
+  anchors also hide the window. For measured footage features, return a
+  position from [a raster track](headless-authoring.md#tracked-drawing-anchors).
+- `source` defaults to `scene`. Each `switches` entry is a
+  `[seconds, sourceId]` pair in strictly increasing interface time. The
+  selected source remains active until the next cue. Use isolated image
+  branches for alternate grades or bound RGBA previews of depth, normals
+  and footage. Use [frame age](#frame-age-masks) for earlier frames.
+- `sourceMask` reads an earlier mask at the **sample** position and
+  follows the crop through resampling. The regular `mask`, depth and
+  target selector gate the **destination**. Pixels sampled beyond the
+  source image are transparent. `nearest` snaps both origins to pixels
+  for registration. Use `filter: 'linear'` for fractional origins and
+  filtered enlargement.
+- Optional `chrome` draws a border in output pixels, plus a straight
+  leader from the feature pin to the pane. It uses the destination
+  mask and opacity and is independent of the source matte. Set
+  `border: 0` for a leader without a frame.
+
+[Kiln Archive](../examples/tracked-source-windows.js) reveals the glaze
+inside a false-color image of a moving vessel, enlarges a patch of the
+underlying clay, and switches a linked scan between live and delayed
+frames. The scan's leader follows the current vessel while its crop
+tracks the recorded pose.
+
+```sh
+node cli/ink-studio.js clip examples/tracked-source-windows.js --w 322 --h 204 --px 1 \
+  --from 0 --to 6 --fps 12 --feedback-fps 24 --out kiln-archive.apng
+```
 
 ## Bind a programmable texture address field
 

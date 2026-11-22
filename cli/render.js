@@ -243,7 +243,7 @@ function render(world, o, preparedPalettes) {
         motionalCoverageHistory: undefined, colorClusterHistory: undefined, partMotionHistory: undefined, capturePartMotion: false
       }, preparedPalettes), kit) : o[Shutter.passImages];
     const frame = { ...base, ...runGraph(graph, base, world, time, kit.poly2.text, camera,
-      (spec,ctx) => kit.annotations.anchor(spec,{ ...ctx,sceneTime:o?.t }),
+      (spec,ctx) => kit.annotations.anchor(spec,{ ...ctx,sceneTime:o?.t ?? ctx.sceneTime }),
       { ...o, renderGraphInputs, [Shutter.passImages]: exposedPasses,
         renderHistoryKey: o.renderHistoryKey ?? o[reconstructionSource] }, kit.procedural, kit.directionDrawing.extract) };
     if (base.passes && diagnostic) {

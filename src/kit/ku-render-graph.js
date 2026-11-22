@@ -12,6 +12,7 @@
     replay: RenderGraph.replay,
     feedbackMotion: RenderGraph.feedbackMotion,
     rowTable: RenderGraph.rowTable,
+    windowFrame: (window, ctx) => RenderGraph.windowFrame(window, { ...ctx, resolve: K.annotations.anchor }),
     addressRaster: RenderGraph.addressRaster,
     scheduleTable: RenderGraph.scheduleTable,
     indexedSchedule: RenderGraph.indexedSchedule,

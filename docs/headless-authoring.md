@@ -761,6 +761,8 @@ separately and pass the resulting raster as a layer's alpha mask in
 last observation time and confidence, and its `tracked`, `held`, or
 `hidden` status. Sampling uses the graph clock or `options.time`.
 For direct use, call `drawing2d.trackedAnchors(observations, bindings).sample(time)`.
+Use the sampled position in a [tracked source window](render-graph.md#tracked-source-windows)
+to reveal a different image branch at the tracked feature.
 
 [Browser demo](../examples/tracked-drawing-anchors.cjs)
 
