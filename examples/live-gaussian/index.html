@@ -10,6 +10,7 @@
   main { width:min(1050px, 93vw); margin:0 auto; padding:clamp(18px, 4vw, 32px) 0 24px; }
   header { margin-bottom:20px; }
   h1 { font-size:clamp(38px, 6vw, 60px); letter-spacing:-.065em; line-height:.94; margin:0 0 12px; }
+  .tool-link { color:#a8e2de; text-underline-offset:3px; }
   header p { color:#a9beca; margin:0; font-size:clamp(13px, 2vw, 16px); }
   .views { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-bottom:12px; }
   figure { margin:0; background:#101e2e; border:1px solid #2a3e52; border-radius:10px; overflow:hidden; }
@@ -66,12 +67,34 @@
   .swatches div::before { content:""; background:var(--chip); grid-row:1/3; grid-column:1; width:20px; height:20px; border:1px solid #547083; border-radius:4px; }
   #jump-status { margin:0; font-size:12px; color:#a9beca; }
   #jump-status[data-state=jump] { color:#ffd39b; }
+  .turntable { margin-top:12px; }
+  .turntable h2 { font-size:16px; margin:0 0 10px; }
+  .turntable-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(220px,300px); gap:18px; }
+  .turntable-controls { display:grid; align-content:start; gap:9px; }
+  .turntable-controls label { display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:13px; }
+  .turntable-controls input[type=text], .turntable-controls input[type=number] {
+    box-sizing:border-box; background:#0c1725; color:inherit; border:1px solid #395469; padding:6px; border-radius:5px;
+  }
+  .turntable-controls input[type=text] { width:100%; }
+  .turntable-controls input[type=number] { width:58px; }
+  .turntable-image {
+    position:relative; width:100%; aspect-ratio:1; overflow:hidden; border-radius:6px; border:1px solid #2a3e52;
+    background:repeating-conic-gradient(#172533 0% 25%, #203040 0% 50%) 50% / 16px 16px;
+  }
+  #turntable-preview { width:100%; height:100%; image-rendering:pixelated; aspect-ratio:1; cursor:default; background:transparent; }
+  #turntable-crosshair { position:absolute; width:14px; height:14px; left:50%; top:50%; transform:translate(-50%,-50%); pointer-events:none; }
+  #turntable-crosshair::before, #turntable-crosshair::after { content:""; position:absolute; background:#eafff1; box-shadow:0 0 1px #08111b; }
+  #turntable-crosshair::before { top:6px; width:14px; height:1px; }
+  #turntable-crosshair::after { left:6px; height:14px; width:1px; }
+  .turntable-playback { margin-top:8px; display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:7px; align-items:center; }
+  #turntable-frame, #turntable-status { font-size:12px; color:#a9beca; margin:0; }
   @media (max-width:575px) {
     main { width:min(380px, 92vw); }
     .views { grid-template-columns:1fr; gap:8px; }
     canvas { aspect-ratio:auto; }
     figcaption { padding:7px 9px; }
     #status { width:100%; margin:2px 0 0; }
+    .turntable-layout { grid-template-columns:1fr; }
   }
 </style>
 </head>
@@ -79,7 +102,7 @@
 <main>
   <header>
     <h1>Pelagic</h1>
-    <p>Inspect a patch or brush a mask in either view, then orbit to see it from another angle.</p>
+    <p>Inspect a patch or paint a mask in either view. <a class="tool-link" href="#turntable-title">Export a turntable</a></p>
   </header>
   <div class="views">
     <figure><div class="view-image"><canvas id="rgb" width="560" height="420" tabindex="0" aria-label="Directional RGB view. Click a patch, or use arrow keys and Enter."></canvas><span class="marker" aria-hidden="true" hidden></span><span class="brush" aria-hidden="true" hidden></span></div><figcaption>Directional RGB</figcaption></figure>
@@ -135,6 +158,38 @@
       <div><dt>Palette pixel</dt><dd id="palette-color">—</dd></div>
     </dl>
     <p id="jump-status" role="status">Pick a patch to track its swatch.</p>
+  </section>
+  <section class="controls turntable" aria-labelledby="turntable-title">
+    <h2 id="turntable-title">Turntable sheet</h2>
+    <div class="turntable-layout">
+      <div class="turntable-controls">
+        <label>Angles in degrees <input id="turntable-angles" type="text" value="0, 45, 90, 135, 180, 225, 270, 315" spellcheck="false"></label>
+        <div class="paint-row">
+          <label>Tile <select id="turntable-size"><option>96</option><option selected>128</option><option>160</option><option>256</option></select> px</label>
+          <label>Columns <input id="turntable-columns" type="number" min="1" max="64" value="4"></label>
+          <label>FPS <input id="turntable-fps" type="number" min="1" max="60" value="8"></label>
+          <label>Cutout <input id="turntable-cutoff" type="number" min="1" max="100" value="25"> %</label>
+          <label><input id="turntable-pivot" type="checkbox" checked> Show pivot</label>
+        </div>
+        <div class="paint-row">
+          <button id="turntable-generate" type="button">Build preview</button>
+          <button id="turntable-png" type="button" disabled>Download PNG</button>
+          <button id="turntable-json" type="button" disabled>Download metadata</button>
+        </div>
+        <p id="turntable-status" role="status">Build a preview to review the loop.</p>
+      </div>
+      <div>
+        <div class="turntable-image">
+          <canvas id="turntable-preview" width="128" height="128" aria-label="Indexed turntable frame preview"></canvas>
+          <span id="turntable-crosshair" aria-hidden="true"></span>
+        </div>
+        <div class="turntable-playback">
+          <button id="turntable-play" type="button" aria-pressed="false" disabled>Play loop</button>
+          <input id="turntable-step" type="range" min="0" max="0" value="0" aria-label="Turntable frame" disabled>
+          <output id="turntable-frame" for="turntable-step">—</output>
+        </div>
+      </div>
+    </div>
   </section>
 </main>
 <script src="../../dist/ink-studio.browser.js"></script>

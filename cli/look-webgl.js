@@ -79,6 +79,7 @@ function browserBackend(kit, createRenderer, createCameraAtlas) {
     }
     return {
       driver,
+      captureTurntable(world, options) { return renderer.captureTurntable(world, options); },
       cameraAtlas(definition) { return createCameraAtlas(canvas, { toolkit: kit, ...definition }); },
       draw(world, overrides) { return renderer.render(world, { changedRows:[], target, ...view,...overrides }); },
       fence() { gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixel); },

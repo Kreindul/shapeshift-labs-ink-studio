@@ -8,7 +8,7 @@ const fs = require('node:fs'),
   moduleFiles = [webgl, webgpu, show].flatMap(folder =>
     fs.readdirSync(folder).filter(file => file.endsWith('.mjs')).map(file => path.join(folder, file))),
   bad = lib.lint(lib.files().concat(lib.demoFiles(), path.join(__dirname, '../webgl.mjs'),
-    path.join(__dirname, '../webgpu.mjs'), path.join(__dirname, '../show-control.mjs'), path.join(__dirname, '../src/gaussian-splats.mjs'), path.join(__dirname, '../src/zstd.mjs'),
+    path.join(__dirname, '../webgpu.mjs'), path.join(__dirname, '../show-control.mjs'), path.join(__dirname, '../src/gaussian-splats.mjs'), path.join(__dirname, '../src/png-bytes.js'), path.join(__dirname, '../src/zstd.mjs'),
     path.join(__dirname, '../src/scene-replay.js'), moduleFiles));
 if (bad.length) {
   console.error('code after a // comment on the same line (it would never run):\n  ' + bad.join('\n  '));

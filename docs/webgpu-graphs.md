@@ -162,4 +162,26 @@ renderer.render(world, {
 });
 ```
 
+### Export an indexed turntable sheet
+
+Open **Turntable sheet** in [Pelagic](../examples/live-gaussian/index.html).
+Enter angles in degrees in the order you want them to play. Set the tile size,
+columns, FPS, and the minimum visible coverage for the cutout. **Build preview**
+renders the actual indexed frames. Play the loop or step through the frames
+with the pivot crosshair visible. The preview reports empty frames and frames
+that touch the tile border.
+
+Download the indexed PNG and JSON sidecar after checking the loop. All tiles
+share a palette, including any applied mask ramp, and use the same orthographic
+framing and center pivot. The cutout uses splat coverage and reserves a separate
+transparent palette entry. JSON includes top-left tile rectangles, tile-local
+pivots in pixels, yaw angles in degrees and frame durations in seconds.
+
+Hosts can call `renderer.captureTurntable(world, { angles, width, height, columns,
+fps, cutoff, pivot, frame })` for an imported live Gaussian world. `cutoff`
+ranges from above zero to one and `pivot` is a world-space XYZ point.
+The result contains the shared indexed pixels and their metadata.
+`encodeGaussianTurntablePNG(sheet)` from `webgl.mjs` produces a PNG Blob
+from that same result.
+
 Format references. [Graphdeco PLY implementation](https://github.com/graphdeco-inria/gaussian-splatting/blob/main/scene/gaussian_model.py) · [Niantic SPZ](https://github.com/nianticlabs/spz) · [WebGPU specification](https://www.w3.org/TR/webgpu/)
