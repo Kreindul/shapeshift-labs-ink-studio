@@ -24,23 +24,25 @@ const {
 } = require('../src/render-graph.js');
 const wrap = (n, size) => n - Math.floor(n / size) * size;
 
-function smearFrame(node, work, input, field, refresh, output, weightAt, memory, w, h) {
+function smearFrame(node, work, input, field, refresh, hold, output, weightAt, memory, w, h) {
   const { width: W, height: H } = work;
-  const elapsed = memory.sampleElapsed;
-  const decay = elapsed > 0 ? 2 ** (-elapsed / node.halfLife) : 0;
+  const { sampleElapsed: elapsed, blocks } = memory;
+  const decay = elapsed > 0 && (!node.motion || field) ? 2 ** (-elapsed / node.halfLife) : 0;
   const donor = [0, 0], color = new Float64Array(4), filter = node.budget.filter;
-  const locate = MotionSmear.address(node, { width: w, height: h, elapsed, field, raw: Boolean(node.motion), refresh });
+  const crop = MotionSmear.sampleBounds(blocks?.rect, w, h, W, H);
+  const locate = MotionSmear.address(node, { width: w, height: h, elapsed, field, raw: Boolean(node.motion),
+    refresh, hold, blocks, decay });
   let stamp = memory.value;
   if (memory.capture) {
-    stamp = MotionSmear.write(input, stamp, { w, h, width: W, height: H, filter, decay, locate });
+    stamp = MotionSmear.write(input, stamp, { w, h, width: W, height: H, filter, crop, locate });
     memory.save(stamp);
   }
-  if (!decay || !node.opacity) return;
+  if (!(decay || elapsed > 0 && hold) || !node.opacity || crop === null) return;
   const retained = { data: stamp, w: W, h: H, filter };
   for (let y = .5, q = 0; y < h; y++) for (let x = .5; x < w; x++, q += 4) {
     const weight = weightAt(x, y) * node.opacity;
     if (!weight || !locate(x, y, donor)) continue;
-    FrameComposite.sample(retained, x * W / w, y * H / h, color);
+    MotionSmear.sampleHistory(retained, x * W / w, y * H / h, crop, color);
     for (let c = 0; c < 4; c++) output[q + c] = Math.round(input[q + c] * (1 - weight) + color[c] * weight);
   }
 }
@@ -116,7 +118,7 @@ function runGraph(plan, frame, world, time, text, camera, resolve, options, proc
       }
       if (smear) {
         const field = node.motion ? motionRaster(node, options.renderGraphInputs, w, h) : outputs.get(node.field);
-        smearFrame(node, work, input, field, outputs.get(node.refresh), output, weightAt, openHistory(node), w, h);
+        smearFrame(node, work, input, field, outputs.get(node.refresh), outputs.get(node.hold), output, weightAt, openHistory(node), w, h);
       }
       if (node.bank) {
         const bank = openHistory(node);

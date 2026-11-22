@@ -56,7 +56,7 @@ const RenderGraph = (() => {
     history: ['mode', 'halfLife', 'cameraMotion'],
     frameAge: ['fps', 'regions', 'source', 'cameraMotion'],
     frameBank: ['fps', 'tiles', 'regions', 'refresh', 'source', 'cameraMotion'],
-    motionSmear: ['field', 'motion', 'fieldScale', 'velocity', 'blockSize', 'halfLife', 'refresh', 'cameraMotion'],
+    motionSmear: ['field', 'motion', 'fieldScale', 'velocity', 'blockSize', 'halfLife', 'refresh', 'hold', 'blockMemory', 'cameraMotion'],
     ...Object.fromEntries(
       effects.types.map(type => [type, [...effects.fields[type], 'maskMode', 'depthThreshold', 'protectObjects']])
     ),
@@ -455,11 +455,14 @@ const RenderGraph = (() => {
           const field = pass.field === undefined ? undefined : reference(pass.field, 'image');
           const refresh = pass.refresh === undefined ? undefined : reference(pass.refresh, 'mask');
           const controls = smear.settings({ ...pass, fieldScale: pass.fieldScale === undefined ? (raw ? [1, 1] : [120, 120]) : pass.fieldScale });
+          const blockMemory = smear.prepareBlocks(pass.blockMemory, controls.blockSize);
+          if (!blockMemory && pass.hold !== undefined) throw new TypeError('Motion smear hold needs blockMemory');
+          const hold = pass.hold === undefined ? undefined : reference(pass.hold, 'mask');
           Object.assign(node, {
             ...controls, ...(binding && { motion: binding, direction: binding.direction, units: binding.units }),
-            field, refresh, cameraMotion, needsCamera: cameraMotion === 'reset',
+            field, refresh, hold, blockMemory, cameraMotion, needsCamera: cameraMotion === 'reset',
             budget: effects.budget({ filter: 'nearest', ...pass.budget }),
-            historyKey: JSON.stringify([type, input, field, binding, cameraMotion])
+            historyKey: JSON.stringify([type, input, field, binding, cameraMotion, blockMemory, blockMemory && controls.blockSize, hold])
           });
           break;
         }
@@ -536,7 +539,7 @@ const RenderGraph = (() => {
       node.dependencies = [
         ...new Set(
           node.enabled
-            ? [node.isolated ? undefined : input, mask, node.source, node.field, node.refresh,
+            ? [node.isolated ? undefined : input, mask, node.source, node.field, node.refresh, node.hold,
                 node.window?.source, node.window?.sourceMask, ...(node.window?.cues.map(([, source]) => source) ?? []),
                 ...(node.regions?.map(region => region.mask) ?? []), ...(node.bank?.masks ?? [])].filter(Boolean)
             : [input].filter(Boolean)
@@ -936,9 +939,11 @@ const RenderGraph = (() => {
           return frameAgeClock(age, node, time, releaseAge);
         }
         const elapsed = prior ? time - prior.time : 0;
+        const capture = !prior || prior.time < time;
+        const blocks = capture ? smear.blockFrame(node.blockMemory, w, h, time, prior?.blocks?.clock) : prior?.blocks;
         return {
           value: prior?.value,
-          capture: !prior || prior.time < time,
+          capture, blocks,
           elapsed,
           sampleElapsed: elapsed || prior?.elapsed || 0,
           decay: prior ? 2 ** (-elapsed / node.halfLife) : 0,
@@ -948,6 +953,7 @@ const RenderGraph = (() => {
               key: keys.get(node.id),
               time,
               elapsed,
+              blocks,
               value
             });
           }

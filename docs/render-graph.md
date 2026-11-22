@@ -724,7 +724,8 @@ The encoded image `field` remains available for authored velocity maps.
   `fieldScale: [1, 1]`. `velocity` stays in pixels per second.
 - A `null` vector slot restores the clean frame. Supply a refresh mask
   to clear only selected pixels, or adjust `halfLife` to control how
-  long history survives elsewhere. A clip cut starts a fresh history.
+  long history survives elsewhere. Block holds can retain pixels during a missing
+  vector packet. A clip cut starts a fresh history.
 
 Use [`anim.datamosh`](headless-authoring.md#transport-image-history-with-signed-motion)
 to combine raw motion and live or recorded images outside the scene renderer.
@@ -735,6 +736,55 @@ study with adjustable half-life and selective refresh.
 [Packet Drift](../examples/motion-smear.js) runs the same animated feed
 through clean and motion-smeared image branches. The motion field follows
 the probe's movement with different offsets in neighboring blocks.
+
+### Corrupt one feed with block memory
+
+Set `blockMemory` on a `motionSmear` pass to make its blocks share motion,
+hold and refresh decisions. Give it the top-left art-pixel rectangle of
+the feed you want to affect.
+
+```js
+const graph = { passes: [
+  { id: 'freeze', type: 'mask', raster: { slot: 'lostPackets' } },
+  { id: 'key', type: 'mask', raster: { slot: 'keyBlocks' } },
+  {
+    id: 'weatherDecoder', type: 'motionSmear', input: 'scene',
+    motion: { slot: 'vectors' },
+    blockSize: [12, 8], halfLife: 2,
+    blockMemory: {
+      rect: [144, 20, 120, 80],
+      recovery: { groupSize: [2, 2], fps: 12, every: 12, phase: 1, step: 3 }
+    },
+    hold: 'freeze', refresh: 'key', cameraMotion: 'keep'
+  }
+] };
+```
+
+- `rect` is `[left, top, width, height]`. It clips to the image and
+  defaults to the full source. The grid starts at the feed's top left.
+  Motion and filtered donor taps stay inside the feed. Pixels outside
+  the rectangle keep the current input.
+- `blockSize` is in native art pixels. Each block reads motion, optional
+  confidence and validity, `hold`, and `refresh` at its center. Blocks
+  along the right and bottom edges use their clipped centers.
+- A `hold` mask value of 128 or more freezes the previous decoded pixels
+  in that block, including during a missing motion packet. When the
+  hold clears, ordinary motion transport and half-life decay resume.
+- A `refresh` mask forces fresh pixels for an entire block at 255.
+  Intermediate mask values mix current and retained pixels. A due
+  recovery group refreshes at full strength even while held.
+- `recovery.groupSize` counts blocks across and down. Each group picks a
+  shared row-major phase. `fps`, `every`, `phase`, and `step` follow the
+  [frame-bank cadence](#frame-banks-with-selective-refresh). Skipped ticks
+  refresh each group whose phase was crossed using the latest observed
+  input. Omit recovery to drive refresh from the mask alone.
+
+The first observation, a cut, a rewind, or a size change starts clean.
+Each decoder keeps independent state. Render CPU or WebGL from the same
+pass, or use `anim.datamosh` for an isolated raster feed in a graph.
+Run `node examples/block-video-corruption.cjs ./out/breakwater-relay`
+for the animated and interactive comparison.
+
 
 ```sh
 node cli/ink-studio.js clip examples/motion-smear.js --w 420 --h 204 \

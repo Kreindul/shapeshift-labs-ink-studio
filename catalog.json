@@ -86,6 +86,17 @@
       ]
     },
     {
+      "id": "render.blockVideoCorruption",
+      "kind": "api",
+      "status": "ready",
+      "title": "Feed-local block video corruption",
+      "what": "Transport stale pixels with shared block motion, freeze selected blocks, and refresh groups on staggered cadences within one feed.",
+      "use": "motionSmear pass with blockMemory and hold, or KIT.procedural.datamosh.create",
+      "where": "src/motion-smear.js, docs/render-graph.md",
+      "example": "examples/block-video-corruption.cjs",
+      "tags": ["video", "datamosh", "motion", "blocks", "render-graph"]
+    },
+    {
       "id": "studio.transitions",
       "kind": "api",
       "status": "ready",

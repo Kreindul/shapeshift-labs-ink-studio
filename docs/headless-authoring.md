@@ -1816,7 +1816,7 @@ port to hide a layer during that hold.
 | `anim.frame` | Select from raster `frames` with `fps` and a half-open interval from `first` to `end` in frame indices. Accepts the same delay, rate, reverse and looping controls. |
 | `anim.visualSample` | Replay a [captured visual span](graph-clips.md#capture-a-reusable-visual-span) with independent timing, alpha, raw data, depth and motion. |
 | `anim.frameBank` | Retain and selectively refresh raster pixels. Outputs the banked image, refresh mask, capture tick, and optional history for [per-pixel time](#per-pixel-time). |
-| `anim.datamosh` | Pull the previous image through signed motion and blend it with the current image. Outputs the image and retained weight. |
+| `anim.datamosh` | Pull the previous image through signed motion and blend it with the current image. Supports per-block holds and staggered recovery in a feed. Outputs the image and retained weight. |
 | `anim.subjectFeedback` | Retain marks in a [subject’s UV or rest-space chart](motion-afterimages.md#subject-attached-feedback). Outputs the retained texture and deposit mask. |
 | `anim.spriteDesync` | Composite a layered raster `source` with independent frame holds or offsets on named parts and pixel rectangles. Returns RGBA `value` and the sampled `frames`. |
 | `anim.captureTransforms` | Snapshot the pose channels of a `source` array of instance records with stable IDs. |
@@ -1851,14 +1851,20 @@ across blocks and `filter: "linear"` for interpolated donors.
 Advance in observation order, with warm-up for exported clips that
 start midway through a shot. A repeated timestamp reuses the stored
 result. A backward seek, size change, cut, or explicit `reset`
-starts clean. A `null` motion sample also copies the current image.
+starts clean. A `null` motion sample copies the current image except where block holds are active.
 
 ```js
 const datamosh = KIT.procedural.datamosh.create({ halfLife: 0.8 });
 const { value, carry } = datamosh.sample(image, motion, time, { valid, refresh });
 ```
 
-Use the same settings with a [screen pass](render-graph.md#feed-signed-motion)
+Set `options.blockMemory` to share `refresh` and an optional aligned byte
+`hold` mask across `blockSize`. Define a feed-local rectangle and an optional
+grouped recovery schedule. Pass `hold` alongside `valid` and `refresh` when
+calling `sample`, or connect the graph's `hold` input. Output `carry` is 1
+for a full hold and 0 for a fresh pixel.
+
+Use the same settings with the [block memory screen pass](render-graph.md#corrupt-one-feed-with-block-memory)
 for CPU or WebGL scene rendering.
 
 ### Selectively refresh a frame bank
