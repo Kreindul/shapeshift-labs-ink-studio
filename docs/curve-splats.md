@@ -722,6 +722,61 @@ counts for removed spans, selected aggregate groups, and groups in transition.
 The [distance demo](../examples/curve-distance-simplification.cjs) shows
 the same bands and bends in both modes during a zoom out.
 
+## Layer budgets and quality review
+
+Set `look.curveQuality` in the scene, pass `curveQuality` to the Node
+renderer, or give the CLI `--curve-quality budgets.json`. Layer rules use
+[target selectors](art-passes.md) in order, with the first match taking
+precedence. Each rule needs a unique ID and at least one limit. Use zero
+to omit a layer or leave a limit unset to give that layer no cap for that
+resource. Pass `false` in Node or `--curve-quality off` in the CLI to
+disable the layer budgets.
+
+```json
+{
+  "layers": [
+    { "id": "frame", "select": { "material": "frame-cord" }, "segments": 96 },
+    { "id": "strings", "select": { "material": "silk" }, "segments": 68 },
+    { "id": "winding", "select": { "material": "winding" }, "fragments": 3100 }
+  ]
+}
+```
+
+Each color raster pass admits whole visible strands in source order after
+timing and authored LOD. A group crossfading to its proxy within a layer is
+admitted together. The segment cap counts visible spans submitted to the
+rasterizer. The fragment cap reserves one slot per art pixel in each span's
+projected bounds, including the edge filter margin. That conservative
+reservation bounds raster work even when a span's rectangular footprint
+contains empty space. `renderStats.curveQuality` reports the requested and
+admitted slots, actual composited fragments, and omitted strands per layer.
+Use the existing LOD settings to simplify eligible spans before admission.
+
+```sh
+ink-studio strand-review examples/curve-quality-harp.js --w 176 --h 112 \
+  --from 0 --to 4 --fps 12 --camera-orbit 52 --out harp-review
+```
+
+The review renders both versions from one pose, at the same time, camera,
+lighting, palette, and native export dimensions. Use `--camera-pan x,y,z`
+for a pan or `--t seconds` for a still. The preview puts the reference on
+the left, the budgeted render in the middle, and the evidence on the right.
+The JSON includes frame time, segment and fragment counts, and pixel and
+path-station evidence for these checks.
+
+| Check | Measurement |
+| --- | --- |
+| Strand breaks and omissions | Missing visible samples bracketed by surviving samples on the same continuous reference run count as a break. A wholly missing strand has its own count. The preview marks missing stations in red. |
+| Join brightness | Compare the sRGB luma step across an authored join against the matched reference. Report the largest step and added change. Amber marks threshold crossings. |
+| Flicker | Follow the reference strand motion across frames and measure reversals in the brightness difference between versions. Magenta marks reversals above the threshold. Cuts restart the comparison. |
+
+The checks sample visible paths from the finite-curve passes. Reference
+gaps, offscreen paths and disocclusions are excluded where there is no
+matched sample. In Node, `reviewCurveQuality(world, options, receive)`
+returns the same measurements and optionally passes each matched image and
+evidence map to `receive`. Use `options.thresholds` to tune `coverage`,
+`joinLuma` and `flickerLuma`, each expressed from zero to one.
+
 ## Render and compare
 
 The [editable example](../examples/curve-splat-scene.json) uses

@@ -95,7 +95,7 @@ function frame(records, camera, { data, x, y, z, alpha, scale, windows, rig }) {
     stats.aggregateGroups++;
     stats.aggregateSegments += end - start;
     if (weight) stats.blendingGroups++;
-    const fine = { weight, detail: true }, coarse = { weight, detail: false };
+    const fine = { weight, detail: true, cohort:aggregate }, coarse = { weight, detail: false, cohort:aggregate };
     for (const [first, end] of detail) for (let i = first; i < end; i++) {
       if (!weight) hidden.add(i);
       else choices.set(i, fine);

@@ -662,6 +662,15 @@ function curveWidthOption() {
   return curveWidthOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
 }
 
+let curveQualityOverride;
+function curveQualityOption() {
+  const value = opt['curve-quality'];
+  if (value === undefined) return;
+  if (value === 'off') return false;
+  if (typeof value !== 'string') die('--curve-quality needs a JSON file or off');
+  return curveQualityOverride ??= JSON.parse(fs.readFileSync(path.resolve(value), 'utf8'));
+}
+
 let translucentSilhouettesOverride;
 function translucentSilhouettesOption() {
   const value = opt['translucent-silhouettes'];
@@ -794,6 +803,7 @@ const view = extra =>
       curveMode: opt['curve-mode'],
       curveLod: onOffOption('curve-lod'),
       curveWidth: curveWidthOption(),
+      curveQuality: curveQualityOption(),
       paletteSampling: onOffOption('palette-sampling'),
       brushwork: onOffOption('brushwork'),
       shadowBandPaint: onOffOption('shadow-band-paint'),
@@ -1296,6 +1306,7 @@ const CMD = {
         '  retarget --profiles  show built-in role templates',
         '  passes <id> [--channels depth,normal,part-motion,strands] [--previous seconds]   save art-pixel render passes',
         '  strand-pixel <id> --at x,y [--t seconds] [--previous seconds]   inspect visible strand hits on the native art grid',
+        '  strand-review <id> --w 160 --h 96 [--curve-quality file.json] [--from 0 --to 3 --camera-orbit 20] [--out directory]',
         '  export-layers <id> [--t 0,1,2 | --from 0 --to 2 --n 3] [--part-motion on] [--compositing file.json] [--out directory]   export RGBA and compositing layers',
         '  export-scene <scene|world|take> --out directory [--formats still,loop,replay,embed]',
         '    --audio soundtrack.json [--mux CODEC --adapters host.cjs]   export aligned WAV stems and optional video',
@@ -2533,6 +2544,18 @@ const CMD = {
     const report = { scene: world.id, ...frame.strandPixel };
     if (opt.out) require('./asset-files.js').json(path.resolve(opt.out), report);
     else process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+  },
+  'strand-review'() {
+    if (pos.length !== 1 || opt.out === true || opt.w === undefined || opt.h === undefined ||
+        ['w', 'h', 't', 'from', 'to', 'fps'].some(flag => opt[flag] === true))
+      die('Use strand-review <scene> --w WIDTH --h HEIGHT [--t TIME | --from START --to END --fps RATE] [--out directory]');
+    const world = buildPreview(), frame = view(), directory = outputFile('strand-review');
+    const time = num('t'), from = num('from'), to = num('to');
+    const replay = feedbackReplay(world, from ?? time ?? 0, frame);
+    const report = require('./curve-quality-review.js').writeCurveQualityReview(world, {
+      kit: lib(), frame, time, from, to, fps: num('fps',12), camera:clipCamera(world), replay, samplePose:pose
+    }, directory);
+    console.log('wrote', directory, report.frames.length, 'matched samples at', report.width + 'x' + report.height, 'art pixels');
   },
   'export-layers'() {
     if (pos.length !== 1 || opt.out === true)

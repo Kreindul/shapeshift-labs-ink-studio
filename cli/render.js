@@ -60,6 +60,7 @@ const CurveCoverage = require('./curve-coverage.js');
 const CurveWidth = require('../src/curve-width.js');
 const CurvePattern = require('../src/curve-pattern.js');
 const CurveLod = require('./curve-lod.js');
+const CurveQuality = require('./curve-quality.js');
 const { createMaskResolve, applyMasks } = require('./look-mask-resolve.js');
 const PalettePixel = require('./palette-pixel.js');
 const PaletteComposition = require('./palette-composition.js');
@@ -365,6 +366,7 @@ function renderFrame(world, o, preparedPalettes) {
   const curves = world.curveSplats && (o.curveMode === undefined ? (o.curveSplats ?? look.curveSplats ?? true) : o.curveMode === 'curves');
   const matchedCarriers = world.curveSplats && o.curveMode === 'splats';
   const curveScene = curves || matchedCarriers;
+  const curveQualityLayers = CurveQuality.prepare(o.curveQuality ?? look.curveQuality);
   const curveWidthAt = CurveWidth.prepare(o.curveWidth ?? look.curveWidth)?.bind(world);
   const deepPlan = o[deepScope];
   const sortedSurfaces = curveScene || Boolean(deepPlan) || orderMode === 'surface' || blendDepth > 0 || planarFootprints;
@@ -1456,6 +1458,23 @@ function renderFrame(world, o, preparedPalettes) {
       counters.curveLod[key] = (counters.curveLod[key] ?? 0) + value;
     }
   }
+  function rasterCurve(i, coarse) {
+    const carrier = shutterRows?.pose(i) ?? world;
+    const curve = prepareCurve(i, curveCamera, carrier, false, coarse);
+    if (!curve) return;
+    const strength = !optical?.[i * OpticalMaterials.STRIDE + 3] && edgeStrengthAt && edgeStrengthAt(i);
+    const bounds = CurveQuality.pixelBounds(curve, strength ? CurveCoverage.margin : 0, W, H);
+    if (bounds) return { curve, carrier, strength, bounds };
+  }
+  const curveQuality = curves ? CurveQuality.plan(world, curveQualityLayers, d, i => {
+    if (AL[i] <= 0 || qualityRows && !qualityRows.keep[i] || curveLod?.hidden?.has(i) ||
+        geometryMask && spriteLOD.hidden(geometryMask.codes[i])) return;
+    return rasterCurve(i, curveLod?.geometry?.get(i));
+  }, curveLod?.choices) : undefined;
+  if (counters && curveQuality) (counters.curveQuality ??= []).push({
+    width: W, height: H, artScale: o.artGridScale || 1,
+    pass: probeView ? 'probe' : reflectionPlane ? 'reflection' : 'color', layers: curveQuality.layers
+  });
   let mn = Infinity;
   for (let i = 0; i < N; i++) if ((!qualityRows || qualityRows.keep[i]) && (i < baseCount || AL[i] > 0) && depth[i] < mn) mn = depth[i];
   const mediumHorizon = aerial ? Math.max(horizon, -mn + R) : horizon;
@@ -1465,7 +1484,7 @@ function renderFrame(world, o, preparedPalettes) {
   let orderCount = 0;
   for (let i = 0; i < N; i++)
     if ((!qualityRows || qualityRows.keep[i]) && !(geometryMask && spriteLOD.hidden(geometryMask.codes[i])) &&
-        !curveLod?.hidden?.has(i)) orderRows[orderCount++] = i;
+        !curveLod?.hidden?.has(i) && !curveQuality?.omitted.has(i)) orderRows[orderCount++] = i;
   const order = orderRows.subarray(0,orderCount);
   order.sort((a, b) => depth[a] - depth[b]);
   if (transparency && !blendDepth && !deep) {
@@ -1634,6 +1653,8 @@ function renderFrame(world, o, preparedPalettes) {
     if (counters) {
       counters.fragments++;
       if (!wd && a < 1) counters.translucentFragments++;
+      const quality = curveQuality?.rows.get(i);
+      if (quality) quality.report.fragments++;
     }
     if (foreground && wd && (i < 0 ? !sprite?.emission : !(d[i*16+11] & 32)))
       [pr,pg,pb] = foreground(foregroundDepth(opticalDepth),pr,pg,pb,contrastColor);
@@ -1833,15 +1854,11 @@ function renderFrame(world, o, preparedPalettes) {
         (reflectionPlane.select && !reflectionPlane.select(i, x, y, z, world)))
     )
       continue;
-    let curve, curveWorld, curveSpan, curveStrength, curveMargin = 0, roughness, curveEmission, curveLight, curveReceives;
+    let curve, curveWorld, curveSpan, curveStrength, curveBounds, roughness, curveEmission, curveLight, curveReceives;
     if (curveCamera && CurveSplat.isRow(d, q)) {
-      curveWorld = shutterRows?.pose(i) ?? world;
-      curve = prepareCurve(i, curveCamera, curveWorld, false, coarse);
-      if (!curve) continue;
-      curveStrength = !opticalActive && edgeStrengthAt && edgeStrengthAt(i);
-      if (curveStrength) curveMargin = CurveCoverage.margin;
-      if (curve.bounds[0] - curveMargin >= W || curve.bounds[1] - curveMargin >= H ||
-          curve.bounds[2] + curveMargin <= 0 || curve.bounds[3] + curveMargin <= 0) continue;
+      const sample = curveQuality?.rows.get(i) ?? rasterCurve(i, coarse);
+      if (!sample) continue;
+      ({ curve, carrier: curveWorld, strength: curveStrength, bounds: curveBounds } = sample);
       if (counters) counters.curveSegments++;
       const finish = curveWorld.curveMaterials;
       const encoded = finish?.[i * CurveSplat.materialStride];
@@ -2086,10 +2103,10 @@ function renderFrame(world, o, preparedPalettes) {
       writesDepth = !opticalActive && solid && coverage === 1 && (!(flags & 1) || curve?.group) &&
         mode !== ContributionRules.softCoverage,
       glass = (flags & 16) !== 0,
-      x0 = Math.max(0, Math.floor(curve ? curve.bounds[0] - curveMargin : sx - ex)),
-      x1 = Math.min(W - 1, Math.ceil(curve ? curve.bounds[2] + curveMargin : sx + ex)),
-      y0 = Math.max(0, Math.floor(curve ? curve.bounds[1] - curveMargin : sy - ey)),
-      y1 = Math.min(H - 1, Math.ceil(curve ? curve.bounds[3] + curveMargin : sy + ey));
+      x0 = curveBounds?.[0] ?? Math.max(0, Math.floor(sx - ex)),
+      x1 = curveBounds?.[1] ?? Math.min(W - 1, Math.ceil(sx + ex)),
+      y0 = curveBounds?.[2] ?? Math.max(0, Math.floor(sy - ey)),
+      y1 = curveBounds?.[3] ?? Math.min(H - 1, Math.ceil(sy + ey));
     let glassLook;
     if (glass && glassIndex) {
       const target = glassIndex.row(i);

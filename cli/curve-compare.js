@@ -17,10 +17,10 @@ function changedPixels(a, b) {
   return changed;
 }
 
-function run(world, {
+function sampleCurveShot(world, {
   frame = {}, width = frame.w ?? frame.width, height = frame.h ?? frame.height,
   time, from, to, fps = 12, camera, replay, samplePose, kit = require('../index.js').load()
-}, receive, pixelBudget = Infinity) {
+}, variants, receive, pixelBudget = Infinity) {
   if (!world?.curveSplats) throw new TypeError('Curve comparison needs a world with curve splats');
   if (![width, height].every(n => Number.isSafeInteger(n) && n > 0) || width * height > 4_000_000)
     throw new RangeError('Curve comparison needs explicit art dimensions of up to 4 million pixels per view');
@@ -35,40 +35,46 @@ function run(world, {
     throw new RangeError('Curve comparison needs a finite time and a range of 1 to 3600 frames');
   if (count * width * height * 2 > pixelBudget)
     throw new RangeError('Curve comparison preview exceeds 64 million art pixels. Reduce the resolution or frame range.');
-  const histories = modes.map(() => R.sequenceHistory(kit.KIT));
+  const histories = variants.map(() => R.sequenceHistory(kit.KIT));
   const applyPose = samplePose ?? ((world, t) => pose(world, t, { kit, artDirection: frame.artDirection }));
-  const report = { format: 'ink-studio/curve-mode-comparison', version: 1, scene: world.id, seed: world.seed,
-    width, height, fps: sequence ? fps : null, modes, frames: [] };
 
   function draw(t, resetRenderHistory) {
     applyPose(world, t);
     const phase = count === 1 ? 0 : Math.max(0, Math.min(1, (t - start) * fps / (count - 1)));
     const shared = { ...frame, ...camera?.(phase, t), t, time: t, px: 1, w: width, h: height, resetRenderHistory };
     const cameras = [];
-    const images = modes.map((curveMode, i) => {
+    const images = variants.map((variant, i) => {
       const capture = R.cameraCapture(shared, view => {
         if (!cameras[i] || view.width === width && view.height === height) cameras[i] = view;
       });
-      const image = R.render(world, { ...shared, ...histories[i], ...capture, curveMode });
+      const image = R.render(world, { ...shared, ...histories[i], ...capture, ...variant });
       if (image.w !== width || image.h !== height)
         throw new RangeError('The render settings changed the requested art resolution');
       return image;
     });
     if (!isDeepStrictEqual(cameras[0], cameras[1]))
       throw new RangeError('The comparison modes resolved different cameras');
-    return { time: t, camera: cameras[0], images };
+    return { time: t, camera: cameras[0], images, reset: resetRenderHistory === true };
   }
 
   for (let index = 0; index < count; index++) {
     const requestedTime = start + index / fps;
     const matched = replay ? R.sequenceOutput(histories[0], () =>
       R.sequenceOutput(histories[1], () => replay.sample(requestedTime, draw))) : draw(requestedTime, index === 0);
-    const { time, camera: sampledCamera, images: [splats, curves] } = matched;
-    const row = { index, requestedTime, time, camera: sampledCamera, changedPixels: changedPixels(splats, curves) };
-    report.frames.push(row);
-    receive?.({ ...row, splats, curves });
+    receive({ index, requestedTime, time:matched.time, camera:matched.camera, reset:matched.reset }, matched.images);
   }
-  return report;
+  return { scene:world.id, seed:world.seed, width, height, fps:sequence ? fps : null };
+}
+
+function run(world, options, receive, pixelBudget) {
+  const frames = [];
+  const summary = sampleCurveShot(world, options, modes.map(curveMode => ({ curveMode })), (sample, [splats, curves]) => {
+    const { reset, ...row } = sample;
+    row.changedPixels = changedPixels(splats, curves);
+    frames.push(row);
+    receive?.({ ...row, splats, curves });
+  }, pixelBudget);
+  return { format:'ink-studio/curve-mode-comparison', version:1, ...summary, modes, frames };
 }
 
 function compareCurveModes(world, options = {}, receive) {
@@ -94,4 +100,4 @@ function writeCurveComparison(world, options, directory) {
   return report;
 }
 
-module.exports = { compareCurveModes, writeCurveComparison };
+module.exports = { sampleCurveShot, compareCurveModes, writeCurveComparison };
