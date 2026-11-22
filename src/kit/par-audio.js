@@ -599,6 +599,42 @@
         return {value:production,reference,revision};
       }
     },
+    'music.planCritique': {
+      description:'Measure rendered evidence on the score grid and propose local hook and arrival edits.',
+      inputs:{source:'record',brief:'record',assets:options},outputs:{value:'record'},
+      run({source,brief,assets}) {return {value:P.musicProduction.critique.plan(source,brief,assets)};}
+    },
+    'music.blindCritique': {
+      description:'Publish matched audio under neutral labels, with a separate reveal key and addressed evidence clips.',
+      inputs:{source:'record',plan:'record',assets:options,options},
+      outputs:{value:'record',audio:'record',evidence:'record',key:'record',token:'string'},
+      run({source,plan,assets,options}) {
+        const {test,audio,evidence,key}=P.musicProduction.critique.blind(source,plan,assets,options);
+        return {value:test,audio,evidence,key,token:test.token};
+      }
+    },
+    'music.keepCritique': {
+      description:'Apply a blind listening decision and save its rationale, paired votes and editable revision.',
+      inputs:{source:'record',key:'record',token:'string',selection:'record',assets:options},
+      outputs:{value:'record',reference:'record',revision:'record'},
+      run({source,key,token,selection,assets}) {
+        const {production,reference,revision}=P.musicProduction.critique.keep(source,key,{...selection,token},assets);
+        return {value:production,reference,revision};
+      }
+    },
+    'music.tagListeningReference': {
+      description:'Keep a sample-addressed reference clip and a description of what to listen for.',
+      inputs:{source:'audio',settings:'record'},outputs:{value:'record',audio:'audio'},
+      run({source,settings}) {
+        const {reference,value}=P.musicProduction.critique.tagReference(source,settings);
+        return {value:reference,audio:value};
+      }
+    },
+    'music.findListeningReferences': {
+      description:'Retrieve tagged listening excerpts and previous choices by musical intent.',
+      inputs:{references:'array<record>',options},outputs:{value:'array<record>'},
+      run({references,options}) {return {value:P.musicProduction.critique.findReferences(references,options)};}
+    },
     'music.planPerformances': {
       description: 'Prepare patch-gesture alternatives that retain the score for audition.',
       inputs:{source:'record',takes:'array<record>',assets:options},

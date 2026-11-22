@@ -2,9 +2,9 @@
 (function (P) {
   const {fields,record,finite,integer,id,check,hash}=P.musicInstruments;
   const eps=1e-8, round=n=>Number(n.toFixed(9));
-  const names=['density','register','harmony','silence','room'];
+  const names=['density','register','harmony','silence','room','level'];
   const fieldsFor={density:['parts','value','keep'],register:['parts','semitones'],
-    harmony:['chords','every'],silence:['parts','mode'],room:['parts','send']};
+    harmony:['chords','every'],silence:['parts','mode'],room:['parts','send'],level:['parts','gainDb','fadeSeconds']};
   const byStart=(a,b)=>a.from-b.from;
   function list(raw,max,label) {
     check(Array.isArray(raw) && raw.length<=max,'Invalid cue '+label+' list');
@@ -73,6 +73,11 @@
         const values=Array.isArray(raw.send) ? Array.from(raw.send) : [raw.send,raw.send];
         check(values.length===2 && values.every(value=>finite(value,0,1)),'Cue room needs a send level or pair of levels');
         row.send=values;
+      }
+      if (key==='level') {
+        const fade=raw.fadeSeconds ?? .02;
+        check(finite(raw.gainDb,-60,18) && finite(fade,0,2),'Cue level needs a gain in dB and a fade in seconds');
+        row.fadeSeconds=Math.min(fade,(row.endTime-row.startTime)*.5);
       }
       return row;
     }).sort(byStart)]));

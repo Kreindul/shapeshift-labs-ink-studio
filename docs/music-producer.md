@@ -1,5 +1,8 @@
 # Producer auditions
 
+[Mix critique and blind listening](music-critique.md) measures an actual
+passage, proposes time-local edits and records a listening decision.
+
 [Music edit sessions](music-edit-session.md) use production revisions as
 take lanes alongside recordings and sample motifs. Loop a passage through the
 session desk, switch takes, and keep selected time ranges.
