@@ -80,6 +80,10 @@ Successful `material-lift` and `material-crumble` events link the body
 and parcel IDs. The lattice and pieces share one checkpoint and replay
 as part of a normal [world recording](simulation-checkpoints.md).
 
+Enable the optional [phase field](coupled-phase-changes.md#freeze-liquid-into-rigid-pieces)
+to pool liquid, grow rigid parcels, and return melted parcels to the
+field. Both representations appear in the same mass and heat ledger.
+
 ## Break a piece in stages
 
 Add `fracture` to a lift to bond the face-neighbor parcels independently.

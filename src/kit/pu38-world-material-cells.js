@@ -14,7 +14,7 @@
   function materialCells(config,env) {
     const {id:system,world}=env;
     const {size, origin=zero, cell=1, initial:placements=[], materials, ambient=20,
-      cooling=0, conduction=0, settle=false, ground=origin?.[1], gravity=[0,-9.81,0], drag=.08}=config;
+      cooling=0, conduction=0, settle=false, ground=origin?.[1], gravity=[0,-9.81,0], drag=.08, phase}=config;
     check(vector(size)&&size.every(n=>integer(n,1,64))&&size.reduce((a,b)=>a*b,1)<=32768&&
       vector(origin)&&origin.every(n=>Math.abs(n)<=1000)&&finite(cell,.04,5)&&finite(ground,-1000,1000)&&
       velocity(gravity)&&finite(drag,0,100)&&finite(ambient,absoluteZero,maxTemperature)&&
@@ -46,8 +46,19 @@
     }
     const mass=row=>profiles.get(row.material).mass;
     const capacity=row=>profiles.get(row.material).capacity;
-    const temperature=row=>absoluteZero+row.energy/capacity(row);
-    const safeHeat=row=>finite(row.energy,0,capacity(row)*(maxTemperature-absoluteZero));
+    let phases;
+    if(phase!==undefined){
+      check(record(phase)&&profiles.has(phase.material),'Material phases need a named rigid material');
+      phases=W.materialPhases.prepare(phase,{size,cell,origin,profile:profiles.get(phase.material),
+        dt:world.dt,ground,absoluteZero,maxTemperature});
+    }
+    const temperature=row=>{
+      const degrees=absoluteZero+row.energy/capacity(row);
+      if(!row.phase)return degrees;
+      return row.energy<phases.meltEnergy?Math.min(degrees,phases.meltingPoint):degrees-phases.latentDegrees;
+    };
+    const heatLimit=row=>capacity(row)*(maxTemperature-absoluteZero)+(row.phase?phases.latent:0);
+    const safeHeat=row=>finite(row.energy,0,heatLimit(row));
     check(Array.isArray(placements)&&placements.length<=512,'Material cells allow up to 512 occupied parcels');
     const authored={}, initialParcels=new Map();
     for(const row of placements){
@@ -61,7 +72,9 @@
       authored[key]=parcel;
       initialParcels.set(key,parcel);
     }
-    const initialEnergy=sum(Object.values(authored),row=>row.energy), initialMass=sum(Object.values(authored),mass);
+    const pool=phases?.totals(phases.start);
+    const initialEnergy=sum(Object.values(authored),row=>row.energy)+(pool?pool.fieldSensibleEnergy+pool.liquidLatentEnergy:0);
+    const initialMass=sum(Object.values(authored),mass)+(pool?pool.liquidMass+pool.fieldIceMass:0);
     const mechanics=W.mechanics.create({continuous:true,ground,gravity,drag},env);
     const emptyPhysics=freeze(mechanics.initial({world}));
     const fixed=new Map(), frames=new WeakMap();
@@ -94,9 +107,12 @@
       return Object.values(state.cells).concat(Object.values(state.pieces).flatMap(piece=>Object.values(piece.cells)));
     }
     function balance(state){
-      const rows=parcelRows(state), energy=sum(rows,row=>row.energy), materialMass=sum(rows,mass);
+      const rows=parcelRows(state), field=phases?.totals(state.phase), parcelEnergy=sum(rows,row=>row.energy);
+      const energy=parcelEnergy+(field?field.fieldSensibleEnergy+field.liquidLatentEnergy:0);
+      const materialMass=sum(rows,mass)+(field?field.liquidMass+field.fieldIceMass:0), phaseEnergy=state.phase?.exchange??0;
       return {mass:materialMass,initialMass,massError:materialMass-initialMass,energy,initialEnergy,appliedEnergy:state.appliedEnergy,
-        ambientEnergy:state.ambientEnergy,energyError:energy-initialEnergy-state.appliedEnergy-state.ambientEnergy,
+        ambientEnergy:state.ambientEnergy,energyError:energy-initialEnergy-state.appliedEnergy-state.ambientEnergy-phaseEnergy,
+        ...(field&&{...field,phaseEnergy,parcelEnergy,solidMass:sum(rows.filter(row=>row.phase),mass)}),
         cells:Object.keys(state.cells).length,carried:rows.length-Object.keys(state.cells).length,pieces:Object.keys(state.pieces).length};
     }
 
@@ -264,13 +280,34 @@
       return {cells:Object.fromEntries(input.map(([key,row])=>[key,{...row,energy:row.energy+delta.get(Number(key))}])),exchange};
     }
 
+    function splitPiece(piecesById,id,groups,ctx,fracture){
+      const piece=piecesById[id], {body,cells}=piece;
+      const origin=center(Number(Object.keys(cells)[0])), oldCenter=V.sub(origin,body.collider.parts[0].at);
+      const pieces={...piecesById}, fragments=[];
+      delete pieces[id];
+      const ordered=groups.slice().sort((a,b)=>b.length-a.length||a[0]-b[0]);
+      for(const [i,group] of ordered.entries()){
+        const cargo=Object.fromEntries(group.map(key=>[key,cells[key]]));
+        const geometry=shapeOf(cargo), offset=M.app(body.rotation,V.sub(geometry.position,oldCenter));
+        const {mass,collider,half}=geometry, position=V.add(body.position,offset);
+        const base='shard.'+ctx.tick+'.'+Math.min(...group.map(key=>cells[key].id));
+        let name=i===0?id:base;
+        if(i)for(let suffix=1;own(pieces,name);suffix++)name=base+'.'+suffix;
+        const nextBody={...body,id:name,entity:name,origin:name,mass,collider,half,position,
+          material:cells[group[0]].material,velocity:V.add(body.velocity,V.cross(body.angular,offset))};
+        pieces[name]={...piece,body:nextBody,cells:cargo,...(fracture&&{fracture:Bonds.subset(fracture,group)})};
+        fragments.push({body:name,parcels:group.map(key=>cells[key].id),mass});
+      }
+      return {pieces,fragments};
+    }
+
     function crack(state,id,loads,ctx){
       const piece=state.pieces[id], {body,cells}=piece;
       const {fracture,failed}=Bonds.update(piece.fracture,cells,loads,ctx.dt,adjacent,temperature);
       if(!failed.length)
         return {...state,pieces:{...state.pieces,[id]:{...piece,fracture}}};
 
-      const groups=Bonds.components(cells,fracture.bonds).sort((a,b)=>b.length-a.length||a[0]-b[0]);
+      const groups=Bonds.components(cells,fracture.bonds);
       if(Object.keys(state.pieces).length-1+groups.length>32){
         ctx.emit('material-fracture-blocked',{body:id,at:body.position,reason:'piece-budget'});
         // Keep the committed bond topology when the split exceeds capacity.
@@ -283,25 +320,12 @@
       const impact=seams.some(seam=>seam.impactDamage>0)&&loads.length>0;
       ctx.emit('material-crack',{body:id,at:seams[0].at,seams,...(impact&&{speed:Math.max(...loads.map(load=>load.speed))})});
       if(groups.length===1)return {...state,pieces:{...state.pieces,[id]:{...piece,fracture}}};
-
-      const pieces={...state.pieces}, fragments=[];
-      for(const [i,group] of groups.entries()){
-        const cargo=Object.fromEntries(group.map(key=>[key,cells[key]]));
-        const geometry=shapeOf(cargo), offset=M.app(body.rotation,V.sub(geometry.position,oldCenter));
-        const {mass,collider,half}=geometry, position=V.add(body.position,offset);
-        const base='shard.'+ctx.tick+'.'+Math.min(...group.map(key=>cells[key].id));
-        let name=i===0?id:base;
-        if(i)for(let suffix=1;own(pieces,name);suffix++)name=base+'.'+suffix;
-        const nextBody={...body,id:name,entity:name,origin:name,mass,collider,half,position,
-          material:cells[group[0]].material,velocity:V.add(body.velocity,V.cross(body.angular,offset))};
-        pieces[name]={...piece,body:nextBody,cells:cargo,fracture:Bonds.subset(fracture,group)};
-        fragments.push({body:name,parcels:group.map(key=>cells[key].id),mass});
-      }
+      const {pieces,fragments}=splitPiece(state.pieces,id,groups,ctx,fracture);
       ctx.emit('material-fracture',{body:id,at:body.position,fragments});
       return {...state,pieces};
     }
 
-    function step(state,ctx){
+    function stepPhysical(state,ctx){
       const settled=settleLoose(state,ctx.tick), staticTemp=thermal(settled,ctx.dt), ids=Object.keys(state.pieces).sort(), moving={};
       let ambientEnergy=state.ambientEnergy+staticTemp.exchange;
       if(!ids.length)return staticTemp.cells===state.cells?state:freeze({...state,cells:staticTemp.cells,ambientEnergy});
@@ -344,23 +368,98 @@
       return freeze(next);
     }
 
+    function advancePhases(state,ctx){
+      const field=phases.advance(state.phase,ctx), cells={...state.cells};
+      let pieces={...state.pieces};
+      function warm(row,point){
+        if(!row.phase)return row;
+        const added=phases.warm(point,temperature(row),ctx.dt);
+        if(!added)return row;
+        const energy=K.clamp(row.energy+added,0,heatLimit(row));
+        field.exchange+=energy-row.energy;
+        return {...row,energy};
+      }
+      function melt(row,point,body) {
+        if(!row.phase||row.energy<phases.meltEnergy)return false;
+        const destination=phases.deposit(field,point,row.energy);
+        if(!destination)return false;
+        ctx.emit('material-melt',{parcel:row.id,material:row.material,at:point,destination,mass:mass(row),energy:row.energy,
+          ...(body!==undefined&&{body})});
+        return true;
+      }
+      for(const [key,parcel] of Object.entries(cells)){
+        const point=center(Number(key)), row=warm(parcel,point);
+        if(melt(row,point))delete cells[key];
+        else cells[key]=row;
+      }
+      for(const [id,piece] of Object.entries(state.pieces)){
+        const {body,fracture}=piece, cargo={}, points=new Map();
+        for(const [i,[key,parcel]] of Object.entries(piece.cells).entries()){
+          const point=V.add(body.position,M.app(body.rotation,body.collider.parts[i].at));
+          points.set(key,point);
+          cargo[key]=warm(parcel,point);
+        }
+        pieces[id]={...piece,cells:cargo};
+        const keys=Object.keys(cargo).map(Number);
+        const bonds=fracture?.bonds??keys.flatMap(a=>adjacent[a].filter(b=>b>a&&own(cargo,b))
+          .map(b=>({a,b,damage:0,strength:1})));
+        const remaining={...cargo};
+        let groups;
+        for(const [key,row] of Object.entries(cargo)){
+          if(!row.phase||row.energy<phases.meltEnergy)continue;
+          delete remaining[key];
+          const candidate=Bonds.components(remaining,bonds.filter(({a,b})=>own(remaining,a)&&own(remaining,b)));
+          if(Object.keys(pieces).length-1+candidate.length<=32&&melt(row,points.get(key),id))groups=candidate;
+          else remaining[key]=row;
+        }
+        if(groups){
+          const split=splitPiece(pieces,id,groups,ctx,fracture);
+          pieces=split.pieces;
+          if(groups.length>1)ctx.emit('material-melt-split',{body:id,at:body.position,fragments:split.fragments});
+        }
+      }
+      const bodies=Object.values(pieces).map(({body})=>body);
+      let count=Object.keys(cells).length+sum(Object.values(pieces),piece=>Object.keys(piece.cells).length);
+      for(const i of phases.sites){
+        if(count>=512)break;
+        if(field.ice[i]<1)continue;
+        const at=phases.lattice(i), key=index(at), point=center(key);
+        if(own(cells,key)||overlapsPiece(point,bodies))continue;
+        const row=phases.extract(field,i);
+        cells[key]=row;
+        count++;
+        ctx.emit('material-freeze',{parcel:row.id,material:row.material,cell:at,at:point,mass:mass(row),energy:row.energy});
+      }
+      return freeze({...state,cells,pieces,phase:field});
+    }
+
+    function step(state,ctx){
+      const next=stepPhysical(state,ctx);
+      return phases?advancePhases(next,ctx):next;
+    }
+
     function validRotation(matrix){
       if(!vector(matrix,9)||Math.abs(M.det(matrix)-1)>1e-6)return false;
       const rows=[matrix.slice(0,3),matrix.slice(3,6),matrix.slice(6,9)];
       return rows.every((row,i)=>rows.every((other,j)=>Math.abs(V.dot(row,other)-Number(i===j))<1e-6));
     }
     function validateState(state){
-      check(keys(state,['cells','pieces','ambientEnergy','appliedEnergy'])&&record(state.cells)&&record(state.pieces)&&
-        Object.keys(state.pieces).length<=32&&[state.ambientEnergy,state.appliedEnergy].every(Number.isFinite),
+      check(keys(state,['cells','pieces','ambientEnergy','appliedEnergy',...(phases?['phase']:[])])&&
+        record(state.cells)&&record(state.pieces)&&Object.keys(state.pieces).length<=32&&
+        [state.ambientEnergy,state.appliedEnergy].every(Number.isFinite),
       'Invalid saved material state');
+      if(phases)phases.validate(state.phase);
       const seen=new Set();
       function validateCells(cells){
-        check(record(cells)&&Object.keys(cells).length<=initialParcels.size,'Invalid saved material cells');
+        check(record(cells)&&Object.keys(cells).length<=(phases?512:initialParcels.size),'Invalid saved material cells');
         for(const [key,row] of Object.entries(cells)){
           const i=Number(key), birth=initialParcels.get(row?.id);
-          check(integer(i,0,count-1)&&String(i)===key&&center(i)[1]-half[1]>=ground-eps&&birth&&
-            !seen.has(row.id)&&keys(row,['id','material','energy','wetness','data','looseSince'])&&
-            (row.looseSince===undefined||settle&&integer(row.looseSince,1,Number.MAX_SAFE_INTEGER))&&row.material===birth.material&&row.wetness===birth.wetness&&equal(row.data,birth.data)&&safeHeat(row),
+          const isNew=phases&&row?.phase===true&&integer(row.id,phases.firstId,state.phase.nextId-1)&&
+            row.material===phases.material&&row.wetness===0&&row.data===undefined;
+          const authored=birth&&row.phase===undefined&&row.material===birth.material&&row.wetness===birth.wetness&&equal(row.data,birth.data);
+          check(integer(i,0,count-1)&&String(i)===key&&center(i)[1]-half[1]>=ground-eps&&(isNew||authored)&&
+            !seen.has(row.id)&&keys(row,['id','material','energy','wetness','data','looseSince',...(phases?['phase']:[])])&&
+            (row.looseSince===undefined||settle&&integer(row.looseSince,1,Number.MAX_SAFE_INTEGER))&&safeHeat(row),
           'Invalid or duplicated saved material parcel');
           seen.add(row.id);
         }
@@ -381,7 +480,9 @@
         'Invalid saved material body');
       }
       const metrics=balance(state);
-      check(seen.size===initialParcels.size&&Math.abs(metrics.energyError)<=1e-7*Math.max(1,metrics.energy,initialEnergy),
+      check(seen.size<=512&&[...initialParcels.keys()].every(id=>seen.has(id))&&
+        Math.abs(metrics.massError)<=1e-7*Math.max(1,initialMass)&&
+        Math.abs(metrics.energyError)<=1e-7*Math.max(1,metrics.energy,initialEnergy),
         'Saved material does not balance');
     }
 
@@ -427,6 +528,17 @@
       }
       paint(state.cells);
       for(const piece of Object.values(state.pieces))paint(piece.cells,piece);
+      if(phases)for(const row of phases.rows(state.phase)){
+        const depth=(row.liquid+row.ice)/phases.mass;
+        if(depth<.005)continue;
+        const point=V.add(row.point,[0,cell*.13*Math.min(2,depth),0]), c=phases.liquidColor;
+        const frozen=row.ice/(row.liquid+row.ice), color=[c>>16,(c>>8)&255,c&255].map((n,i)=>
+          Math.round(n+([187,223,231][i]-n)*frozen));
+        const first=B.count();
+        B.disc(...point,[0,1,0],cell*(.29+.31*Math.min(1,depth)),cell*.035,color,1);
+        splatIds.push(system+'/phase/'+row.at.join('/'));
+        B.describeSplats(first,B.count(),{material:phases.material+'-liquid',target:{surface:system}});
+      }
       const {data,count,moving,back,renderMetadata}=B.finish();
       const part={data:data.slice(0,count*16),count,moving,back,renderMetadata,splatIds:freeze(splatIds)};
       const result=Object.freeze({bounds,parts:Object.freeze([Object.freeze(part)])});
@@ -451,7 +563,7 @@
       return pieces;
     }
     return {
-      initial:()=>freeze({cells:authored,pieces:{},ambientEnergy:0,appliedEnergy:0}),checkAction,
+      initial:()=>freeze({cells:authored,pieces:{},ambientEnergy:0,appliedEnergy:0,...(phases&&{phase:phases.start})}),checkAction,
       validateState,step,actions:{lift,crumble,heat},volumeFrame:state=>state?frame(state):null,
       *poseEntities(state){yield* Object.keys(state?.pieces??{});},
       pose:(state,name)=>own(state?.pieces,name)?state.pieces[name].body:null,
@@ -464,6 +576,7 @@
           return row?Q.ok(describe(row,key,center(key))):Q.missing('No material cell','empty');
         })},
         pieces:{type:'record',read:whenReady(state=>Q.ok(readPieces(state)))},
+        ...(phases&&{phases:{type:'records',read:whenReady(state=>Q.ok(phases.rows(state.phase)))}}),
         bodies:{type:'record',read:whenReady(state=>Q.ok(pieceBodies(state)))},
         balance:{type:'record',read:whenReady(state=>Q.ok(balance(state)))},
         'solid-clearance':{type:'number',units:'world',read:whenReady((state,target)=>target.point?

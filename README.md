@@ -306,6 +306,7 @@ circuits and frost that travel through corners and forks.
 [Tile color attributes](docs/tile-attributes.md) let a sprite or effect rewrite the ink and paper of whole tiles over a fixed bitmap.
 [Rule boards](docs/rule-board.md) compile rotatable copper tracks and movable glyphs into inspectable rules.
 [Boundary cels](docs/boundary-cels.md) fit hand-drawn corners, edges, and gaps to visible material and light seams.
+[Rigid phase changes](docs/coupled-phase-changes.md#freeze-liquid-into-rigid-pieces) share mass and heat between liquid fields and movable solid parcels.
 [Directional contact marks](docs/contact-marks.md) pin hand-drawn flashes
 and skids at the point of contact, with their own clock through a pose hold.
 
