@@ -18,6 +18,8 @@ for copper pulses and creeping frost.
 glancing skids with two authored sizes and diagonal poses.
 [Light-driven highlight cels](highlight-cels.md) add individually drawn
 pins, hooks, and arcs for brass, enamel, and glass.
+[Jointed sprite chains](jointed-sprite-chains.md) register authored link cels
+to two spring-driven sockets and switch drawings as the links deform.
 
 ## Drawing and timing
 

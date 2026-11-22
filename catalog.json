@@ -832,6 +832,17 @@
       ]
     },
     {
+      "id": "sim.spriteChains",
+      "kind": "fx",
+      "status": "ready",
+      "title": "Jointed sprite chains",
+      "what": "Drive registered pixel-art links with XPBD springs and signed-distance contact. Use separate poses for bends, compression, and contact and select authored sizes and directions at native resolution.",
+      "use": "K.spriteChains.create({ points, pins, style: K.spriteChains.style(cels), sdf })",
+      "where": "src/kit/paz-sprite-chains.js",
+      "example": "examples/jointed-sprite-chains.js",
+      "tags": ["sprites", "pixel-art", "rope", "contact", "xpbd"]
+    },
+    {
       "id": "import.mesh",
       "kind": "solid",
       "status": "ready",
