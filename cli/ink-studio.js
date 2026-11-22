@@ -996,6 +996,7 @@ const CMD = {
         '    sim run <world> --record file.json [--observations plan.json]   retain reproducible execution evidence',
         '    sim verify <run> [--workers N]   replay and check the recorded evidence',
         '    sim block-play <model> --samples N [--resume checkpoint --checkpoint file]   sample and checkpoint a fast kernel',
+        '    sim discretize <plan.json> [--out compiled.json]   compile solver cells, face geometry, and boundary regions',
         '    sim domain <domain.json> [--world world.json --section tube/index]   assemble or trace sectioned tubes at named sockets',
         '    sim sections <plan.json> [--out report.json]   measure mesh, SDF, or contour sections along a path',
         '    sim model-changes <plan> [--samples N --resume file --checkpoint file]   play prepared parameter ramps and topology swaps',

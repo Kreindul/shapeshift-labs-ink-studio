@@ -155,3 +155,6 @@ for models of ducts, valves and variable-width channels.
 
 [Branched domains](branched-domains.md) assemble those profiles into a versioned
 geometry graph with explicit junctions, cavities, reservoirs, ports and probes.
+
+[Compiled discretizations](discretization.md) supply physical cells, oriented
+faces, neighbors, and boundary regions for grid, chart, and mesh operators.

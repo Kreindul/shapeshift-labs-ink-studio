@@ -510,6 +510,10 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         const result=require('./path-sections.js').measure(kit,read(file),file,shot?.dependency);
         return respond(result);
       }
+      case 'discretize': {
+        ensure(typeof file==='string' && other===undefined,'Use sim discretize <plan.json> [--out compiled.json]');
+        return respond(require('./discretization.js').compile(kit,read(file),file,shot?.dependency));
+      }
       case 'domain': {
         ensure(typeof file==='string' && other===undefined &&
           (opt.section===undefined||typeof opt.section==='string') &&
