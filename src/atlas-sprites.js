@@ -205,7 +205,7 @@ const AtlasSprites = (() => {
       };
     }
     const editedDepth=edits&&Array.from(edits.edited.values()).some(edit=>edit.maps.depth||edit.extensionDepth!==undefined);
-    return Object.freeze({[assetBrand]:true,select,sample,effect,playback:mode=>cels.playback(timing,fps,mode),
+    return Object.freeze({[assetBrand]:true,select,sample,effect,...(edits?.fringe&&{fringe:edits.fringe}),playback:mode=>cels.playback(timing,fps,mode),
       snapshot:()=>({metadata:structuredClone(metadata),images:structuredClone(sourceMaps)}),
       width,height,normalSpace,emissionMode,swatches,largestView:frames.reduce((max,{rect})=>Math.max(max,rect.width*rect.height),0),hasDepth:Boolean(maps.depth||scenery||editedDepth),sceneryPlanes:scenery?.planes});
   }

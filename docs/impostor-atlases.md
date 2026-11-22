@@ -189,3 +189,84 @@ ink-studio clip examples/lantern-catch.js --from 0 --to 1.65 --fps 24 \
 character, paints its catch sleeve and holds the braced pose for two frames
 while the swinging lantern and camera keep moving. Use `--params
 '{"edited":false}'` for the original bake.
+
+## Painted sprite fringes
+
+Add `fringe` to the same `cels` sidecar used for replacements and
+holds. Paint the **attachment sites** on a sprite view with indexed
+brushes. Each painted texel pins an independently timed, hand-drawn
+cel sequence. A brush can trail behind a hem, flicker along a banner,
+or send a small detached fragment past the tile edge.
+
+```json
+{
+  "poses": { "hover": 1 },
+  "fringe": {
+    "clips": {
+      "wisp": {
+        "width": 3,
+        "height": 3,
+        "pin": [1, 0],
+        "palette": ["#8ed6cb", "#4a9aaa"],
+        "frames": [
+          { "rows": [".0.", ".01", "..1"], "duration": 0.12 },
+          { "rows": [".0.", "10.", "1.."], "duration": 0.16 },
+          { "rows": ["...", ".0.", "..1"], "offset": [2, 3], "duration": 0.14 },
+          { "duration": 0.08 }
+        ]
+      }
+    },
+    "brushes": [
+      { "clip": "wisp", "depth": 0.04, "opacity": 0.85 },
+      { "clip": "wisp", "phase": 0.19, "depth": 0.07, "opacity": 0.7 }
+    ],
+    "paint": {
+      "strokes": [
+        { "slot": 0, "shape": { "type": "rect", "rect": [16, 31, 1, 1] } },
+        { "slot": 1, "shape": { "type": "rect", "rect": [20, 31, 1, 1] } }
+      ]
+    }
+  }
+}
+```
+
+- Clips use the [indexed pixel stamp](pixel-stamps.md) cel format, so a
+  pose can be authored as `rows`, `slots`, or `strokes`. Each clip
+  has a palette of RGB hex swatches and a `pin` in top-left art-pixel
+  coordinates. `fps` and optional per-cel `duration` control timing.
+  Playback loops by default. Use `playback: 'once'` and a final empty cel
+  to play a wisp once and clear it.
+- Each painted site selects a brush index. For exact placement, use
+  single-pixel marks and leave holes between strands. Use whole-view
+  `rows` or `slots`, or ordered strokes. A stroke with `slot: null`
+  erases sites. Each view supports up to 512 painted sites. A clip
+  supports up to 96 cels on a grid up to 64×64 pixels.
+- `phase` offsets the clip clock in seconds. Choose different phases for
+  neighboring strands. A cel can also nudge its painted pixels with an
+  integer `offset: [x, y]`. For a release, leave a gap at the pin and
+  offset successive cels away from the hem. The detached fragment is
+  animated in sprite-local pixels and can extend beyond the bake.
+- Use `views: [{ frame: 'hover', direction: 0, paint: { ... } }]` to
+  replace the default anchor map for a pose or direction. Add `pitch`
+  to distinguish elevations. Use an empty `paint: {}` to clear the
+  anchors for a matching view. A held pose keeps its own anchor map
+  while the fringe clock keeps advancing.
+- `depth` sorts the fringe relative to the pivot plane in scene units,
+  using the same convention as `effectDepth`. It participates in
+  occlusion and fog as translucent paint. Set an optional `emission`
+  gain from zero to one for glow passes. Painting the fringe keeps the
+  registered body color and auxiliary maps intact.
+
+The Node renderer and CLI draw fringes on card and impostor atlases,
+including native-pixel cards. An editor can query
+`atlas.fringe(atlas.select(frame, mode, direction), time)` for a
+view-local packet with exclusive `bounds` and `at(x, y)` samples.
+
+[The Drowned Belfry](../examples/tidekeeper-fringe.js) uses three clips for
+a ghost's fluttering hem, long ribbons, and small released wisps. Render
+with `--params '{"fringe":false}'` to inspect the underlying silhouette.
+
+```sh
+node cli/ink-studio.js clip examples/tidekeeper-fringe.js --w 322 --h 214 --px 1 \
+  --raw --from 0 --to 6 --fps 15 --out drowned-belfry.apng
+```

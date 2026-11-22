@@ -55,7 +55,7 @@ function rasterize(placements, settings) {
     const rotation=basis(placement.yaw,0);
     const frame=lod?undefined:typeof placement.frame==='function'?placement.frame(time,frameView):placement.frame??placement.frameAt?.(time);
     const tile=lod?.view??atlas.select(frame,mode,local(rotation,direction));
-    const effect=atlas.effect?.(tile);
+    const effect=atlas.effect?.(tile), fringe=atlas.fringe?.(tile,time);
     const normalAxes=basis(tile.yaw+placement.yaw,tile.pitch);
     const axes=lod?.axes??(fixed?normalAxes:basis(...heading(direction)));
     const units=tile.unitsPerPixel*placement.scale;
@@ -70,10 +70,12 @@ function rasterize(placements, settings) {
       const u0=bounds?Math.max(0,bounds[0]-tileX):0, u1=bounds?Math.min(width,bounds[2]-tileX):width;
       const v0=bounds?Math.max(0,bounds[1]-tileY):0, v1=bounds?Math.min(height,bounds[3]-tileY):height;
       if (u1<=u0||v1<=v0) continue;
-      let left=rasterX, right=rasterX+width, bottom=rasterY, top=rasterY+height;
+      const [f0,g0,f1,g1]=fringe?.bounds??[u0,v0,u1,v1];
+      const x0=Math.min(u0,f0),y0=Math.min(v0,g0),x1=Math.max(u1,f1),y1=Math.max(v1,g1);
+      let left=rasterX+x0, right=rasterX+x1, bottom=rasterY+height-y1, top=rasterY+height-y0;
       if (!exact) {
         const corners=[];
-        for (const y of [py-v1,py-v0]) for (const x of [u0-px,u1-px])
+        for (const y of [py-y1,py-y0]) for (const x of [x0-px,x1-px])
           corners.push(project(anchor.map((n,i)=>n+units*(x*axes.right[i]+y*axes.up[i]))));
         if (fixed&&corners.every(c=>c[2]<near)) continue;
         const clipped=corners.some(c=>c[2]<near);
@@ -92,9 +94,11 @@ function rasterize(placements, settings) {
         const uAt=exact?x-rasterX+.5:px+(dot(origin,axes.right)+plane*dot(ray.direction,axes.right))/units;
         const vAt=exact?height-1-(y-rasterY)+.5:py-(dot(origin,axes.up)+plane*dot(ray.direction,axes.up))/units;
         const u=Math.floor(uAt), v=Math.floor(vAt);
-        if (u<u0||u>=u1||v<v0||v>=v1) continue;
+        const inside=u>=u0&&u<u1&&v>=v0&&v<v1;
+        const strands=fringe?.at(u,v);
+        if (!inside&&!strands) continue;
         const p=y*W+x;
-        if (atlas.sample(tile,u,v,placement,sample,id) && (!lod || spriteLOD.alpha(sample.alpha,lod,x,y))) {
+        if (inside && atlas.sample(tile,u,v,placement,sample,id) && (!lod || spriteLOD.alpha(sample.alpha,lod,x,y))) {
           const hit=fragmentAt(ray,fixed?plane:plane+placement.scale*sample.depth/facing);
           if (hit) {
             const {position}=hit;
@@ -118,10 +122,16 @@ function rasterize(placements, settings) {
               ...(objectDither && mode==='card' && { patternPosition:[(uAt-px)*tile.unitsPerPixel,(py-vAt)*tile.unitsPerPixel,0] })});
           }
         }
-        const alpha=effect?.sample(u,v,effectColor);
+        const alpha=inside&&effect?.sample(u,v,effectColor);
         if (alpha&&(!lod||spriteLOD.alpha(alpha,lod,x,y))) {
           const hit=fragmentAt(ray,plane+(placement.depth?placement.scale*effect.depth/facing:0));
           if (hit) results.push({p,...hit,...ids,alpha:lod?1:alpha*opacity,color:effectColor.slice(),protection,effect:true});
+        }
+        if (strands) for (const strand of strands) {
+          if (lod&&!spriteLOD.alpha(strand.alpha,lod,x,y)) continue;
+          const hit=fragmentAt(ray,plane+(placement.depth?placement.scale*strand.depth/facing:0));
+          if (hit) results.push({p,...hit,...ids,alpha:lod?1:strand.alpha*opacity,color:strand.color,protection,effect:true,
+            emission:placement.emission&&strand.emission?strand.color.map(n=>n*strand.emission):null});
         }
       }
     }

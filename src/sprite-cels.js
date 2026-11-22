@@ -7,8 +7,8 @@ const SpriteCels = (() => {
 
   function prepare(definition, groups, { width, color, depthRange, copyRgba, pixelBudget }) {
     if (definition === undefined) return null;
-    if (!fields(definition, ['poses', 'replacements', 'holds']))
-      throw new TypeError('Sprite cels need poses, replacements or holds');
+    if (!fields(definition, ['poses', 'replacements', 'holds', 'fringe']))
+      throw new TypeError('Sprite cels need poses, replacements, holds or fringe');
     const { poses = {}, replacements = [], holds = [] } = definition;
     if (!isRecord(poses) || Object.entries(poses).some(([name, frame]) => !name.trim() || !groups.has(frame)) ||
         ![replacements, holds].every(list => Array.isArray(list) && list.length <= 4096))
@@ -62,7 +62,9 @@ const SpriteCels = (() => {
         held.set(destination, source);
       }
     }
-    return { edited, held };
+    const fringes = typeof SpriteFringe === 'undefined' ? require('./sprite-fringe.js') : SpriteFringe;
+    const fringe = fringes.prepare(definition.fringe, groups, select, pixelBudget);
+    return { edited, held, fringe };
   }
 
   function playback(entries, fps, mode) {
