@@ -9,19 +9,43 @@
     return true;
   }
 
-  function prepare(domain,settings={}){
+  function prepare(domain,settings={},{diagnostics}={}){
     const spec=T.compile(domain,settings), {sources,probes,sampleRate,method,maxWork,identity}=spec;
-    const engine=method==='distributed'?W.waveDistributed(spec):W.waveDelay(spec);
+    let review=diagnostics===undefined?null:W.diagnostics.create(diagnostics);
+    const engine=method==='distributed'?W.waveDistributed(spec,review):W.waveDelay(spec,review);
+    const connections=review&&spec.nodes.map(node=>({kind:'connection',node:node.name}));
+    function observer(block){
+      return (pressure,outward,through,input,time)=>{
+        for(let i=0;i<spec.nodes.length;i++){
+          const {outside,source,pressureSource,released}=spec.nodes[i];
+          if(pressureSource||released)continue;
+          const incoming=source<0?0:input[source], load=outside*pressure[i];
+          block.error('wave-flow-balance',outward[i]+load-incoming,Math.max(through[i],Math.abs(load),Math.abs(incoming)),
+            connections[i],time);
+        }
+      };
+    }
     const probePressure=new Float64Array(probes.length), probeFlow=new Float64Array(probes.length);
     const buffers={...engine.buffers,probePressure,probeFlow};
     const views=Object.entries(buffers).map(([name,value])=>({name,value,saved:new Float64Array(value.length)}));
     const keys=new Set(sources.map(row=>row.name)), level=new Float64Array(sources.length);
-    const workPerSample=engine.workPerSample+spec.driveWork;
+    const workPerSample=engine.workPerSample+spec.driveWork+(review?engine.reviewWork:0);
     const info=freeze({method,sampleRate,soundSpeed:spec.soundSpeed,density:spec.density,domain:identity,
       nodes:spec.named,tubes:spec.tubeCount,sections:spec.segments.length,workPerSample,maxWork,
       ...(spec.conditions&&{boundarySet:spec.conditions.asset}),
       sources:sources.map(({name,kind})=>({name,kind})),probes:probes.map(({name})=>name),...engine.info});
-    let sample=0;
+    const planning=review;
+    if(review)review=planning.fork();
+    review?.merge(planning);
+    let sample=0, reviewStart=0;
+
+    function resetReview(){
+      if(planning){
+        review=planning.fork();
+        review.merge(planning);
+        reviewStart=sample;
+      }
+    }
 
     function process(count,{inputs={},collect=true}={}){
       check(integer(count,0,65536)&&sample+count<=Number.MAX_SAFE_INTEGER&&typeof collect==='boolean',
@@ -38,6 +62,7 @@
       const pressure=collect?probes.map(()=>new Float64Array(count)):null;
       const flow=collect?probes.map(()=>new Float64Array(count)):null;
       if(count){
+        const block=review?.fork(), observe=block&&observer(block);
         for(const {value,saved} of views)saved.set(value);
         try{
           for(let i=0;i<count;i++){
@@ -46,13 +71,14 @@
               level[j]=typeof drive==='number'?drive:typeof drive==='function'?drive((sample+i)/sampleRate,1/sampleRate):drive[i];
               check(finite(level[j]),'Wave authored drive exceeded numerical range');
             }
-            engine.advance(sample+i,level,probePressure,probeFlow);
+            engine.advance(sample+i,level,probePressure,probeFlow,observe);
             for(let j=0;j<probes.length;j++){
               check(finite(probePressure[j])&&finite(probeFlow[j]),'Wave probe exceeded the finite numeric range');
               if(collect){pressure[j][i]=probePressure[j];flow[j][i]=probeFlow[j];}
             }
           }
           check(views.every(({value})=>value.every(finite)),'Wave state exceeded the finite numeric range');
+          if(block)review.merge(block);
         }catch(error){
           for(const {value,saved} of views)value.set(saved);
           throw error;
@@ -80,9 +106,12 @@
         views.every(({name,value})=>numbers(row.buffers[name],value.length)),'Incompatible wave checkpoint');
       for(const {name,value} of views)value.set(row.buffers[name]);
       sample=row.sample;
+      resetReview();
     }
-    function reset(){for(const {value} of views)value.fill(0);sample=0;}
-    return Object.freeze({info,process,view,snapshot,restore,reset});
+    function reset(){for(const {value} of views)value.fill(0);sample=0;resetReview();}
+    return Object.freeze({info,process,view,snapshot,restore,reset,...(review&&{
+      diagnostics:()=>review.report({solver:method+'-wave',domain:identity,start:reviewStart,end:sample})
+    })});
   }
 
   W.waveNetworks=Object.freeze({format:T.format,runFormat,traceFormat,checkpointFormat,prepare});

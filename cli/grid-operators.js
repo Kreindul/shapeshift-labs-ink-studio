@@ -17,7 +17,7 @@ function json(key,value) {
   return ArrayBuffer.isView(value)?Array.from(value):value;
 }
 
-function run(kit,plan,file,dependency=()=>{}) {
+function run(kit,plan,file,dependency=()=>{},diagnostics) {
   const W=kit.KIT.world, api=W.gridOperators, {check,own,record}=W.data;
   const {operation,values,boundary,conditions,settings={}}=plan??{};
   check(plan?.format===api.planFormat&&plan.version===1&&own(operations,operation)&&record(settings)&&
@@ -44,7 +44,8 @@ function run(kit,plan,file,dependency=()=>{}) {
       check(settings.velocity===undefined||settings.carrierFlux===undefined,'Choose velocity or an integrated carrier flux');
       check(settings.location===undefined||settings.velocity!==undefined,'A velocity location requires a velocity field');
       if(settings.velocity!==undefined)options.carrierFlux=ops.flux(settings.velocity,options);
-      result=ops[operation](values,options);
+      result=diagnostics!==undefined&&operation==='transport'?
+        ops.inspectTransport(values,options,{observed:plan.observed,diagnostics}):ops[operation](values,options);
       break;
     }
     default: result=ops[operation](values,options);

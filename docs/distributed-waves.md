@@ -34,6 +34,9 @@ propagation. Use separated tubes with sealed ends to represent a closure.
 }
 ```
 
+[Simulation diagnostics](simulation-diagnostics.md) report CFL limits,
+section travel-time drift, and volume-flow balance at connections.
+
 ## Choose the solver and boundary behavior
 
 | Setting | Behavior |

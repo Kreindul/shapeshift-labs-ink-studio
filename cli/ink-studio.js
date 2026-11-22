@@ -1003,6 +1003,7 @@ const CMD = {
         '    sim reduce <plan.json> [--out asset.json]   bake reduced geometry, response taps, or resonant modes',
         '    sim integrate <plan.json> [--out trace.json]   integrate creator-authored state and locate substep events',
         '    sim grid-ops <plan.json> [--out report.json]   apply finite-volume operators to a compiled grid, chart, or mesh',
+        '    sim diagnose <plan.json> [--out report.json --fail-on warning|error]   locate stability and conservation issues',
         '    sim boundaries <asset.json> [--t seconds --dt seconds]   inspect reusable boundary and source laws',
         '    sim solve <plan.json> [--out report.json --require-convergence]   solve dense, tridiagonal, sparse, or bracketed scalar systems',
         '    sim network <run.json> [--out trace.json]   simulate a lumped effort/flow network and its sources',

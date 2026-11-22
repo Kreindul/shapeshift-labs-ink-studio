@@ -14,6 +14,9 @@ new `Float64Array` fields, and CLI reports store regular JSON arrays.
 Every integrated face flux is positive out of its owner and negative
 into its neighbor. The two cells share that one number.
 
+[Simulation diagnostics](simulation-diagnostics.md) can find the cell
+limiting a transport step and audit local balance against a recorded field.
+
 ## Operators
 
 | Library method | Input and output |

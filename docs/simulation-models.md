@@ -22,6 +22,9 @@ the resolved schedule, or `probe` to sample an individual world field.
 [Boundary sets](boundary-conditions.md) share source and boundary laws with
 finite-volume grids, wave networks, and moving-boundary world systems.
 
+Use [simulation diagnostics](simulation-diagnostics.md) to check stability
+and conservation of individual solver plans.
+
 ## Author a model
 
 | Property | Contents |

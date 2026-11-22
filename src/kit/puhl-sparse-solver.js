@@ -41,26 +41,30 @@
     const {restart=24,maxIterations=Math.min(1000,n*4),initial,history=false}=options;
     check(integer(restart,1,64)&&integer(maxIterations,0,10000)&&typeof history==='boolean','Invalid GMRES controls');
     const x=initial===undefined?new Float64Array(n):Float64Array.from(vector(initial,n,'initial solution'));
-    let best=x.slice(), bestResidual=null, iterations=0,matrixProducts=0;
+    let best=x.slice(), bestResidual=null,bestRow=0,bestSigned=0, iterations=0,matrixProducts=0;
     const trace=history?[]:null;
     function finish(status){
       return {method:'sparse',algorithm:'gmres',size:n,status,converged:status==='converged',solution:best,
-        residual:bestResidual===null?null:ctl.residual(bestResidual),
+        residual:bestResidual===null?null:ctl.residual(bestResidual,bestRow,bestSigned),
         work:{...ctl.evidence(),iterations,matrixProducts,nonzeros:nnz,restart:Math.min(restart,n)},
         ...(trace&&{history:trace})};
     }
     const productCost=nnz+n, residualCost=nnz+2*n, residual=new Float64Array(n);
     function measure(solution){
-      let largest=0;
+      let largest=0,row=0;
       for(let i=0;i<n;i++){
         let sum=0;
         for(let j=rowPointers[i];j<rowPointers[i+1];j++)sum+=values[j]*solution[columns[j]];
         residual[i]=b[i]-sum;
-        largest=Math.max(largest,Math.abs(residual[i]));
+        const magnitude=Math.abs(residual[i]);
+        if(!finite(magnitude)){largest=magnitude;break;}
+        if(magnitude>largest){largest=magnitude;row=i;}
       }
       matrixProducts++;
       if(finite(largest)){
-        if(bestResidual===null||largest<bestResidual){bestResidual=largest;best.set(solution);}
+        if(bestResidual===null||largest<bestResidual){
+          bestResidual=largest;bestRow=row;bestSigned=residual[row];best.set(solution);
+        }
         trace?.push({iterations,absolute:largest});
       }
       return largest;

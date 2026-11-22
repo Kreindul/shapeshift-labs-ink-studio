@@ -137,10 +137,12 @@
           }
           return {residual,ratio};
         });
-        const residualRatio=Math.max(...errors.map(row=>row.ratio)), converged=residualRatio<=1;
+        const worst=errors.reduce((best,row,i)=>row.ratio>errors[best].ratio?i:best,0);
+        const residualRatio=errors[worst].ratio, converged=residualRatio<=1;
         if (converged||iteration===iterations) {
           if (!converged&&onLimit==='error')
-            throw Error('Transfer coupling '+requester+' did not converge at tick '+tick+' (residual ratio '+residualRatio+')');
+            throw Error('Transfer coupling '+requester+' did not converge at tick '+tick+
+              ' (connection '+links[worst].id+', residual ratio '+residualRatio+')');
           const committed=converged||onLimit==='accept';
           const report=links.map(({id,units,type,zero},i)=>{
             const receipt=current.receipts[i];

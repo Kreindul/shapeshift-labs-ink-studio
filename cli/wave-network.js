@@ -2,7 +2,7 @@
 const fs=require('node:fs'), path=require('node:path');
 const WAV=require('./wav.js');
 
-function run(kit,plan,file,dependency=()=>{}){
+function run(kit,plan,file,dependency=()=>{},diagnostics){
   const W=kit.KIT.world, N=W.waveNetworks, {check,record}=W.data;
   const {settings={},samples,inputs={},checkpoint,maxTotalWork=400000000}=plan??{};
   check(plan?.format===N.runFormat&&plan.version===1&&record(inputs)&&
@@ -16,7 +16,7 @@ function run(kit,plan,file,dependency=()=>{}){
     return JSON.parse(fs.readFileSync(location,'utf8'));
   }
   const conditions=require('./boundary-conditions.js').resolve(settings?.conditions,file,dependency);
-  const wave=N.prepare(read(plan.network),conditions===undefined?settings:{...settings,conditions}), {info}=wave;
+  const wave=N.prepare(read(plan.network),conditions===undefined?settings:{...settings,conditions},{diagnostics}), {info}=wave;
   check(samples*info.probes.length<=1000000,'Wave run exceeds its output sample budget');
   check(samples*info.workPerSample<=maxTotalWork,'Wave run exceeds its total work limit');
   if(checkpoint!==undefined)wave.restore(read(checkpoint));
@@ -55,7 +55,7 @@ function run(kit,plan,file,dependency=()=>{}){
   }
   const json=rows=>Object.fromEntries(Object.entries(rows).map(([name,value])=>[name,Array.from(value)]));
   return {format:N.traceFormat,version:1,info,start,end:start+samples,pressure:json(pressure),
-    flow:json(flow),checkpoint:wave.snapshot()};
+    flow:json(flow),checkpoint:wave.snapshot(),...(wave.diagnostics&&{diagnostics:wave.diagnostics()})};
 }
 
 function writeWav(file,report,{probe=report.info.probes[0],gain=1}={}){

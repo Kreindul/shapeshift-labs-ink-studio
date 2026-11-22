@@ -1,11 +1,12 @@
 /* Bidirectional delay guides with pressure/flow scattering at area changes and branches. */
 (function(K){
   const W=K.world, {check}=W.data, finite=Number.isFinite;
-  function create(spec){
+  function create(spec,review){
     const {nodes,segments,probes,soundSpeed,sampleRate}=spec;
     const pressure=new Float64Array(nodes.length), outward=new Float64Array(nodes.length), inputSum=new Float64Array(nodes.length);
+    const through=review&&new Float64Array(nodes.length);
     let entries=0, fractional=0, clamped=0, travelError=0;
-    const links=segments.map(link=>{
+    const links=segments.map((link,section)=>{
       const desired=link.length/soundSpeed*sampleRate;
       const nearest=Math.round(desired);
       const effective=Math.max(1,Math.abs(desired-nearest)<1e-9?nearest:desired);
@@ -16,6 +17,9 @@
       if(fraction)fractional++;
       if(desired<1-1e-9)clamped++;
       travelError=Math.max(travelError,Math.abs(desired-effective));
+      review?.error('wave-travel-drift',effective-desired,desired,
+        {kind:'section',tube:link.name,section,fromMetres:link.at,toMetres:link.at+link.length},undefined,
+        {unit:'sample',desired,effective});
       return {...link,at,delay,slot:0,a:(1-fraction)/(1+fraction),fraction,
         transmission:Math.exp(-link.loss*link.length)};
     });
@@ -47,9 +51,10 @@
       return first+(next-first)*fraction;
     }
 
-    function step(sample,input,probePressure,probeFlow){
+    function step(sample,input,probePressure,probeFlow,observe){
       inputSum.fill(0);
       outward.fill(0);
+      if(observe)through.fill(0);
       for(const [i,link] of links.entries()){
         link.slot=sample%link.delay;
         const f=receive(link,i,0), b=receive(link,i,1);
@@ -66,9 +71,15 @@
         const f=received[2*i],b=received[2*i+1];
         ring[at+slot]=pressure[from]-b;
         ring[at+delay+slot]=pressure[to]-f;
-        outward[from]+=y*(pressure[from]-2*b);
-        outward[to]+=y*(pressure[to]-2*f);
+        const forward=y*(pressure[from]-2*b), backward=y*(pressure[to]-2*f);
+        outward[from]+=forward;
+        outward[to]+=backward;
+        if(observe){
+          through[from]=Math.max(through[from],Math.abs(forward));
+          through[to]=Math.max(through[to],Math.abs(backward));
+        }
       }
+      if(observe)observe(pressure,outward,through,input,sample/sampleRate);
       for(const [i,site] of sites.entries()){
         if(site.node!==undefined){
           probePressure[i]=pressure[site.node];
@@ -84,7 +95,8 @@
     }
     check(finite(travelError),'Wave delay timing exceeds range');
     return {advance:step,buffers:{rings:ring,allpass},workPerSample:3*links.length+nodes.length+sites.length,
-      info:{ringSamples:entries,fractionalSegments:fractional,clampedSegments:clamped,maxSegmentTravelErrorSamples:travelError}};
+      info:{ringSamples:entries,fractionalSegments:fractional,clampedSegments:clamped,maxSegmentTravelErrorSamples:travelError},
+      reviewWork:links.length+nodes.length*2};
   }
   W.waveDelay=create;
 })(KIT);

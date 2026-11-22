@@ -5,9 +5,16 @@
   const runFormat='ink-studio/lumped-network-run', traceFormat='ink-studio/lumped-network-trace',
     checkpointFormat='ink-studio/lumped-network-checkpoint';
 
-  function prepare(definition){
+  function prepare(definition,{diagnostics}={}){
     const {layout,initial,inputs,outputs,numeric,nodes,elements,junctions,solve}=T.compile(definition);
     const energyIn=initial.length-2, energyOut=initial.length-1;
+    const reviewOptions=diagnostics===undefined?null:W.diagnostics.create(diagnostics);
+    let review=reviewOptions?.fork();
+    const connections=review&&nodes.map((node,i)=>node.kind!=='junction'?null:{
+      kind:'connection',node:node.name,
+      elements:elements.filter(edge=>edge.from===i||edge.to===i).map(edge=>edge.name)
+    });
+    const through=review&&new Float64Array(nodes.length);
     const defaults=Object.fromEntries(Object.entries(inputs).map(([key,port])=>[key,port.default]));
     const e=new Float64Array(nodes.length), net=new Float64Array(nodes.length),
       junctionLoad=new Float64Array(junctions.length);
@@ -103,6 +110,24 @@
         [name,group==='ledger'?ledger[measure]:group==='nodes'?nodeRows[nodes[index].name][measure]:edgeRows[elements[index].name][measure]]));
       return {time,inputs:{...input},nodes:nodeRows,elements:edgeRows,ledger,outputs:ports};
     }
+    function inspect({time,ledger}){
+      if(!review)return;
+      const {initialEnergy,energy,supplied,dissipated,balance}=ledger, expected=initialEnergy+supplied-dissipated;
+      const block=review.fork();
+      block.error('network-energy-balance',balance,
+        Math.max(Math.abs(initialEnergy),Math.abs(energy),Math.abs(supplied),Math.abs(dissipated)),
+        {kind:'network',id:layout.id},time,{energy,expected,initialEnergy,supplied,dissipated});
+      through.fill(0);
+      for(const [i,{from,to}] of elements.entries()){
+        const amount=Math.abs(q[i]);
+        through[from]=Math.max(through[from],amount);
+        through[to]=Math.max(through[to],amount);
+      }
+      for(const i of junctions)block.error('network-junction-residual',net[i],through[i],connections[i],time,
+        {unit:layout.units.flow??null});
+      review.merge(block);
+    }
+
     function view(){
       const {time,state}=solver.snapshot();
       return report(time,state,applied);
@@ -112,6 +137,7 @@
       try{
         const stepped=solver.advance(time,next);
         const measured=report(stepped.time,stepped.state,next);
+        inspect(measured);
         applied=next;
         return {...measured,stats:stepped.stats};
       }catch(error){
@@ -131,18 +157,27 @@
         solver.restore(saved.integrator);
         const {time,state}=solver.snapshot();
         check(time>=0,'Network checkpoint time must be nonnegative');
-        report(time,state,next);
+        const measured=report(time,state,next);
+        const beforeReview=review;
+        review=reviewOptions?.fork();
+        try{inspect(measured);}catch(error){review=beforeReview;throw error;}
         applied=next;
       }catch(error){
         solver.restore(before);
         throw error;
       }
     }
-    function reset(){solver.reset();applied=defaults;}
-    view();
+    function reset(){
+      solver.reset();applied=defaults;
+      review=reviewOptions?.fork();
+      if(review)inspect(view());
+    }
+    inspect(view());
     const outputPorts=Object.fromEntries(Object.entries(outputs).map(([key,row])=>[key,row.port]));
     return Object.freeze({layout,inputs:K.procedural.data.freeze(inputs),outputs:K.procedural.data.freeze(outputPorts),
-      advance,view,snapshot,restore,reset});
+      advance,view,snapshot,restore,reset,...(review&&{
+        diagnostics:()=>review.report({solver:'lumped-network',network:layout,configuredStep:numeric.step??1/240})
+      })});
   }
 
   function system(config){

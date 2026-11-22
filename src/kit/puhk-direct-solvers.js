@@ -33,9 +33,9 @@
       evidence(){
         return {used,limit:maxWork};
       },
-      residual(absolute){
+      residual(absolute,row,signed){
         const ratio=scale>0?absolute/scale:null;
-        return {absolute,relative:finite(ratio)?ratio:null,threshold};
+        return {absolute,relative:finite(ratio)?ratio:null,threshold,row,signed};
       }
     };
   }
@@ -50,10 +50,14 @@
     if(solution){
       if(!ctl.take(entries+b.length))status='work-limit';
       else{
-        let absolute=0;
-        for(let i=0;i<b.length;i++)absolute=Math.max(absolute,Math.abs(b[i]-multiply(solution,i)));
+        let absolute=0,row=0,signed=0;
+        for(let i=0;i<b.length;i++){
+          const difference=b[i]-multiply(solution,i), magnitude=Math.abs(difference);
+          if(!finite(magnitude)||magnitude>absolute){absolute=magnitude;row=i;signed=difference;}
+          if(!finite(absolute))break;
+        }
         if(finite(absolute)){
-          residual=ctl.residual(absolute);
+          residual=ctl.residual(absolute,row,signed);
           status=absolute<=ctl.threshold?'converged':'residual';
         }else status='non-finite';
       }

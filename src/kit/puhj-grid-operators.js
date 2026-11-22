@@ -25,7 +25,8 @@
       kind:domain.kind,units:domain.units,cells:domain.cells.length,faces:domain.faces.length});
     const cells=Array.from(domain.cells,(row,i)=>{
       check(vector(row?.center)&&positive(row.measure),'Invalid operator cell '+i);
-      return {center:row.center.slice(),measure:row.measure,faces:[]};
+      return {center:row.center.slice(),measure:row.measure,faces:[],
+        ...(Array.isArray(row.address)&&{address:row.address.slice()})};
     });
     const regions=Object.keys(domain.boundaries);
     check(regions.every(id),'Invalid compiled boundary tag');
@@ -247,6 +248,11 @@
       return rows;
     }
 
+    function site(cell){
+      const {center,address}=cells[cell];
+      return {kind:'cell',cell,center:center.slice(),...(address&&{address:address.slice()})};
+    }
+
     function operator(values,table,{diffusivity,carrierFlux}={}){
       const at=coefficient(diffusivity===undefined?0:diffusivity), flux=zeros(), depletion=new Float64Array(count);
       if(carrierFlux!==undefined)field(carrierFlux,faceCount,'carrier flux');
@@ -280,13 +286,17 @@
         }
         flux[i]=amount;
       }
-      let stableDt=Infinity;
+      let stableDt=Infinity, limitingCell=null;
       for(const [i,c] of cells.entries()){
         check(finite(depletion[i]),'Transport depletion exceeded numeric range');
-        if(depletion[i]>0)stableDt=Math.min(stableDt,c.measure/depletion[i]);
+        if(depletion[i]>0){
+          const bound=c.measure/depletion[i];
+          if(bound<stableDt){stableDt=bound;limitingCell=i;}
+        }
       }
       const rate=net(flux).map(v=>-v);
-      return {flux,rate,stableDt:finite(stableDt)?stableDt:null};
+      return {flux,rate,stableDt:finite(stableDt)?stableDt:null,
+        ...(limitingCell!==null&&{limitingCell:site(limitingCell)})};
     }
 
     function diffusion(values,{boundary,time=0,diffusivity=1}={}){
@@ -300,17 +310,27 @@
       return {...result,boundaryFlux:boundaryFlux(result.flux)};
     }
 
-    function transport(values,{dt,boundary,time=0,diffusivity=0,carrierFlux,source}={}){
+    function advance(values,{dt,boundary,time=0,diffusivity=0,carrierFlux,source}={},review,observed){
       check(positive(dt),'Transport needs a finite positive dt');
       const result=operator(cellValues(values),policies(boundary,time,dt),{diffusivity,carrierFlux});
-      check(result.stableDt===null||dt<=result.stableDt,'Transport dt exceeds the combined explicit stability bound');
+      const context={solver:'grid-transport',domain:identity,time,requestedDt:dt,maxDt:result.stableDt};
+      if(review){
+        check(finite(time),'Invalid transport diagnostic time');
+        if(result.stableDt!==null)review.limit('transport-timestep',dt,result.stableDt,result.limitingCell,time);
+      }
+      if(result.stableDt!==null&&dt>result.stableDt){
+        if(review)return {diagnostics:review.report({...context,advanced:false})};
+        throw Error('Transport dt exceeds the combined explicit stability bound '+result.stableDt+
+          ' at cell '+result.limitingCell.cell+' (requested '+dt+')');
+      }
       const authored=applied?.source(time,dt), hasSource=source!==undefined||Boolean(authored);
       if(source!==undefined&&typeof source!=='number')field(source,count,'cell source');
       if(typeof source==='number')check(finite(source),'Invalid constant cell source');
       const supplied=hasSource?Float64Array.from(values,(_,i)=>
         (typeof source==='number'?source:source?.[i]??0)+(authored?.[i]??0)):null;
       const rate=supplied?result.rate.map((value,i)=>value+supplied[i]):result.rate;
-      const next=Float64Array.from(values,(value,i)=>value+dt*rate[i]);
+      const next=observed===undefined?Float64Array.from(values,(value,i)=>value+dt*rate[i]):
+        Float64Array.from(field(observed,count,'observed cell field'));
       function quantity(source){
         let sum=0, carry=0;
         for(let i=0;i<count;i++){
@@ -326,12 +346,26 @@
       const sourceAmount=supplied?dt*quantity(supplied):0;
       const error=after-before+outward-sourceAmount;
       check(finite(error),'Transport balance exceeded numeric range');
-      return {...result,rate,values:next,ledger:{before,after,boundary:regions,netOut:outward,
-        ...(hasSource&&{source:sourceAmount}),error}};
+      const ledger={before,after,boundary:regions,netOut:outward,...(hasSource&&{source:sourceAmount}),error};
+      if(review){
+        review.error('transport-balance',error,Math.max(Math.abs(before),Math.abs(after),Math.abs(outward),Math.abs(sourceAmount)),
+          {kind:'domain',id:identity.id},time+dt,{before,after,netOut:outward,source:sourceAmount});
+        for(const [cell,{measure}] of cells.entries()){
+          const change=(next[cell]-values[cell])*measure, expected=(dt*rate[cell])*measure;
+          review.error('transport-cell-balance',change-expected,
+            Math.max(Math.abs(expected),Math.abs(values[cell]*measure),Math.abs(next[cell]*measure)),
+            site(cell),time+dt,{change,expected});
+        }
+      }
+      return {...result,rate,values:next,ledger,...(review&&{
+        diagnostics:review.report({...context,advanced:observed===undefined,observed:observed!==undefined})
+      })};
     }
 
     return Object.freeze({domain:identity,...(applied&&{boundarySet:applied.identity}),applyBoundaries,interpolate,sample,gradient,faceGradient,flux,divergence:net,
-      diffusion,advection,transport});
+      diffusion,advection,transport:(values,options)=>advance(values,options),
+      inspectTransport:(values,options,{observed,diagnostics=true}={})=>
+        advance(values,options,W.diagnostics.create(diagnostics),observed)});
   }
 
   W.gridOperators=Object.freeze({planFormat,reportFormat,prepare});

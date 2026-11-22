@@ -2,7 +2,7 @@
 const path=require('node:path');
 const format='ink-studio/integration-plan';
 
-function run(kit,plan,file,dependency=()=>{}) {
+function run(kit,plan,file,dependency=()=>{},diagnostics) {
   const {module:equations,config={},settings={},times,input}=plan??{};
   const {check,record}=kit.KIT.world.data;
   check(plan?.format===format&&plan.version===1&&record(config)&&record(settings)&&
@@ -16,15 +16,15 @@ function run(kit,plan,file,dependency=()=>{}) {
   dependency(location);
   const load=require(location);
   check(typeof load==='function','Integration module must export a function of kit and config');
-  const {derivative,acceleration,events}=load(kit,config)??{};
-  const solver=kit.KIT.world.integrators.create({...settings,derivative,acceleration,events});
+  const {derivative,acceleration,events,invariants}=load(kit,config)??{};
+  const solver=kit.KIT.world.integrators.create({...settings,derivative,acceleration,events,...(diagnostics!==undefined&&{invariants,diagnostics})});
   const initial=solver.snapshot(), results=[];
   for(const time of times){
     const result=solver.advance(time,input);
     results.push(result);
     if(result.terminal!==null)break;
   }
-  return {format:'ink-studio/integration-trace',version:1,initial,results,checkpoint:solver.snapshot()};
+  return {format:'ink-studio/integration-trace',version:1,initial,results,checkpoint:solver.snapshot(),...(solver.diagnostics&&{diagnostics:solver.diagnostics()})};
 }
 
 module.exports={run};

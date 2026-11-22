@@ -86,6 +86,9 @@ what posted. `converged`, `iterations`, `residualRatio` and `committed` are
 ordinary output ports. Checkpoints preserve the latest report and the existing
 transfer receipts.
 
+Use [simulation diagnostics](simulation-diagnostics.md) to rank a saved
+probe by link residual and gate a run on tolerance.
+
 ## Register a law for a model
 
 Register a named and revisioned law in the same project loader as the account

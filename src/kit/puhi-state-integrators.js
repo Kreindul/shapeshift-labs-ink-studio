@@ -48,16 +48,18 @@
       rk4(time,state,middle-time,middle,half,input,stats);
       rk4(middle,half,end-middle,end,out,input,stats);
     }
-    function trial(time,state,dt,end,out,input,stats,tolerances,relative){
+    function trial(time,state,dt,end,out,input,stats,tolerances,relative,evidence){
       rk4(time,state,dt,end,coarse,input,stats);
       fine(time,state,dt,end,out,input,stats);
-      let error=0;
+      let error=0, component=0;
       for(let i=0;i<size;i++){
         const scale=tolerances[i]+relative*Math.max(Math.abs(state[i]),Math.abs(out[i]));
         const difference=out[i]-coarse[i];
         const correction=finite(difference)?difference/15:out[i]/15-coarse[i]/15;
-        error=Math.max(error,Math.abs(correction)/scale);
+        const ratio=Math.abs(correction)/scale;
+        if(ratio>error){error=ratio;component=i;}
       }
+      if(evidence)evidence.component=component;
       return error;
     }
     return {rk4,'semi-implicit':symplectic,adaptive:fine,trial};
@@ -105,6 +107,36 @@
     const clock={time:initialTime,nextStep:step};
     let busy=false;
     committed.set(start);
+    const diagnostics=options.diagnostics??(options.invariants===undefined?undefined:true);
+    const originalReview=diagnostics===undefined?null:W.diagnostics.create(diagnostics);
+    let review=originalReview?.fork(), reviewStart=initialTime, maxAcceptedDt=0;
+    const invariants=options.invariants??{};
+    check(record(invariants)&&Object.keys(invariants).length<=32,'Expected up to 32 named integrator invariants');
+    const probes=Object.entries(invariants).map(([name,probe])=>{
+      const {measure}=probe??{};
+      check(id(name)&&name.length<=80&&record(probe)&&typeof measure==='function',
+        'Invalid integrator invariant '+name);
+      const expected=probe.expected??measure(initialTime,start.slice());
+      check(finite(expected),'Integrator invariant '+name+' needs a finite expected value');
+      return {name,measure,expected};
+    });
+    function inspect(block,time,state){
+      if(!block||!probes.length)return;
+      const sample=Object.freeze(Array.from(state));
+      for(const {name,measure,expected} of probes){
+        const actual=measure(time,sample);
+        check(finite(actual),'Integrator invariant '+name+' returned a non-finite value');
+        block.error('invariant.'+name,actual-expected,Math.max(Math.abs(expected),Math.abs(actual)),
+          {kind:'invariant',name},time,{actual,expected});
+      }
+    }
+    function resetReview(){
+      if(originalReview){
+        review=originalReview.fork();
+        reviewStart=clock.time;
+        maxAcceptedDt=0;
+      }
+    }
 
     function value(event,time,state,input,stats){
       const result=event.value(time,state,input);
@@ -136,6 +168,8 @@
       let time=clock.time, nextStep=clock.nextStep, current=first, candidate=second, terminal=null;
       const stats={acceptedSteps:0,rejectedSteps:0,evaluations:0,eventEvaluations:0,eventIterations:0};
       const events=[];
+      const block=review?.fork(), evidence=block&&{};
+      let acceptedMax=maxAcceptedDt;
       current.set(committed);
       busy=true;
       try {
@@ -150,7 +184,7 @@
           const end=remaining-span<=roundoff?target:Math.min(target,proposed);
           const dt=end-time;
           if(adaptive){
-            const error=solver.trial(time,current,dt,end,candidate,input,stats,settings.absoluteTolerance,relativeTolerance);
+            const error=solver.trial(time,current,dt,end,candidate,input,stats,settings.absoluteTolerance,relativeTolerance,evidence);
             const growth=error===0?4:clamp(.9*error**(-.2),.2,4);
             nextStep=clamp(dt*growth,minStep,maxStep);
             if(error>1){
@@ -158,6 +192,7 @@
               stats.rejectedSteps++;
               continue;
             }
+            if(block)block.limit('adaptive-trial-error',error,1,{kind:'component',index:evidence.component},end,{dt});
           }else replay(time,current,dt,end,candidate,input,stats);
 
           const after=definitions.map(event=>value(event,end,candidate,input,stats));
@@ -171,6 +206,7 @@
           stats.acceptedSteps++;
           if(!found.length){
             [current,candidate]=[candidate,current];
+            if(block){acceptedMax=Math.max(acceptedMax,end-time);inspect(block,end,current);}
             time=end;
             before=after;
             continue;
@@ -188,11 +224,13 @@
             events.push({id:event.id,time:at,before:left,after:Array.from(eventState),terminal:event.terminal});
             if(event.terminal&&terminal===null)terminal=event.id;
           }
+          if(block){acceptedMax=Math.max(acceptedMax,at-time);inspect(block,at,eventState);}
           time=at;
           current.set(eventState);
           if(terminal!==null)break;
           before=definitions.map(event=>value(event,time,current,input,stats));
         }
+        if(block){review.merge(block);maxAcceptedDt=acceptedMax;}
         committed.set(current);
         Object.assign(clock,{time,nextStep});
       }finally{busy=false;}
@@ -209,13 +247,18 @@
       'Incompatible integrator snapshot');
       committed.set(saved.state);
       Object.assign(clock,{time:saved.time,nextStep:saved.nextStep});
+      resetReview();
     }
     function reset(){
       check(!busy,'Integrator is already advancing');
       committed.set(start);
       Object.assign(clock,{time:initialTime,nextStep:step});
+      resetReview();
     }
-    return Object.freeze({advance,snapshot,restore,reset});
+    return Object.freeze({advance,snapshot,restore,reset,...(review&&{
+      diagnostics:()=>review.report({solver:'integrator',method,from:reviewStart,to:clock.time,
+        configuredStep:step,stepCap:stepLimit,maxAcceptedDt})
+    })});
   }
 
   W.integrators=Object.freeze({format,methods:Object.freeze(methods),create});

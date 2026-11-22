@@ -19,6 +19,9 @@ pair. `units: {effort,flow}` labels port values with Ink's existing
 [physical quantities](physical-ports.md). Network coefficients and source
 values use the same authored scale.
 
+[Simulation diagnostics](simulation-diagnostics.md) summarize the energy
+ledger and locate the largest flow residual at a named junction.
+
 ## Reusable elements
 
 | Where | Kind | Fields and equation |

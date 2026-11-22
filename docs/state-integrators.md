@@ -47,6 +47,9 @@ and discard a trial or replay part of it to locate an event. Keep callbacks
 deterministic, avoid external side effects, and keep all advancing state
 in the state vector. Callback arrays are temporary working storage.
 
+[Simulation diagnostics](simulation-diagnostics.md) can measure named
+invariants and locate adaptive error by state component.
+
 ## Step sizes and error control
 
 `time` defaults to zero, and `step` defaults to 1/60 s. The initial state

@@ -1,7 +1,7 @@
 /* Resolve a versioned network and sample its exact source-change boundaries. */
 const fs=require('node:fs'), path=require('node:path');
 
-function run(kit,plan,file,dependency=()=>{}){
+function run(kit,plan,file,dependency=()=>{},diagnostics){
   const W=kit.KIT.world, N=W.lumpedNetworks, {check,record}=W.data;
   const {samples,commands=[],inputs,checkpoint}=plan??{};
   check(plan?.format===N.runFormat&&plan.version===1&&typeof plan.network!=='undefined'&&
@@ -14,7 +14,7 @@ function run(kit,plan,file,dependency=()=>{}){
     dependency(location);
     return JSON.parse(fs.readFileSync(location,'utf8'));
   }
-  const network=N.prepare(read(plan.network));
+  const network=N.prepare(read(plan.network),{diagnostics});
   if(checkpoint!==undefined)network.restore(read(checkpoint));
   const start=network.view();
   check(Array.from(samples).every((time,i)=>Number.isFinite(time)&&(i?time>samples[i-1]:time>=start.time)),
@@ -33,7 +33,7 @@ function run(kit,plan,file,dependency=()=>{}){
     }
     return network.advance(time,active);
   });
-  return {format:N.traceFormat,version:1,layout:network.layout,initial,results,checkpoint:network.snapshot()};
+  return {format:N.traceFormat,version:1,layout:network.layout,initial,results,checkpoint:network.snapshot(),...(network.diagnostics&&{diagnostics:network.diagnostics()})};
 }
 
 module.exports={run};
