@@ -308,6 +308,7 @@ The comparison renders the same seven camera checkpoints in each projection. An 
 | Selective ink, diagnostic buffers, stable art resolves, and frame-history effects | Host integration | Supported |
 | Directional environment sky, parallax horizon bands, and baked cloud cards | Supported | Supported |
 | Constant-density height, box, sphere, and shaft fog | Supported | Supported |
+| Stepped facing colors on native splats | Supported | Supported |
 | View-dependent surface finishes, projected layers, reflection captures, and marched density fields | Host integration | Supported |
 | Water-column extinction, surface highlights, foam, caustics, and refraction | Supported | Water data and queries |
 | Text rendering, PNG/APNG, scene reviews, and sprite atlases | Host integration | Supported |

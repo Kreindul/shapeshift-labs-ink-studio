@@ -178,7 +178,7 @@
         bySurface.get(slot).push(row);
       }
     }
-    for (const [i, { settings }] of (world.surfaces ?? []).entries()) {
+    for (const [i, { settings, facingRamp }] of (world.surfaces ?? []).entries()) {
       const surface = i + 1, eligible = bySurface.get(surface) ?? [];
       const base = 'surfaces[' + i + ']';
       const roles = check(base + '.paletteRoles', () => PixelLook.bindRoles(world.pal, world.paletteRoles, settings.paletteRoles));
@@ -186,9 +186,9 @@
       staged(base + '.renderStages', settings.renderStages, eligible, surface, { ...context, roles });
       const layers = Object.entries(settings.layers ?? {}).filter(([id, layer]) => rgbLayer(layer?.type) ||
         (id === 'lookAssetRamp' && settings.lookAssetId && layer?.lightingRamp));
-      if (!layers.length && settings.paletteConstraint === undefined) continue;
+      if (!layers.length && settings.paletteConstraint === undefined && !settings.facingColors) continue;
       check(base, () => SurfaceLook.prepare(settings, world.pal, undefined, world.surfaceEffects, {
-        paletteRoles: world.paletteRoles, blueNoise: context.blueNoise
+        paletteRoles: world.paletteRoles, facingRamp, blueNoise: context.blueNoise
       }));
       for (const [id, layer] of layers) add(base + '.layers.' + id, 'lit',
         { ...layer, assetId: ['lookAsset','lookAssetRamp'].includes(id) ? settings.lookAssetId : undefined }, eligible, { mode: 'surface', surface });

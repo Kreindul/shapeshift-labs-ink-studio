@@ -31,7 +31,7 @@ vec4 relightAt(int row) { return texelFetch(u_relight, ivec2(row & 511, row >> 9
 export function splatShaderSources(ascii, sampleCoverage, {
   water = false, airPockets = false, layered = false, atlas = false, portal = false, instances = false,
   contributions = false, masked = false, textured = false, layeredGlass = false, coverageRules, materialStyles = false,
-  environment = false, emitterFog=false, relighting = false, optical = false, stableDetail, cutaway, airflow, footprints = false, footprintGLSL, engraving=false, screenPrintGLSL, spriteReconstruction
+  environment = false, emitterFog=false, relighting = false, optical = false, stableDetail, cutaway, airflow, footprints = false, footprintGLSL, engraving=false, screenPrintGLSL, spriteReconstruction, facingColors = false
 } = {}) {
   if (footprints && typeof footprintGLSL !== 'string') throw new Error('Footprint shaders need SplatFootprints.glsl');
   const coverageStride = coverageRules?.coverageStride ?? 4;
@@ -42,6 +42,7 @@ export function splatShaderSources(ascii, sampleCoverage, {
   const SPLAT_VS = `#version 300 es
 precision highp float; precision highp int;
 uniform highp sampler2D u_data;
+${facingColors ? facingColors.splatVertexGLSL : ''}
 ${spriteReconstruction ? 'uniform highp sampler2D u_spriteLod; uniform int u_spriteLodCount; flat out int v_spriteLod;' : ''}
 uniform mat4 u_view, u_proj;
 uniform bool u_geometryDepth;
@@ -401,6 +402,8 @@ ${environment ? '  v_envAxial = -cam.z;' : ''}
       (u_materialPatterned && (styleCode & 1024) != 0) ||
       t1.w != (fract(v_pixelStyle.y) >= 0.25 ? v_pixelStyle.w : v_pixelStyle.z)) v_pixelStyle.y = 0.0;
   v_pixelFog = fogk;` : ''}
+  ${facingColors ? `facingVertex(color == colorF ? record : -1, FM, u_view,
+    alpha >= 1.0 && v_depth >= 0.0, fogk);` : ''}
   v_color = vec4(min(color, 1.0), alpha);
   v_gl = (flags & 16) != 0 ? 1.0 : 0.0;   // glass
   v_as = (flags & 128) != 0 ? 1.0 : 0.0; v_ast = v_as > 0.5 ? float(((kraw >> 12) & 1) | (((kraw >> 14) & 1) << 1)) : 0.0;   // text (K.ascii): the dab asks for it (and maybe for a set of its own), or it lies inside a zone (0.5 on the zone's surface)
@@ -417,8 +420,11 @@ in vec2 v_d; in vec3 v_conic; in vec4 v_color; in float v_depth; flat in int v_c
 ${stableDetail ? 'flat in float v_detailGeometry, v_detailTexture;' : ''}
 ${portal ? 'flat in vec3 v_portalDepth; uniform vec4 u_splatPlane, u_portalCoverPlane;' : ''}
 ${!portal || layeredGlass ? 'flat in float v_ownerDepth;' : ''}
-${portal || cutaway || footprints ? 'uniform mat4 u_proj; uniform float u_ortho;' : ''}
-${footprints ? 'uniform float u_focal;' + (!cutaway ? 'uniform bool u_geometryDepth;' : '') : ''}
+${portal || cutaway || footprints ? 'uniform mat4 u_proj;' : ''}
+${portal || cutaway || footprints || facingColors ? 'uniform float u_ortho;' : ''}
+${facingColors ? facingColors.splatFragmentGLSL : ''}
+${footprints || facingColors ? 'uniform float u_focal;' : ''}
+${footprints && !cutaway ? 'uniform bool u_geometryDepth;' : ''}
 ${cutaway ? cutaway + `
 flat in vec4 v_sectionSample;
 uniform mat4 u_view;
@@ -444,7 +450,7 @@ flat in float v_glassNearDepth;
 float glassDepth(vec4 sampleDepth) {
   return dot(floor(sampleDepth.rgb*255.0+0.5),vec3(1.0,256.0,65536.0)) / 16777215.0;
 }` : ''}
-${water || portal || environment || cutaway || footprints ? 'uniform vec2 u_viewport;' : ''}
+${water || portal || environment || cutaway || footprints || facingColors ? 'uniform vec2 u_viewport;' : ''}
 ${environment ? environmentMediaSource(emitterFog) + 'flat in float v_envAxial;' : ''}
 ${portal || cutaway ? axialPosition : ''}
 ${footprints ? footprintGLSL : ''}
@@ -577,6 +583,7 @@ ${materialStyles ? `
     int ci = int(mod(floor(f / (ij.x == 0 ? 1.0 : ij.x == 1 ? 64.0 : ij.x == 2 ? 4096.0 : 262144.0)), 64.0));
     vec3 tile = mix(u_fpal[ci], u_fog, v_fk);
     rgb = ${stableDetail ? 'mix(rgb, tile, v_detailTexture)' : 'tile'}; }
+${facingColors ? 'rgb = facingFragment(rgb, u_fog, u_viewport, u_focal, u_ortho > 0.5);' : ''}
 ${relighting ? 'if (v_relight.w > 0.0) rgb = mix(min(vec3(1.0), rgb * v_relight.xyz), u_fog, v_relight.w - 1.0);' : ''}
 ${optical ? `
   if (hasOptical) {
@@ -788,7 +795,7 @@ bool constrainPalette(ivec2 p, vec3 inputColor, out vec3 color) {
 
 export function pixelShaderSources(PixelLook, { water = false, airPockets = false, layered = false, atlas = false,
   paletteConstraints = false, masked = false, contributions = false, layeredGlass = false, materialStyles = false,
-  environment = false, emitterFog=false, relighting = false, packedTone = false, cutaway } = {}) {
+  environment = false, emitterFog=false, relighting = false, packedTone = false, cutaway, facingColors = false } = {}) {
   const waterPixelGLSL = `
 uniform highp sampler2D u_waterMask;
 ivec2 waterPixel(ivec2 p) {
@@ -1065,6 +1072,7 @@ float materialLight(float t, int id, int rampSize, ivec2 p) {
     floor(level) + float(fract(level) > pixelStyleThreshold(mode, p))) / float(bands);
 }
 ` : ''}
+${facingColors ? facingColors.indexedGLSL : ''}
 vec3 pixColour(ivec2 p, vec3 c) {
   int i = dabAt(p); if (i < 0) return c;
   if ((int(texelFetch(u_dat,ivec2(((i & 511)<<2)+2,i>>9),0).w) & 32768) != 0) return c; vec4 A = pixA(i); if (A.x < 0.5) return c;
@@ -1128,6 +1136,9 @@ ${environment ? '  baked = envMedia(baked, vec2(p) + 0.5, size, axial);' : ''}
       if (bb >= 0) ci = rampAt(r, edge ? max(0, bb - kk2) : bb + ck); } }
   g_pixed = true;
   vec3 surfaceColor = u_pal[clamp(ci, 0, u_n - 1)];
+  ${facingColors ? `vec2 facingSize = vec2(textureSize(u_idxTex, 0));
+  surfaceColor = facingIndexed(surfaceColor, i, u_dat, u_ptime, u_pview, vec2(p) + 0.5,
+    facingSize, facingSize.y / (2.0 * u_tanF), u_portho > 0.5);` : ''}
   ${relighting ? 'if (gain.w > 0.0) surfaceColor = mix(min(vec3(1.0), surfaceColor * gain.rgb), u_relightFog, fogAmount);' : ''}
   ${water ? 'surfaceColor = waterPaint(surfaceColor,vec2(p)+0.5,size,axial,mark);' : ''}
   ${environment ? 'surfaceColor = envMedia(surfaceColor,vec2(p)+0.5,size,axial);' : ''}

@@ -1168,6 +1168,7 @@ function makeSculpt(B, rest) {
       visibility: 1 - shd };
     if (PRB) return ci;
     const bevel = surface ? bevelDistance(surface, curP) : undefined;
+    const facingRamp = surface?.facingColors?.mode === 'shift' && surface.facingColors.ramp === undefined ? ramp : undefined;
     selected?.(m, style, style?.mode && !flat && !m.glass && shade?.[0] !== shade?.[1] ? shade : null);
     const fl =
       FLO || m.motionAt?.(x, y, z) || m.fl || (m.em ? EM : glint ? GLINT : (m.leaf || m.blade) && !m.still ? (m.leaf ? WINDL : WINDG) : undefined);
@@ -1200,7 +1201,7 @@ function makeSculpt(B, rest) {
           ramp[
             clamp(Math.floor(t * ramp.length + (R() - 0.5) * (lf.j === undefined ? 1.3 : lf.j)), 0, ramp.length - 1)
           ];
-        if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, [tx / tl, ty / tl, tz / tl], bevel);
+        if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, [tx / tl, ty / tl, tz / tl], bevel, facingRamp);
         stick(
           x + nx * 0.04,
           y + ny * 0.04,
@@ -1223,7 +1224,7 @@ function makeSculpt(B, rest) {
       ci = tones[clamp(Math.floor(li * tones.length + (R() - 0.5) * 1.1), 0, tones.length - 1)];
       const size = (R() < 0.32 ? 0.12 + R() * 0.1 : 0.06 + R() * 0.065) * 2.3 * clamp(res * 5.2, 0.45, 1.1),
         out = 0.04 + R() * size * 0.6;
-      if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, [tx / tl, ty / tl, tz / tl], bevel);
+      if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, [tx / tl, ty / tl, tz / tl], bevel, facingRamp);
       stick(
         x + nx * out,
         y + ny * out,
@@ -1250,7 +1251,7 @@ function makeSculpt(B, rest) {
         lo = ramp[Math.max(0, k - 1)],
         mid = ramp[k],
         hi = ramp[Math.min(n - 1, k + 1)];
-      if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, undefined, bevel);
+      if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, undefined, bevel, facingRamp);
       disc(x, y, z, [nx, ny, nz], res * S.fat, res * 0.3, P[lo], 3, m.fl);
       if (wear > 0.7 && R() < (wear - 0.7) * 6) return;
       const h = (bl.h || 0.15) * 2.1 * (0.45 + 1.1 * tall) * (0.55 + 0.75 * R()),
@@ -1259,7 +1260,7 @@ function makeSculpt(B, rest) {
         lz = (R() - 0.5) * 0.5,
         ll = Math.hypot(lx, 1, lz),
         ax = [lx / ll, 1 / ll, lz / ll];
-      if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, ax, bevel);
+      if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, ax, bevel, facingRamp);
       stick(
         x + ax[0] * h * 0.3,
         y + ax[1] * h * 0.3,
@@ -1271,7 +1272,7 @@ function makeSculpt(B, rest) {
         3,
         fl
       );
-      if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, ax, bevel);
+      if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, ax, bevel, facingRamp);
       stick(
         x + ax[0] * h * 0.72,
         y + ax[1] * h * 0.72,
@@ -1314,7 +1315,7 @@ function makeSculpt(B, rest) {
       fy -= ny * fn;
       fz -= nz * fn;
       const fm = Math.hypot(fx, fy, fz) || 1;
-      if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, undefined, bevel);
+      if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, undefined, bevel, facingRamp);
       disc(x, y, z, [nx, ny, nz], res * S.fat, res * 0.3, P[ramp[Math.max(0, k - 2)]], 3, m.fl);
       for (let hi = 0; hi < hairs; hi++) {
         const jx = R() - 0.5,
@@ -1343,7 +1344,7 @@ function makeSculpt(B, rest) {
                 ? rr2[clamp(Math.floor(rim * rr2.length), 0, rr2.length - 1)]
                 : ramp[Math.min(n - 1, k + sg + (rim > 0.75 ? 1 : 0))];
           }
-          if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, ax, bevel);
+          if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, ax, bevel, facingRamp);
           stick(
             qx + ax[0] * sl * 0.5,
             qy + ax[1] * sl * 0.5,
@@ -1386,7 +1387,7 @@ function makeSculpt(B, rest) {
         m0.line === false || m.line === false
       );
     // (a: how solid it is, 1 and over is solid, under 1 lets what is behind show through; glass also bends what is behind it)
-    if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, undefined, bevel);
+    if (surface) B.surfaceNext(surface, nx, ny, nz, L, 1 - shd, undefined, bevel, facingRamp);
     if (alternate) B.shadowNext(ci, alternate);
     const brushDefinition = m.brush === undefined ? (m0.brush ?? S.brush) : m.brush;
     if (brushDefinition !== undefined && brushDefinition !== false && !m.glass && Math.hypot(nx, ny, nz) > 1e-8) {

@@ -1119,6 +1119,10 @@ function renderFrame(world, o, preparedPalettes) {
     skyOverlay: Boolean(skyOverlay),
     skyReflectionSource,
     parallel: ortho ? [V[2], V[6], V[10]] : null,
+    artRay(sx, sy) {
+      const scale = o.artGridScale || 1;
+      return rayAt((Math.floor(sx / scale) + .5) * scale, (Math.floor(sy / scale) + .5) * scale).direction;
+    },
     footprint: (dist * 2) / (tp * H),
     detail: stableDetail, pixelsPerUnit: focal / (o.artGridScale || 1), orthographic: ortho,
     time: t, waterTime: motion.water, waterWind,
@@ -1912,7 +1916,7 @@ function renderFrame(world, o, preparedPalettes) {
     const pixelSurface = !opticalActive && PIX?.[i * 8] && !surface?.reveals(i) && (!planar || (al >= 1 && !(flags & 1)));
     const projected = surface?.projected(i);
     const reflectedSky = !skyOverlay && surface?.environment(i);
-    const fragmentSurface = !pixelSurface && (planar || localProbeReflection || projected || surface?.bevel(i) || surface?.thin(i) || reflectedSky || liveNormal && hasSurface);
+    const fragmentSurface = !pixelSurface && (planar || localProbeReflection || projected || surface?.facing?.(i) || surface?.bevel(i) || surface?.thin(i) || reflectedSky || liveNormal && hasSurface);
     const ditherRule = contribution && fragmentRule(i);
     const detailParticle = fieldParticle || world.effectParticles?.some(({ first, count }) => i >= first && i < first + count);
     const centered = hasSurface && !pixelSurface && !fragmentSurface;
