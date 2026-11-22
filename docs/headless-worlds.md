@@ -651,6 +651,10 @@ for a specified wetness. Most numeric properties accept a constant or
 
 | Property | What uses it |
 | --- | --- |
+| `density` | Bulk density in kg/m³ for [mass and inertia measurements](mass-properties.md) and model operators. |
+| `elastic.youngModulus`, `elastic.poissonRatio`, `damping` | Young’s modulus in Pa, Poisson’s ratio, and a dimensionless damping ratio available to structural and motion models. |
+| `intrinsicPermeability` | Material permeability in m² for transport models. |
+| `thermal.specificHeat`, `thermal.conductivity`, `thermal.expansion` | Specific heat in J/(kg·K), thermal conductivity in W/(m·K), and linear thermal expansion in 1/K. Each is optional. |
 | `friction` | Mechanics uses the coefficient to reduce sliding and cap driven wheel traction. If both contacting materials supply a coefficient, their geometric mean is used. |
 | `permeability` | Potential water loss through the bed in world units per second. Surface water caps the loss by available water and reports it in its drainage ledger. |
 | `thermal.heatCapacity`, `thermal.conductance`, `dryingRate` | Lumped heat capacity in J/K and conductance in W/K use the same reference area. Each cell approaches its ambient temperature at their ratio. The drying rate is in inverse seconds at 20 °C. Dry cells lose moisture faster as their temperature rises. |

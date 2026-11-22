@@ -158,3 +158,7 @@ geometry graph with explicit junctions, cavities, reservoirs, ports and probes.
 
 [Compiled discretizations](discretization.md) supply physical cells, oriented
 faces, neighbors, and boundary regions for grid, chart, and mesh operators.
+
+[Physical property measurements](mass-properties.md) provide mass, volume,
+centres, inertia tensors, thickness and resolved material coefficients for
+model bindings.
