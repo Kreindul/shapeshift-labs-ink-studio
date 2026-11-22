@@ -687,3 +687,79 @@ test('bundle guides can use a named surface chart and keep the world recipe edit
   assert.ok(ink.render(world, { ...imageOptions, transparent: true }).alpha.some(value => value === 255));
   assert.ok(world.renderMetadata.targets.some(target => target?.surface === 'tail:4'));
 });
+
+test('timed reveal clips a directed segment exactly and supports independent start and end keys', () => {
+  const style = { edge: 'hard', width: .2, color: '#f3b56b', reveal: {
+    start: [[0,0],[.5,0],[1,.5]], end: [[0,0],[1,1]], width: [[0,.5],[1,1.4]]
+  } };
+  const view = { ...imageOptions, ortho: true, transparent: true };
+  const world = C.world(scene([{ source: straight, ...style }]));
+  const read = t => ink.render(world, { ...view, t });
+  const alpha = (frame, x) => frame.alpha[38 * frame.w + x];
+  assert.ok(read(0).alpha.every(value => value === 0));
+  const early = read(.26);
+  assert.ok(alpha(early, 38) > 200);
+  assert.equal(alpha(early, 64), 0);
+  const later = read(.85);
+  assert.equal(alpha(later, 38), 0);
+  assert.ok(alpha(later, 68) > 200);
+  const reversed = ink.render(C.world(scene([{ source: straight.slice().reverse(), ...style }])), { ...view, t: .26 });
+  assert.equal(alpha(reversed, 38), 0);
+  assert.ok(alpha(reversed, 89) > 200);
+  assert.deepEqual(read(.26).alpha, early.alpha);
+  assert.ok(read(.85).alpha.filter(value => value > 0).length > early.alpha.filter(value => value > 0).length);
+});
+
+test('timestamped trails clip the birth front and expiry tail and vary width and opacity by age', () => {
+  const source = { kind: 'trail', samples: [{ time: 0, point: straight[0] }, { time: 2, point: straight[1] }] };
+  const view = { ...imageOptions, ortho: true, transparent: true };
+  const make = trail => C.world(scene([{ source, edge: 'hard', width: .32, trail }]));
+  const flat = make({ lifetime: .7, fade: 1 });
+  const faded = make({ lifetime: .7, width: [[0,1],[1,.25]], fade: [[0,1],[1,0]] });
+  assert.ok(ink.render(faded, { ...view, t: 0 }).alpha.every(value => value === 0));
+  assert.ok(ink.render(faded, { ...view, t: 2.72 }).alpha.every(value => value === 0));
+  const age = ink.render(faded, { ...view, t: 1.22 }), solid = ink.render(flat, { ...view, t: 1.22 });
+  const mid = x => age.alpha[38 * age.w + x];
+  assert.equal(mid(37), 0);
+  assert.equal(mid(82), 0);
+  assert.ok(mid(67) > mid(53) + 50);
+  assert.ok(solid.alpha.filter(value => value > 0).length > age.alpha.filter(value => value > 0).length);
+
+  const restart = { kind: 'trail', samples: [
+    { time: .1, point: [-2,0,0] }, { time: .3, point: [-1.2,0,0] }, null,
+    { time: .45, point: [1.2,0,0] }, { time: .65, point: [2,0,0] }
+  ] };
+  const both = ink.render(C.world(scene([{ source: restart, edge: 'hard', trail: { lifetime: 1, fade: 1 }, width: .17 }])),
+    { ...view, t: .7 });
+  assert.ok(both.alpha.some(value => value > 0));
+  assert.equal(both.alpha[38 * both.w + 64], 0);
+  const B = kit.makeBuilder(1, palette);
+  assert.throws(() => C.draw(B, { kind: 'trail', samples: [{time: 0, point: straight[0]}, {time: 0, point: straight[1]}] },
+    { trail: true }), /increasing timestamps/);
+  assert.equal(B.count(), 0);
+});
+
+test('timed paths retain distinct clocks through assembly and use the posed forward direction', () => {
+  const build = (y, reveal) => {
+    const B = kit.makeBuilder(1, palette);
+    C.draw(B, straight.map(([x]) => [x,y,0]), { width: .22, edge: 'hard', reveal });
+    return host(B);
+  };
+  const first = build(.5, { end: [[0,0],[1,1]] }), second = build(-.5, { end: [[0,0],[2,1]] });
+  const meta = { cam: camera, fog: first.fog }, joined = kit.SplatProvenance.join([first,second], meta);
+  assert.equal(joined.curveTiming[0], 1);
+  assert.equal(joined.curveTiming[8], 2);
+  assert.equal(joined.curveTimePrograms.length, 2);
+  const subset = kit.SplatProvenance.subset(joined, [1]);
+  const view = { ...imageOptions, ortho: true, transparent: true, t: .8 };
+  assert.deepEqual(ink.render(subset, view).alpha, ink.render(second, view).alpha);
+
+  const B = kit.makeBuilder(1, palette);
+  const move = C.bind(B, straight, rest => rest.points.map(([x,y,z]) => [-x,y,z]),
+    { edge: 'hard', width: .22, reveal: { end: .28 } });
+  const posed = host(B);
+  move.pose(posed);
+  const frame = ink.render(posed, view);
+  assert.ok(frame.alpha[38 * frame.w + 90] > 200);
+  assert.equal(frame.alpha[38 * frame.w + 38], 0);
+});

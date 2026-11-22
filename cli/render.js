@@ -786,7 +786,8 @@ function renderFrame(world, o, preparedPalettes) {
     baseCount = world.count;
   const curveCamera = curves && { view: V, near, focal, width: W, height: H, ortho };
   const curveLightSample = curves && [1, 0, 0];
-  const curveFrames = curves && world.curveClips && (world.anim?.rig || world.anim?.bones || world.reconstructionPose) &&
+  const curveFrames = curves && (world.curveClips || world.curveTiming || shutterRows) &&
+    (world.anim?.rig || world.anim?.bones || world.reconstructionPose) &&
     sampleFrames(world, t);
   const ditherView = anchorSpaces.has('view') ? ArtStability.viewProjection(V) : undefined;
   if(!o.reflectionPlane&&!probeView)o.cameraFrame?.({time:camera.time,pose:CameraLens.fromView(V),motion:camera.motion});
@@ -1211,6 +1212,8 @@ function renderFrame(world, o, preparedPalettes) {
     wet = new Float32Array(N);
   const sampleWithdrawal = SampleCoverage.amount(o.sampleWithdrawal ?? world.sampleWithdrawal ?? 0);
   const sceneMotion = motion;
+  const curveWindows = curves && (world.curveTiming || shutterRows) && new Array(baseCount);
+  const timePrograms = curveWindows && new Map();
   for (let i = 0, q = 0; i < N; i++, q += 16) {
     if (qualityRows && !qualityRows.keep[i] || geometryMask && spriteLOD.hidden(geometryMask.codes[i])) continue;
     const motion = shutterRows?.clock(i) ?? sceneMotion, t = motion.scene;
@@ -1320,6 +1323,20 @@ function renderFrame(world, o, preparedPalettes) {
       if (gs <= 0) al = 0;
       sc *= gs * (2 - gs);
     } else if (kraw & 1024) wet[i] = Math.min(1, Math.max(0, (t * ((world.grow || {}).rate || 1) - ex) / 2));
+    if (curveWindows && i < baseCount && al > 0) {
+      const carrier = shutterRows?.pose(i) ?? world, rows = carrier.curveTiming;
+      const at = i * CurveSplat.timingStride, program = rows?.[at] && carrier.curveTimePrograms?.[rows[at] - 1];
+      if (program) {
+        if (!timePrograms.has(program)) timePrograms.set(program, new Map());
+        const samples = timePrograms.get(program);
+        if (!samples.has(t)) samples.set(t, program.sample(t));
+        const window = CurveSplat.timeWindow(rows, at, samples.get(t), program.trail, t);
+        if (window) {
+          al = CurveSplat.timedOpacity(al, window.fade, ex);
+          curveWindows[i] = window;
+        } else al = 0;
+      }
+    }
     X[i] = x;
     Y[i] = y;
     Z[i] = z;
@@ -1724,8 +1741,15 @@ function renderFrame(world, o, preparedPalettes) {
     let curve, roughness, curveEmission, curveLight;
     if (curveCamera && CurveSplat.isRow(d, q)) {
       const position = [x, y, z], curveWorld = shutterRows?.pose(i) ?? world;
-      const clips = CurveSplat.clipPlanes(curveWorld.curveClips, i, position, SC[i], curveFrames ? curveFrames(i) : null);
-      curve = CurveSplat.prepare(d, q, position, SC[i], al, curveCamera, clips);
+      const frame = curveFrames ? curveFrames(i) : null;
+      const clips = CurveSplat.clipPlanes(curveWorld.curveClips, i, position, SC[i], frame);
+      let window = curveWindows?.[i];
+      if (window && frame && (window.first > 0 || window.last < 1)) {
+        const { direction } = window, m = frame.basis().anchor;
+        window = { ...window, direction: [0, 3, 6].map(k =>
+          m[k] * direction[0] + m[k + 1] * direction[1] + m[k + 2] * direction[2]) };
+      }
+      curve = CurveSplat.prepare(d, q, position, SC[i], al, curveCamera, clips, window);
       if (!curve || curve.bounds[0] >= W || curve.bounds[1] >= H || curve.bounds[2] <= 0 || curve.bounds[3] <= 0) continue;
       const finish = curveWorld.curveMaterials;
       const encoded = finish?.[i * CurveSplat.materialStride];

@@ -1057,24 +1057,26 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
       else fallingSnowRanges.push({ first, end });
     }
   }
-  let hasCurveSplats = false, curveGroups = 0, curveClips, curveMaterials, curveLighting;
-  function writeCurveRow(storage, stride, values) {
+  let hasCurveSplats = false, curveGroups = 0, curveClips, curveMaterials, curveLighting, curveTiming;
+  const curveTimePrograms = [];
+  function writeCurveRow(storage, stride, values, Type = Float32Array) {
     if (!storage || storage.length < n * stride) {
-      const next = new Float32Array(Math.max(n * stride, storage ? storage.length * 2 : 256 * stride));
+      const next = new Type(Math.max(n * stride, storage ? storage.length * 2 : 256 * stride));
       if (storage) next.set(storage);
       storage = next;
     }
     storage.set(values, (n - 1) * stride);
     return storage;
   }
-  function curveSplat(from, to, radius, color, opacity, profile, edge, group, clips, finish, lighting) {
-    const { center, half, normal, covariance } = CurveSplat.carrier(from, to, radius, profile);
+  function curveSplat(from, to, radius, color, opacity, profile, edge, group, clips, finish, lighting, timing) {
+    const { center, half, axis, normal, covariance } = CurveSplat.carrier(from, to, radius, profile);
     const section = profile ? (profile.flattened ? 2 : 1) : 0;
     push(...center, ...covariance, color, opacity,
       { nd: true, ph: radius, sp: half, rg: profile?.aspect, ex: CurveSplat.tag(section, edge, group) }, normal);
     hasCurveSplats = true;
     if (finish) curveMaterials = writeCurveRow(curveMaterials, CurveSplat.materialStride, finish);
     if (lighting) curveLighting = writeCurveRow(curveLighting, CurveSplat.lightingStride, lighting);
+    if (timing) curveTiming = writeCurveRow(curveTiming, CurveSplat.timingStride, [...timing, ...axis], Float64Array);
     if (clips) {
       const stride = CurveSplat.clipStride;
       if (!curveClips || curveClips.length < n * stride) {
@@ -1113,6 +1115,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
         ...(hasCurveSplats && { curveSplats: true }),
         ...(curveMaterials && { curveMaterials: curveMaterials.slice(0, n * CurveSplat.materialStride) }),
         ...(curveLighting && { curveLighting: curveLighting.slice(0, n * CurveSplat.lightingStride) }),
+        ...(curveTiming && { curveTiming: curveTiming.slice(0, n * CurveSplat.timingStride), curveTimePrograms: curveTimePrograms.slice() }),
         ...(curveClips && { curveClips: curveClips.slice(0, n * CurveSplat.clipStride) }),
         ...(paintDecals.length && { paintDecals }),
         ...(correctionRows.length && { paintCorrections: PaintCorrections.bind(correctionRows) }),
@@ -1193,7 +1196,8 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     n = 0;
     hasCurveSplats = false;
     curveGroups = 0;
-    curveClips = curveMaterials = curveLighting = undefined;
+    curveClips = curveMaterials = curveLighting = curveTiming = undefined;
+    curveTimePrograms.length = 0;
     fine = null;
     attr = null;
     attrN = null;
@@ -1300,6 +1304,7 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     dab,
     stick,
     curveSplat,
+    registerCurveTiming: program => curveTimePrograms.push(program),
     reserveCurveGroups(count) {
       const first = curveGroups + 1;
       CurveSplat.tag(0, 'hard', curveGroups + count);

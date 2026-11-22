@@ -1,7 +1,7 @@
 /* Finite strand kernels carried by ordinary native splat rows. */
 const CurveSplat = (() => {
   // Kind zero leaves the motion payload free. Preserve the tag through native row copies.
-  const marker = -161291.375, minimum = 1e-5, clipStride = 12, materialStride = 4, lightingStride = 7;
+  const marker = -161291.375, minimum = 1e-5, clipStride = 12, materialStride = 4, lightingStride = 7, timingStride = 8;
   const hardBase = 1 << 20, maxHardGroups = (1 << 20) - 1;
   const betaRadius = Math.sqrt(6), betaIntegral = 5 * Math.PI / 16;
   // Seven-point Gaussian quadrature across the flat section, with rounded Gaussian edges.
@@ -51,11 +51,11 @@ const CurveSplat = (() => {
     const axis = delta.map(value => value / (2 * half)), variance = radius * radius;
     if (!profile) {
       const along = half * half / 3;
-      return { center, half, covariance: covarianceTerms.map(([i, j]) => (i === j ? variance : 0) + along * axis[i] * axis[j]) };
+      return { center, half, axis, covariance: covarianceTerms.map(([i, j]) => (i === j ? variance : 0) + along * axis[i] * axis[j]) };
     }
     const normal = cross(axis, profile.major), major = cross(normal, axis);
     const along = variance * axialUnits(radius, half), minor = variance * profile.aspect ** 2;
-    return { center, half, normal, covariance: covarianceTerms.map(([i, j]) =>
+    return { center, half, axis, normal, covariance: covarianceTerms.map(([i, j]) =>
       along * axis[i] * axis[j] + variance * major[i] * major[j] + minor * normal[i] * normal[j]) };
   }
 
@@ -141,22 +141,50 @@ const CurveSplat = (() => {
     return planes.length ? planes : null;
   }
 
-  function prepare(data, at, position, scale, opacity, { view, near, focal, width, height, ortho }, clips) {
+  function timeWindow(rows, at, state, trail, time) {
+    const u = rows[at + 1], length = rows[at + 2] - u;
+    let first = Math.max(0, (state.start - u) / length), last = Math.min(1, (state.end - u) / length);
+    let width = state.width, fade = state.opacity;
+    if (trail) {
+      const birth = rows[at + 3], duration = rows[at + 4] - birth, sinceBirth = time - birth;
+      if (duration > 0) {
+        first = Math.max(first, (sinceBirth - trail.lifetime) / duration);
+        last = Math.min(last, sinceBirth / duration);
+      } else if (sinceBirth < 0 || sinceBirth >= trail.lifetime) return null;
+      if (first >= last) return null;
+      const age = Math.max(0, sinceBirth - duration * (first + last) / 2);
+      const sample = { u: Math.min(1, age / trail.lifetime), age, time };
+      width *= trail.width.sample(sample);
+      fade *= trail.fade.sample(sample);
+    }
+    return first < last && width > 0 && fade > 0 ? { first, last, width, fade,
+      direction: rows.subarray(at + 5, at + timingStride) } : null;
+  }
+
+  function timedOpacity(value, fade, tag) {
+    if (fade === 1) return value;
+    return hardGroup(tag) ? value * fade : -Math.expm1(Math.log1p(-Math.min(.999, value)) * fade);
+  }
+
+  function prepare(data, at, position, scale, opacity, { view, near, focal, width, height, ortho }, clips, window) {
     const packed = data[at + 15], section = sectionOf(packed);
     if (section < 0) return null;
     const shape = dimensions(data, at, scale, section);
     if (!shape) return null;
     const group = hardGroup(packed), beta = !group && marker - packed >= 3, flattened = section === 2;
-    const { axis, radius, half } = shape;
+    const { axis, half } = shape, radius = shape.radius * (window?.width ?? 1);
+    const reverse = window && dot(window.direction, axis) < 0;
+    const begin = !window ? 0 : reverse ? 1 - window.last : window.first;
+    const finish = !window ? 1 : reverse ? 1 - window.first : window.last;
     const cameraPoint = p => [0, 1, 2].map(i => p[0] * view[i] + p[1] * view[i + 4] + p[2] * view[i + 8] + view[i + 12]);
-    const start = position.map((v, i) => v - half * axis[i]);
-    const end = position.map((v, i) => v + half * axis[i]);
+    const start = position.map((v, i) => v + (2 * begin - 1) * half * axis[i]);
+    const end = position.map((v, i) => v + (2 * finish - 1) * half * axis[i]);
     const a = cameraPoint(start), b = cameraPoint(end);
     if (a[2] > -near && b[2] > -near) return null;
     const clip = (p, q) => (-near - p[2]) / (q[2] - p[2]);
     const first = a[2] > -near ? clip(a, b) : 0;
     const last = b[2] > -near ? 1 - clip(b, a) : 1;
-    const length = (last - first) * 2 * half;
+    const length = (last - first) * (finish - begin) * 2 * half;
     if (!(length > 0)) return null;
     const from = start.map((v, i) => v + first * (end[i] - v));
     const bounds = [Infinity, Infinity, -Infinity, -Infinity];
@@ -471,7 +499,7 @@ const CurveSplat = (() => {
     if (wantNormal) hit.normal = softNormal(strand, start, ray, along, near / axial * scale);
     return hit;
   }
-  return Object.freeze({ tag, joinGroups, axialUnits, minimum, clipStride, materialStride, lightingStride, clipPlanes,
-    emissionAt, lightingAt, isRow, carrier, writeClips, prepare, sample, specular, directional });
+  return Object.freeze({ tag, joinGroups, axialUnits, minimum, clipStride, materialStride, lightingStride, timingStride, clipPlanes,
+    emissionAt, lightingAt, isRow, carrier, writeClips, timeWindow, timedOpacity, prepare, sample, specular, directional });
 })();
 if (typeof module !== 'undefined') module.exports = CurveSplat;

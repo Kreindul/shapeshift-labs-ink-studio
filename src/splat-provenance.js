@@ -5,7 +5,7 @@ const SplatProvenance = (() => {
   const perSplat = [['data', 16, Float32Array], ['attr', 4, Float32Array], ['fine', 12, Float32Array],
     ['pix', 8, Float32Array], ['surfaceData', 8, Float32Array], ['materialAlbedo', 1, Uint32Array],
     ['opticalSplats', 12, Float32Array], ['curveClips', 12, Float32Array], ['curveMaterials', 4, Float32Array],
-    ['curveLighting', 7, Float32Array], ['materialPixelStyles', 4, Float32Array], ['shadowLod', 6, Float32Array]];
+    ['curveLighting', 7, Float32Array], ['curveTiming', 8, Float64Array], ['materialPixelStyles', 4, Float32Array], ['shadowLod', 6, Float32Array]];
   function targetKey(target) {
     const labels = [target.entity, target.surface, target.prefabs, target.tags, target.medium, target.mediumKind];
     if (target.mark !== undefined || target.markLayer !== undefined || target.part !== undefined) labels.push(target.mark, target.markLayer);
@@ -104,9 +104,18 @@ const SplatProvenance = (() => {
     const withIds = parts.some(part => part.splatIds ?? part.ids);
     const rampIds = new Map(), patternIds = new Map();
     let offset = 0, curveGroups = 0;
+    const curveTimePrograms = [];
     const curveAPI = result.curveSplats && (typeof CurveSplat === 'undefined' ? require('./curve-splat.js') : CurveSplat);
     for (const part of parts) {
       if (curveAPI && part.curveSplats) curveAPI.joinGroups(result.data, offset, part.count, () => ++curveGroups);
+      if (part.curveTiming?.length && part.curveTimePrograms?.length) {
+        const first = curveTimePrograms.length, stride = curveAPI.timingStride;
+        curveTimePrograms.push(...part.curveTimePrograms);
+        for (let i = 0; i < part.count; i++) {
+          const row = (offset + i) * stride;
+          if (result.curveTiming[row]) result.curveTiming[row] += first;
+        }
+      }
       const base = surfaces.length;
       for (const surface of part.surfaces ?? []) surfaces.push(surface);
       const remapRamps = part.ramps?.map((ramp, i) => {
@@ -139,6 +148,7 @@ const SplatProvenance = (() => {
       for (const row of part.paintCorrections?.rows ?? []) paintRows.push({ ...row, index: offset + row.index });
       offset += part.count;
     }
+    if (curveTimePrograms.length) result.curveTimePrograms = curveTimePrograms;
     if (result.surfaceData) result.surfaces = surfaces;
     if (result.pix) Object.assign(result, { ramps, rampOff, pats });
     if (withIds) result.splatIds = Object.freeze(splatIds);

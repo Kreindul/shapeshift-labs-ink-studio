@@ -38,7 +38,7 @@ world position, arc distance, and textile UV when present.
 | Surface stroke | `{ kind: 'surface', chart, points, lift, inset }` follows an editable UV path on a chart. |
 | Textile | `{ kind: 'textile', plan }` reads a textile or interlace plan, keeping each strand's ID and width. Set `renderer: 'curve-splats'` in `K.textile.draw` appearance to opt in directly. Existing textile plans can still use `renderer: 'patches'`. |
 | Routed link | `{ kind: 'routed', link }` uses a sampled routed link's `paths`, material, and radius. Cut and broken links retain their separate spans. In simulation visuals set `visual.routedLinkRenderer: 'curve-splats'` alongside `visual.fields.routedLinks`. |
-| Particle trail | `{ kind: 'trail', samples }` takes one particle's ordered XYZ points or `{ point: [x,y,z] }` samples. Use `null` for a discontinuity or spawn break. Submit each particle separately. |
+| Particle trail | `{ kind: 'trail', samples }` takes one particle's ordered XYZ points or `{ point: [x,y,z], time }` samples. Use `null` for a discontinuity or spawn break. Submit each particle separately. |
 
 The optional `maxSegments` bounds preparation before the builder receives
 any rows. Standalone scenes have a total budget of 60,000 segments.
@@ -454,6 +454,76 @@ Run the [editable bundle studies](../examples/curve-splat-bundles.js) with
 `node examples/curve-splat-bundles.cjs studio/out/curve-splat-bundles`.
 Use `--params '{"style":"frayed-hem"}'` to select a study in CLI
 `render` and `clip` commands.
+
+## Animate a reveal window
+
+Add `reveal` to a strand's appearance. `start` and `end` are independent
+positions from 0 to 1 along the strand's reference arc length. They default
+to 0 and 1. Where the window is empty the strand is hidden. The renderer
+trims partial segments at the sampled positions, including on posed paths.
+
+```js
+K.curveSplats.draw(builder, source, {
+  width: .12,
+  edge: 'hard',
+  reveal: {
+    end: [[0, 0], [.24, 0, 'smooth'], [1.18, 1]],
+    start: [[0, 0], [1.28, 0], [2.15, 1]],
+    width: [[0, .65], [.8, 1.25], [2.15, .55]],
+    opacity: 1
+  }
+});
+```
+
+Reveal controls accept a constant or `[seconds, value, easing?]` keys.
+Use `{ keys, ease }` to set a shared easing. Each key applies its easing to
+the following interval. The default is linear. Start, end, and opacity
+range from 0 to 1. Width is a multiplier from 0 to 8. The keys use the
+renderer scene clock and hold their first and last values outside the
+key range. Use successive strands with different key times to write
+multi-stroke lettering.
+
+## Age a recorded trail
+
+Set `trail` on the appearance and give each trail sample a time in seconds.
+Times increase within each continuous run. Keep `null` between runs to
+separate spawns, teleports, or sweeps. The head follows the recorded
+positions between samples. The tail stops at `time - lifetime`.
+
+```js
+K.curveSplats.draw(builder, {
+  kind: 'trail',
+  samples: [
+    { time: 0, point: [-2, 0, 0] },
+    { time: .35, point: [-.4, .6, .2] },
+    { time: .7, point: [1.4, -.1, .4] }
+  ]
+}, {
+  edge: 'beta',
+  width: .19,
+  trail: {
+    lifetime: .54,
+    width: [[0, 1], [.38, .8], [1, .1]],
+    fade: [[0, 1], [.25, .9], [1, 0]]
+  }
+});
+```
+
+Trail width and fade use normalized age. 0 is newborn and 1 is the end
+of the lifetime. They use the existing spatial profile syntax, including
+`{ samples: [...] }` and SDK callbacks receiving `{ u, age, time }`. Age and time
+are in seconds. Width ranges from 0 to 8 and fade from 0 to 1. `trail: true`
+uses a one-second lifetime, constant width, and a linear fade. `ageSamples`
+sets the sample density per lifetime for wide timestamp gaps and defaults
+to 24. These subdivisions use the same strand segment budget as the
+existing profiles. Combine `reveal` and `trail` to apply their windows and
+gains together.
+
+Timed controls are sampled by the finite curve path in the headless library
+and CLI. Keep `curveSplats` enabled when rendering a timed shot. Run
+`node examples/timed-curve-trails.cjs studio/out/timed-curve-trails` to render
+the three studies and write their editable curve-scene JSON. Render or clip
+those files with the ordinary CLI and the intended scene times.
 
 ## Render and compare
 

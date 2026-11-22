@@ -91,11 +91,14 @@
       }
       case 'trail': {
         check(Array.isArray(source.samples) && source.samples.length <= segmentLimit + 1, 'expected a bounded trail sample list');
-        const spans = [{ points: [] }];
+        const spans = [{ points: [], times: [] }];
         for (const sample of source.samples) {
           if (sample === null) {
-            if (spans.at(-1).points.length) spans.push({ points: [] });
-          } else spans.at(-1).points.push(sample?.point ?? sample);
+            if (spans.at(-1).points.length) spans.push({ points: [], times: [] });
+          } else {
+            spans.at(-1).points.push(sample?.point ?? sample);
+            spans.at(-1).times.push(sample?.time);
+          }
         }
         return spans.map((span, i) => ({ ...span, id: String(i) }));
       }
@@ -149,6 +152,43 @@
       check(finite(n, min, max), 'invalid ' + name + ' value');
       return n;
     }, n => typeof n === 'number', mix);
+  }
+
+  function timeTrack(value, name, fallback, max) {
+    if (value === undefined) return () => fallback;
+    if (finite(value, 0, max)) return () => value;
+    const keys = Array.isArray(value) ? value : value?.keys, ease = value?.ease ?? 'linear';
+    check(Array.isArray(keys) && keys.length >= 1 && keys.length <= 512 &&
+      K.anim.keyframeTrack.eases.includes(ease), 'invalid ' + name + ' time track');
+    const rows = Array.from(keys, key => {
+      check(Array.isArray(key) && (key.length === 2 || key.length === 3) &&
+        finite(key[0], 0, 1e9) && finite(key[1], 0, max), 'invalid ' + name + ' timed key');
+      return { time: key[0], value: { value: key[1] }, ease: key[2] ?? ease };
+    });
+    const track = K.anim.keyframeTrack.create({ value: 'number' }, rows);
+    return time => track.sample(time).value;
+  }
+
+  function timingProgram(source, options) {
+    const reveal = options.reveal === false ? undefined : options.reveal;
+    const trail = options.trail === true ? {} : options.trail === false ? undefined : options.trail;
+    if (reveal === undefined && trail === undefined) return;
+    check(reveal === undefined || reveal && Object.getPrototypeOf(reveal) === Object.prototype &&
+      Object.keys(reveal).every(key => ['start', 'end', 'width', 'opacity'].includes(key)), 'invalid reveal settings');
+    check(trail === undefined || source?.kind === 'trail' && trail && Object.getPrototypeOf(trail) === Object.prototype &&
+      Object.keys(trail).every(key => ['lifetime', 'width', 'fade', 'ageSamples'].includes(key)),
+      'trail timing needs a trail source and age settings');
+    const start = timeTrack(reveal?.start, 'reveal start', 0, 1), end = timeTrack(reveal?.end, 'reveal end', 1, 1);
+    const width = timeTrack(reveal?.width, 'reveal width', 1, 8), opacity = timeTrack(reveal?.opacity, 'reveal opacity', 1, 1);
+    const result = { sample: time => ({ start: start(time), end: end(time), width: width(time), opacity: opacity(time) }) };
+    if (trail) {
+      const { lifetime = 1, ageSamples = 24, width = 1, fade = [[0,1],[1,0]] } = trail;
+      check(finite(lifetime, 1e-4, 1e9) && Number.isSafeInteger(ageSamples) && ageSamples >= 4 && ageSamples <= 128,
+        'invalid trail lifetime or age resolution');
+      result.trail = Object.freeze({ lifetime, ageSamples, width: channel(width, 'trail width', 0, 8),
+        fade: channel(fade, 'trail fade', 0, 1) });
+    }
+    return Object.freeze(result);
   }
 
   const colorTrack = (value, name) => track(value, name, rgb, value => typeof value === 'string' ||
@@ -504,11 +544,15 @@
     const caps = capStyles(capInput), joins = joinStyles(joinInput), pools = joins.filter(join => join.type === 'pool');
     const endEdits = joins.length || caps.start.type !== 'rounded' || caps.end.type !== 'rounded';
     const fixedColor = typeof color === 'function' ? null : rgb(color);
+    const timing = timingProgram(source, options);
     let segments = 0, examined = 0, samples = 0;
     const strands = paths(source).map((strand, index) => {
       const baseRadius = radius ?? strand.radius ?? .03, id = strand.id ?? String(index);
       check(finite(baseRadius, 1e-6, 100) && label(id), 'invalid strand radius or ID');
       const knots = points(strand.points), rows = [];
+      const times = timing?.trail && strand.times;
+      if (timing?.trail) check(times?.length === knots.length && times.every((time, i) =>
+        finite(time, -1e9, 1e9) && (!i || time > times[i - 1])), 'timed trail samples need increasing timestamps in each run');
       const autoClosed = strand.closed && knots.length >= 2 && K.V.dist(knots[0], knots.at(-1)) > 1e-8;
       if (autoClosed) knots.push(knots[0].slice());
       samples += knots.length;
@@ -519,7 +563,7 @@
         check(!retain, 'a bound strand needs nonzero reference length');
         return { id, rows };
       }
-      const closed = strand.closed ?? (knots.length > 3 && K.V.dist(knots[0], knots.at(-1)) <= 1e-8);
+      const closed = strand.closed ?? (!times && knots.length > 3 && K.V.dist(knots[0], knots.at(-1)) <= 1e-8);
       const ends = endEdits ? strandEnds(knots, lengths, total, caps, joins, closed, profileCuts) : null;
       const stops = ends?.stops ?? profileCuts;
       let runIndex = 0;
@@ -541,12 +585,19 @@
         const axis = framed && K.V.mul(K.V.sub(to, from), 1 / length);
         const begin = distance / total, end = (distance + length) / total;
         const a = strand.uvs?.[i], b = strand.uvs?.[i + 1];
-        let previous = 0;
+        const ageParts = times ? Math.max(1, Math.ceil((times[i + 1] - times[i]) / timing.trail.lifetime *
+          timing.trail.ageSamples)) : 1;
+        check(ageParts <= Math.max(1, maxSegments), 'trail sample interval exceeds the segment budget');
+        let previous = 0, agePart = 1;
         while (stop < stops.length && stops[stop] <= begin + 1e-12) stop++;
         do {
           check(++examined <= maxSegments, 'segment budget exceeded');
-          const next = stop < stops.length && stops[stop] < end - 1e-12 ?
-            (stops[stop++] * total - distance) / length : 1;
+          const profileEnd = stop < stops.length && stops[stop] < end - 1e-12 ?
+            (stops[stop] * total - distance) / length : 1;
+          const ageEnd = agePart / ageParts, next = Math.min(profileEnd, ageEnd);
+          if (next === profileEnd && profileEnd < 1) stop++;
+          if (next === ageEnd) agePart++;
+
           const middle = (previous + next) / 2, arc = distance + length * middle;
           const sample = { id, family: strand.family, index: strand.index ?? index, clump: strand.clump,
             point: K.V.lerp(from, to, middle), distance: arc, u: arc / total,
@@ -605,6 +656,8 @@
               continuesFrom(run.end, start, end)) ? run.end : null;
             rows.push({ from: start, to: end, shade, radius: size, opacity: rowOpacity, profile, finish, lighting,
               clips: left || right ? [left, right] : undefined,
+              ...(timing && { timeRange: [(distance + previous * length) / total, (distance + next * length) / total,
+                times ? mix(times[i], times[i + 1], previous) : 0, times ? mix(times[i], times[i + 1], next) : 0] }),
               ...(retain && { attachment: { segment: i, first: previous, last: next, roll, twist: twistAngle } }) });
           }
           previous = next;
@@ -613,7 +666,7 @@
       }
       return { id, rows, rest, followNormals: Boolean(chartNormals) };
     });
-    return { object, material, target, edge, strands, segments, examined };
+    return { object, material, target, edge, strands, segments, examined, timing };
   }
 
   function emit(builder, plan) {
@@ -621,11 +674,13 @@
     const first = builder.count(), threads = [];
     const groups = plan.edge === 'hard' ? plan.strands.filter(strand => strand.rows.length).length : 0;
     let nextGroup = groups ? builder.reserveCurveGroups(groups) : 0;
+    const timing = plan.timing && plan.segments ? builder.registerCurveTiming(plan.timing) : undefined;
     for (const { id, rows } of plan.strands) {
       const start = builder.count();
       const group = nextGroup && rows.length ? nextGroup++ : undefined;
-      for (const { from, to, shade, radius, opacity, profile, clips, finish, lighting } of rows)
-        builder.curveSplat(from, to, radius, shade, opacity, profile, plan.edge, group, clips, finish, lighting);
+      for (const { from, to, shade, radius, opacity, profile, clips, finish, lighting, timeRange } of rows)
+        builder.curveSplat(from, to, radius, shade, opacity, profile, plan.edge, group, clips, finish, lighting,
+          timing && [timing, ...timeRange]);
       const end = builder.count();
       builder.describeSplats?.(start, end, {
         object: plan.object, material: plan.material, target: { entity: plan.object, ...plan.target, surface: id }
@@ -700,6 +755,7 @@
             if (geometry.normal) world.renderMetadata?.normals?.set(geometry.normal, indexOfRow * 3);
             for (let k = 0; k < slots.length; k++) data[q + slots[k]] = geometry.covariance[k];
             data[q + 13] = geometry.half;
+            if (row.timeRange) world.curveTiming.set(geometry.axis, indexOfRow * CurveSplat.timingStride + 5);
             if (hidden[h] && data[q + 3] <= 0) data[q + 3] = row.opacity;
             hidden[h] = 0;
             if (row.clips) CurveSplat.writeClips(world.curveClips, indexOfRow, geometry.center, row.clips.map(clip));
