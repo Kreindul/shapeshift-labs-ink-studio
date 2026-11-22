@@ -5,7 +5,8 @@ Use `KIT.world.gridOperators.prepare(domain)` with a
 `ink-studio sim grid-ops <plan.json>`. The same finite-volume operators
 work on regular, sparse, and cut grids, carrier charts, triangle surfaces,
 and tetrahedral volumes. A 2D cell's measure is area and its face measure
-is edge length. In 3D these are volume and face area.
+is edge length. In 3D these are volume and face area. A [boundary set](boundary-conditions.md)
+can supply time-varying region values, fluxes, and cell disturbances.
 
 Scalar fields contain one number per cell or face, in compiled order.
 World-space vector fields are flat XYZ values. Library operators return

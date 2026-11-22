@@ -16,7 +16,7 @@
     check((native&&raw.complete===true||raw?.format===format)&&raw.version===1&&id(raw.id)&&
       integer(raw.revision??1,1,Number.MAX_SAFE_INTEGER),'Expected a version 1 wave network or complete compiled branched domain');
     check(fields(settings,['method','sampleRate','soundSpeed','density','metersPerUnit','loss','losses','cellLength','cfl',
-      'terminations','sources','probes','maxWork']),'Unknown wave settings');
+      'terminations','sources','probes','maxWork','conditions']),'Unknown wave settings');
     const {method='distributed',sampleRate=48000,soundSpeed=343,density=1.2,metersPerUnit=1,loss=0,losses={},
       cellLength=soundSpeed/sampleRate,cfl=.95,maxWork=80000000}=settings;
     check(['distributed','delay'].includes(method)&&integer(sampleRate,1000,192000)&&positive(soundSpeed)&&
@@ -80,8 +80,18 @@
     }
     check(nodes.every(row=>positive(row.admittance)),'Wave nodes need a connected tube and finite admittance');
 
+    const conditions=settings.conditions, applied=conditions===undefined?null:
+      W.boundaryConditions.bound(conditions,['ends','drives']).waves(conditions);
+    function merged(legacy,authored,label){
+      const combined=Object.fromEntries(table(legacy??{},256,label));
+      for(const [key,row] of Object.entries(authored??{})){
+        check(!own(combined,key),'Repeated '+label+' '+key);
+        combined[key]=row;
+      }
+      return combined;
+    }
     const ended=new Set();
-    for(const [key,row] of table(settings.terminations??{},256,'termination')){
+    for(const [key,row] of table(merged(settings.terminations,applied?.terminations,'termination'),256,'termination')){
       const where=indexOrPort(key), n=nodes[where], {kind,coefficient,impedance}=row??{};
       check(!ended.has(where)&&fields(row,['kind',...(kind==='reflect'?['coefficient']:kind==='impedance'?['impedance']:[])])&&
         ['sealed','open','matched','reflect','impedance'].includes(kind)&&
@@ -100,7 +110,7 @@
       return ports.has(key)?ports.get(key):index(key);
     }
 
-    const sources=table(settings.sources??{},32,'source').map(([name,row],i)=>{
+    const sources=table(merged(settings.sources,applied?.sources,'source'),32,'source').map(([name,row],i)=>{
       check(fields(row,['kind','node','port'])&&['flow','pressure'].includes(row.kind),'Invalid wave source '+name);
       const at=site(row), n=nodes[at];
       check(n.source<0&&(!n.released||row.kind==='pressure')&&
@@ -134,9 +144,10 @@
       const part=segments[section];
       return {name,section,ratio:Math.min(1,Math.max(0,(distance-part.at)/part.length))};
     });
-    const normalized={method,sampleRate,soundSpeed,density,metersPerUnit,cellLength,cfl,nodes,segments,sources,probes};
+    const normalized={method,sampleRate,soundSpeed,density,metersPerUnit,cellLength,cfl,nodes,segments,sources,probes,
+      ...(applied&&{conditions:{asset:applied.identity,ends:conditions.ends??{},drives:conditions.drives??{}}})};
     const identity={id:raw.id,revision:raw.revision??1,signature:hash(JSON.stringify(normalized))};
-    return {...normalized,identity,maxWork,named,tubeCount:tubes.size};
+    return {...normalized,identity,maxWork,named,tubeCount:tubes.size,defaults:applied?.defaults,driveWork:applied?.work??0};
   }
 
   W.waveTopology=Object.freeze({format,compile,finite,integer,array});

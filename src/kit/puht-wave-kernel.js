@@ -20,12 +20,12 @@
       check(Math.abs(1/sampleRate-dt)<=4*Number.EPSILON*dt&&
         (settings.sampleRate===undefined||settings.sampleRate===sampleRate),'Acoustic wave kernel must match its integer sample-rate clock');
       const wave=N.prepare(domain,{...settings,sampleRate});
-      check(wave.info.sources.some(row=>row.name===source)&&wave.info.probes.includes(probe),
+      check((source===undefined||wave.info.sources.some(row=>row.name===source))&&wave.info.probes.includes(probe),
         'Acoustic wave kernel needs a known source and probe');
       const current=()=>wave.view().probes[probe];
       function advanceBlock({start,end,input}){
         check(start===wave.view().sample,'Acoustic wave kernel sample cursor disagrees with its block');
-        wave.process(end-start,{inputs:{[source]:input.drive},collect:false});
+        wave.process(end-start,{inputs:source===undefined?{}:{[source]:input.drive},collect:false});
         return current();
       }
       return {

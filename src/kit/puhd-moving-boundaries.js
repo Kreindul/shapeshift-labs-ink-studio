@@ -170,23 +170,26 @@
   }
 
   function system(config) {
-    check(fields(config,['boundaries'])&&record(config.boundaries)&&integer(Object.keys(config.boundaries).length,1,64),
+    check(fields(config,['boundaries','conditions'])&&record(config.boundaries)&&integer(Object.keys(config.boundaries).length,1,64),
       'Moving boundary system needs a table of named boundaries');
     let vertices=0;
+    const applied=config.conditions===undefined?null:W.boundaryConditions.bound(config.conditions,[]);
     const plans=Object.entries(config.boundaries).map(([name,spec])=>{
       check(id(name)&&name.length<=75,'Invalid moving boundary ID');
-      const plan=prepare(spec);
-      vertices+=spec.seat.points.length;
+      const fromAsset=fields(spec,['rule'])&&id(spec.rule);
+      check(!fromAsset||applied,'Moving-wall rule needs a boundary set');
+      const plan=fromAsset?applied.wall(spec.rule):prepare(spec);
+      vertices+=fromAsset?plan.vertexCount:spec.seat.points.length;
       check(vertices<=4096,'Moving boundary system exceeds its seat vertex budget');
       return [name,plan];
     });
     const properties={aperture:'number',opening:'number','min-gap':'number','max-gap':'number',
       'displaced-volume':'number','volume-change':'number',sealed:'bool',available:'bool'};
     const outputs=Object.fromEntries(plans.flatMap(([name])=>Object.entries(properties).map(([key,type])=>[key+'.'+name,type])));
-    function measure(state,query,emit) {
+    function measure(state,query,emit,time=0) {
       return Object.fromEntries(plans.map(([name,plan])=>{
         const prior=state[name], reference=prior?.reference??plan.referenceVolume;
-        const result=plan.sample(query,reference);
+        const result=plan.sample(query,reference,time);
         if(result.status==='unavailable')return [name,{...result,reference:reference??null,volumeChange:null}];
         const baseline=reference??result.pocketVolume;
         const volumeChange=prior?.pocketVolume===undefined?0:prior.pocketVolume-result.pocketVolume;
@@ -201,7 +204,7 @@
         for(const [name,plan] of plans)if(plan.field)
           check(query.field(plan.field)?.role==='deformable-surfaces','Moving boundary '+name+' needs a deformable surfaces field');
       },
-      step:(state,{query,emit})=>measure(state,query,emit),
+      step:(state,{query,emit,time})=>measure(state,query,emit,time),
       validateState(state) {
         check(record(state)&&Object.keys(state).length===plans.length,'Invalid moving boundary checkpoint');
         for(const [name,plan] of plans){

@@ -5,7 +5,8 @@ Use `KIT.world.waveNetworks.prepare(domain, settings)` or
 variable-area tubes, branches, sources, named pressure/flow probes,
 losses, and passive terminations. They model linear, one-dimensional
 waves about rest. Positive tube flow follows the tube's authored
-`from` to `to` direction.
+`from` to `to` direction. A [boundary set](boundary-conditions.md) can supply
+time-varying drives and name reusable terminations.
 
 Supply a complete [compiled branched domain](branched-domains.md) or a
 compact `ink-studio/wave-network` document, version 1. The compact form

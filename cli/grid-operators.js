@@ -11,7 +11,7 @@ const operations={
   divergence:[],
   diffusion:['diffusivity'],
   advection:['carrierFlux','velocity','location'],
-  transport:['dt','diffusivity','carrierFlux','velocity','location']
+  transport:['dt','diffusivity','carrierFlux','velocity','location','source']
 };
 function json(key,value) {
   return ArrayBuffer.isView(value)?Array.from(value):value;
@@ -19,9 +19,9 @@ function json(key,value) {
 
 function run(kit,plan,file,dependency=()=>{}) {
   const W=kit.KIT.world, api=W.gridOperators, {check,own,record}=W.data;
-  const {operation,values,boundary,settings={}}=plan??{};
+  const {operation,values,boundary,conditions,settings={}}=plan??{};
   check(plan?.format===api.planFormat&&plan.version===1&&own(operations,operation)&&record(settings)&&
-    Object.keys(settings).every(key=>operations[operation].includes(key)),
+    Object.keys(settings).every(key=>key==='time'&&operation!=='divergence'||operations[operation].includes(key)),
   'Expected a version 1 grid operator plan with valid operation settings');
   let domain=plan.domain, owner=file;
   if(typeof domain==='string'){
@@ -30,7 +30,9 @@ function run(kit,plan,file,dependency=()=>{}) {
     dependency(owner);
     domain=JSON.parse(fs.readFileSync(owner,'utf8'));
   }
-  const ops=api.prepare(domain?.format===W.discretization.compiledFormat?domain:compile(kit,domain,owner,dependency));
+  const supplied=require('./boundary-conditions.js').resolve(conditions,file,dependency);
+  const ops=api.prepare(domain?.format===W.discretization.compiledFormat?domain:compile(kit,domain,owner,dependency),
+    {conditions:supplied});
   const options={...settings,boundary};
   let result;
   switch(operation){
@@ -47,7 +49,7 @@ function run(kit,plan,file,dependency=()=>{}) {
     }
     default: result=ops[operation](values,options);
   }
-  return JSON.parse(JSON.stringify({format:api.reportFormat,version:1,domain:ops.domain,operation,result},json));
+  return JSON.parse(JSON.stringify({format:api.reportFormat,version:1,domain:ops.domain,...(ops.boundarySet&&{boundarySet:ops.boundarySet}),operation,result},json));
 }
 
 module.exports={run};

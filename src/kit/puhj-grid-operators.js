@@ -14,7 +14,7 @@
     return values;
   }
 
-  function prepare(domain){
+  function prepare(domain,{conditions}={}){
     check(domain?.format===W.discretization.compiledFormat&&domain.version===1&&
       ['grid','charts','mesh'].includes(domain.kind)&&[2,3].includes(domain.dimension)&&
       id(domain.id)&&integer(domain.revision,1,Number.MAX_SAFE_INTEGER)&&typeof domain.units==='string'&&domain.units.length>0&&
@@ -45,7 +45,12 @@
     check(cells.every(row=>row.faces.length>=domain.dimension+1),'Operator topology contains incomplete cells');
     const faceCount=faces.length, zeros=()=>new Float64Array(faceCount), cellValues=values=>field(values,count,'cell field');
 
-    function policies(table={}){
+    const applied=conditions===undefined?null:
+      W.boundaryConditions.bound(conditions,['boundaries','disturbances']).grid(conditions,{cells,faces,regions});
+
+    function policies(table={},time=0,dt=0){
+      check(record(table),'Invalid grid boundary table');
+      if(applied)table={...applied.boundary(time,dt),...table};
       check(record(table)&&Object.keys(table).every(tag=>regions.includes(tag)),'Unknown or invalid boundary region');
       const normalized=Object.create(null);
       for(const [tag,row] of Object.entries(table)){
@@ -73,9 +78,9 @@
       return 0;
     }
 
-    function applyBoundaries(values,{boundary,diffusivity=1}={}){
+    function applyBoundaries(values,{boundary,time=0,diffusivity=1}={}){
       cellValues(values);
-      const table=policies(boundary), at=coefficient(diffusivity), rows=[];
+      const table=policies(boundary,time), at=coefficient(diffusivity), rows=[];
       for(const [face,f] of faces.entries())if(!f.interior){
         const bc=table[f.region]??closed, owner=values[f.owner], k=at(f.owner);
         const g=outward(f,bc,owner,k), v=bc.kind==='value'?bc.value:g===null?null:owner+g*f.ownerDistance;
@@ -87,9 +92,9 @@
       return rows;
     }
 
-    function faceGradient(values,{boundary,diffusivity=1}={}){
+    function faceGradient(values,{boundary,time=0,diffusivity=1}={}){
       cellValues(values);
-      const table=policies(boundary), at=coefficient(diffusivity);
+      const table=policies(boundary,time), at=coefficient(diffusivity);
       return Float64Array.from(faces,f=>{
         const g=f.interior?(values[f.neighbor]-values[f.owner])/f.span:
           outward(f,table[f.region]??closed,values[f.owner],at(f.owner));
@@ -147,14 +152,14 @@
       return out;
     }
 
-    function gradient(values,{boundary,diffusivity=1}={}){
-      return reconstruct(cellValues(values),policies(boundary),coefficient(diffusivity));
+    function gradient(values,{boundary,time=0,diffusivity=1}={}){
+      return reconstruct(cellValues(values),policies(boundary,time),coefficient(diffusivity));
     }
 
-    function interpolate(values,{boundary,diffusivity=1,scheme='linear'}={}){
+    function interpolate(values,{boundary,time=0,diffusivity=1,scheme='linear'}={}){
       cellValues(values);
       check(['linear','reconstructed'].includes(scheme),'Unknown face interpolation scheme');
-      const table=policies(boundary), at=coefficient(diffusivity);
+      const table=policies(boundary,time), at=coefficient(diffusivity);
       const slopes=scheme==='reconstructed'?reconstruct(values,table,at):null;
       function side(f,i){
         return values[i]+(slopes?V.dot(slopes.subarray(i*3,i*3+3),V.sub(f.center,cells[i].center)):0);
@@ -176,10 +181,10 @@
       });
     }
 
-    function sample(values,sites,{boundary,diffusivity=1}={}){
+    function sample(values,sites,{boundary,time=0,diffusivity=1}={}){
       cellValues(values);
       check(Array.isArray(sites)&&sites.length<=65536,'Expected a list of up to 65536 cell sample sites');
-      const slopes=reconstruct(values,policies(boundary),coefficient(diffusivity));
+      const slopes=reconstruct(values,policies(boundary,time),coefficient(diffusivity));
       return Float64Array.from(sites,(site,i)=>{
         check(integer(site?.cell,0,last)&&vector(site.point),'Invalid cell sample site '+i);
         const j=site.cell;
@@ -189,8 +194,8 @@
       });
     }
 
-    function flux(velocity,{boundary,location='normal'}={}){
-      const table=policies(boundary), lengths={normal:faceCount,constant:3,cells:count*3,faces:faceCount*3};
+    function flux(velocity,{boundary,time=0,location='normal'}={}){
+      const table=policies(boundary,time), lengths={normal:faceCount,constant:3,cells:count*3,faces:faceCount*3};
       check(own(lengths,location),'Unknown velocity field location');
       field(velocity,lengths[location],'velocity field');
       const dot=(i,n)=>n[0]*velocity[i]+n[1]*velocity[i+1]+n[2]*velocity[i+2];
@@ -284,22 +289,28 @@
       return {flux,rate,stableDt:finite(stableDt)?stableDt:null};
     }
 
-    function diffusion(values,{boundary,diffusivity=1}={}){
-      const result=operator(cellValues(values),policies(boundary),{diffusivity});
+    function diffusion(values,{boundary,time=0,diffusivity=1}={}){
+      const result=operator(cellValues(values),policies(boundary,time),{diffusivity});
       return {...result,boundaryFlux:boundaryFlux(result.flux)};
     }
 
-    function advection(values,{boundary,carrierFlux}={}){
+    function advection(values,{boundary,time=0,carrierFlux}={}){
       check(carrierFlux!==undefined,'Advection needs an integrated carrier flux');
-      const result=operator(cellValues(values),policies(boundary),{carrierFlux});
+      const result=operator(cellValues(values),policies(boundary,time),{carrierFlux});
       return {...result,boundaryFlux:boundaryFlux(result.flux)};
     }
 
-    function transport(values,{dt,boundary,diffusivity=0,carrierFlux}={}){
+    function transport(values,{dt,boundary,time=0,diffusivity=0,carrierFlux,source}={}){
       check(positive(dt),'Transport needs a finite positive dt');
-      const result=operator(cellValues(values),policies(boundary),{diffusivity,carrierFlux});
+      const result=operator(cellValues(values),policies(boundary,time,dt),{diffusivity,carrierFlux});
       check(result.stableDt===null||dt<=result.stableDt,'Transport dt exceeds the combined explicit stability bound');
-      const next=Float64Array.from(values,(value,i)=>value+dt*result.rate[i]);
+      const authored=applied?.source(time,dt), hasSource=source!==undefined||Boolean(authored);
+      if(source!==undefined&&typeof source!=='number')field(source,count,'cell source');
+      if(typeof source==='number')check(finite(source),'Invalid constant cell source');
+      const supplied=hasSource?Float64Array.from(values,(_,i)=>
+        (typeof source==='number'?source:source?.[i]??0)+(authored?.[i]??0)):null;
+      const rate=supplied?result.rate.map((value,i)=>value+supplied[i]):result.rate;
+      const next=Float64Array.from(values,(value,i)=>value+dt*rate[i]);
       function quantity(source){
         let sum=0, carry=0;
         for(let i=0;i<count;i++){
@@ -312,12 +323,14 @@
       }
       const before=quantity(values), after=quantity(next), regions=boundaryFlux(result.flux,dt);
       const outward=Object.values(regions).reduce((sum,row)=>sum+row.net,0);
-      const error=after-before+outward;
+      const sourceAmount=supplied?dt*quantity(supplied):0;
+      const error=after-before+outward-sourceAmount;
       check(finite(error),'Transport balance exceeded numeric range');
-      return {...result,values:next,ledger:{before,after,boundary:regions,netOut:outward,error}};
+      return {...result,rate,values:next,ledger:{before,after,boundary:regions,netOut:outward,
+        ...(hasSource&&{source:sourceAmount}),error}};
     }
 
-    return Object.freeze({domain:identity,applyBoundaries,interpolate,sample,gradient,faceGradient,flux,divergence:net,
+    return Object.freeze({domain:identity,...(applied&&{boundarySet:applied.identity}),applyBoundaries,interpolate,sample,gradient,faceGradient,flux,divergence:net,
       diffusion,advection,transport});
   }
 

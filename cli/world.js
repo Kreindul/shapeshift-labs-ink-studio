@@ -515,6 +515,12 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         return respond(require('./mass-properties.js').measure(kit,read(file),file,
           {dependency:shot?.dependency,assetPack:opt['asset-pack']}));
       }
+      case 'boundaries': {
+        ensure(typeof file==='string'&&other===undefined&&
+          (opt.t===undefined||typeof opt.t==='string')&&(opt.dt===undefined||typeof opt.dt==='string'),
+        'Use sim boundaries <asset.json> [--t seconds --dt seconds --out file.json]');
+        return respond(W.boundaryConditions.prepare(read(file)).sample(Number(opt.t??0),Number(opt.dt??0)));
+      }
       case 'resonator': {
         ensure(['bake','render'].includes(file)&&typeof other==='string'&&
           (opt.wav===undefined||file==='render'&&typeof opt.wav==='string'),

@@ -15,7 +15,8 @@ function run(kit,plan,file,dependency=()=>{}){
     dependency(location);
     return JSON.parse(fs.readFileSync(location,'utf8'));
   }
-  const wave=N.prepare(read(plan.network),settings), {info}=wave;
+  const conditions=require('./boundary-conditions.js').resolve(settings?.conditions,file,dependency);
+  const wave=N.prepare(read(plan.network),conditions===undefined?settings:{...settings,conditions}), {info}=wave;
   check(samples*info.probes.length<=1000000,'Wave run exceeds its output sample budget');
   check(samples*info.workPerSample<=maxTotalWork,'Wave run exceeds its total work limit');
   if(checkpoint!==undefined)wave.restore(read(checkpoint));

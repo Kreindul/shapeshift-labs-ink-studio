@@ -4,7 +4,8 @@ A `moving-boundaries` system measures a lift valve, compliant seal, diaphragm,
 or other boundary with a moving surface registered to a planar seat. Connect
 its measured opening to an existing pipe valve, ventilation opening, or
 custom model. The geometry and telemetry use normal Ink world and simulation
-model entry points.
+model entry points. A [boundary set](boundary-conditions.md) can share
+geometry and prescribed displacement with other solvers.
 
 ## Author a seat and moving patch
 

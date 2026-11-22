@@ -16,20 +16,23 @@
     const buffers={...engine.buffers,probePressure,probeFlow};
     const views=Object.entries(buffers).map(([name,value])=>({name,value,saved:new Float64Array(value.length)}));
     const keys=new Set(sources.map(row=>row.name)), level=new Float64Array(sources.length);
+    const workPerSample=engine.workPerSample+spec.driveWork;
     const info=freeze({method,sampleRate,soundSpeed:spec.soundSpeed,density:spec.density,domain:identity,
-      nodes:spec.named,tubes:spec.tubeCount,sections:spec.segments.length,workPerSample:engine.workPerSample,maxWork,
+      nodes:spec.named,tubes:spec.tubeCount,sections:spec.segments.length,workPerSample,maxWork,
+      ...(spec.conditions&&{boundarySet:spec.conditions.asset}),
       sources:sources.map(({name,kind})=>({name,kind})),probes:probes.map(({name})=>name),...engine.info});
     let sample=0;
 
     function process(count,{inputs={},collect=true}={}){
       check(integer(count,0,65536)&&sample+count<=Number.MAX_SAFE_INTEGER&&typeof collect==='boolean',
         'Wave block needs a bounded sample count');
-      check(count*engine.workPerSample<=maxWork,'Wave block exceeded the work limit; split it into smaller blocks');
+      check(count*workPerSample<=maxWork,'Wave block exceeded the work limit; split it into smaller blocks');
       check(!collect||count*probes.length<=1000000,'Wave block exceeded its collected sample budget');
       check(record(inputs)&&Object.keys(inputs).every(name=>keys.has(name)),'Invalid wave input channels');
       const supplied=sources.map(({name})=>{
-        const value=own(inputs,name)?inputs[name]:0;
-        check(finite(value)||numbers(value,count),'Wave input '+name+' needs a finite level or one value per sample');
+        const value=own(inputs,name)?inputs[name]:spec.defaults?.[name]??0;
+        check(typeof value==='function'&&!own(inputs,name)||finite(value)||numbers(value,count),
+          'Wave input '+name+' needs a finite level or one value per sample');
         return value;
       });
       const pressure=collect?probes.map(()=>new Float64Array(count)):null;
@@ -38,7 +41,11 @@
         for(const {value,saved} of views)saved.set(value);
         try{
           for(let i=0;i<count;i++){
-            for(let j=0;j<level.length;j++)level[j]=finite(supplied[j])?supplied[j]:supplied[j][i];
+            for(let j=0;j<level.length;j++){
+              const drive=supplied[j];
+              level[j]=typeof drive==='number'?drive:typeof drive==='function'?drive((sample+i)/sampleRate,1/sampleRate):drive[i];
+              check(finite(level[j]),'Wave authored drive exceeded numerical range');
+            }
             engine.advance(sample+i,level,probePressure,probeFlow);
             for(let j=0;j<probes.length;j++){
               check(finite(probePressure[j])&&finite(probeFlow[j]),'Wave probe exceeded the finite numeric range');
