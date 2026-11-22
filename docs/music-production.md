@@ -16,6 +16,8 @@ Use [note clips and voice-leading search](music-voice-leading.md) to
 try independent inner lines around a locked melody and bass.
 Use [patch gestures](music-gestures.md) to rehearse different performances
 of the written notes.
+Load the [stock performance instruments](music-playable-instruments.md)
+for a breath-and-resonance flute, prepared metal, and electric bass.
 Use [modular instruments](music-instrument-graphs.md) to combine samples,
 oscillators, resonators, filters and feedback in a per-note signal graph.
 Use [instrument performance maps](music-instrument-performance.md) for

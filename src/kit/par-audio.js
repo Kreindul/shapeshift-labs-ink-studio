@@ -572,6 +572,19 @@
       inputs:{patch:'record',assets:options},outputs:{value:'record'},
       run({patch,assets}) {return {value:P.musicProduction.inspectInstrumentGraph(patch,assets)};}
     },
+    'music.instrumentLibrary': {
+      description:'List stock performance instruments, their articulations, controls and pad addresses.',
+      inputs:{},outputs:{value:'record'},
+      run() {return {value:P.musicProduction.instrumentLibrary};}
+    },
+    'music.loadInstrumentPack': {
+      description:'Load a seeded stock performance instrument with editable patches or a pad kit and its playable audio sources.',
+      inputs:{name:'string',options},outputs:{value:'record',patches:'record',kit:'record',assets:'record'},
+      run({name,options}) {
+        const {id,guide,patches,kit,assets}=P.musicProduction.loadInstrumentPack(name,options);
+        return {value:{id,guide,patches,kit},patches,kit,assets};
+      }
+    },
     'music.instrumentPresets': {
       description:'Get editable stock reed, electric tines and bass patches with contextual articulation maps.',
       inputs:{},outputs:{value:'record'},

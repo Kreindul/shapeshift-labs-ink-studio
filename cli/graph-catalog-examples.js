@@ -304,6 +304,8 @@ const specifications = {
     tone:{type:'oscillator',wave:'sine'},shape:{type:'envelope'},
     amp:{type:'gain',input:'tone',amount:{base:0,from:{shape:.6},by:{pressure:.2}}}
   }}}},
+  'music.instrumentLibrary': {inputs:{}},
+  'music.loadInstrumentPack': {inputs:{name:'cinder-flute',options:{sampleRate:8000}}},
   'music.instrumentPresets': {inputs:{}},
   'music.planPocket': {inputs:{source:production,brief:{
     rhythm:{edits:[{part:'lead',section:'opening',scope:'section',adopt:{length:4,events:[

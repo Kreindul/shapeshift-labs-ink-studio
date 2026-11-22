@@ -13,11 +13,13 @@
     const names=new Set(Object.keys(patch.articulations ?? {}));
     for (const zone of sampleZones(patch)) if (zone.articulation) names.add(zone.articulation);
     const rules=Array.from(raw.rules ?? [],row=>{
-      check(fields(row,['when','interval','articulation','attackLead','glide','level','curves']) &&
+      check(fields(row,['when','interval','velocity','articulation','attackLead','glide','level','curves']) &&
         ['attack','repeat','legato','release'].includes(row.when) &&
         (row.articulation===undefined || id(row.articulation) && names.has(row.articulation)) &&
         (row.interval===undefined || row.when==='legato' && Array.isArray(row.interval) && row.interval.length===2 &&
           integer(row.interval[0],-127,127) && integer(row.interval[1],row.interval[0],127)) &&
+        (row.velocity===undefined || Array.isArray(row.velocity) && row.velocity.length===2 &&
+          finite(row.velocity[0],0,1) && finite(row.velocity[1],row.velocity[0],1)) &&
         finite(row.attackLead ?? 0,0,2) && finite(row.glide ?? 0,0,1) && finite(row.level ?? 1,0,2),
       'Invalid articulation performance rule');
       if (row.when==='release')
@@ -31,9 +33,9 @@
 
   function apply(model,notes,silence,percussion) {
     const byVoice=new Map(), turns=new Map();
-    const select=(kind,span)=>model.rules.find(row=>row.when===kind &&
-      (!row.interval || span>=row.interval[0] && span<=row.interval[1]));
-    const release=select('release');
+    const select=(kind,span,velocity)=>model.rules.find(row=>row.when===kind &&
+      (!row.interval || span>=row.interval[0] && span<=row.interval[1]) &&
+      (!row.velocity || velocity>=row.velocity[0] && velocity<=row.velocity[1]));
     for (const note of notes) {
       const voice=note.voice ?? 0, prev=byVoice.get(voice);
       const cleared=silence.findLast(row=>row.endTime<=note.time+eps);
@@ -45,7 +47,7 @@
       let kind='attack';
       if (interval===0 && gap<=model.repeatGap) kind='repeat';
       else if (interval!==null && !percussion && Math.abs(interval)<=model.interval && gap<=model.gap) kind='legato';
-      const rule=select(kind,interval);
+      const rule=select(kind,interval,note.velocity), release=select('release',interval,note.velocity);
       const articulation=note.play.articulation ?? rule?.articulation;
       const lead=rule?.attackLead ?? 0;
       const minimum=prev && !percussion ? Math.max(floor,Math.min(note.time,(prev.start ?? prev.time)+.001)) : floor;
