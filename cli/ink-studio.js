@@ -1000,6 +1000,7 @@ const CMD = {
         '    sim remap <plan.json> [--out report.json]   conservatively transfer extensive state across discretizations',
         '    sim discretize <plan.json> [--out compiled.json]   compile solver cells, face geometry, and boundary regions',
         '    sim domain <domain.json> [--world world.json --section tube/index]   assemble or trace sectioned tubes at named sockets',
+        '    sim reduce <plan.json> [--out asset.json]   bake reduced geometry, response taps, or resonant modes',
         '    sim sections <plan.json> [--out report.json]   measure mesh, SDF, or contour sections along a path',
         '    sim model-changes <plan> [--samples N --resume file --checkpoint file]   play prepared parameter ramps and topology swaps',
         '    sim block-check <model> <plan> [--candidate trace.json] [--trace-out file.json]   compare sample block partitions',

@@ -168,3 +168,6 @@ aperture, sealing, and displaced-volume signals for solvers.
 
 [Conservative state remapping](state-remap.md) transfers mass, heat and other
 extensive channels across resolution and moving-boundary changes.
+
+[Reduced simulation models](model-reduction.md) bake detailed sections, branched domains,
+and sampled responses into smaller assets with recorded fitting ranges and error.
