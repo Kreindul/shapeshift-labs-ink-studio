@@ -6,6 +6,7 @@ KIT.detailBudgets = DetailBudgets;
 KIT.passQuality = PassQuality;
 KIT.renderContract = RenderContract;
 KIT.colorClusters = ColorClusters;
+KIT.boundaryCels = BoundaryCels;
 KIT.shadowArt = ShadowArt;
 KIT.shotLighting = ShotLighting;
 KIT.splatFrames = SplatFrames;

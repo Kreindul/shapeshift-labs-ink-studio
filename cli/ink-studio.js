@@ -746,6 +746,7 @@ const view = extra =>
       edgeFilter: edgeFilterOption(),
       motionalCoverage: motionalCoverageOption(),
       colorClusters: colorClustersOption(),
+      boundaryCels: onOffOption('boundary-cels') === false ? false : undefined,
       artDirection: artDirectionOption(),
       silhouetteProtection: silhouetteOption(),
       horizonBands: horizonOption(),

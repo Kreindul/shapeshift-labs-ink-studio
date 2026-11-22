@@ -40,6 +40,7 @@ const ObjectMattes = require('./object-mattes.js');
 const OpticalMaterials = require('../src/optical-materials.js');
 const SplatRelighting = require('../src/splat-relighting.js');
 const ColorClusters = require('../src/color-clusters.js');
+const BoundaryCels = require('../src/boundary-cels.js');
 const MaterialPixelStyle = require('../src/material-pixel-style.js');
 const EffectPalettes = require('../src/effect-palettes.js');
 const ArtEffects = require('../src/art-effects.js');
@@ -365,6 +366,8 @@ function renderFrame(world, o, preparedPalettes) {
   const legacyLook = styled && !retainContributions;
   const clusterView = !o.samples && !o.captureCoverage && !o.reflectionPlane && !probeView;
   const clusters = styled && clusterView && ColorClusters.prepare(o.colorClusters ?? look.colorClusters);
+  const boundaries = styled && clusterView && BoundaryCels.prepare(o.boundaryCels ?? look.boundaryCels,
+    { scenePalette: world.pal, paletteRoles: world.paletteRoles });
   if (clusterView && !clusters?.coherent) o.colorClusterHistory?.clear();
   const effectPaletteSettings = styled ? EffectPalettes.prepare(
     o.effectPalettes === true ? look.effectPalettes : o.effectPalettes ?? look.effectPalettes, world.pal, world.paletteRoles
@@ -389,6 +392,7 @@ function renderFrame(world, o, preparedPalettes) {
   const readabilitySelectors = !o.samples && !o.captureCoverage && o.readabilitySelectors;
   if (readabilitySelectors) passSelection.add('splatId');
   if (clusters) for (const channel of ['splatId', 'protected', 'emission', 'paletteOwner']) passSelection.add(channel);
+  if (boundaries) passSelection.add('splatId');
   const paletteDiagnostic = passSelection.has('paletteOwner');
   if (paletteDiagnostic && !o.raw) passSelection.add('materialId');
   let lookPass;
@@ -507,6 +511,13 @@ function renderFrame(world, o, preparedPalettes) {
         if (paletteTrace) paletteTrace.cluster(before, rgb);
         if (frame.quantization) frame.quantization.resolved = rgb.slice();
       }
+    }
+    if (boundaries) {
+      const result = BoundaryCels.apply(frame, passes, boundaries, world, { time: t, captureSites: o.captureBoundarySites });
+      for (const color of result.swatches) paletteInventory?.declared.add(color);
+      frame.boundaryCels = result.report;
+      o.boundaryCelsFrame?.(result.report);
+      if (result.rgb !== frame.rgb) frame = ArtEffects.paletteUse({ ...frame, rgb: result.rgb }, world.pal);
     }
     if (nativeCelRows.length) {
       let painted = false;

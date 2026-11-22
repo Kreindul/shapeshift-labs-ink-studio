@@ -1,6 +1,6 @@
 import {createEngravingBinding} from './engraving.mjs';
 import { createFootprintBinding } from './footprints.mjs';
-import { createColorClusters } from './color-clusters.mjs';
+import { createArtPixelFinish } from './art-pixel-finish.mjs';
 import { createRenderGrid } from './render-grid.mjs';
 import { createMaterialControls } from './material-controls.mjs';
 import { createLightEmitters } from './light-emitters.mjs';
@@ -172,8 +172,8 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
     const mainTransparency = new WeakMap(), portalTransparency = new WeakMap();
     const previewPipelines = [];
     let surfacePipeline,emitterSurfacePipeline, reflectionTarget, secondaryReflectionTarget, reflectionAtlas, reflectionAtlasSize, reflectionAtlasFramebuffer;
-    let clusterRenderer;
-    const clusterAPI = toolkit.KIT?.colorClusters;
+    let artPixelFinish;
+    const clusterAPI = toolkit.KIT?.colorClusters, boundaryAPI = toolkit.KIT?.boundaryCels;
     const clusterHistory = clusterAPI?.history(), portalClusterHistory = clusterAPI?.history();
     let post, simpleUnavailable = false, keyProgram, damp, copy, spriteProgram, spriteEnvProgram, spriteLayer, spriteTable, anchors;
     let lastWorld, lastData, lastCount, lastOutput, lastDetail, lastEnvironment, lastStaged, fineValues, materials, anchorCount = 0;
@@ -739,6 +739,10 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
       if (clusterDefinition !== undefined && clusterDefinition !== false && !clusterAPI)
         throw new Error('Color clusters need the Ink Studio KIT');
       const clusters = clusterAPI?.prepare(clusterDefinition);
+      const boundaryDefinition = raw || reflectionCapture ? false : frame.boundaryCels ?? look.boundaryCels;
+      if (boundaryDefinition !== undefined && boundaryDefinition !== false && !boundaryAPI)
+        throw new Error('Boundary cels need the Ink Studio KIT');
+      const boundaries = boundaryAPI?.prepare(boundaryDefinition, { scenePalette: world.pal, paletteRoles: world.paletteRoles });
       const coherenceHistory = plane === zero ? frame.colorClusterHistory ?? clusterHistory : portalClusterHistory;
       if (!reflectionCapture && !clusters?.coherent) coherenceHistory?.clear();
       const clock = contract?.clock(world, frame);
@@ -917,7 +921,7 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
           (waterScene && frame.time !== lastWaterTime)) historyValid = false;
       geometry.resize(rw, rh);
       contours.resize(colored ? width : 1, colored ? height : 1);
-      const ownsPixels = packedDepth || !!clusters || !!frame[graphOwner] || patterned || !!constraints && !coverage || scopedCleanup;
+      const ownsPixels = packedDepth || !!clusters || !!boundaries || !!frame[graphOwner] || patterned || !!constraints && !coverage || scopedCleanup;
       owner.resize(ownsPixels ? width : 1, ownsPixels ? height : 1);
       if (scopedCleanup) detailTable ??= table(512, 7, maxSize);
       if (materialStyles) materialStyleTable ??= table(512, 16, maxSize);
@@ -1218,12 +1222,12 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
           u_gh: gaps, u_ghn: count, u_gfl: glass.floor ?? -50
         });
       }
-      if (clusters) {
+      if (clusters || boundaries) {
         copy ??= program(sources.COPY_FS);
-        clusterRenderer ??= createColorClusters(gl, { api: clusterAPI, target, textureUnit, fullscreen, copy });
-        clusterRenderer.buffer.resize(width, height);
+        artPixelFinish ??= createArtPixelFinish(gl, { target, textureUnit, fullscreen, copy });
+        artPixelFinish.buffer.resize(width, height);
       }
-      const presentation = clusters ? clusterRenderer.buffer.framebuffer : output;
+      const presentation = clusters || boundaries ? artPixelFinish.buffer.framebuffer : output;
       const destination = damping ? finished.framebuffer : presentation;
       let resolve;
       const styledPattern = patterned && materialStyles;
@@ -1320,17 +1324,29 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         historyValid = true;
         previousVP = vp;
       }
-      if (clusters) {
+      if (clusters || boundaries) {
         let continuity;
-        if (clusters.coherent) {
+        if (clusters?.coherent) {
           const sampler = toolkit.KIT.splatFrames.create(world, time, toolkit.KIT.M);
           continuity = { history:coherenceHistory, source:frame.colorClusterSource ?? frame.renderHistoryKey ?? source,
             time:t, project:clusterAPI.projector(camera, i => sampler(i).position()), projection:camera.ortho,
             reset:frame.resetRenderHistory || frame.resetColorClusters, captureLabels:frame.captureColorClusterLabels,
             palette:Array.from((grade ?? pal).subarray(0,palCount*3)) };
         }
-        clusterRenderer.finish(world, clusters, owner,
-          cleaning ? cleaned : damping ? finished : clusterRenderer.buffer, output, width, height, continuity, frame.colorClustersFrame);
+        const detail = clusters && (cleaning ? cleaned : damping ? finished : artPixelFinish.buffer);
+        artPixelFinish.finish(owner, detail, output, width, height, (art, passes) => {
+          if (clusters) {
+            const { rgb, ...report } = clusterAPI.apply(art, passes, clusters, world, continuity);
+            frame.colorClustersFrame?.(report);
+            if (rgb !== art.rgb) art = { ...art, rgb };
+          }
+          if (!boundaries) return art.rgb;
+          const result = boundaryAPI.apply(art, passes, boundaries, world, {
+            time: t, captureSites: frame.captureBoundarySites
+          });
+          frame.boundaryCelsFrame?.(result.report);
+          return result.rgb;
+        });
       }
       if (foamRows?.length || highlightRows?.length) {
         drawNativeCels ??= createNativeCelDraw(gl, resources, textureUnit, nativeCelAPI.pixels);
@@ -1377,11 +1393,11 @@ function createBackend(gl, toolkit, { specialize, reuseOrder, simpleOnly }) {
         portalMask.resize(width, height);
         const nextCamera = withCameraPose(camera, opening.camera(cameraPose(camera)));
         const { raw, outline, dither, scale, clean, lineClean, colored, tone, edges, water, time, skyTime, cameraTime,
-          stepAnimation, artDirection, renderStages, strictContract, environment, colorClusters,
+          stepAnimation, artDirection, renderStages, strictContract, environment, colorClusters, boundaryCels,
           stableTransparency, resetTransparency, stableDetail, passQuality, silhouetteProtection, scalePreviews } = frame;
         const destination = reconstructFrame(portal.destination, { raw, outline, dither, scale, clean, lineClean, colored, tone,
           edges, water, time, skyTime, cameraTime, stepAnimation, artDirection, renderStages, strictContract,
-          environment, colorClusters, stableTransparency, resetTransparency, stableDetail, passQuality,
+          environment, colorClusters, boundaryCels, stableTransparency, resetTransparency, stableDetail, passQuality,
           silhouetteProtection, scalePreviews, ...portal.destinationFrame, damp: false },
           portalReconstructionInstances);
         render(destination.world, destination.frame, width, height, portalDestination.framebuffer, nextCamera, anchorPlane(opening.to));

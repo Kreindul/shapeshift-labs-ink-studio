@@ -1,6 +1,5 @@
-// The component pass works on resolved art pixels. Read only the optional
-// color and owner targets, then upload the processed color for presentation.
-export function createColorClusters(gl, { api, target, textureUnit, fullscreen, copy }) {
+// Read resolved color and ownership once for native art-pixel finish passes.
+export function createArtPixelFinish(gl, { target, textureUnit, fullscreen, copy }) {
   const buffer = target();
   let rgba, scratch, rgb, splatId, protectedPixels;
   function read(source, bytes, width, height) {
@@ -8,7 +7,7 @@ export function createColorClusters(gl, { api, target, textureUnit, fullscreen, 
     gl.readBuffer(gl.COLOR_ATTACHMENT0);
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
   }
-  function finish(world, plan, owner, detail, output, width, height, continuity, report) {
+  function finish(owner, detail, output, width, height, process) {
     const size = width * height;
     if (splatId?.length !== size) {
       rgba = new Uint8Array(size * 4);
@@ -26,22 +25,20 @@ export function createColorClusters(gl, { api, target, textureUnit, fullscreen, 
       rgb[3 * p + 1] = rgba[j + 1];
       rgb[3 * p + 2] = rgba[j + 2];
     }
-    if (detail !== buffer) read(detail, scratch, width, height);
-    const marked = detail === buffer ? rgba : scratch;
-    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++)
-      protectedPixels[y * width + x] = Number(marked[((height - 1 - y) * width + x) * 4 + 3] < 192);
-    const result = api.apply({ w: width, h: height, rgb }, { splatId, protected: protectedPixels }, plan, world, continuity);
-    if (report) {
-      const { rgb: pixels, ...summary } = result;
-      report(summary);
+    if (detail) {
+      if (detail !== buffer) read(detail, scratch, width, height);
+      const marked = detail === buffer ? rgba : scratch;
+      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++)
+        protectedPixels[y * width + x] = Number(marked[((height - 1 - y) * width + x) * 4 + 3] < 192);
     }
+    const result = process({ w: width, h: height, rgb }, { splatId, protected: detail && protectedPixels });
     textureUnit(8, buffer.textures[0]);
-    if (result.changedPixels) {
+    if (result !== rgb) {
       for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
         const p = (y * width + x) * 3, j = ((height - 1 - y) * width + x) * 4;
-        rgba[j] = result.rgb[p];
-        rgba[j + 1] = result.rgb[p + 1];
-        rgba[j + 2] = result.rgb[p + 2];
+        rgba[j] = result[p];
+        rgba[j + 1] = result[p + 1];
+        rgba[j + 2] = result[p + 2];
       }
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
     }
