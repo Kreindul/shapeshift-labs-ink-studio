@@ -147,6 +147,7 @@ function audition(file,opt,kit) {
 module.exports=function musicCommand(pos,opt,kit) {
   const [mode,file,editFile]=pos;
   if (mode==='production') return require('./music-production.js')(pos.slice(1),opt,kit);
+  if (mode==='gestures') return require('./music-gestures.js')(pos.slice(1),opt,kit);
   if (mode==='samples') return require('./music-samples.js')(pos.slice(1),opt,kit);
   if (mode==='pads') return require('./music-pads.js')(pos.slice(1),opt,kit);
   if (mode==='instrument') return require('./music-instrument.js')(pos.slice(1),opt,kit);

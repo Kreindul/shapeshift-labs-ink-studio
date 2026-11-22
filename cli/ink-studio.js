@@ -1110,6 +1110,8 @@ const CMD = {
         '  music editorial inspect|render project.json --out output   spot and print editorial audio',
         '  music editorial edit|reconform project.json changes.json --out output   revise or preview a new cut',
         '  music groove extract <recipe.json> [--out groove.json]   measure a WAV or MIDI performance',
+        '  music gestures <ingest|generate|search|audition|keep> <library> <recipe or query>   build and audition a searchable gesture bank',
+        '  music gestures inspect <library> [session]   inspect sessions, takes and aligned recordings',
         '  music samples <add|search|get> <library> [recipe or ID]   capture and find reusable samples',
         '  music samples <slice|edit|render|audition> <library> <ID or project> [settings.json]   edit sample audio',
         '  music samples warp <library> <ID or project> settings.json --out directory   warp or repitch sample audio',

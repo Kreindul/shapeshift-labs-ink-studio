@@ -4,26 +4,9 @@ const path = require('node:path');
 const {createHash} = require('node:crypto');
 const {isDeepStrictEqual} = require('node:util');
 const WAV = require('./wav.js');
-const {write} = require('./asset-files.js');
+const {write,publishJson} = require('./asset-files.js');
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
-
-function publish(file, entry) {
-  const folder = path.dirname(file);
-  fs.mkdirSync(folder,{recursive:true});
-  const scratch = fs.mkdtempSync(path.join(folder,'.ink-sample-'));
-  const staged = path.join(scratch,'entry');
-  try {
-    fs.writeFileSync(staged,JSON.stringify(entry,null,2)+'\n');
-    try { fs.linkSync(staged,file); }
-    catch (error) {
-      if (error.code!=='EEXIST') throw error;
-      if (!isDeepStrictEqual(read(file),entry)) throw new RangeError('Sample ID already exists with different content or metadata');
-    }
-  } finally {
-    fs.rmSync(scratch,{recursive:true,force:true});
-  }
-}
 
 function openSampleLibrary(directory, {kit = require('../index.js').load()} = {}) {
   const root = path.resolve(directory), manifest = path.join(root,'entries');
@@ -53,7 +36,7 @@ function openSampleLibrary(directory, {kit = require('../index.js').load()} = {}
   }
   function persist({entry,file,bytes}) {
     if (!fs.existsSync(file)) write(file,bytes);
-    publish(path.join(manifest,entry.id+'.json'),entry);
+    publishJson(path.join(manifest,entry.id+'.json'),entry,'Sample ID already exists with different content or metadata');
     return result(entry);
   }
   return Object.freeze({
