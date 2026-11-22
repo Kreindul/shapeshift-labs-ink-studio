@@ -101,8 +101,9 @@ The module also exports `validateSceneReplay(recording)` and
 frame index, source time, dimensions, and its PNG data URL.
 
 The playback module renders captured images, including alpha, at their
-published rate. Live camera changes, simulations, and editable native takes
-use the authoring toolkit. For one file that opens offline, choose the
+published rate. Use the [browser bake profile](#bake-and-render-in-the-browser)
+for live camera changes with native splats. Simulations and editable native
+takes use the authoring toolkit. For one file that opens offline, choose the
 [self-contained scene embed](scene-publishing.md#replay-and-embed).
 
 `studio.bundle()` still returns the classic authoring bundle. The
