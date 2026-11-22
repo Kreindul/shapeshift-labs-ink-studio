@@ -1680,6 +1680,17 @@
       "tags": ["stage", "perspective", "parallax", "pixel-art", "reflections"]
     },
     {
+      "id": "render.heightmapFlyover",
+      "kind": "api",
+      "status": "ready",
+      "title": "Height-map flyovers",
+      "what": "Fly across aligned height and paint maps. Near ridges occlude distant terrain and independent altitude and distance bands select exact pixel-art swatches. Returns shared render outputs.",
+      "use": "K.heightmapFlyover.create({ bounds, heights, paint, altitude, distance })",
+      "where": "src/kit/paz-heightmap-flyover.js",
+      "example": "examples/heightmap-flyover.js",
+      "tags": ["terrain", "heightmap", "pixel-art", "palette", "depth"]
+    },
+    {
       "id": "render.textile",
       "kind": "api",
       "status": "ready",
