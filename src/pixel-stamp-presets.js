@@ -2,6 +2,7 @@
 const PixelStampPresets = (() => {
   const glitter = typeof GlitterBurstCels === 'undefined' ? require('./glitter-burst-cels.js') : GlitterBurstCels;
   const tileCels = typeof PixelTileCels === 'undefined' ? require('./pixel-tile-cels.js') : PixelTileCels;
+  const reconnectCels = typeof ReconnectingTileCels === 'undefined' ? require('./reconnecting-tile-cels.js') : ReconnectingTileCels;
   const contactCels = typeof ContactMarkCels === 'undefined' ? require('./contact-mark-cels.js') : ContactMarkCels;
   const highlightCels = typeof HighlightCelPresets === 'undefined' ? require('./highlight-cel-presets.js') : HighlightCelPresets;
   const foamCels = typeof ShoreFoamPresets === 'undefined' ? require('./shore-foam-presets.js') : ShoreFoamPresets;
@@ -165,7 +166,7 @@ const PixelStampPresets = (() => {
     'glyph-diamond': ['Signal diamond', 'signal', art.diamond],
     'glyph-four-dot': ['Signal four-dot', 'signal', art.fourDot],
     'glyph-brackets': ['Signal brackets', 'signal', art.brackets],
-    ...tileCels, ...highlightCels, ...foamCels,
+    ...tileCels, ...reconnectCels, ...highlightCels, ...foamCels,
     ...Object.fromEntries(Object.entries(contactCels).map(([id, art]) => {
       const [, kind, size, angle] = id.split('-');
       return [id, ['Contact ' + kind + ' · ' + size + ' · ' + (angle === 'ne' ? 'diagonal' : 'horizontal'), 'contact', art]];
@@ -179,6 +180,7 @@ const PixelStampPresets = (() => {
     glitter: ['ash','dim','ember','orange','gold','hot','core'],
     signal: ['residue', 'dim', 'lit', 'peak'],
     'tile-copper': ['shadow', 'trace', 'warm', 'lit', 'peak'],
+    'tile-reconnect': ['shadow', 'ink', 'edge', 'wave', 'spark'],
     'tile-frost': ['shadow', 'ice', 'blue', 'lit', 'peak'],
     contact: ['ash', 'ember', 'heat', 'edge', 'core'],
     highlight: ['shade', 'edge', 'lit', 'spark', 'core'],

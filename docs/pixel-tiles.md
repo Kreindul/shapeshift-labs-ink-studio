@@ -82,3 +82,95 @@ node cli/ink-studio.js clip examples/tile-pulse-studies.js --w 280 --h 174 --px 
 node cli/ink-studio.js clip examples/tile-pulse-studies.js --params '{"study":"frost"}' \
   --w 280 --h 174 --px 1 --from 0 --to 8 --fps 25 --out rime-window.png
 ```
+
+## Reconnect the paths inside a tile
+
+`K.pixelTiles.reconnect()` gives a tile more than one way to pair its
+external sockets. The same four edges can connect north–east and south–west
+in one variant, then north–west and east–south in another. A cue changes the
+pairing and plays the authored cels across the selected cells.
+
+```js
+const board = K.pixelTiles.reconnect({
+  width: 12, height: 8, size: 8,
+  ...K.pixelTiles.pairedArcs(8, { wave: '#215bbf', spark: '#70d3fa' }),
+  initial: ({ x, y }) => (x + y) % 2 ? 'a' : 'b',
+  period: 5,
+  cues: [
+    { time: .3, duration: .52, next: { a: 'b', b: 'a' },
+      wave: { from: [0, 4], speed: 8 } },
+    { time: 3, duration: .4, next: { a: 'b', b: 'a' },
+      wave: { direction: [-1, .4], speed: 10 } }
+  ]
+});
+const frame = board.raster(time); // { w, h, rgba }
+const route = board.trace(1, 2, 'N', time);
+```
+
+- Set `initial` to a variant ID, a row-major array of IDs, or an XY callback.
+  Each entry in `variants` has a single indexed `cel` and `pairs`, such as
+  `['NE', 'SW']`. A port may occur in just one pair. Adjacent cells must agree
+  on their shared edge. Outer sockets can terminate at the grid boundary.
+- Give each transition `from` and `to` variant IDs, an indexed `clip`, and
+  optionally one `stages` entry per cel. `'from'` and `'to'` expose the
+  corresponding route. `'open'` interrupts both connections and is the
+  default. All cels keep the same exact two socket pixels on each used edge.
+- A cue takes a destination `to` or a `next` map. IDs omitted from the map
+  keep their current variant. A changed variant needs a matching authored
+  transition. `sample(x, y, time)` reports the visible pairing and active
+  stage. `trace` follows that pairing until reaching an edge, open arc,
+  absent entry, or a loop.
+- Library clips are separately drawn at **8×8 and 12×12** and editable in
+  the [Pixel Stamp Workshop](../examples/pixel-stamp-editor.html). Start
+  with `tile-reconnect-8-a-b` or `tile-reconnect-12-a-b`. Custom artwork can
+  use any even size from 4 to 32. The [original wave study](https://x.com/tuukzs/status/2124292540463493219)
+  shows the broken arcs that inspired the transition.
+
+## Turn selected cells or glyphs
+
+`K.pixelGrid.turn()` accepts any aligned RGBA8 tile sheet or glyph raster.
+A cue turns selected artwork in place by signed quarter turns. It can turn
+a cell containing one glyph or a larger cell containing an entire motif.
+Input cells that are taller or wider are centered on a padded square so
+their texels fit through the whole turn. The output is equally spaced,
+including cells outside the selection.
+
+```js
+const turns = K.pixelGrid.turn({
+  width: 16, height: 8, cell: [6, 8], // e.g. K.glyphGrid.paint().raster(frame)
+  cues: [
+    { rect: [2, 2, 8, 3], time: .5, duration: .55, turns: 1,
+      wave: { direction: [1, 0], speed: 8 } },
+    { cells: [[13, 1], [13, 4]], time: 1.2, duration: .4, turns: -1 }
+  ]
+});
+return turns.raster(glyphRaster, time);
+```
+
+Each quarter turn steps between exact orientations at its midpoint.
+Supply `between({ x, y, size, from, to, direction, progress, time })` to paint
+an intermediate pose. Return a square `{ w, h, rgba }` authored relative to
+orientation zero. Ink applies the starting orientation on the integer
+grid. Return `null` to use the stepped pose for that cell. `from` and `to`
+are clockwise quarter indices from 0 to 3. `progress` is within the current
+quarter and `direction` is 1 or -1. Standard cels and arbitrary raster
+art share the same path.
+
+Both tools accept `rect` or explicit `cells` to select a subset. Omitting
+both targets the whole grid. `wave.from` measures radial distance from
+an XY point. `wave.direction` measures distance along a vector from the
+first selected cell it reaches. Wave speed is in cells per second.
+Cues on different cells can overlap. At the same cell, cues must finish
+before the next starts. To define a seamless `period`, include the cues
+that return each cell to its initial state by the end. Samples are seekable.
+
+[Tide Seal and Glyph Relay](../examples/reconnecting-grids.js) show the
+route changing on a limestone inlay and selected banks of glyphs turning
+on a display.
+
+```sh
+node cli/ink-studio.js clip examples/reconnecting-grids.js --w 272 --h 166 --px 1 \
+  --from 0 --to 6.4 --fps 15 --out tide-seal.png
+node cli/ink-studio.js clip examples/reconnecting-grids.js --params '{"study":"glyphs"}' \
+  --w 272 --h 166 --px 1 --from 0 --to 6.4 --fps 15 --out glyph-relay.png
+```

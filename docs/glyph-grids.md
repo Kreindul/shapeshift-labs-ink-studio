@@ -111,3 +111,7 @@ reports `emitted` and whether the splat budget or draw capacity
 The grid supports up to 65,536 cells. Recall supports up to 32 patterns
 subject to a combined memory budget of 1,048,576 cells. Step batches,
 rasters and splat emission also have bounded work or output sizes.
+
+Use [grid turns](pixel-tiles.md#turn-selected-cells-or-glyphs) to rotate
+selected glyphs after rasterizing a frame. The turn layer holds its own
+cue timing and can use hand-authored intermediate cels.

@@ -34,13 +34,8 @@
 
   function rotate(source, size, { mirror, turn }) {
     if (!mirror && !turn) return source;
-    const rgba = new Uint8Array(source.length), last = size - 1;
-    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-      let u = mirror ? last - x : x, v = y;
-      for (let j = 0; j < turn; j++) [u, v] = [last - v, u];
-      const at = (y * size + x) * 4;
-      rgba.set(source.subarray(at, at + 4), (v * size + u) * 4);
-    }
+    const rgba = new Uint8Array(source.length);
+    PixelGridMotion.blit(source,{rgba,width:size},size,0,0,turn,mirror);
     return rgba;
   }
 
@@ -215,5 +210,141 @@
     });
   }
 
-  K.pixelTiles = Object.freeze({ create });
+  function pairedArcs(size = 8, swatches) {
+    check([8,12].includes(size),'paired arc presets come in 8×8 and 12×12');
+    const clip = id => K.pixelStamps.clip('tile-reconnect-'+size+'-'+id,{swatches});
+    return {
+      variants:{a:{pairs:['NE','SW'],cel:clip('a')},b:{pairs:['NW','ES'],cel:clip('b')}},
+      transitions:[
+        {from:'a',to:'b',clip:clip('a-b'),stages:['from','open','open','to']},
+        {from:'b',to:'a',clip:clip('b-a'),stages:['from','open','open','to']}
+      ]
+    };
+  }
+
+  function reconnect({width,height,size=8,variants,transitions=[],initial='a',cues=[],period}={},palette={}) {
+    const timeline=PixelGridMotion.clock(width,height,cues,period), w=width*size,h=height*size;
+    check(integer(size,4,32) && size%2===0 && w*h<=1048576,
+      'reconnection needs an even tile size from 4 to 32 and a bounded raster');
+    check(record(variants) && integer(Object.keys(variants).length,1,64) && Array.isArray(transitions) &&
+      transitions.length<=256,'expected named variants and up to 256 transitions');
+    const {pixelStamps:stamps}=K, byName=new Map(), byChange=new Map(), open=Object.freeze([]);
+    let paintBudget=1048576;
+    function art(spec,ports,single){
+      check(spec?.width===size && spec.height===size &&
+        (spec.frames===undefined || Array.isArray(spec.frames)&&integer(spec.frames.length,1,single?1:32)),
+      'expected one steady cel or a transition of up to 32 cels on the declared square');
+      const {entries,palette:colors,duration}=stamps.prepare(spec);
+      paintBudget-=entries.length*size*size;
+      check(paintBudget>=0 && entries.every(cel=>cel.duration>=.0001&&cel.duration<=3600),
+        'reconnection exceeded the art budget or has an invalid cel hold');
+      const images=entries.map(({slots})=>{
+        checkSockets(slots,size,ports);
+        return stamps.image({width:size,height:size,slots,palette:colors},palette).rgba;
+      });
+      return {images,duration,at:SpriteCels.playback(entries,12,'once')};
+    }
+    for (const [id,variant] of Object.entries(variants)){
+      check(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$/.test(id) && record(variant) &&
+        Array.isArray(variant.pairs) && variant.pairs.length<=2 &&
+        Array.from(variant.pairs).every(pair=>typeof pair==='string' && /^[NESW]{2}$/.test(pair)) &&
+        new Set(variant.pairs.join('')).size===variant.pairs.length*2,
+      'a variant needs an ID and distinct paired NESW sockets');
+      const pairs=Object.freeze(variant.pairs.slice()), ports=names(bits(pairs.join('')));
+      byName.set(id,{id,pairs,ports,art:art(variant.cel,ports,true).images[0]});
+    }
+    const variant = id => {
+      check(byName.has(id),'unknown reconnection variant '+id);
+      return byName.get(id);
+    };
+    const transitionKey=(from,to)=>from.id+'>'+to.id;
+    for (const transition of transitions) {
+      check(record(transition),'expected a transition record');
+      const from=variant(transition.from),to=variant(transition.to),key=transitionKey(from,to);
+      check(from!==to && from.ports===to.ports&&!byChange.has(key),
+        'transitions must be unique and preserve the exterior sockets');
+      const clip=art(transition.clip,from.ports,false), stages=transition.stages??
+        clip.images.map(()=> 'open');
+      check(Array.isArray(stages)&&stages.length===clip.images.length &&
+        Array.from(stages).every(stage=>['from','open','to'].includes(stage)),
+      'each transition cel needs a from, open, or to stage');
+      byChange.set(key,{...clip,stages:stages.slice()});
+    }
+    const count=width*height;
+    check(typeof initial==='string' || typeof initial==='function' || Array.isArray(initial)&&initial.length===count,
+      'initial state must be a variant, one variant per cell, or a cell callback');
+    const base=Array.from({length:count},(_,i)=>{
+      const [x,y]=timeline.coords(i);
+      return variant(typeof initial==='function' ? initial({x,y}) : Array.isArray(initial) ? initial[i] : initial);
+    });
+    for(const [i,cell] of base.entries()){
+      const [x,y]=timeline.coords(i);
+      check((x===width-1 || cell.ports.includes('E')===base[i+1].ports.includes('W')) &&
+        (y===height-1 || cell.ports.includes('S')===base[i+width].ports.includes('N')),
+      'adjacent tiles must agree on their exterior sockets');
+    }
+    const targets=cues.map(({to,next})=>{
+      check((to===undefined)!==(next===undefined),'a reconnection cue needs either to or next');
+      if(to!==undefined) return ()=>variant(to);
+      check(record(next),'next must map source variants to destination variants');
+      const map=new Map(Object.entries(next).map(([from,to])=>[variant(from),variant(to)]));
+      return from=>map.get(from)??from;
+    });
+    const rows=timeline.rows.map((row,i)=>{
+      let current=base[i];
+      const events=row.flatMap(entry=>{
+        const from=current,to=targets[entry.id](from);
+        if(from===to) return [];
+        const change=byChange.get(transitionKey(from,to));
+        check(change,'missing painted transition from '+from.id+' to '+to.id);
+        current=to;
+        return [{...entry,from,to,change}];
+      });
+      check(period===undefined || current===base[i],'looping reconnections must restore every initial variant');
+      return events;
+    });
+    function state(i,local) {
+      const event=timeline.at(rows[i],local), current=event?.to??base[i];
+      if(!event || local+epsilon>=event.end) return {variant:current.id,pairs:current.pairs,art:current.art,active:false};
+      const {from,to,change}=event,progress=Math.max(0,(local-event.start)/(event.end-event.start)),
+        frame=change.at(progress*change.duration+epsilon);
+      const stage=change.stages[frame], paired=stage==='from'?from:stage==='to'?to:null;
+      return {variant:paired?.id??null,pairs:paired?.pairs??open,art:change.images[frame],
+        active:true,from:from.id,to:to.id,stage,frame,progress};
+    }
+    function raster(time=0){
+      const local=timeline.time(time),rgba=new Uint8Array(w*h*4),target={rgba,width:w};
+      for(let i=0;i<count;i++){
+        const [x,y]=timeline.coords(i);
+        PixelGridMotion.blit(state(i,local).art,target,size,x*size,y*size);
+      }
+      return {w,h,rgba};
+    }
+    function trace(x,y,entry,time=0){
+      check(typeof entry==='string'&&entry.length===1&&sides.includes(entry),'trace entry must be one NESW socket');
+      let i=timeline.address([x,y]);
+      const local=timeline.time(time), path=[],seen=new Set();
+      if(!base[i].ports.includes(entry)) return {path,end:'absent'};
+      while(true){
+        const key=i*4+sides.indexOf(entry);
+        if(seen.has(key)) return {path,end:'loop'};
+        seen.add(key);
+        [x,y]=timeline.coords(i);
+        const pair=state(i,local).pairs.find(link=>link.includes(entry));
+        if(!pair) return {path,end:'open'};
+        const exit=pair[0]===entry ? pair[1] : pair[0],d=sides.indexOf(exit);
+        path.push({x,y,entry,exit});
+        x+=dx[d];y+=dy[d];
+        if(x<0||x>=width||y<0||y>=height) return {path,end:'edge'};
+        i=y*width+x;
+        entry=sides[(d+2)%4];
+      }
+    }
+    return Object.freeze({w,h,raster,trace,sample(x,y,time=0){
+      const {art,...pose}=state(timeline.address([x,y]),timeline.time(time));
+      return pose;
+    }});
+  }
+
+  K.pixelTiles = Object.freeze({create,reconnect,pairedArcs});
 })(KIT);
