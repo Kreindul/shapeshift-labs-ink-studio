@@ -46,6 +46,10 @@ const arrangement = { score:{key:{root:'C4'},harmonies:{home:{root:'C4',quality:
   motifs:{melody:motif},parts:{lead:{role:'lead',material:'melody'}},
   sections:[{id:'opening',bars:1,harmony:'home'}] };
 const production = {arrangement,patches:{pluck:{type:'fm'}},tracks:{lead:{patch:'pluck',gain:-11,send:.2}}};
+const rehearsalTimeline={entry:'wait',end:1.4,segments:{wait:{source:'score',end:.5},reveal:{source:'score'}}};
+const rehearsalTrace={format:'ink-studio/adaptive-score-trace',version:1,id:'short',entry:'wait',end:1.4,
+  intents:[{kind:'music-transition',from:'wait',to:'reveal',time:.7}]};
+const rehearsalEdit={id:'tail',transitions:[{from:'wait',to:'reveal',tail:.1}]};
 const editSession={format:'ink-studio/music-edit-session',version:1,id:'bench',sampleRate:8000,production};
 const padPattern = {op:'music.programPads',inputs:{
   source:{id:'bench-roll',length:1,steps:[{id:'tap',beat:0,pad:'metal',play:{sample:'hit'},
@@ -307,6 +311,11 @@ const specifications = {
     options:{tags:['short tail']}}},
   'music.renderTransitions': { inputs:{sources:{score:production},
     timeline:{entry:'opening',end:.25,segments:{opening:{source:'score'}}},options:{sampleRate:8000}} },
+  'music.captureScoreTrace': {inputs:{score:{entry:'wait',sections:{wait:{resource:'wait'}}},
+    settings:{id:'short',end:1.4}}},
+  'music.rehearseTransitions': {inputs:{sources:{score:production},timeline:rehearsalTimeline,traces:[rehearsalTrace],
+    variants:[rehearsalEdit],options:{sampleRate:8000,limit:1}}},
+  'music.reviseTransitions': {inputs:{sources:{score:production},timeline:rehearsalTimeline,revision:rehearsalEdit}},
   'music.arrange': { inputs:{source:arrangement} },
   'music.revise': { inputs:{source:arrangement,options:{edits:[{part:'lead',operations:[{type:'answer'}]}]}} },
   'music.reference': { inputs:{source:arrangement,part:'lead',section:'opening'} },

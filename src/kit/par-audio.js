@@ -663,6 +663,29 @@
         return P.musicProduction.renderTimeline(sources,timeline,intents,assets,options);
       }
     },
+    'music.captureScoreTrace': {
+      description:'Replay timestamped adaptive score inputs into a reusable trace of requests, commits and cues.',
+      inputs:{score:'record',updates:scoreRequests,settings:'record'},outputs:{value:'record'},
+      run({score,updates,settings}) {return {value:P.musicProduction.rehearsal.captureScore(score,updates,settings)};}
+    },
+    'music.rehearseTransitions': {
+      description:'Audit sound and score joins over identical world traces and return aligned, level-matched comparisons.',
+      inputs:{sources:'record',timeline:'record',traces:'array<record>',variants:scoreRequests,assets:options,options},
+      outputs:{value:'record',audio:'record'},
+      run({sources,timeline,traces,variants,assets,options}) {
+        const {report,audio}=P.musicProduction.rehearsal.run(sources,timeline,traces,variants,assets,options);
+        return {value:report,audio};
+      }
+    },
+    'music.reviseTransitions': {
+      description:'Apply named segment, source, edge or stinger edits to an ordinary adaptive production timeline.',
+      inputs:{sources:'record',timeline:'record',revision:'record',assets:options},
+      outputs:{value:'record',sources:'record',timeline:'record'},
+      run({sources,timeline,revision,assets}) {
+        const value=P.musicProduction.rehearsal.revise(sources,timeline,revision,assets);
+        return {value,...value};
+      }
+    },
     'music.fifths': {
       description: 'Find the shortest circle-of-fifths route between two pitch classes.',
       inputs: { from: 'string', to: 'string' }, outputs: { value: 'record', path: 'array<string>', distance: 'number' },

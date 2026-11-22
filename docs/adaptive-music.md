@@ -8,6 +8,9 @@ standalone `KIT.music.create(config)` clock.
 
 Use [tempo maps](scene-timeline.md#beat-bar-and-phrase-timing) to place authored visual keys and scene cues on beats, bars, and phrases.
 
+[Adaptive score rehearsal](music-adaptive-rehearsal.md) compares transition edits
+against captured requests, reversals, and world cues.
+
 [Procedural scores](procedural-score.md) use the same musical grid for
 chord events, native synthesis, and visual or simulation controls.
 

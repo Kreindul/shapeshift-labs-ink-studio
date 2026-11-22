@@ -173,3 +173,4 @@ module.exports=function command([mode,file,config],opt,kit) {
   return value;
 };
 module.exports.assetPaths = assetPaths;
+module.exports.timelineBank = timelineBank;
