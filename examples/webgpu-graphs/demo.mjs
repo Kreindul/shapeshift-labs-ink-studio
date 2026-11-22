@@ -1,6 +1,6 @@
 import { createWebGPUGraph } from '../../webgpu.mjs';
 import { createRenderer, decodeGaussianSplat, gaussianSplatWorld } from '../../webgl.mjs';
-import { samplePly, sampleSpz } from './sample.mjs';
+import { samplePly, sampleSpz, pelagicPalette } from './sample.mjs';
 import {
   textureWidth, textureHeight, gridSize, generateTexture, filterTexture, generateMesh, shapeMesh, presentTexture, presentMesh
 } from './kernels.mjs';
@@ -163,7 +163,7 @@ el('reset').addEventListener('click', () => {
   void useShader();
 });
 let dirty = true;
-for (const field of ['shift', 'deform', 'orbit']) el(field).addEventListener('input', () => { dirty = true; });
+for (const field of ['shift', 'deform', 'orbit', 'splat-colors']) el(field).addEventListener('input', () => { dirty = true; });
 
 async function load(name, source) {
   const current = ++loadId, output = el('splat-status');
@@ -171,9 +171,9 @@ async function load(name, source) {
   try {
     const asset = await decodeGaussianSplat(await source(), { maxPoints: 2_000_000 });
     if (current !== loadId) return;
-    world = gaussianSplatWorld(asset);
+    world = gaussianSplatWorld(asset, { colorMode: 'rgb', palette: pelagicPalette });
     output.textContent = asset.count.toLocaleString() + ' splats · ' + asset.format.toUpperCase() +
-      (asset.version ? ' v' + asset.version : '') + ' · ' + name;
+      (asset.version ? ' v' + asset.version : '') + ' · SH degree ' + asset.degree + ' · ' + name;
     output.dataset.state = 'ready';
     dirty = true;
   } catch (error) {
@@ -197,7 +197,7 @@ try {
   void load('Pelagic.ply', samplePly);
 } catch (error) {
   el('splat-status').textContent = error.message;
-  for (const field of ['ply', 'spz', 'file', 'orbit']) el(field).disabled = true;
+  for (const field of ['ply', 'spz', 'file', 'orbit', 'splat-colors']) el(field).disabled = true;
 }
 initWebGPU().then(engine => {
   gpu = engine;
@@ -216,7 +216,7 @@ function frame(now) {
   if (!paused || dirty) {
     gpu?.draw(elapsed);
     if (world) renderer.render(world, {
-      width: 672, height: 460, time: 0, raw: true, colored: true, damp: false,
+      width: 672, height: 460, time: 0, raw: true, gaussianColor: el('splat-colors').value, colored: true, damp: false, changedRows: [],
       camera: { ...world.cam, yaw: Number(orbit.value) * Math.PI / 180 + elapsed * .30, pitch: -.12 }
     });
     dirty = false;

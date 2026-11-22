@@ -113,3 +113,84 @@ test('the public Node and CLI entry points render imported Gaussian data', async
     '--raw', '--w', '36', '--h', '32', '--out', out], { cwd: dir });
   assert.equal(fs.readFileSync(out).subarray(1, 4).toString(), 'PNG');
 });
+
+test('live worlds share decoded rows and preserve the fixed-view fallback', async () => {
+  const { decodeGaussianSplat, gaussianSplatWorld } = await import('../src/gaussian-splats.mjs');
+  for (const bytes of [ply('binary_little_endian', Array(9).fill(.1)), spz(4)]) {
+    const cloud = await decodeGaussianSplat(bytes);
+    const palette = [0x152537, 0xbdad99];
+    const viewDirection = [1, 0, 1];
+    const baked = gaussianSplatWorld(cloud, { viewDirection });
+    assert.equal(baked.gaussianHarmonics, undefined);
+    for (const colorMode of ['rgb', 'palette']) {
+      const world = gaussianSplatWorld(cloud, { viewDirection, colorMode, palette });
+      assert.deepEqual(world.data, baked.data);
+      assert.equal(world.gaussianHarmonics.dc, cloud.dc);
+      assert.equal(world.gaussianHarmonics.sh, cloud.sh);
+      assert.equal(world.gaussianHarmonics.degree, 1);
+      assert.equal(world.gaussianHarmonics.colorMode, colorMode);
+      assert.deepEqual(world.bg, [0x15, 0x25, 0x37]);
+      assert.deepEqual(world.pal, palette);
+    }
+    assert.throws(() => gaussianSplatWorld(cloud, { colorMode: 'invalid' }), /Gaussian color mode/);
+    assert.throws(() => gaussianSplatWorld(cloud, { palette: [] }), /Gaussian palette/);
+  }
+});
+
+test('WebGL live Gaussian color matches baked harmonics through degree four', { skip: !process.env.INK_TEST_CHROME }, async () => {
+  const { decodeGaussianSplat, gaussianSplatWorld } = await import('../src/gaussian-splats.mjs');
+  const cases = [];
+  const camera = { yaw: .72, pitch: -.31, dist: 4, target: [0, 0, 0] };
+  const ray = [-Math.cos(camera.pitch) * Math.sin(camera.yaw), -Math.sin(camera.pitch), -Math.cos(camera.pitch) * Math.cos(camera.yaw)];
+  const palette = [0x031528, 0x713f86, 0xc18671, 0x76b9ad, 0xa6dcf9];
+  for (let l = 0; l <= 4; l++) {
+    const count = 3 * ((l + 1) ** 2 - 1);
+    const coeffs = Array.from({ length: count }, (_, i) => Math.sin(i * 2.13 + .2) * .16);
+    const cloud = await decodeGaussianSplat(ply('binary_little_endian', coeffs));
+    cloud.opacity[0] = 1;
+    const up = l % 2 === 0 ? 'z' : 'y';
+    const world = gaussianSplatWorld(cloud, { colorMode: 'rgb', size: 1.8, palette, up });
+    const baked = gaussianSplatWorld(cloud, { size: 1.8, palette, up,
+      viewDirection: up === 'z' ? [ray[0], -ray[2], ray[1]] : ray });
+    const { gaussianHarmonics: rows, ...base } = world;
+    cases.push({ base: { ...base, data: Array.from(base.data), moving: [], back: [] },
+      rows: { ...rows, dc: Array.from(rows.dc), sh: Array.from(rows.sh) }, fixed: Array.from(baked.data) });
+  }
+
+  const result = require('../cli/look-webgl.js')({}, () => {}, (kit, fixture, backend, input) => {
+    const renderer = backend(80, 80, { offscreen: true, colored: false, dither: 0, damp: false });
+    const center = () => renderer.sample({ p: [40, 40] }).p;
+    const results = [];
+    for (const { base, rows, fixed } of input.cases) {
+      const fallback = { ...base, data: Float32Array.from(fixed), moving: new Int32Array(), back: new Int32Array() };
+      const world = { ...fallback, data: Float32Array.from(base.data), gaussianHarmonics: {
+        ...rows, dc: Float32Array.from(rows.dc), sh: Float32Array.from(rows.sh)
+      } };
+      const { camera } = input;
+      renderer.draw(fallback, { camera, raw: true });
+      const baked = center();
+      renderer.draw(world, { camera });
+      const rgb = center();
+      renderer.draw(world, { camera: { ...camera, ortho: true } });
+      const ortho = center();
+      renderer.draw(world, { camera: { ...camera, yaw: camera.yaw - Math.PI } });
+      const opposite = center();
+      renderer.draw(world, { camera, gaussianColor: 'palette', raw: true });
+      const palette = center();
+      renderer.draw(fallback, { camera, raw: true });
+      results.push({ baked, rgb, ortho, opposite, palette, restored: center() });
+    }
+    renderer.close();
+    return { results };
+  }, { cases, camera });
+  const samples = palette.map(color => [color >> 16, color >> 8 & 255, color & 255]);
+  for (const [degree, { baked, rgb, ortho, opposite, palette: stepped, restored }] of result.results.entries()) {
+    for (let channel = 0; channel < 3; channel++) {
+      approx(rgb[channel], baked[channel], 2);
+      approx(ortho[channel], baked[channel], 2);
+    }
+    assert.deepEqual(restored, baked);
+    assert(samples.some(swatch => swatch.every((value, i) => value === stepped[i])));
+    if (degree > 0) assert.notDeepEqual(opposite, rgb);
+  }
+});

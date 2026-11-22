@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pelagic · Live Gaussian Color</title>
+<style>
+  :root { color-scheme: dark; font-family: system-ui, sans-serif; background:#08111b; color:#eaf2f7; }
+  body { margin:0; }
+  main { width:min(1050px, 93vw); margin:0 auto; padding:clamp(18px, 5vw, 42px) 0 24px; }
+  header { margin-bottom:20px; }
+  h1 { font-size:clamp(38px, 6vw, 68px); letter-spacing:-.065em; line-height:.94; margin:0 0 12px; }
+  header p { color:#a9beca; margin:0; font-size:clamp(13px, 2vw, 16px); }
+  .views { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-bottom:12px; }
+  figure { margin:0; background:#101e2e; border:1px solid #2a3e52; border-radius:10px; overflow:hidden; }
+  canvas { display:block; width:100%; aspect-ratio:4/3; background:#0b1523; }
+  #palette { image-rendering:pixelated; }
+  figcaption { padding:9px 12px; font-size:14px; font-weight:650; }
+  .controls { background:#101e2e; border:1px solid #2a3e52; border-radius:10px; padding:10px 12px; }
+  .orbit { display:grid; grid-template-columns:auto 1fr 5ch auto; gap:9px; align-items:center; }
+  .assets { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:9px; }
+  button, .upload {
+    background:#182a3e; color:inherit; border:1px solid #395469; border-radius:5px;
+    padding:6px 9px; font:inherit; cursor:pointer; font-size:13px;
+  }
+  button[aria-pressed=true] { border-color:#9de0df; background:#254453; }
+  button:focus-visible, .upload:focus-within { outline:2px solid #9de0df; outline-offset:2px; }
+  .upload { position:relative; overflow:hidden; }
+  .upload input { position:absolute; inset:0; width:100%; opacity:0; cursor:pointer; }
+  input[type=range] { min-width:0; accent-color:#9de0df; }
+  output { text-align:right; font-variant-numeric:tabular-nums; }
+  #status { color:#a9beca; margin:0 0 0 auto; font-size:12px; }
+  #status[data-state=error] { color:#ffc1ad; }
+  @media (max-width:575px) {
+    main { width:min(380px, 92vw); }
+    .views { grid-template-columns:1fr; gap:8px; }
+    canvas { aspect-ratio:auto; }
+    figcaption { padding:7px 9px; }
+    #status { width:100%; margin:2px 0 0; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Pelagic</h1>
+    <p>Orbit a Gaussian splat cloud with live color in RGB and on a pixel-art palette.</p>
+  </header>
+  <div class="views">
+    <figure><canvas id="rgb" width="560" height="420" aria-label="Directional RGB view"></canvas><figcaption>Directional RGB</figcaption></figure>
+    <figure><canvas id="palette" width="280" height="210" aria-label="Directional palette view"></canvas><figcaption>Directional palette</figcaption></figure>
+  </div>
+  <div class="controls">
+    <div class="orbit">
+      <label for="angle">Orbit</label>
+      <input type="range" id="angle" min="-180" max="180" value="65">
+      <output id="degrees" for="angle">65°</output>
+      <button type="button" id="play" aria-pressed="false">Play</button>
+    </div>
+    <div class="assets">
+      <button type="button" id="ply" aria-pressed="true">Sample PLY</button>
+      <button type="button" id="spz" aria-pressed="false">Sample SPZ</button>
+      <label class="upload">Open PLY or SPZ <input type="file" id="file" accept=".ply,.spz,.gsz"></label>
+      <p id="status" role="status">Loading sample…</p>
+    </div>
+  </div>
+</main>
+<script src="../../dist/ink-studio.browser.js"></script>
+<script type="module" src="demo.mjs"></script>
+</body>
+</html>

@@ -56,6 +56,8 @@
       </div>
       <label class="file-label" for="file">Open a splat file</label>
       <input type="file" id="file" accept=".ply,.spz,.gsz">
+      <label for="splat-colors" class="mode-label">Splat colors</label>
+      <select id="splat-colors"><option value="rgb">Directional RGB</option><option value="palette">Directional palette</option><option value="baked">Static color</option></select>
       <label for="orbit" class="orbit-label">Orbit angle</label>
       <input type="range" id="orbit" min="-180" max="180" step="1" value="18">
       <p id="splat-status" role="status">Loading sample…</p>

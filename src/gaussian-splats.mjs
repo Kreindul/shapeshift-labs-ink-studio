@@ -320,7 +320,11 @@ function shBasis(direction, degree) {
   return basis;
 }
 
-export function gaussianSplatWorld(cloud, { size = 6, up = 'y', viewDirection } = {}) {
+const defaultPalette = [0x0c1217, 0x334552, 0x6f8590, 0xbccdd0, 0xf4f8f5];
+
+export function gaussianSplatWorld(cloud, {
+  size = 6, up = 'y', viewDirection, colorMode = 'baked', palette = defaultPalette
+} = {}) {
   const { count, positions, scales, rotations, opacity, dc, sh, degree } = cloud;
   checkCount(count, pointLimit);
   if (!Number.isInteger(degree) || degree < 0 || degree > 4) throw new TypeError('Invalid Gaussian SH degree');
@@ -329,6 +333,11 @@ export function gaussianSplatWorld(cloud, { size = 6, up = 'y', viewDirection } 
     .every(([array, width]) => array instanceof Float32Array && array.length === count * width))
     throw new TypeError('Invalid Gaussian cloud attributes');
   if (!finite(size) || size <= 0 || !['y', 'z'].includes(up)) throw new TypeError('Invalid Gaussian world size or up axis');
+  if (!['baked', 'rgb', 'palette'].includes(colorMode)) throw new TypeError('Invalid Gaussian color mode');
+  if (!(Array.isArray(palette) || ArrayBuffer.isView(palette)) || !palette.length || palette.length > 64 ||
+      !Array.from(palette).every(color => Number.isInteger(color) && color >= 0 && color <= 0xffffff))
+    throw new TypeError('Gaussian palette needs one to 64 packed RGB swatches');
+  const pal = Array.from(palette);
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   let maxScale = 0;
   for (let i = 0; i < positions.length; i++) {
@@ -375,7 +384,8 @@ export function gaussianSplatWorld(cloud, { size = 6, up = 'y', viewDirection } 
   }
   return {
     count, data, seed: 1, detail: 14, radius: size, moving: new Int32Array(), back: new Int32Array(),
-    bg: [12, 18, 23], pal: [0x0c1217, 0x334552, 0x6f8590, 0xbccdd0, 0xf4f8f5],
+    bg: [pal[0] >> 16, pal[0] >> 8 & 255, pal[0] & 255], pal,
+    ...(colorMode !== 'baked' && { gaussianHarmonics: { count, degree, dc, sh, up, colorMode } }),
     palName: 'Imported Gaussian', dither: 0, fog: { c: 0, start: 1, max: 0 }, outline: { c: 0, edge: 0 },
     cam: { target: [0, 0, 0], yaw: 0, pitch: 0, dist: size * 2.15, sway: 0 }
   };

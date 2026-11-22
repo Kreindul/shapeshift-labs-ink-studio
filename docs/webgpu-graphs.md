@@ -13,7 +13,7 @@ npm run build
 python3 -m http.server 8180 --bind 127.0.0.1
 ```
 
-Open [GPU Studies](http://127.0.0.1:8180/examples/webgpu-graphs/). Refraction generates and filters a texture. Change its channel shift or edit its WGSL and apply it live. Fold deforms a 16,641-vertex surface and shades it using the texture from Refraction. Pelagic opens sample PLY and SPZ assets or a local file and renders them through Ink's WebGL 2 pipeline.
+Open [GPU Studies](http://127.0.0.1:8180/examples/webgpu-graphs/). Refraction generates and filters a texture. Change its channel shift or edit its WGSL and apply it live. Fold deforms a 16,641-vertex surface and shades it using the texture from Refraction. Pelagic opens sample PLY and SPZ assets or a local file and renders them through Ink's WebGL 2 pipeline. The [side-by-side viewer](../examples/live-gaussian/index.html) shares a camera between directional RGB and palette views.
 
 ## Compile a graph
 
@@ -90,9 +90,25 @@ async function frame(file) {
 
 In the browser, import `decodeGaussianSplat(bytes)` and `gaussianSplatWorld(cloud)` from `webgl.mjs`. Pass the resulting world to `createRenderer()` as you would a baked Ink scene. The PLY-only synchronous function `decodeGaussianPly()` and the async `decodeGaussianSpz()` are available from the same entry.
 
+To keep coefficients on the GPU and shade from the current camera:
+
+```js
+const world = gaussianSplatWorld(await decodeGaussianSplat(bytes), {
+  colorMode: 'rgb',
+  palette: [0x0b1523, 0x24465c, 0x4089a8, 0x86d3d3, 0xcd7e7b, 0xffd5b0]
+});
+renderer.render(world, { camera, gaussianColor: 'palette', width: 320, height: 240 });
+```
+
+- `colorMode: 'rgb'` uses the decoded directional RGB. `colorMode: 'palette'` uses the same shading and resolves the composited pixels against the world palette.
+- `gaussianColor` switches a live world between `'rgb'`, `'palette'`, and its packed `'baked'` fallback. The live RGB and palette choices control palette resolve even when the frame supplies `raw`.
+- `colorMode: 'baked'` is the default. The CLI and CPU renderer use the packed fallback, including any source-space `viewDirection` supplied at import.
+- Live color evaluates degrees 0–4 on the GPU. Perspective rays run from the camera to each splat. Orthographic rays are parallel. The importer keeps the coefficients in source coordinates and applies the inverse of its up-axis rotation to the rays.
+- A live cloud uses 12 bytes of RGB coefficient data per term and point before texture padding. For large files, set the decoder's `maxPoints` to suit the device.
+
 - **PLY.** Graphdeco-style Gaussian vertices in ASCII or binary, in either byte order. The first element must be `vertex` with scalar fields for position, log-scale, quaternion, opacity logit, and DC color. Contiguous higher-order SH properties are retained through degree 4.
 - **SPZ.** Niantic SPZ versions 1–4. Versions 1–3 use gzip. Version 4 uses Zstandard, decoded natively in supported Node runtimes or with the included fzstd fallback. Ink decodes the core attributes and reports optional extension and antialias flags. Extension payloads and SPZ-specific antialias rendering are outside the Ink world conversion.
-- **World conversion.** The decoder retains XYZ, scales, normalized XYZW rotation, opacity and SH coefficients in typed arrays. World conversion fits the cloud and packs each Gaussian's covariance for Ink's renderer. It uses DC color by default. Set `viewDirection: [x, y, z]` in source coordinates to bake the retained harmonics for a fixed viewing direction. The current Ink renderer uses packed color during orbiting.
+- **World conversion.** The decoder retains XYZ, scales, normalized XYZW rotation, opacity and SH coefficients in typed arrays. World conversion fits the cloud and packs each Gaussian's covariance for Ink's renderer. It uses DC color by default. Set `viewDirection: [x, y, z]` in source coordinates to bake the retained harmonics for a fixed viewing direction. Use a live color mode in WebGL to evaluate those coefficients during orbiting.
 - **Limits.** Decoding defaults to a four-million-point maximum. Hosts can pass a lower `maxPoints`. A file named `.gsz` must contain a recognized PLY or SPZ payload. Derivative's [Point File In reference](https://docs.derivative.ca/Point_File_In_POP) and [file-type table](https://docs.derivative.ca/File_Types) list `.spz` for this format.
 
 Format references. [Graphdeco PLY implementation](https://github.com/graphdeco-inria/gaussian-splatting/blob/main/scene/gaussian_model.py) · [Niantic SPZ](https://github.com/nianticlabs/spz) · [WebGPU specification](https://www.w3.org/TR/webgpu/)
