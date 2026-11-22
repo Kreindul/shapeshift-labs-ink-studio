@@ -53,7 +53,7 @@ test('spline, textile, routed and recorded trail inputs retain their separate pa
 
   const textile = K.textile.weave({ size: [2, 1.4], columns: 4, rows: 3, radius: .06, clearance: .02 });
   let sampled = 0;
-  const yarn = K.textile.draw(B, textile, { renderer: 'curve-splats', curveProfile: { width: .18, twist: .3 }, color: ({ uv }) => {
+  const yarn = K.textile.draw(B, textile, { renderer: 'curve-splats', curveProfile: { section: 'flattened', width: .18, twist: .3 }, color: ({ uv }) => {
     assert.equal(uv.length, 2);
     sampled++;
     return '#76d6ae';
@@ -92,7 +92,7 @@ test('the normal render CLI opens an editable JSON curve scene and can switch to
   t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
   const file = name => path.join(folder, name);
   const entry = scene([{ source: { kind: 'spline', points: [[-2,0,0],[-.8,.7,.2],[.8,-.5,-.3],[2,0,0]], samples: 5 },
-    width: { samples: [.06, .21, .10] }, twist: [[0, 0], [1, Math.PI]], color: '#f3b56b', object: 'wire' }]);
+    section: 'flattened', width: { samples: [.06, .21, .10] }, twist: [[0, 0], [1, Math.PI]], color: '#f3b56b', object: 'wire' }]);
   fs.writeFileSync(file('strand.json'), JSON.stringify(entry));
   const cli = path.resolve(__dirname, '../cli/ink-studio.js');
   for (const mode of ['on', 'off']) {
@@ -159,4 +159,39 @@ test('profile painters are sampled in path order and a bad profile leaves the bu
   assert.throws(() => C.draw(B, straight, { width: ({ u }) => u > .6 ? NaN : .25 }), /invalid width/);
   assert.throws(() => C.draw(B, straight, { taper: 0, twist: [[0, 0], [1, Math.PI]], maxSegments: 3 }), /segment budget/);
   assert.equal(B.count(), count);
+});
+
+test('named round and elliptical sections preserve the existing profiles while flattened sections have a plateau', () => {
+  const width = .9, aspect = .25;
+  const round = profileFrame({ width, section: 'round' });
+  assert.deepEqual(round.alpha, profileFrame({ width }).alpha);
+  const ellipse = profileFrame({ width, aspect, section: 'elliptical' });
+  assert.deepEqual(ellipse.alpha, profileFrame({ width, aspect }).alpha);
+  const flat = profileFrame({ width, aspect, section: 'flattened' });
+  const center = frame => frame.alpha[38 * frame.w + 64];
+  const atOffset = (frame, offset) => frame.alpha[(38 + offset) * frame.w + 64] / center(frame);
+  assert.ok(atOffset(flat, 5) > .90);
+  assert.ok(atOffset(flat, 5) > atOffset(ellipse, 5) + .07);
+  assert.ok(atOffset(flat, 12) < .08 && atOffset(ellipse, 12) > .25);
+});
+
+test('flattened sections follow the authored path frame and continue across subdivided spans', () => {
+  const folded = K.curve.path(straight, { up: [0, 0, 1] });
+  const settings = { width: .4, aspect: .24, section: 'flattened' };
+  const raster = (source, settings, ortho) => ink.render(C.world(scene([{ source, ...settings }])),
+    { ...imageOptions, ortho, transparent: true });
+  const broad = raster(straight, settings, true), edge = raster(folded, settings, true);
+  assert.notDeepEqual(broad.alpha, edge.alpha);
+  assert.deepEqual(broad.alpha, raster(folded, { ...settings, up: [0, 1, 0] }, true).alpha);
+  assert.ok(band(broad, 64) > band(edge, 64));
+
+  const pieces = Array.from({ length: 24 }, (_, i) => K.V.lerp(straight[0], straight[1], i / 23));
+  for (const ortho of [false, true]) {
+    const a = raster(straight, settings, ortho), b = raster(pieces, settings, ortho);
+    assert.ok(a.alpha.every((value, i) => Math.abs(value - b.alpha[i]) <= 1));
+  }
+  const B = kit.makeBuilder(1, palette);
+  assert.throws(() => C.draw(B, straight, { section: 'square' }), /round, elliptical or flattened/);
+  assert.throws(() => C.draw(B, straight, { section: 'round', aspect: .5 }), /round sections use aspect 1/);
+  assert.equal(B.count(), 0);
 });

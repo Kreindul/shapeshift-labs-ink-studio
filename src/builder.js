@@ -1062,12 +1062,12 @@ function makeBuilder(seed, hex, { renderMetadata = true, initialCapacity = 1 << 
     const delta = to.map((v, i) => v - from[i]), half = Math.hypot(...delta) / 2;
     const center = from.map((v, i) => v + delta[i] * .5), axis = delta.map(v => v / (2 * half));
     if (profile) {
-      const { major, aspect } = profile;
+      const { major, aspect, flattened } = profile;
       const normal = [axis[1] * major[2] - axis[2] * major[1],
         axis[2] * major[0] - axis[0] * major[2], axis[0] * major[1] - axis[1] * major[0]];
       const axial = radius * Math.sqrt(CurveSplat.axialUnits(radius, half));
       dab(...center, normal, axis, axial, radius, radius * aspect, color, opacity,
-        { nd: true, ph: radius, sp: half, rg: aspect, ex: CurveSplat.profileMarker });
+        { nd: true, ph: radius, sp: half, rg: aspect, ex: flattened ? CurveSplat.flatMarker : CurveSplat.profileMarker });
     } else {
       stick(...center, axis, Math.hypot(radius, half / Math.sqrt(3)), radius, color, opacity,
         { nd: true, ph: radius, sp: half, ex: CurveSplat.marker });

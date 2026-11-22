@@ -1,7 +1,16 @@
 /* Finite Gaussian strands carried by ordinary native splat rows. */
 const CurveSplat = (() => {
   // Kind zero leaves the motion payload free. Preserve the tag through native row copies.
-  const marker = -161291.375, profileMarker = -161292.375, minimum = 1e-5;
+  const marker = -161291.375, profileMarker = -161292.375, flatMarker = -161293.375, minimum = 1e-5;
+  // Seven-point Gaussian quadrature across the flat section, with rounded Gaussian edges.
+  const flatBlur = .25, flatNormalization = 1 / (Math.sqrt(2 * Math.PI) * flatBlur);
+  const ribbonSamples = [
+    [-.949107912342759, .129484966168870], [-.741531185599394, .279705391489277],
+    [-.405845151377397, .381830050505119], [0, .417959183673469],
+    [.405845151377397, .381830050505119], [.741531185599394, .279705391489277],
+    [.949107912342759, .129484966168870]
+  ];
+  const alongX = [1, 0, 0];
   // Keep the axial eigenvalue separate from the transverse values even for very short spans.
   const axialUnits = (radius, half) => Math.max(4, Math.min(64, 1 + (half / radius) ** 2 / 3));
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -10,8 +19,11 @@ const CurveSplat = (() => {
     const length = Math.hypot(...a);
     return length > 0 ? a.map(v => v / length) : null;
   };
-  const isRow = (data, at) => (data[at + 15] === marker || data[at + 15] === profileMarker) &&
-    (data[at + 11] & 15) === 0 && data[at + 12] > 0 && data[at + 13] > 0;
+  const isRow = (data, at) => {
+    const tag = data[at + 15];
+    return (tag === marker || tag === profileMarker || tag === flatMarker) &&
+      (data[at + 11] & 15) === 0 && data[at + 12] > 0 && data[at + 13] > 0;
+  };
 
   function profiledDimensions(radius, half, aspect, scale, xx, xy, xz, yy, yz, zz) {
     const ratio = aspect * aspect, longitudinal = axialUnits(radius, half);
@@ -40,7 +52,7 @@ const CurveSplat = (() => {
     const radius = data[at + 12], half = data[at + 13];
     const xx = data[at + 4], xy = data[at + 5], xz = data[at + 6];
     const yy = data[at + 8], yz = data[at + 9], zz = data[at + 10];
-    if (data[at + 15] === profileMarker)
+    if (data[at + 15] !== marker)
       return profiledDimensions(radius, half, data[at + 14], scale, xx, xy, xz, yy, yz, zz);
     // The carrier stores the covariance of a uniform segment convolved with a round Gaussian.
     // Its principal axis also follows native rigid transforms. Recover the uniform scale from the trace.
@@ -89,29 +101,14 @@ const CurveSplat = (() => {
       bounds[3] = Math.max(bounds[3], sy + ey);
     }
     const middle = a.map((v, i) => v + (first + last) / 2 * (b[i] - v));
-    return { from, axis, radius, length, bounds, middle, major: shape.major, minor: shape.minor,
+    const flattened = data[at + 15] === flatMarker;
+    return { from, axis, radius, length, bounds, middle, major: shape.major, minor: shape.minor, flattened,
       tau: -Math.log1p(-Math.min(.999, opacity)) };
   }
 
-  // Integrate over the finite axis after projecting the Gaussian orthogonal to the camera ray.
-  function sample(strand, { origin, direction, axial }, near) {
-    const { from, axis, radius, length, major, minor } = strand;
-    const offsetFromEye = [from[0] - origin[0], from[1] - origin[1], from[2] - origin[2]];
-    const axialStart = dot(offsetFromEye, direction), axialSlope = dot(axis, direction);
-    let start = offsetFromEye, ray = direction, along = axis, tau = strand.tau;
-    if (major) {
-      // Whiten the elliptical kernel and integrate the Gaussian along the transformed ray.
-      start = [dot(axis, offsetFromEye), dot(major, offsetFromEye), dot(minor, offsetFromEye)];
-      ray = [axialSlope, dot(major, direction), dot(minor, direction)];
-      const rayScale = Math.hypot(...ray);
-      ray = ray.map(v => v / rayScale);
-      along = [1, 0, 0];
-      tau /= rayScale;
-    }
-    const rayStart = major ? dot(start, ray) : axialStart, parallel = major ? ray[0] : axialSlope;
-    const px = start[0] - rayStart * ray[0], py = start[1] - rayStart * ray[1], pz = start[2] - rayStart * ray[2];
-    const dx = along[0] - parallel * ray[0], dy = along[1] - parallel * ray[1], dz = along[2] - parallel * ray[2];
-    const transverse = Math.hypot(dx, dy, dz), sigma = radius * Math.SQRT2;
+  // The integral is optical depth per unit strength, with the nearest point on the sampled axis.
+  function kernel(length, radius, transverse, dx, dy, dz, px, py, pz) {
+    const sigma = radius * Math.SQRT2;
     let at, nearest, integral;
     if (transverse * length < 1e-4 * radius) {
       at = nearest = length / 2;
@@ -125,9 +122,49 @@ const CurveSplat = (() => {
     }
     const offset = Math.hypot(px + nearest * dx, py + nearest * dy, pz + nearest * dz) / sigma;
     if (offset > 3.6) return null;
-    const alpha = -Math.expm1(-tau * integral * Math.exp(-offset * offset));
-    return alpha >= minimum ? { alpha, depth: Math.max(near, axial * (axialStart + at * axialSlope)) } : null;
+    return { at, amount: integral * Math.exp(-offset * offset) };
   }
-  return Object.freeze({ marker, profileMarker, axialUnits, minimum, isRow, prepare, sample });
+
+  function sample(strand, { origin, direction, axial }, near) {
+    const { from, axis, radius, length, major, minor, flattened } = strand;
+    const offsetFromEye = [from[0] - origin[0], from[1] - origin[1], from[2] - origin[2]];
+    const axialStart = dot(offsetFromEye, direction), axialSlope = dot(axis, direction);
+    let start = offsetFromEye, ray = direction, along = axis, tau = strand.tau;
+    if (major) {
+      // Whiten the section and integrate the Gaussian along the transformed ray.
+      const blur = flattened ? flatBlur : 1;
+      start = [dot(axis, offsetFromEye), dot(major, offsetFromEye) / blur, dot(minor, offsetFromEye)];
+      ray = [axialSlope, dot(major, direction) / blur, dot(minor, direction)];
+      const rayScale = Math.hypot(...ray);
+      ray = ray.map(v => v / rayScale);
+      along = alongX;
+      tau /= rayScale;
+    }
+    const rayStart = major ? dot(start, ray) : axialStart, parallel = major ? ray[0] : axialSlope;
+    const px = start[0] - rayStart * ray[0], py = start[1] - rayStart * ray[1], pz = start[2] - rayStart * ray[2];
+    const dx = along[0] - parallel * ray[0], dy = along[1] - parallel * ray[1], dz = along[2] - parallel * ray[2];
+    const transverse = Math.hypot(dx, dy, dz);
+    if (!flattened) {
+      const hit = kernel(length, radius, transverse, dx, dy, dz, px, py, pz);
+      const coverage = hit && -Math.expm1(-tau * hit.amount);
+      return coverage >= minimum ? { alpha: coverage, depth: Math.max(near, axial * (axialStart + hit.at * axialSlope)) } : null;
+    }
+
+    // Integrate the parallel Gaussian strips before turning optical depth into a single fragment.
+    let amount = 0, weightedDepth = 0;
+    const lateral = dot(major, direction);
+    for (const [offset, weight] of ribbonSamples) {
+      const shift = offset * radius, whitened = shift / flatBlur, alongRay = whitened * ray[1];
+      const hit = kernel(length, radius, transverse, dx, dy, dz,
+        px - alongRay * ray[0], py + whitened - alongRay * ray[1], pz - alongRay * ray[2]);
+      if (!hit) continue;
+      const mass = weight * hit.amount;
+      amount += mass;
+      weightedDepth += mass * (axialStart + shift * lateral + hit.at * axialSlope);
+    }
+    const coverage = -Math.expm1(-tau * flatNormalization * amount);
+    return coverage >= minimum ? { alpha: coverage, depth: Math.max(near, axial * weightedDepth / amount) } : null;
+  }
+  return Object.freeze({ marker, profileMarker, flatMarker, axialUnits, minimum, isRow, prepare, sample });
 })();
 if (typeof module !== 'undefined') module.exports = CurveSplat;

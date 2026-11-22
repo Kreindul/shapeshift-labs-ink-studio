@@ -59,9 +59,10 @@ K.curveSplats.draw(builder, source, {
 });
 ```
 
-- `width` is twice the Gaussian standard deviation in world units along the
-  major section axis. It takes precedence over `radius`. A fixed width keeps
-  a cable at the same world gauge through bends.
+- `width` sets the nominal world-space width and takes precedence over
+  `radius`. For a Gaussian section it is twice the major-axis standard
+  deviation. For a flattened ribbon it measures the band before edge
+  rounding. A fixed width keeps a cable at the same world gauge through bends.
 - `taper` multiplies the width by a value from 0 to 1. A zero profile omits
   coverage there.
 - `twist` rotates the section about the path tangent in radians. Set `up`
@@ -82,6 +83,39 @@ individual routed link. The [profile example](../examples/curve-splat-profiles.j
 shows a fixed cable, painted stroke, tapered tip, and twisted ribbon. Run
 `node examples/curve-splat-profiles.cjs studio/out/curve-splat-profiles`
 to render an animated review.
+
+## Choose a cross-section
+
+Set `section` per strand. All three profiles support the same width, taper,
+and twist channels.
+
+| Section | Profile |
+| --- | --- |
+| `round` | Circular Gaussian falloff around the tangent. It uses aspect 1 and keeps its shape under roll. |
+| `elliptical` | Gaussian falloff across two axes. The default minor-to-major ratio is .5. Set `aspect` from .1 to 1 for a narrower or rounder yarn. |
+| `flattened` | A ribbon with nearly uniform density across the face, rounded edges, and a Gaussian falloff through its thickness. The default thickness ratio is .16. Set `aspect` from .1 to .99. |
+
+A compiled path supplies its transported frame. Named elliptical and flattened
+sections on textile charts use the chart normal as the thin axis. Raw polylines
+and sampled routes use a transported frame from world up. Set `up` to override
+the strand's reference width direction, or key `twist` to turn it along the path.
+
+```js
+const ribbon = K.curve.path(points, { up: [0, 1, 0] });
+K.curveSplats.draw(builder, ribbon, {
+  section: 'flattened',
+  width: .24,
+  aspect: .16,
+  twist: [[0, 0], [1, Math.PI]]
+});
+```
+
+The headless renderer integrates the ribbon's lateral density with seven
+Gaussian quadrature samples and combines it into one fragment per segment and
+pixel. This keeps the profile continuous across straight subdivisions.
+Existing recipes also accept the implicit section chosen by `aspect` or `twist`.
+The [section comparison](../examples/curve-splat-sections.json) is editable
+and renders with the normal still and clip commands.
 
 ## Render and compare
 

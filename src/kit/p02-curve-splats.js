@@ -23,28 +23,34 @@
       return Array.from(value);
     });
   }
+  function pathSpec(path) {
+    return { points: path.points, closed: path.closed, up: path.up,
+      frame: typeof path.frame === 'function' ? distance => path.frame(distance).N : undefined };
+  }
+
   function paths(source) {
     if (Array.isArray(source)) return [{ points: source }];
     check(source && typeof source === 'object', 'expected a path or source document');
     switch (source.kind ?? 'path') {
       case 'path':
         check(source.closed === undefined || typeof source.closed === 'boolean', 'invalid closure');
-        return [{ points: source.points, closed: source.closed }];
+        return [pathSpec(source)];
       case 'spline': {
         const controls = points(source.points), per = source.samples ?? 6;
         check(controls.length >= 2 && Number.isSafeInteger(per) && per >= 1 && per <= 128 &&
           per * (controls.length - 1) <= segmentLimit, 'invalid spline controls or sample count');
         return [{ points: K.curve.spline(controls, per) }];
       }
-      case 'family': return [{ points: K.curve.create(source.definition).points }];
+      case 'family': return [pathSpec(K.curve.create(source.definition))];
       case 'textile': {
         const plan = source.plan;
         check(Array.isArray(plan?.threads ?? plan?.strands) && (plan.threads ?? plan.strands).length <= segmentLimit,
           'expected a textile or interlace plan');
         return (plan.threads ?? plan.strands).map(strand => ({
           id: strand.id, radius: strand.radius, family: strand.family, index: strand.index,
-          points: strand.stations?.map(station => station.p) ?? strand.path?.points,
-          uvs: strand.stations?.map(station => station.uv)
+          ...(strand.path && pathSpec(strand.path)),
+          ...(strand.stations && { points: strand.stations.map(station => station.p),
+            uvs: strand.stations.map(station => station.uv), normals: strand.stations.map(station => station.n) })
         }));
       }
       case 'routed': {
@@ -122,8 +128,7 @@
     return [...stops].sort((a, b) => a - b);
   }
 
-  function majorAxis(frames, index, axis, t, angle) {
-    const direction = K.V.lerp(frames[index].N, frames[index + 1].N, t);
+  function majorAxis(direction, axis, angle) {
     const projected = K.V.mad(direction, axis, -K.V.dot(direction, axis));
     const reference = Math.abs(axis[1]) < .9 ? [0, 1, 0] : [1, 0, 0];
     const n = K.V.norm(K.V.len(projected) > 1e-7 ? projected : K.V.mad(reference, axis, -K.V.dot(reference, axis)));
@@ -132,19 +137,24 @@
 
   function prepare(source, options = {}) {
     const link = source?.kind === 'routed' ? source.link : undefined;
-    const { radius, width, taper = 1, twist = 0, aspect = options.twist === undefined ? 1 : .35,
-      up = [0, 1, 0], profileSamples = 96, opacity = .94, color = '#eab876', object = link?.id ?? 'curve',
+    const { radius, width, taper = 1, twist = 0, section, up, profileSamples = 96, opacity = .94, color = '#eab876', object = link?.id ?? 'curve',
       material = link?.material ?? 'strand', target, maxSegments = segmentLimit } = options;
+    const defaultAspect = section === 'flattened' ? .16 : section === 'elliptical' ? .5 :
+      section === 'round' || options.twist === undefined ? 1 : .35;
+    const aspect = options.aspect === undefined ? defaultAspect : options.aspect;
+    check(section === undefined || ['round', 'elliptical', 'flattened'].includes(section), 'expected a round, elliptical or flattened section');
+    check(section !== 'round' || aspect === 1, 'round sections use aspect 1');
+    check(section !== 'flattened' || aspect <= .99, 'flattened sections need aspect at most .99');
     check((radius === undefined || finite(radius, 1e-6, 100)) && finite(opacity, 0, 1) && label(object) && label(material) &&
-      finite(aspect, .1, 1) && point(up) && K.V.len(up) > 1e-8 &&
+      finite(aspect, .1, 1) && (up === undefined || point(up) && K.V.len(up) > 1e-8) &&
       Number.isSafeInteger(profileSamples) && profileSamples >= 8 && profileSamples <= 1024 &&
       Number.isSafeInteger(maxSegments) && maxSegments >= 0 && maxSegments <= segmentLimit,
       'invalid strand appearance, profile resolution or segment budget');
     const profileWidth = width === undefined ? null : channel(width, 'width', 0, 200);
     const profileTaper = channel(taper, 'taper', 0, 1);
     const profileTwist = channel(twist, 'twist', -64 * Math.PI, 64 * Math.PI);
-    const elliptical = aspect < .99999;
-    const stops = profileStops([profileWidth, profileTaper, elliptical && profileTwist], profileSamples);
+    const framed = aspect < .99999, flattened = section === 'flattened';
+    const stops = profileStops([profileWidth, profileTaper, framed && profileTwist], profileSamples);
     const fixedColor = typeof color === 'function' ? null : rgb(color);
     let segments = 0, examined = 0, samples = 0;
     const strands = paths(source).map((strand, index) => {
@@ -156,12 +166,16 @@
       check(samples <= 2 * segmentLimit, 'point budget exceeded');
       const lengths = knots.slice(1).map((to, i) => K.V.dist(knots[i], to));
       const total = lengths.reduce((sum, length) => length < 1e-7 ? sum : sum + length, 0);
-      const frames = elliptical && total > 0 ? K.curve.frames(knots, Array.from(up)) : null;
+      const retainedFrame = framed && up === undefined && strand.frame;
+      const chartNormals = framed && up === undefined && section !== undefined ? strand.normals : undefined;
+      const initial = up ?? strand.up ?? [0, 1, 0];
+      check(!framed || point(initial) && K.V.len(initial) > 1e-8, 'invalid path frame up vector');
+      const frames = framed && total > 0 && !retainedFrame ? K.curve.frames(knots, Array.from(initial)) : null;
       let distance = 0, stop = 0;
       for (let i = 0; i < lengths.length; i++) {
         const from = knots[i], to = knots[i + 1], length = lengths[i];
         if (length < 1e-7) continue;
-        const axis = frames && K.V.mul(K.V.sub(to, from), 1 / length);
+        const axis = framed && K.V.mul(K.V.sub(to, from), 1 / length);
         const begin = distance / total, end = (distance + length) / total;
         const a = strand.uvs?.[i], b = strand.uvs?.[i + 1];
         let previous = 0;
@@ -178,7 +192,14 @@
           if (size >= 1e-6 && (next - previous) * length >= 1e-7) {
             segments++;
             const shade = fixedColor ?? rgb(color(sample));
-            const profile = frames ? { major: majorAxis(frames, i, axis, middle, profileTwist.sample(sample)), aspect } : undefined;
+            let profile;
+            if (framed) {
+              const a = chartNormals?.[i], b = chartNormals?.[i + 1];
+              const direction = retainedFrame ? retainedFrame(arc) : a && b ?
+                K.V.cross(K.V.lerp(a, b, middle), axis) : K.V.lerp(frames[i].N, frames[i + 1].N, middle);
+              check(point(direction), 'invalid strand frame');
+              profile = { major: majorAxis(direction, axis, profileTwist.sample(sample)), aspect, flattened };
+            }
             rows.push({ from: previous === 0 ? from : K.V.lerp(from, to, previous),
               to: next === 1 ? to : K.V.lerp(from, to, next), shade, radius: size, profile });
           }
