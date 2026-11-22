@@ -82,3 +82,8 @@ Use `KIT.procedural.mediaGraph.sampleMotif.plan(source, score, settings)`,
 graph nodes are `music.planSampleMotif`, `music.renderSampleMotif` and
 `music.auditionSampleMotif`. Use `ink-studio graph describe <node> --example`
 for a runnable graph.
+
+To derive the lead's contour, accent timing and texture slice from the
+recording, add `settings.derive`. See [Compose from a recorded
+gesture](timbre-composition.md) for projection, palettes and full-cue
+orchestration.

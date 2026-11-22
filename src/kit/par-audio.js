@@ -182,6 +182,38 @@
       inputs:{source:'audio',score:'audio',plan:'record',options},outputs:{value:'audio',report:'record'},
       run({source,score,plan,options}) {return A.sampleMotif.audition(plan,source,score,options);}
     },
+    'music.extractTimbreGesture': {
+      description:'Read the pitch contour, attacks, envelope and tail of a recording on its sample grid.',
+      inputs:{source:'audio',options},outputs:{value:'record'},
+      run({source,options}) {return {value:A.timbreComposition.extract(source,options)};}
+    },
+    'music.projectTimbreGesture': {
+      description:'Project measured contour, attacks and tail to editable motifs with separate expression.',
+      inputs:{source:'record',options},outputs:{value:'record'},
+      run({source,options}) {return {value:A.timbreComposition.project(source,options)};}
+    },
+    'music.matchTimbreGesture': {
+      description:'Rank materials by their evolving normalized level and brightness across three phases.',
+      inputs:{source:'record',candidates:'array<record>',options},outputs:{value:'array<record>'},
+      run({source,candidates,options}) {return {value:A.timbreComposition.compare(source,candidates,options)};}
+    },
+    'music.timbrePalette': {
+      description:'Load a seeded coastal, prepared metal and breath, or broken-beat instrument bank.',
+      inputs:{name:'string',options},outputs:{value:'record',patches:'record',assets:'record',room:'record'},
+      run({name,options}) {
+        const {patches,assets,room}=A.timbrePalettes.load(name,options);
+        return {value:{id:name,patches,room},patches,assets,room};
+      }
+    },
+    'music.planTimbreOrchestration': {
+      description:'Assign a recording’s contour, attacks and tail to normal score takes with reusable materials.',
+      inputs:{source:'audio',production:'record',settings:'record',assets:options},
+      outputs:{value:'record',variants:'array<record>',assets:'record',report:'record'},
+      run({source,production,settings,assets}) {
+        const {assets:derived,...value}=A.timbreComposition.plan(source,production,settings,assets);
+        return {value,variants:value.variants,assets:{...assets,...derived},report:value.report};
+      }
+    },
     'music.inspectEditSession': {
       description:'Inspect the stable score, audio take and automation addresses in a music edit session.',
       inputs:{source:'record',assets:sessionAssets},outputs:{value:'record'},
