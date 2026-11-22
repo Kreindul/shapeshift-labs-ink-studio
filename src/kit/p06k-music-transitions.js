@@ -9,7 +9,7 @@
   };
   function schedule(sources,spec,intents=[],assets={}) {
     check(record(sources) && Object.keys(sources).length<=32 && Object.keys(sources).every(id) &&
-      fields(spec,['entry','segments','transitions','stingers','end','thematic']) && record(spec.segments) &&
+      fields(spec,['entry','segments','transitions','stingers','stingerRules','end','thematic']) && record(spec.segments) &&
       Object.keys(spec.segments).length<=64 && Object.keys(spec.segments).every(id) &&
       Array.isArray(intents) && intents.length<=2048,'Invalid production timeline');
     const end=numeric(spec.end,.001,300,'end'), compiled={};
@@ -69,9 +69,14 @@
     const edges=spec.transitions ?? [], stingers=spec.stingers ?? {};
     check(Array.isArray(edges) && edges.length<=128 && record(stingers) && Object.keys(stingers).length<=128 &&
       Object.entries(stingers).every(([key,value])=>id(key) && known(value)),'Invalid transition or stinger table');
+    const holds=spec.stingerRules ?? [];
+    check(Array.isArray(holds) && holds.length<=128 && Array.from(holds).every(row=>
+      fields(row,['resource','section','linked']) && Object.hasOwn(stingers,row.resource) && known(row.section) &&
+      (row.linked===undefined || typeof row.linked==='boolean')),
+    'Stinger rules need a mapped resource and a section in which to withhold it');
     const rules=new Map();
     for (const edge of edges) {
-      check(fields(edge,['from','to','exit','entry','tail','fadeIn','bridge','pickup']) && known(edge.from) &&
+      check(fields(edge,['from','to','exit','entry','tail','fadeIn','bridge','pickup','commonTone']) && known(edge.from) &&
         known(edge.to) && (edge.bridge===undefined || known(edge.bridge)),'Invalid music transition edge');
       const key=edge.from+'>'+edge.to;
       check(!rules.has(key),'Duplicate music transition edge');
@@ -81,13 +86,20 @@
       const tail=numeric(edge.tail ?? 0,0,4,'tail'), fadeIn=numeric(edge.fadeIn ?? 0,0,4,'fade in');
       const pickup=numeric(edge.pickup ?? 0,0,4,'pickup');
       check(!pickup || edge.bridge,'A pickup requires a transition bridge');
-      rules.set(key,{exit,entry,tail,fadeIn,bridge:edge.bridge,pickup});
+      const tone=edge.commonTone;
+      if (tone!==undefined) {
+        check(fields(tone,['segment','pickup']) && known(tone.segment),'A common tone needs an authored segment');
+        const clip=segments[tone.segment];
+        numeric(tone.pickup ?? 0,0,Math.min(4,clip.end-clip.start-.001),'common tone pickup');
+      }
+      rules.set(key,{exit,entry,tail,fadeIn,bridge:edge.bridge,pickup,commonTone:tone});
     }
     const eligible=intents.filter(intent=>intent?.kind==='music-transition' || intent?.kind==='music-cue');
     check(eligible.every(event=>finite(event.time,0,1e9)),'Music intents need nonnegative times');
     const events=eligible.filter(event=>event.time<end)
       .sort((a,b)=>a.time-b.time || (a.serial ?? 0)-(b.serial ?? 0));
-    const placements=[], markers=[];
+    const placements=[], markers=[], cueDecisions=[];
+    const landing=new Map(events.filter(event=>event.kind==='music-transition').map(event=>[event.time,event.to]));
     function place(name,at,from,to,{tail=0,fadeIn=0,layers={},kind='segment',source=segments[name].source}={}) {
       if (to<=from+1e-8 || at>=end) return;
       check(placements.length<4096,'Music timeline exceeds its placement budget');
@@ -128,11 +140,17 @@
       return source;
     }
     let name=spec.entry, start=0, offset=segments[name].start, fadeIn=0, layers={}, source=choose(name,0);
-    for (const event of events) {
+    for (const [eventIndex,event] of events.entries()) {
       if (event.kind==='music-cue') {
         const resource=event.resource ?? event.cue;
         const clip=Object.hasOwn(stingers,resource) && stingers[resource];
-        if (clip) {
+        const section=landing.get(event.time) ?? name;
+        const withheld=clip && holds.some(row=>row.resource===resource && row.section===section &&
+          (row.linked===undefined || row.linked===(event.transition!==undefined)));
+        cueDecisions.push({time:event.time,serial:event.serial ?? null,eventIndex,resource,section,
+          cue:event.cue ?? resource,linked:event.transition ?? null,segment:clip || null,
+          status:withheld ? 'withheld' : clip ? 'played' : 'unmapped'});
+        if (clip && !withheld) {
           const segment=segments[clip];
           place(clip,event.time,segment.start,segment.end,{kind:'stinger'});
         }
@@ -147,7 +165,15 @@
         const bridge=segments[edge.bridge], pickup=Math.min(edge.pickup,event.time-start);
         place(edge.bridge,event.time-pickup,bridge.start,bridge.end,{kind:'bridge'});
       }
-      markers.push({time:event.time,beat:event.beat ?? null,from:name,to:event.to,rule:event.rule ?? null});
+      if (edge.commonTone) {
+        const tone=edge.commonTone, clip=segments[tone.segment];
+        const pickup=Math.min(tone.pickup ?? 0,event.time-start);
+        place(tone.segment,event.time-pickup,clip.start,clip.end,{kind:'common-tone'});
+      }
+      markers.push({time:event.time,beat:event.beat ?? null,from:name,to:event.to,rule:event.rule ?? null,
+        serial:event.serial ?? null,eventIndex,exit:edge.exit,entry:edge.entry,tail:edge.tail,fadeIn:edge.fadeIn,
+        bridge:edge.bridge ?? null,pickup:edge.bridge ? Math.min(edge.pickup,event.time-start) : 0,
+        commonTone:edge.commonTone ?? null});
       name=event.to; start=event.time; offset=edge.entry; fadeIn=edge.fadeIn;
       source=choose(name,start);
       layers=event.layers ?? {};
@@ -157,12 +183,11 @@
     playRegion(name,source,offset,start,end,fadeIn,layers);
     placements.sort((a,b)=>a.at-b.at);
     const themes=memory && {final:memory.at(end),decisions,appearances:memory.completed()};
-    return {compiled,placements,markers,duration:end,themes};
+    return {compiled,segments,placements,markers,cueDecisions,duration:end,themes};
   }
 
-  function renderTimeline(sources,spec,intents,assets={},options={}) {
+  function renderScheduled(timeline,spec,options={}) {
     check(fields(options,['sampleRate','start','end','stems','world']),'Invalid production timeline render options');
-    const timeline=schedule(sources,spec,intents,assets);
     const {sampleRate=48000,start:beginPoint=0,end:endPoint=timeline.duration,stems=false}=options;
     const start=T.seconds(T.read(beginPoint)),end=T.seconds(T.read(endPoint));
     check(integer(sampleRate,8000,96000)&& finite(start,0,timeline.duration) &&
@@ -220,9 +245,14 @@
       }
     }
     return {value,stems:buffers,report:{start,end,sampleRate,placements:timeline.placements,markers:timeline.markers,
+      cueDecisions:timeline.cueDecisions,
       ...(timeline.themes && {themes:timeline.themes}),
       ...(world && {world:world.report}),
       ...(A.meters(value))}};
   }
+  function renderTimeline(sources,spec,intents,assets={},options={}) {
+    return renderScheduled(schedule(sources,spec,intents,assets),spec,options);
+  }
+  P.musicTimeline=Object.freeze({schedule,renderScheduled});
   P.musicProduction=Object.freeze({...A,renderTimeline});
 })(KIT.procedural);

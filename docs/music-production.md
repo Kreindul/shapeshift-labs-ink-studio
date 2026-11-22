@@ -128,6 +128,9 @@ parallel inserts, and sidechain compression on the same sample grid.
 
 ## Assemble adaptive transitions
 
+[Rehearse adaptive joins](music-adaptive-rehearsal.md) against recorded world
+paths and audition edits at the same sample addresses.
+
 Pass the `music-transition` and `music-cue` intents from Ink's
 [adaptive music clock](adaptive-music.md) to `music.renderTransitions`.
 The renderer takes a named production `sources` bank and a `timeline` with
