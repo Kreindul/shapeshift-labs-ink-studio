@@ -1,7 +1,8 @@
 /* A JSON diorama and its local dependencies, mounted without a host filesystem. */
 (function(K) {
   const A = K.authoring, DIO = K.diorama;
-  const format = 'ink-studio/project-bundle', version = 1, takeVersion = 2;
+  const format = 'ink-studio/project-bundle', version = 1, takeVersion = 2, experimentVersion = 3;
+  const experimentFormat = 'ink-studio/simulation-experiment';
   const maxBytes = 128 * 1024 * 1024, maxFiles = 4096;
   const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
   const meshExtension = /\.(obj|gltf|glb)$/i;
@@ -174,26 +175,35 @@
 
   function open(input) {
     const document = contents(input), { entry, project, toolkit, files, attachments = {}, atlases = {} } = document;
-    if (document.format !== format || ![version, takeVersion].includes(document.version))
+    const experiment = document.version === experimentVersion;
+    if (document.format !== format || ![version, takeVersion, experimentVersion].includes(document.version))
       throw new TypeError('Unsupported Ink Studio project bundle version');
     if (!object(project) || typeof project.id !== 'string' || !Number.isSafeInteger(project.revision) ||
         project.revision < 1 || !object(toolkit) || typeof toolkit.version !== 'string' ||
-        !/^[a-f0-9]{64}$/.test(toolkit.sourceHash ?? '') || !object(files) || !object(attachments) || !object(atlases))
+        !/^[a-f0-9]{64}$/.test(toolkit.sourceHash ?? '') ||
+        experiment && !/^[a-f0-9]{64}$/.test(toolkit.runnerHash ?? '') ||
+        !object(files) || !object(attachments) || !object(atlases))
       throw new TypeError('Invalid project version information or file table');
     const rows = Object.entries(files);
     if (!rows.length || rows.length > maxFiles || !/\.json$/i.test(entry ?? '') || !Object.hasOwn(files, entry))
       throw new RangeError('A project needs a JSON scene entry and a bounded file table');
     let size = 0;
-    const table = new Map();
+    const table = new Map(), paths = experiment ? new Set() : null;
     for (const [name, record] of rows) {
       if (resolvePath('', name) !== name || !object(record) || typeof record.data !== 'string' ||
           !['utf8', 'base64'].includes(record.encoding))
         throw new TypeError('Invalid project file record: ' + name);
       if (record.encoding === 'base64' && !base64(record.data))
         throw new TypeError('Invalid base64 project file: ' + name);
+      if (experiment) {
+        const path = name.toLowerCase();
+        if (paths.has(path) || !/^[a-f0-9]{64}$/.test(record.sha256 ?? ''))
+          throw new TypeError('Invalid experiment file path or digest: ' + name);
+        paths.add(path);
+      }
       size += record.encoding === 'base64' ? record.data.length * 3 / 4 : encodeText(record.data).length;
       if (size > maxBytes) throw new RangeError('Project exceeds the file size budget');
-      table.set(name, { encoding: record.encoding, data: record.data });
+      table.set(name, { encoding: record.encoding, data: record.data, ...(experiment && { sha256: record.sha256 }) });
     }
     const io = reader(name => table.get(name)), lookup = new Map(Object.entries(attachments));
     const visited = new Set();
@@ -219,19 +229,22 @@
       return compiledAtlases.get(file);
     }
     const authored = contents(io.text(entry));
-    if (document.version === takeVersion) {
-      if (authored.format !== 'ink-studio/take' || authored.version !== 1 ||
-          authored.id !== undefined && authored.id !== project.id)
-        throw new TypeError('Version 2 project bundles need a matching take entry');
-      const metadata = Object.freeze({ id: project.id, revision: project.revision, entry, kind: 'take',
-        toolkit: Object.freeze({ version: toolkit.version, sourceHash: toolkit.sourceHash }) });
+    if (document.version === takeVersion || experiment) {
+      const kind = experiment ? 'experiment' : 'take', authoredFormat = experiment ? experimentFormat : 'ink-studio/take';
+      if (authored.format !== authoredFormat || authored.version !== 1 ||
+          (experiment ? authored.id !== project.id || project.revision !== (authored.revision ?? 1) :
+            authored.id !== undefined && authored.id !== project.id))
+        throw new TypeError('Version ' + document.version + ' project bundles need a matching ' + kind + ' entry');
+      const metadata = Object.freeze({ id: project.id, revision: project.revision, entry, kind,
+        toolkit: Object.freeze({ version: toolkit.version, sourceHash: toolkit.sourceHash,
+          ...(experiment && { runnerHash: toolkit.runnerHash }) }) });
       return Object.freeze({
         metadata,
-        snapshot: () => ({ format, version: takeVersion, project: { ...project }, toolkit: { ...metadata.toolkit },
+        snapshot: () => ({ format, version: document.version, project: { ...project }, toolkit: { ...metadata.toolkit },
           entry, files: Object.fromEntries([...table].map(([name, record]) => [name, { ...record }])),
           attachments: Object.fromEntries(lookup),
           ...(atlasSources.size && { atlases: structuredClone(Object.fromEntries(atlasSources)) }) }),
-        takeDocument: () => structuredClone(authored),
+        [kind + 'Document']: () => structuredClone(authored),
         files: () => [...table.keys()],
         readFile: name => io.bytes(resolvePath('', name)),
         attachment(id) {
@@ -281,7 +294,8 @@
     });
   }
 
-  A.projectBundles = Object.freeze({ format, version, takeVersion, maxBytes, maxFiles, resolvePath, open, mapAtlasImages,
+  A.projectBundles = Object.freeze({ format, version, takeVersion, experimentVersion, experimentFormat,
+    maxBytes, maxFiles, resolvePath, open, mapAtlasImages,
     collectAttachment(file, get) {
       visitAttachment(file, reader(get), new Set());
     },

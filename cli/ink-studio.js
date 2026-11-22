@@ -1252,9 +1252,10 @@ const CMD = {
         '    --w width --h height --still-scale 2 --t seconds --from 0 --to 2 --fps 12 --embed-config file.json',
         '  scene-replay <recording.json> --out output.png [--at seconds]   save a frame from a replay',
         '  scene-replay <recording.json> --embed --out embed.html [--embed-config file.json]   package a replay for the web',
-        '  project pack <scene-or-take.json> --out <bundle.json> [--root directory --revision n --asset-pack file --paint file --attachments file]',
+        '  project pack <scene-take-or-experiment.json> --out <bundle.json> [--root directory --revision n --asset-pack file --paint file --attachments file]',
         '  project inspect <bundle.json>   show the bundle version, entry path and retained files',
         '  project unpack <bundle.json> --out new-directory   extract a portable project',
+        '  project verify <experiment-bundle.json> [--out report.json --compare-engine]   replay packaged simulation checks',
         '  environment-parity [--fixture observatory --out directory --chrome executable]  compare matched CLI and WebGL environment frames',
         '  passes <id> --channels environment --px1   export sky, fog transmittance, precipitation, reflections and foreground coverage',
         '  render|sheet|clip <id> or sim render <file> --passes environment   write environment passes beside the export',
@@ -2554,8 +2555,8 @@ const CMD = {
   },
   project() {
     const [mode, input] = pos, api = require('./project-bundle.js');
-    if (pos.length !== 2 || !['pack', 'inspect', 'unpack'].includes(mode))
-      die('Use project pack <scene-or-take.json>, inspect <bundle.json>, or unpack <bundle.json> --out new-directory');
+    if (pos.length !== 2 || !['pack', 'inspect', 'unpack', 'verify'].includes(mode))
+      die('Use project pack, inspect, unpack or verify with a JSON document');
     if (mode === 'unpack') {
       const { entry } = api.unpackProject(input, { out: opt.out });
       console.log('unpacked', entry);
@@ -2563,11 +2564,28 @@ const CMD = {
     }
     if (mode === 'inspect') {
       const project = api.readProjectBundle(input), { format, version, attachments } = project.snapshot();
-      process.stdout.write(JSON.stringify({ format, version, ...project.metadata, files: project.files(), attachments, take: project.takeDocument?.() }, null, 2) + '\n');
+      process.stdout.write(JSON.stringify({ format, version, ...project.metadata, files: project.files(), attachments,
+        take: project.takeDocument?.(), experiment: project.experimentDocument?.() }, null, 2) + '\n');
+      return;
+    }
+    if (mode === 'verify') {
+      if (Object.keys(opt).some(key => key !== 'out' && key !== 'compare-engine') ||
+          opt.out !== undefined && (typeof opt.out !== 'string' || !opt.out.trim()) ||
+          opt['compare-engine'] !== undefined && opt['compare-engine'] !== true)
+        die('Use project verify <experiment-bundle.json> [--out report.json --compare-engine]');
+      if (opt.out && fs.existsSync(opt.out)) {
+        const source = fs.statSync(input), destination = fs.statSync(opt.out);
+        if (source.dev === destination.dev && source.ino === destination.ino) die('Choose a report separate from its experiment bundle');
+      }
+      const report = require('./project-experiment.js').verify(input, { compareEngine: opt['compare-engine'] ?? false });
+      if (opt.out) require('./asset-files.js').json(path.resolve(opt.out), report);
+      else process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+      if (!report.passed) process.exitCode = 2;
       return;
     }
     if ([opt.root, opt.revision].includes(true)) die('--root and --revision need values');
-    const { file, project } = api.packProject(input, { out: opt.out, root: opt.root, revision: num('revision', 1),
+    const { file, project } = api.packProject(input, { out: opt.out, root: opt.root,
+      revision: opt.revision === undefined ? undefined : num('revision', 1),
       assetPack: opt['asset-pack'], paint: opt.paint, attachments: opt.attachments });
     console.log('wrote', file, project.files().length, 'file(s)');
   },

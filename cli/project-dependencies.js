@@ -6,6 +6,7 @@ const { validateTake } = require('./take-document.js');
 const { resolveCheckpoint } = require('./checkpoint-file.js');
 const { isModel, mapModels, requireRevision } = require('./simulation-model-files.js');
 const { groupEntries, groupReference, groupDocument, requireGroupReference } = require('./graph-groups.js');
+const Experiment = require('./experiment-schema.js');
 
 const formats = {
   'ink-studio/take': 'take',
@@ -22,7 +23,8 @@ const formats = {
   'ink-studio/run': 'checkpoints',
   'ink-studio/asset-pack': 'look',
   'ink-studio/asset-bundle': 'look',
-  'ink-studio/input-recording': 'inputs'
+  'ink-studio/input-recording': 'inputs',
+  [Experiment.format]: 'experiment'
 };
 const bytes = record => Buffer.from(record.data, record.encoding);
 const digest = record => createHash('sha256').update(bytes(record)).digest('hex');
@@ -38,6 +40,8 @@ function collectDependencies(bundles, entry, get, attachments = {}) {
     if (!value) throw new Error('Missing project file: ' + name);
     return value;
   };
+  const entryDocument = JSON.parse(bytes(requireFile(entry)).toString('utf8'));
+  const experiment = entryDocument?.format === Experiment.format;
 
   function directoryAnchor(owner, ref) {
     if (typeof ref !== 'string') throw new TypeError('Expected a project directory path');
@@ -47,6 +51,43 @@ function collectDependencies(bundles, entry, get, attachments = {}) {
   function datasetFiles(file, data) {
     for (const dataset of values(data)) if (dataset?.file !== undefined)
       requireFile(resolvePath(file, dataset.file));
+  }
+
+  function world(file, document) {
+    datasetFiles(file, document.dataInputs);
+    activeModels.add(file);
+    mapModels(document, ref => {
+      const target = resolvePath(file, ref.file);
+      if (activeModels.has(target)) throw new Error('Simulation model file cycle at ' + target);
+      requireRevision(ref, visit(target, 'world').model, target);
+      return ref;
+    });
+    activeModels.delete(file);
+  }
+
+  function simulation(file, document) {
+    if (document.format === 'ink-studio/world' || isModel(document) ||
+        document.format === undefined && record(document.systems)) world(file, document);
+    for (const source of Experiment.dependencies(document)) {
+      if (typeof source === 'string') visit(resolvePath(file, source));
+      else if (Object.hasOwn(source, Experiment.savedFile)) requireFile(resolvePath(file, source[Experiment.savedFile]));
+      else simulation(file, source);
+    }
+  }
+
+  function experimentEntry(file, document) {
+    Experiment.validate(document);
+    for (const group of values(document.assets))
+      for (const ref of values(group)) visit(resolvePath(file, ref));
+    for (const [name, run] of Object.entries(document.runs)) {
+      const source = visit(resolvePath(file, run.source), undefined, true), expected = Experiment.entries[run.kind];
+      if (expected === 'native' ? !Experiment.nativeFormats.has(source.format) : source.format !== expected)
+        throw new TypeError('Unexpected experiment source format on ' + name);
+      JSON.parse(bytes(requireFile(resolvePath(file, run.expected))).toString('utf8'));
+      if (run.checkpoint !== undefined) visit(resolvePath(file, run.checkpoint), 'checkpoints');
+      if (run.commands !== undefined)
+        JSON.parse(bytes(requireFile(resolvePath(file, run.commands))).toString('utf8'));
+    }
   }
 
   function graphGroups(file, declarations = {}) {
@@ -104,18 +145,22 @@ function collectDependencies(bundles, entry, get, attachments = {}) {
       return prior;
     }
     const raw = requireFile(file);
-    const document = /\.json$/i.test(file) || expected || json ? JSON.parse(bytes(raw).toString('utf8')) : undefined;
+    const document = file === entry ? entryDocument :
+      /\.json$/i.test(file) || expected || json ? JSON.parse(bytes(raw).toString('utf8')) : undefined;
     const kind = document && Object.hasOwn(formats, document.format) ? formats[document.format] :
       document && document.format === undefined && expected === 'world' ? 'world' :
       document && (file === entry || Array.isArray(document.solids) || document.brushRegion || document.prefabLibrary || document.instances)
         ? 'scene' : undefined;
     if (expected && expected !== kind) throw new TypeError('Unexpected project dependency type: ' + file);
-    const dependency = {kind, ...(kind === 'group' && {group:groupDocument(document, bytes(raw), file)}),
+    const dependency = {kind,format:document?.format, ...(kind === 'group' && {group:groupDocument(document, bytes(raw), file)}),
       ...(isModel(document) && {model:document})};
     visited.set(file, dependency);
     const follow = (ref, type) => { if (ref !== undefined) visit(resolvePath(file, ref), type); };
 
-    if (kind === 'take') {
+    if (kind === 'experiment') {
+      if (!experiment || file !== entry) throw new TypeError('A simulation experiment must be the project entry');
+      experimentEntry(file, document);
+    } else if (kind === 'take') {
       validateTake(document);
       follow(document.world, 'world');
       follow(document.graph, 'graph');
@@ -140,15 +185,7 @@ function collectDependencies(bundles, entry, get, attachments = {}) {
         else if (record(asset)) follow(asset.graph, 'graph');
       }
     } else if (kind === 'world') {
-      datasetFiles(file, document.dataInputs);
-      activeModels.add(file);
-      mapModels(document, ref => {
-        const target = resolvePath(file, ref.file);
-        if (activeModels.has(target)) throw new Error('Simulation model file cycle at ' + target);
-        requireRevision(ref, visit(target, 'world').model, target);
-        return ref;
-      });
-      activeModels.delete(file);
+      world(file, document);
     } else if (kind === 'shot') {
       shot(file, document);
     } else if (kind === 'checkpoints') {
@@ -164,6 +201,7 @@ function collectDependencies(bundles, entry, get, attachments = {}) {
     } else if (kind === 'scene') {
       for (const name of bundles.collect(file, get, {}, { validate: file === entry }).atlasPaths) atlasPaths.add(name);
     } else if (kind === undefined) {
+      if (experiment && document) simulation(file, document);
       bundles.collectAttachment(file, get);
     }
     return dependency;

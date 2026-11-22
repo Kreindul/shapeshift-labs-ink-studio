@@ -89,6 +89,7 @@ module.exports = {
   EXPORTS,
   version: require('./package.json').version,
   bundle,
+  nodeToolkitHash: () => createHash('sha256').update(fs.readFileSync(nodeBundlePath())).digest('hex'),
   // the seven built-in demo dioramas. They push onto an array called SCENES, which must already exist
   demos: () => demoFiles().map(read).join('\n'),
   // refuse-to-build check: code written after a // comment on the same line never runs. Returns the offending lines
@@ -207,6 +208,7 @@ module.exports = {
   readProjectBundle: require('./cli/project-bundle.js').readProjectBundle,
   writeProjectBundle: require('./cli/project-bundle.js').writeProjectBundle,
   unpackProject: require('./cli/project-bundle.js').unpackProject,
+  verifyProjectExperiment: (...args) => require('./cli/project-experiment.js').verify(...args),
   describeRenderFrame: (world, frame) => require('./src/render-contract.js').describe(world, frame),
   capturePixelScan: require('./cli/pixel-scan.js').capturePixelScan,
   createCameraAtlas(options) {

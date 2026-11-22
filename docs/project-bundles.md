@@ -71,3 +71,10 @@ The Node API exposes the same extraction via
 Portable shots use declarative scenes and local inputs. A project that uses
 custom graph operations or a codec adapter can still supply those through its
 host. The take commands and shot replay use the Node library and CLI.
+
+## Bundle a simulation experiment
+
+A version 3 project bundle carries a [simulation experiment](simulation-experiment-bundles.md).
+Use `project pack` to retain its model, geometry, inputs, references,
+checkpoint, and expected results. Use `project verify` to replay the named
+checks against the packaged files on the pinned engine.
