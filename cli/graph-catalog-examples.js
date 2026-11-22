@@ -17,6 +17,7 @@ const sampleCapture = {op:'audio.captureSample',inputs:{source:audio,settings:{
   sample:{id:'tone',label:'Bench tone',material:'synth',pitch:'A4',license:{id:'CC0-1.0'}},
   source:{kind:'graph',name:'oscillator'},firstSample:16,endSample:48
 }}};
+const sampleMotifPlan={op:'music.planSampleMotif',inputs:{source:audio,score:audio}};
 const atmosphereReference={sampleRate:8000,frames:128,events:{lead:[]}};
 const atmosphereSettings={layers:[{id:'drift',kind:'bed',assets:['tone']}]};
 const atmospherePlan={op:'music.planAtmosphere',inputs:{source:atmosphereReference,assets:{tone:audio},settings:atmosphereSettings}};
@@ -326,6 +327,9 @@ const specifications = {
   'audio.buildSampleInstrument': {inputs:{assets:{tone:audio},source:{zones:[{id:'tiny',takes:['tone'],low:60,high:60,root:null}]}}},
   'audio.warp': {nodes:{edited:{op:'audio.renderSampleEdit',inputs:{source:audio,edit:slicedAudio}}},
     inputs:{source:link('edited'),options:{mode:'repitch',speed:.8}}},
+  'music.planSampleMotif': {inputs:sampleMotifPlan.inputs},
+  'music.renderSampleMotif': {nodes:{plan:sampleMotifPlan},inputs:{source:audio,score:audio,plan:link('plan'),role:'lead'}},
+  'music.auditionSampleMotif': {nodes:{plan:sampleMotifPlan},inputs:{source:audio,score:audio,plan:link('plan')}},
   'music.atmosphereReference': {inputs:{score:audio,performance:{events:{lead:[]}}}},
   'music.planAtmosphere': {inputs:atmospherePlan.inputs},
   'music.renderAtmosphere': {nodes:{plan:atmospherePlan},
