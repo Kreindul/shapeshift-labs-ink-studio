@@ -89,12 +89,17 @@ function writeReview(folder,result,paths) {
 }
 
 module.exports=function command([mode,file,config],opt,kit) {
+  const P=kit.KIT.music.production;
+  if (mode==='instrument-presets') {
+    if (typeof opt.out==='string') write(opt.out,P.instrumentPresets);
+    else process.stdout.write(JSON.stringify(P.instrumentPresets,null,2)+'\n');
+    return P.instrumentPresets;
+  }
   if (!file) throw new TypeError('Use music production with a mode and a recipe. Producer modes are plan-audition, review-audition and keep-audition');
   const recipe=read(file);
   const {sources,paths,timeline}=mode==='timeline' ? timelineBank(recipe,file) : {paths:assetPaths(recipe,file)};
   const assets=Object.fromEntries(Object.entries(paths).map(([name,file])=>[name,WAV.read(file)]));
   const production=recipe.production ?? recipe;
-  const P=kit.KIT.music.production;
   let value;
   if (mode==='inspect') value=P.inspect(production,assets);
   else if (mode==='performances') value=P.planPerformances(production,config ? read(config) : recipe.performances,assets);
@@ -114,6 +119,7 @@ module.exports=function command([mode,file,config],opt,kit) {
   else if (mode==='analyze') value=P.analyze(production,assets,config ? read(config) : recipe.options);
   else if (mode==='suggest') value=P.suggest(production,config ? read(config) : recipe.options,assets);
   else if (mode==='search') value=P.searchComposition(production,config ? read(config) : recipe.brief,assets);
+  else if (mode==='pocket') value=P.planPocket(production,config ? read(config) : recipe.pocket,assets);
   else if (mode==='plan-audition') value=P.planProducer(production,config ? read(config) : recipe.brief,assets);
   else if (mode==='revise' && config) {
     const document=read(config);

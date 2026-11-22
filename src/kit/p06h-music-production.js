@@ -194,7 +194,7 @@
         highpass:number(raw,'highpass',0,0,4000),lowpass:number(raw,'lowpass',20000,80,24000),
         send:number(raw,'send',0,0,1),choke:raw.choke,duck};
       const patch=patches[raw.patch];
-      return [name,{patch:raw.patch,play:patch.player,mix,echo:patch.echo,color:patch.color,
+      return [name,{patch:raw.patch,play:patch.player,performance:patch.performance,mix,echo:patch.echo,color:patch.color,
         gestures:G.score(raw.gestures,patch,plan,clock),
         clips:raw.clips===undefined ? null : N.rows(raw.clips,clock,program,plan.sections.at(-1).end),
         groove:groove(raw.groove),pad:raw.pad===undefined ? null : pad(raw.pad,plan.sections)}];
@@ -205,7 +205,7 @@
     const events=Object.fromEntries(names.map(name=>[name,[]]));
     let eventCount=0;
     for (const name of performance?.order ?? names) {
-      const track=tracks[name], follow=performance?.driver(name,events);
+      const track=tracks[name], follow=performance?.driver(name,events,clock);
       const scoreNotes=N.overlay(scoreRows(plan,program,clock,name,track.pad),track.clips,clock), g=track.groove;
       const rows=cue ? Q.shape(cue,name,scoreNotes) : scoreNotes;
       const silence=cue?.perTrack[name].silence ?? [], cuts=cue?.perTrack[name].cuts ?? [];
@@ -226,7 +226,7 @@
         const gate=Math.max(.001,writtenGate+(length && !row.ties ? (length.target-writtenGate)*length.strength : 0));
         const voice=row.voice ?? 0, retrigger=row.ties ? 1 : play.retrigger ?? 1, fromFrequency=last.get(voice);
         const previous=lastNotes.get(voice);
-        const connected=style.legato && velocity>0 && plan.parts[name].role!=='percussion' &&
+        const connected=!track.performance && style.legato && velocity>0 && plan.parts[name].role!=='percussion' &&
           !track.pad && previous?.velocity>0 && connection<end && connection>previous.time+.005 &&
           connection-previous.time-previous.gate<=.14 &&
           (next(silence,previous.time)?.startTime ?? Infinity)>connection;
@@ -245,9 +245,10 @@
           const note={part:name,beat:round(row.beat),time:onset,gate:Math.min(gate/retrigger,stop-onset),midi:row.midi,
             frequency:row.frequency,velocity,play,fromFrequency,salt,roundRobin:notes.length,
             ...(row.clip && {clip:row.clip,voice:row.voice,note:row.note,...(row.ties && {ties:row.ties})}),
+            ...(track.performance && !row.clip && row.voice!==undefined && {voice:row.voice}),
             ...(style.gesture && {gesture:style.gesture}),...(connected && r===0 && {connected:true})};
           const cut=next(cuts,onset)?.startTime;
-          if (cut!==undefined && onset+track.play.prepare(note,48000,note.gate).duration>cut)
+          if (cut!==undefined && (track.performance || onset+track.play.prepare(note,48000,note.gate).duration>cut))
             note.choke=cut;
           notes.push(note);
           lastNotes.set(voice,note);
@@ -255,9 +256,11 @@
         }
       }
       notes.sort((a,b)=>a.time-b.time);
+      if (track.performance) P.musicPhrasing.apply(track.performance,notes,silence,plan.parts[name].role==='percussion');
       events[name]=notes;
     }
     applyChokes(tracks,events);
+    for (const name of names) if (tracks[name].performance) P.musicPhrasing.releases(events[name]);
     const locks=cue || performance ? Object.keys(C.locks(written)) : [];
     if (locks.length) {
       const {cueMap,grooveMap,...plain}=source, base=compile(plain,assets);
@@ -281,11 +284,12 @@
       chokeGroups.set(group,rows);
     }
     for (const rows of chokeGroups.values()) {
-      rows.sort((a,b)=>a.time-b.time);
+      const onset=note=>note.start ?? note.time;
+      rows.sort((a,b)=>onset(a)-onset(b));
       let next=Infinity;
       for (let i=rows.length-1;i>=0;i--) {
-        const at=rows[i].time;
-        if (rows[i+1]?.time>at) next=rows[i+1].time;
+        const at=onset(rows[i]);
+        if (rows[i+1] && onset(rows[i+1])>at) next=onset(rows[i+1]);
         if (next!==Infinity) rows[i].choke=Math.min(rows[i].choke ?? next,next);
       }
     }
@@ -308,16 +312,24 @@
     const buffers={}, mix=new Float32Array(n*2), feed=new Float32Array(stop*2);
     for (const name of names) {
       const track=music.tracks[name], data=new Float32Array(stop*2);
-      for (const note of music.events[name]) {
-        if (note.time>=end) break;
-        const first=Math.ceil(note.time*sampleRate-1e-7);
+      const onset=note=>note.start ?? note.time;
+      const events=track.performance ? music.events[name].slice().sort((a,b)=>onset(a)-onset(b)) : music.events[name];
+      for (const note of events) {
+        const start=onset(note);
+        if (start>=end) break;
+        const first=Math.ceil(start*sampleRate-1e-7);
         if (first>=stop) break;
-        const sound=track.play.prepare(note,sampleRate,Math.min(note.gate,end-note.time));
-        const endTime=Math.min(note.choke ?? Infinity,note.time+sound.duration);
+        const gate=Math.min(note.gate,end-note.time)+note.time-start;
+        const nativeGate=note.start===undefined ? Math.min(note.gate,end-note.time) : gate;
+        const cropped=note.performance?.release && end<note.time+note.gate-1e-8;
+        const sound=track.play.prepare(cropped ? {...note,suppressRelease:true} : note,sampleRate,nativeGate);
+        const endTime=Math.min(note.choke ?? Infinity,start+sound.duration);
         const last=Math.min(stop,Math.ceil(endTime*sampleRate));
         for (let at=first;at<last;at++) {
-          const t=Math.max(0,at/sampleRate-note.time);
-          const fade=note.choke===endTime ? clamp((endTime-at/sampleRate)*250) : 1;
+          const t=Math.max(0,at/sampleRate-start);
+          const remaining=endTime-at/sampleRate;
+          const fade=note.choke!==endTime ? 1 : note.chokeFade ?
+            Math.sin(clamp(remaining/note.chokeFade)*Math.PI/2) : clamp(remaining*250);
           const frame=at-first;
           const left=sound.signal(t,frame,0)*fade;
           data[2*at]+=left;

@@ -249,6 +249,14 @@ const specifications = {
     template:{format:'ink-studio/performance-groove',version:1,id:'take',step:.25,length:2,
       lanes:{keys:[{slot:3,offset:.035,accent:.9,length:.21}]}},roles:{lead:{lane:'keys'}}
   }}},
+  'music.instrumentPresets': {inputs:{}},
+  'music.planPocket': {inputs:{source:production,brief:{
+    rhythm:{edits:[{part:'lead',section:'opening',scope:'section',adopt:{length:4,events:[
+      {beat:.25,duration:.24,degree:1},{beat:.75,duration:.28,degree:3}
+    ]}}]},
+    groove:{template:{format:'ink-studio/performance-groove',version:1,id:'late',step:.25,length:2,
+      lanes:{lead:[{slot:3,offset:.035,accent:1}]}},tracks:{lead:{lane:'lead'}}}
+  }}},
   'music.noteClip': {inputs:{source:{id:'lines',beat:0,length:2,voices:[
     {id:'alto',notes:[{id:'held',beat:0,duration:2,midi:64}]},
     {id:'tenor',notes:[{id:'answer',beat:.5,duration:1,midi:55}]}]}}},

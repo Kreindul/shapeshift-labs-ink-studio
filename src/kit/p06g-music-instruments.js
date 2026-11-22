@@ -41,7 +41,8 @@
     const ramp=Math.min(time,glide);
     const slide=glide && note.fromFrequency ? (note.fromFrequency-frequency)*ramp*(1-ramp/(2*glide)) : 0;
     const modulation=vibrato ? frequency*(2**(vibrato/1200)-1)*(1-Math.cos(time*tau*5.2))/(tau*5.2) : 0;
-    return frequency*time+slide+modulation;
+    const travel=note.expression?.pitchTime?.(time) ?? time;
+    return frequency*travel+slide+modulation;
   }
 
   function synth(raw) {
@@ -52,15 +53,16 @@
     return {prepare(note,rate,gate) {
       const bright=note.play.brightness ?? params.color;
       const accent=.48+.7*note.velocity;
+      const upper=note.frequency*(note.expression?.pitchMax ?? 1);
       const index=params.index*(.35+.9*bright)*(.3+.7*note.velocity)*
-        clamp((.48*rate/note.frequency-params.ratio)/Math.max(1,params.ratio));
+        clamp((.48*rate/upper-params.ratio)/Math.max(1,params.ratio));
       const gain=Math.pow(note.velocity,.78), salt=note.salt;
       const spread=2**(params.width/1200)-1;
       return {duration:gate+e.release,signal(t,frame){
         const turn=phase(note,t), transient=Math.exp(-t/params.indexDecay);
         const fm=sin(turn+sin(turn*params.ratio)*index*(.13+.87*transient)/tau);
-        const harmonics=sin(2*turn+.07)*.53*clamp((.5-2*note.frequency/rate)*12)+
-          sin(3*turn)*.26*clamp((.5-3*note.frequency/rate)*12);
+        const harmonics=sin(2*turn+.07)*.53*clamp((.5-2*upper/rate)*12)+
+          sin(3*turn)*.26*clamp((.5-3*upper/rate)*12);
         let value=type==='fm' ? fm*(1-params.body)+params.body*sin(turn/2) :
           sin(turn)*.76+params.body*harmonics*accent;
         if (spread) value=value*.72+.14*sin(turn*(1+spread))+.14*sin(turn/(1+spread));
@@ -81,7 +83,7 @@
     return {prepare(note,rate,gate) {
       const color=note.play.brightness ?? p.color, velocity=note.velocity, salt=note.salt;
       const brightness=(.35+.65*color)*(.35+.65*velocity);
-      const partial=(ratio,gain)=>gain*clamp((.5-note.frequency*ratio/rate)*12);
+      const partial=(ratio,gain)=>gain*clamp((.5-note.frequency*(note.expression?.pitchMax ?? 1)*ratio/rate)*12);
       const second=partial(1.999,.20*p.tine), third=partial(3.998,.38*p.bite*brightness);
       const strike=partial(6.84,.26*p.bite*brightness);
       return {duration:gate+e.release,signal(t,frame) {
@@ -105,9 +107,10 @@
       const hardness=note.play.brightness ?? p.color;
       return {duration,signal(t,frame) {
         const n1=noise(frame,salt), n2=noise(frame-1,salt), edge=(n1-n2)*.5;
-        const body=sin(p.tune*t+p.sweep*(1-Math.exp(-75*t))/75);
+        const travel=note.expression?.pitchTime?.(t) ?? t;
+        const body=sin(p.tune*travel+p.sweep*(1-Math.exp(-75*t))/75);
         const hiss=(n1*(.7-hardness*.45)+edge*(.3+hardness*.45));
-        const ring=sin(p.tune*t)*.55+sin(p.tune*2.73*t)*.25+sin(p.tune*4.59*t)*.2;
+        const ring=sin(p.tune*travel)*.55+sin(p.tune*2.73*travel)*.25+sin(p.tune*4.59*travel)*.2;
         let value;
         switch (kind) {
           case 'kick': value=.93*body*Math.exp(-4*t/duration)+p.click*hiss*Math.exp(-300*t); break;
@@ -162,11 +165,12 @@
       const frames=samples.length/channels, ratio=2**((zone.tune+(note.play.bend ?? 0))/1200)*
         (zone.root===null ? 1 : note.frequency/hz(zone.root));
       const offset=(note.play.offset ?? 0)*sampleRate;
-      const span=Math.max(0,(frames-offset)/(ratio*sampleRate));
+      const travel=note.expression?.pitchTime;
+      const span=P.musicNoteExpression.duration(travel,Math.max(0,(frames-offset)/(ratio*sampleRate)));
       const duration=zone.oneShot ? span : zone.loop ? gate+e.release : Math.min(span,gate+e.release);
       const gain=zone.gain*(zone.levels?.[alternate] ?? 1)*note.velocity**.72;
       return {duration,stereo:channels===2,signal(t,frame,channel) {
-        let pos=offset+t*ratio*sampleRate;
+        let pos=offset+(travel?.(t) ?? t)*ratio*sampleRate;
         if (zone.loop && pos>=zone.loop[1]*sampleRate)
           pos=zone.loop[0]*sampleRate+(pos-zone.loop[0]*sampleRate)%((zone.loop[1]-zone.loop[0])*sampleRate);
         const at=Math.floor(pos), blend=pos-at, ch=channels===1 ? 0 : channel;
@@ -187,7 +191,7 @@
     check(['fm','analog'].includes(raw.type),'Unknown music instrument type');
     return synth(raw);
   }
-  function compile(raw,assets={}) {
+  function articulated(raw,assets) {
     check(record(raw),'Expected a music instrument');
     const {articulations,...base}=raw, patch=instrument(base,assets);
     if (articulations===undefined) return patch;
@@ -201,6 +205,56 @@
     return {prepare(note,...args) {
       const name=note.play.articulation;
       return (Object.hasOwn(variants,name) ? variants[name] : patch).prepare(note,...args);
+    }};
+  }
+
+  function express(player,note,rate,gate) {
+    const authoredGate=(note.gate ?? gate)+(note.start===undefined ? 0 : note.time-note.start);
+    const expression=P.musicNoteExpression.compile(note.play.curves,Math.max(gate,authoredGate),rate);
+    const body=player.prepare(expression ? {...note,expression} : note,rate,gate);
+    const fadeIn=note.performance?.fadeIn;
+    if (!expression?.gain && !expression?.filter && !fadeIn) return body;
+    const state=[0,0];
+    return {...body,signal(t,frame,ch=0) {
+      let sample=body.signal(t,frame,ch);
+      if (expression?.filter) {
+        state[ch]+=(sample-state[ch])*expression.filter(t);
+        sample=state[ch];
+      }
+      const fade=fadeIn ? Math.sin(clamp(t/fadeIn)*Math.PI/2) : 1;
+      return sample*fade*(expression?.gain?.(t) ?? 1);
+    }};
+  }
+
+  function compile(raw,assets={}) {
+    const player=articulated(raw,assets);
+    return {prepare(note,rate,gate) {
+      const body=express(player,note,rate,gate), release=note.performance?.release;
+      const start=note.start ?? note.time;
+      if (!release || note.suppressRelease || (note.choke ?? Infinity)<=start+gate+1e-8) return body;
+      const tail=express(player,{...note,performance:null,gate:.075,start:undefined,roundRobin:release.roundRobin,
+        velocity:clamp(note.velocity*release.level),play:{articulation:release.articulation,curves:release.curves}},rate,.075);
+      if (!tail.duration) return body;
+      const stereo=body.stereo || tail.stereo, releaseFrame=Math.ceil(gate*rate-1e-7);
+      let bodyFrame=-1, tailFrame=-1, dry=0, off=0;
+      return {stereo,duration:Math.max(body.duration,gate+tail.duration),signal(t,frame,ch=0) {
+        let sample=0;
+        if (t<body.duration) {
+          if (body.stereo) sample=body.signal(t,frame,ch);
+          else {
+            if (frame!==bodyFrame) {bodyFrame=frame;dry=body.signal(t,frame,0);}
+            sample=dry;
+          }
+        }
+        if (t>=gate && t-gate<tail.duration) {
+          if (tail.stereo) sample+=tail.signal(t-gate,frame-releaseFrame,ch);
+          else {
+            if (frame!==tailFrame) {tailFrame=frame;off=tail.signal(t-gate,frame-releaseFrame,0);}
+            sample+=off;
+          }
+        }
+        return sample;
+      }};
     }};
   }
 
