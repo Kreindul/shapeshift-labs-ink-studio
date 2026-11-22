@@ -139,3 +139,10 @@ c++ -std=c++17 -O2 -I /path/to/stretch -I /path/to/linear/include \
   examples/audio-racks/signalsmith-gesture-probe.cpp -o signalsmith-gesture
 node examples/music-production/sample-instrument-workshop.cjs output breath.wav laugh.wav ./signalsmith-gesture
 ```
+
+## Fit a synthesizer to a recording
+
+The [recording fitter](recording-instrument-fit.md) proposes editable
+oscillator, resonator, and recorded-attack graph patches from a single
+slice. Use it when you want to reshape the model and play it in another
+register or at another length.

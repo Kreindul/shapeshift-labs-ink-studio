@@ -1143,6 +1143,7 @@ const CMD = {
         '  music rack render|audition rack recipe.json --out directory   render a rack or compare with bypass',
         '  music rack plugin-info|plugin-state alias [settings.json] --clap-host manifest.json   inspect or save CLAP state',
         '  music instrument analyze|audition|build recipe.json --out path   turn a take bank into labeled playable zones',
+        '  music instrument fit|audition-fit recipe.json --out dir   fit and audition editable instruments from a recording',
         '  music deliver recipe.json --out directory [--strict]   print BWF stems, M&E, loops, cue sheet and editorial timeline',
         '  music repair input.wav settings.json --out output   render before, repaired and removed dialogue',
         '  music editorial spot-foley recipe.json --out project.json   spot paired Foley takes from committed world contacts',

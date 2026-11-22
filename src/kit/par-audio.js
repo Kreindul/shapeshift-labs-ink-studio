@@ -161,6 +161,16 @@
       inputs:{assets:'record',source:'record'},outputs:{value:'record',assets:'record',report:'record'},
       run({assets,source}) {return A.sampleInstrument.build(assets,source);}
     },
+    'audio.fitInstrument': {
+      description:'Fit editable oscillator, resonator and recorded-attack patches to one recording.',
+      inputs:{source:'audio',options},outputs:{value:'record',assets:'record',reference:'audio',report:'record'},
+      run({source,options}) {return A.instrumentFit.fit(source,options);}
+    },
+    'audio.auditionInstrumentFit': {
+      description:'Compare fitted or edited instruments over pitch, velocity and gate with a source recording.',
+      inputs:{fit:'record',assets:'record',reference:'audio',options},outputs:{value:'audio',report:'record'},
+      run({fit,assets,reference,options}) {return A.instrumentFit.audition(fit,assets,options,reference);}
+    },
     'audio.warp': {
       description: 'Fit audio to tempo or sample and picture pins with beat, tonal, speech or varispeed processing.',
       inputs: {source:'audio',options}, outputs: {value:'audio',report:'record'},

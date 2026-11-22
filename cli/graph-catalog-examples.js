@@ -12,6 +12,9 @@ const triangle = [[0, 0], [1, 0], [0, 1]], quad = [[0, 0], [1, 0], [0, 1], [1, 1
 const mesh = { points: [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], faces: [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]] };
 const clip = { width: 4, height: 4, fps: 8, layers: { ink: { frames: [rgba.data, rgba.data] } } };
 const audio = { sampleRate: 8000, channels: 1, samples: Array.from({ length: 128 }, (_, i) => i % 4 === 1 ? .5 : i % 4 === 3 ? -.5 : 0) };
+const fitTone={sampleRate:8000,channels:1,samples:Array.from({length:1600},(_,i)=>
+  .5*Math.sin(2*Math.PI*280*i/8000)*Math.min(1,i/40)*Math.exp(-i/1200))};
+const fittedTone={op:'audio.fitInstrument',inputs:{source:fitTone}};
 const event = { time: 0, channel: 'held', value: true };
 const sampleCapture = {op:'audio.captureSample',inputs:{source:audio,settings:{
   sample:{id:'tone',label:'Bench tone',material:'synth',pitch:'A4',license:{id:'CC0-1.0'}},
@@ -456,6 +459,10 @@ const specifications = {
   'audio.analyzeInstrumentSamples': {inputs:{assets:{tone:audio}}},
   'audio.auditionInstrumentRange': {inputs:{assets:{tone:audio},options:{offsets:[0]}}},
   'audio.buildSampleInstrument': {inputs:{assets:{tone:audio},source:{zones:[{id:'tiny',takes:['tone'],low:60,high:60,root:null}]}}},
+  'audio.fitInstrument': {inputs:fittedTone.inputs},
+  'audio.auditionInstrumentFit': {nodes:{fit:fittedTone},inputs:{
+    fit:link('fit'),assets:link('fit','assets'),reference:link('fit','reference'),
+    options:{candidates:['synth'],sampleRate:8000,cases:[{id:'match',midi:61,velocity:.8,gate:.2}]}}},
   'audio.warp': {nodes:{edited:{op:'audio.renderSampleEdit',inputs:{source:audio,edit:slicedAudio}}},
     inputs:{source:link('edited'),options:{mode:'repitch',speed:.8}}},
   'music.planSampleMotif': {inputs:sampleMotifPlan.inputs},
