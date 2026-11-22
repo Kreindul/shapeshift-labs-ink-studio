@@ -165,6 +165,22 @@
       inputs: {source:'audio',options}, outputs: {value:'audio',report:'record'},
       run({source,options}) {return A.warpAudio(source,options);}
     },
+    'music.planSampleMotif': {
+      description:'Plan raw, playable lead, rhythmic and stretched roles for a recording on one score window.',
+      inputs:{source:'audio',score:'audio',options},outputs:{value:'record'},
+      run({source,score,options}) {return {value:A.sampleMotif.plan(source,score,options)};}
+    },
+    'music.renderSampleMotif': {
+      description:'Replay an editable sample motif role with a score, isolated stem and playable material.',
+      inputs:{source:'audio',score:'audio',plan:'record',role:'string'},
+      outputs:{value:'audio',stem:'audio',material:'audio',role:'record',report:'record'},
+      run({source,score,plan,role}) {return A.sampleMotif.render(plan,source,score,role);}
+    },
+    'music.auditionSampleMotif': {
+      description:'Hear different musical uses of one recording over the same bars with a shared playback gain.',
+      inputs:{source:'audio',score:'audio',plan:'record',options},outputs:{value:'audio',report:'record'},
+      run({source,score,plan,options}) {return A.sampleMotif.audition(plan,source,score,options);}
+    },
     'music.atmosphereReference': {
       description:'Read the audio clock and performed note gates for a pinned atmosphere score.',
       inputs:{score:'audio',performance:'record'},outputs:{value:'record'},

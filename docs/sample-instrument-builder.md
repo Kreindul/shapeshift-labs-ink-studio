@@ -110,6 +110,9 @@ headless graphs. The build node returns the normal patch at `value`,
 decoded baked clips at `assets`, and key labels and processing at
 `report`. JavaScript uses `KIT.procedural.mediaGraph.sampleInstrument`.
 
+Use [sample-to-motif audition](sample-motif.md) to compare a recording as a
+cue, playable lead, rhythmic accent and granular texture over the same score.
+
 ## Workshop and adapter comparison
 
 ```sh

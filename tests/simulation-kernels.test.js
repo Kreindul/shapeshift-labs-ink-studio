@@ -13,7 +13,7 @@ const model = require('../examples/simulation-kernels/spring.model.json');
 const kit = ink.load(), W = kit.KIT.world;
 const operation = register(kit);
 const json = value => JSON.parse(JSON.stringify(value));
-const runCLI = (...args) => execFileSync(process.execPath,[cli,...args],{cwd:fixture,encoding:'utf8'});
+const runCLI = (...args) => execFileSync(process.execPath,[cli,...args],{cwd:fixture,encoding:'utf8',maxBuffer:4*1024*1024});
 
 test('prepared kernels snapshot both typed buffers and auxiliary data without changing saved values', () => {
   const kind = 'typed-kernel-test';
