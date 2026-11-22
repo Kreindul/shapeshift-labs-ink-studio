@@ -83,14 +83,21 @@ test('PNG transition cels survive a sidecar round trip and a portable project bu
   const root = fs.mkdtempSync(path.join(os.tmpdir(),'ink-face-transition-'));
   t.after(() => fs.rmSync(root,{recursive:true,force:true}));
   const file = path.join(root,'actor.json');
-  ink.writeSpriteAtlas(fixture(),{out:file});
+  const source = fixture();
+  const mixed = source.metadata.cels.transitions[0].frames[1];
+  mixed.paint.rows = ['11'];
+  mixed.images = { mask:Uint8Array.of(0,0,0,127, 0,0,0,128), emission:Uint8Array.of(0,0,0,0, 42,8,19,255) };
+  ink.writeSpriteAtlas(source,{out:file});
   const saved = JSON.parse(fs.readFileSync(file,'utf8'));
   const png = saved.cels.transitions[1].frames[0].files.color;
+  const { mask, emission } = saved.cels.transitions[0].frames[1].files;
   fs.writeFileSync(path.join(root,'expressions.json'),JSON.stringify(saved.cels));
   saved.cels = 'expressions.json';
   fs.writeFileSync(file,JSON.stringify(saved));
   const loaded = ink.readSpriteAtlas(file);
   assert.deepEqual(sample(loaded,loaded.select(0,'card'),.2,2).paint,berry);
+  assert.deepEqual(sample(loaded,loaded.select(0,'card'),.2,0).paint,skin);
+  assert.deepEqual(sample(loaded,loaded.select(0,'card'),.2,1).paint,open);
   const scene = path.join(root,'scene.json');
   fs.writeFileSync(scene,JSON.stringify({id:'expression-test',name:'Expression test',seed:1,
     solids:[{ id:'stand',kind:'box',at:[0,-1,0],half:[1,.05,1],mat:'stone',res:.2 }],
@@ -99,9 +106,71 @@ test('PNG transition cels survive a sidecar round trip and a portable project bu
   const out = path.join(root,'bundle.json');
   const { project } = ink.packProject(scene,{out,root});
   assert(project.files().includes(png));
+  assert(project.files().includes(mask));
+  assert(project.files().includes(emission));
   assert(project.files().includes('expressions.json'));
   const world = ink.createSceneEditor(fs.readFileSync(out,'utf8')).build();
   const restored = world.spriteAtlases[0].atlas;
   assert.deepEqual(sample(restored,restored.select(0,'card'),.2,2).paint,berry);
+  const restoredView = restored.select(0,'card'), texel = { color:[], normal:[], emission:[0,0,0] };
+  restored.sample(restoredView,1,0,{emission:true},texel,undefined,restored.transition(restoredView,.2));
+  assert.deepEqual(texel.emission.map(value=>Math.round(value*255)),[42,8,19]);
   assert.equal(ink.readSpriteAtlas(file,{cels:false}).transition,undefined);
+});
+
+test('registered iris stencils clip emission and upper overlays cover both the eye and its glow', () => {
+  const colors = ['#340c23','#d1434b','#ff4e31'];
+  const rect = [0,0,5,1], bake = Uint8Array.from([...skin,...skin,...skin,...skin,...clear]);
+  const baseEmission = Uint8Array.from([...lid,...clear,...clear,...clear,...clear]);
+  const atlas = K.sprite.atlas({
+    metadata:{width:5,height:1,frames:[{rect:{x:0,y:0,width:5,height:1},pivot:{x:0,y:0}}],cels:{
+      transitions:[
+        {id:'spell',rect,palette:colors,inheritEmission:false,start:.25,frames:[{
+          duration:.75,paint:{rows:['11111']},maskPaint:{rows:['000..']},emissionPaint:{rows:['22222']}
+        }]},
+        {id:'bangs',rect,palette:colors,inheritEmission:false,frames:[{
+          duration:1,paint:{rows:['0....']}
+        }]},
+        {id:'blink',rect,palette:colors,inheritEmission:false,start:.5,frames:[
+          {duration:.25,paint:{rows:['.0...']}},{duration:.25,paint:{rows:['.00..']}}
+        ]}
+      ]
+    }},
+    images:{color:bake,emission:baseEmission}
+  });
+  const stamp = K.sprite.placeAtlas({ atlas,mode:'card',nativePixels:true,at:[0,0,0],lighting:false });
+  const world = makeBuilder(1,[0x171827]).finish({
+    cam:{target:[0,0,0],dist:5,yaw:0,pitch:0,sway:0},radius:5,spriteAtlases:[stamp]
+  });
+  const w = 24,h = 16, left = 12, top = 8, base = top*w+left;
+  const preview = K.sprite.celPreview.create({ atlas,width:w,height:h,fps:4,count:4,mode:'card' });
+  for (const [i, expected] of [[0,[0,0,0,0,0]],[1,[0,255,255,0,0]],[2,[0,0,255,0,0]],[3,[0,0,0,0,0]]]) {
+    const { rgba,time } = preview.inspect(i);
+    const frame = ink.render(world,{ w,h,t:time,raw:true,px:1,transparent:true,passes:['emission'] });
+    assert.deepEqual(expected.map((_,x)=>Math.round(frame.passes.emission[(base+x)*3]*255)),expected);
+    for (let p=base;p<base+5;p++) {
+      assert.equal(frame.alpha[p],rgba[p*4+3]);
+      if (frame.alpha[p]) assert.deepEqual([...frame.rgb.subarray(p*3,p*3+3)],[...rgba.subarray(p*4,p*4+3)]);
+    }
+    assert.deepEqual([...rgba.subarray((base+3)*4,(base+4)*4)],skin);
+    assert.equal(rgba[(base+4)*4+3],0);
+  }
+  const withoutHalo = t => ink.render(world,{ w,h,t,px:1 }).rgb;
+  const withHalo = t => ink.render(world,{ w,h,t,px:1,artEffects:{glow:{radius:2}} }).rgb;
+  assert.notDeepEqual(withHalo(.25),withoutHalo(.25));
+  assert.deepEqual(withHalo(.75),withoutHalo(.75));
+});
+
+test('a replacement stencil preserves old pixels outside the mask and erases transparent pixels inside it', () => {
+  const source = fixture();
+  source.metadata.cels.transitions = [{
+    id:'selective-replace',mode:'replace',rect:[0,0,4,1],palette,frames:[{
+      duration:1,paint:{rows:['..00']},maskPaint:{rows:['.00.']}
+    }]
+  }];
+  const atlas=K.sprite.atlas(source), view=atlas.select(0,'card');
+  assert.deepEqual([0,1,2,3].map(x=>sample(atlas,view,0,x).paint),[skin,clear,lid,clear]);
+  const cel = source.metadata.cels.transitions[0].frames[0];
+  cel.images = { mask: new Uint8Array(16) };
+  assert.throws(()=>K.sprite.atlas(source),/one source per auxiliary channel/);
 });

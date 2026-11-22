@@ -1625,6 +1625,17 @@
       "tags": ["sprites", "pixel-art", "animation", "onion-skin"]
     },
     {
+      "id": "render.spriteOverlayMasks",
+      "kind": "api",
+      "status": "ready",
+      "title": "Sprite overlay stencils and emission",
+      "what": "Clip painted transition cels and their emission on the same art grid. Opaque eyelids or bangs can cover an independently timed emissive iris.",
+      "use": "metadata.cels.transitions with maskPaint, emissionPaint, or aligned PNG channels",
+      "where": "src/sprite-transitions.js",
+      "example": "examples/sprite-overlay-masks.js",
+      "tags": ["sprites", "pixel-art", "animation", "masks", "emission"]
+    },
+    {
       "id": "render.textile",
       "kind": "api",
       "status": "ready",

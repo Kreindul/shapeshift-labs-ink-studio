@@ -267,6 +267,55 @@ node cli/ink-studio.js clip examples/face-transition-cels.js --w 316 --h 190 --p
   --raw --from 0 --to 6 --fps 20 --out wrong-password.apng
 ```
 
+### Overlay stencils and emission
+
+Give a transition cel its own stencil to clip the registered color,
+depth, normal and emission channels to the same art pixels. Draw
+`maskPaint` with slot `0` to show the cel and `.` to reveal whatever is
+underneath. A registered `files.mask` PNG or `images.mask` RGBA buffer
+uses alpha ≥ 128 for the same hard stencil. In `replace` mode, transparent
+color erases the silhouette only inside the stencil.
+
+Paint a separate emitter with `emissionPaint`, using the clip palette,
+or supply an aligned `emission` PNG or RGBA channel. You can mix indexed
+color with auxiliary PNGs by declaring `paint` and `files` on the
+same cel. Each channel takes one source. The atlas emission encoding still
+applies. `add` adds emission to the painted color and `baked` preserves
+the painted color while supplying a signal to effects such as glow.
+
+```json
+{
+  "id": "spell-iris",
+  "rect": [22, 14, 5, 3],
+  "palette": ["#341c29", "#d44149", "#ff6a48"],
+  "inheritEmission": false,
+  "frames": [
+    {
+      "duration": 0.25,
+      "paint": { "rows": [".111.", "01110", ".111."] },
+      "maskPaint": { "rows": [".....", "00000", ".000."] },
+      "emissionPaint": { "rows": [".222.", ".222.", "..2.."] }
+    }
+  ]
+}
+```
+
+Draw the hair and lid as later clips so their visible texels cover the
+iris. Set `inheritEmission: false` on those clips to suppress baked body
+emission wherever they draw. Opaque paint then covers both the color and
+glow source. Clips without this option retain the existing body-emission
+fallback. The visible emission pass drives the halo, so a fully closed eye
+stops emitting even while its iris clip is running.
+
+[The Crimson Lock](../examples/sprite-overlay-masks.js) runs the iris,
+lid and bangs on separate tracks. Frame times around 1.55 seconds show
+the upper lid cutting into the iris and 1.75 seconds shows it shut.
+
+```sh
+node cli/ink-studio.js clip examples/sprite-overlay-masks.js --w 184 --h 116 --px 1 \
+  --from 0 --to 4 --fps 20 --out crimson-lock.apng
+```
+
 ## Native-size cel preview
 
 Scrub a sprite atlas one art pixel at a time with the [cel preview example](../examples/sprite-cel-preview.cjs).

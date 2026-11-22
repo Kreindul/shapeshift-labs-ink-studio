@@ -183,7 +183,8 @@ const AtlasSprites = (() => {
       const keepBase = !art || Boolean(baseImage[baseIndex+3]);
       const depth=art?.depth??patch?.depth??maps.depth, d=art?.depth?transition.index:patch?.depth?texel:index;
       const normal=art?.normal??patch?.normal??maps.normal, n=art?.normal?transition.index:patch?.normal?texel:index;
-      const emission=art?.emission??patch?.emission??maps.emission, e=art?.emission?transition.index:patch?.emission?texel:index;
+      const inheritedEmission=transition?.inheritEmission===false?undefined:patch?.emission??maps.emission;
+      const emission=art?.emission??inheritedEmission, e=art?.emission?transition.index:patch?.emission?texel:index;
       out.depth=0;
       if (channels.depth) {
         if (scenery) out.depth=scenery.depths[scenery.bandAt(index)];

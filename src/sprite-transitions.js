@@ -2,8 +2,11 @@
 const SpriteTransitions = (() => {
   const record = (value, keys) => value && Object.getPrototypeOf(value) === Object.prototype &&
     Object.keys(value).every(key => keys.includes(key));
-  const names = ['color', 'depth', 'normal', 'emission'];
+  const names = ['color', 'depth', 'normal', 'emission', 'mask'];
+  const paintKeys = ['rows', 'slots', 'strokes'];
+  const maskPalette = ['#ffffff'];
   const finite = Number.isFinite;
+  const visible = (maps, index) => !maps.mask || maps.mask[index + 3] >= 128;
   function check(ok, message) {
     if (!ok) throw new RangeError('Sprite transition: ' + message);
   }
@@ -15,40 +18,45 @@ const SpriteTransitions = (() => {
     let hasDepth = false;
     const stamps = typeof PixelStamps === 'undefined' ? require('./pixel-stamps.js') : PixelStamps;
     for (const clip of definition) {
-      check(record(clip, ['id','frame','direction','pitch','rect','mode','start','period','fps','frames','palette','extensionDepth']),
-        'invalid clip settings');
-      const { id, rect, mode = 'patch', start = 0, period, fps = 12, frames, palette, extensionDepth } = clip;
+      check(record(clip, ['id','frame','direction','pitch','rect','mode','start','period','fps','frames','palette',
+        'extensionDepth','inheritEmission']), 'invalid clip settings');
+      const { id, rect, mode = 'patch', start = 0, period, fps = 12, frames, palette, extensionDepth,
+        inheritEmission = true } = clip;
       check(typeof id === 'string' && id.trim() && !ids.has(id), 'clips need distinct names');
       ids.add(id);
       check(Array.isArray(rect) && rect.length === 4 && Array.from(rect).every(Number.isSafeInteger) &&
         rect[2] > 0 && rect[3] > 0 && rect[2] * rect[3] <= 65536, 'rect needs an integer origin and up to 65,536 pixels');
       check((mode === 'patch' || mode === 'replace') && finite(start) && finite(fps) && fps > 0 &&
-        (extensionDepth === undefined || finite(extensionDepth)) && Array.isArray(frames) && frames.length >= 1 &&
+        typeof inheritEmission === 'boolean' && (extensionDepth === undefined || finite(extensionDepth)) &&
+        Array.isArray(frames) && frames.length >= 1 &&
         frames.length <= 128, 'invalid mode, time, depth or cel list');
       const [left, top, w, h] = rect;
       const views = select(clip);
       check(views.every(({ rect: view }) => left >= -128 && top >= -128 && left + w <= view.width + 128 &&
         top + h <= view.height + 128 && left < view.width && top < view.height && left + w > 0 && top + h > 0),
         'rect must overlap the registered view with at most 128 pixels of overhang');
+      function paintMap(drawing, colors) {
+        check(record(drawing, paintKeys) && Array.isArray(colors) && colors.length > 0 &&
+          Array.from(colors).every(entry => typeof entry === 'string' && /^#[\da-f]{6}$/i.test(entry)),
+          'indexed channels need a hex RGB palette and rows, slots or strokes');
+        return stamps.image({ width: w, height: h, ...drawing, palette: colors }).rgba;
+      }
       const entries = Array.from(frames, (cel, frame) => {
-        check(record(cel, ['duration','paint','images']) && !(cel.paint !== undefined && cel.images !== undefined),
-          'a cel needs indexed paint, registered images or a timing-only frame');
-        const { duration = 1 / fps, paint, images } = cel;
+        check(record(cel, ['duration','paint','images','maskPaint','emissionPaint']), 'invalid cel settings');
+        const { duration = 1 / fps, paint, images, maskPaint, emissionPaint } = cel;
         check(finite(duration) && duration > 0, 'cel duration must be positive');
-        if (paint === undefined && images === undefined) return { frame, duration };
-        let maps;
-        if (images) {
-          check(record(images, names) && images.color !== undefined, 'registered images need an RGBA color channel');
-          maps = Object.fromEntries(Object.entries(images).map(([name, image]) =>
-            [name, copyRgba(image, w * h * 4, 'Sprite transition ' + name)]));
-        } else {
-          check(record(paint, ['rows','slots','strokes']) && Array.isArray(palette) && palette.length > 0 &&
-            palette.every(entry => typeof entry === 'string' && /^#[\da-f]{6}$/i.test(entry)),
-            'indexed cels need a hex RGB palette and rows, slots or strokes');
-          maps = { color: stamps.image({ width: w, height: h, ...paint, palette }).rgba };
-        }
-        pixelBudget -= w * h * Object.keys(maps).length;
+        const indexed = [['color',paint,palette],['mask',maskPaint,maskPalette],['emission',emissionPaint,palette]]
+          .filter(([, drawing]) => drawing !== undefined);
+        if (images === undefined && !indexed.length) return { frame, duration };
+        check(images === undefined || record(images, names), 'invalid registered image channels');
+        check((paint !== undefined || images?.color !== undefined) &&
+          indexed.every(([name]) => !images || !Object.hasOwn(images,name)),
+          'supply one color channel and at most one source per auxiliary channel');
+        pixelBudget -= w * h * (indexed.length + Object.keys(images ?? {}).length);
         check(pixelBudget >= 0, 'cel maps exceed the atlas pixel budget');
+        const maps = Object.fromEntries(Object.entries(images ?? {}).map(([name, image]) =>
+          [name, copyRgba(image, w * h * 4, 'Sprite transition ' + name)]));
+        for (const [name,drawing,colors] of indexed) maps[name] = paintMap(drawing,colors);
         check(!maps.depth || depthRange, 'a depth cel needs the atlas depth range');
         hasDepth ||= Boolean(maps.depth) || extensionDepth !== undefined;
         return { frame, duration, maps };
@@ -60,7 +68,7 @@ const SpriteTransitions = (() => {
         'repeat period must be at least the clip duration');
       const pick = playback(entries, fps, 'once');
       const bounds = [left, top, left + w, top + h];
-      const draw = { bounds, mode, w, extensionDepth, at(time) {
+      const draw = { bounds, mode, w, extensionDepth, inheritEmission, at(time) {
         const age = time - start;
         if (!finite(age) || age < -epsilon) return;
         let local = Math.max(0, age);
@@ -73,7 +81,10 @@ const SpriteTransitions = (() => {
       const occupied = new Set();
       if (extensionDepth === undefined) for (const { maps } of entries) {
         if (!maps) continue;
-        for (let p = 0; p < w * h; p++) if (maps.color[p * 4 + 3] && !maps.depth?.[p * 4 + 3]) occupied.add(p);
+        for (let p = 0; p < w * h; p++) {
+          const index = p * 4;
+          if (visible(maps,index) && maps.color[index + 3] && !maps.depth?.[index + 3]) occupied.add(p);
+        }
       }
       for (const view of views) {
         const patch = edited.get(view)?.maps.color;
@@ -113,8 +124,8 @@ const SpriteTransitions = (() => {
         const cel = active[i], [left,top,right,bottom] = cel.bounds;
         if (x < left || x >= right || y < top || y >= bottom) continue;
         const index = ((y - top) * cel.w + x - left) * 4;
-        if (cel.mode === 'replace' || cel.maps.color[index + 3])
-          return { maps: cel.maps, index, extensionDepth: cel.extensionDepth };
+        if (visible(cel.maps,index) && (cel.mode === 'replace' || cel.maps.color[index + 3]))
+          return { maps: cel.maps, index, extensionDepth: cel.extensionDepth, inheritEmission: cel.inheritEmission };
       }
     }
     return { frame, read, hasDepth, pixelBudget };

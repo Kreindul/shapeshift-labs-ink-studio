@@ -184,7 +184,7 @@ function readCels(definition, dir, metadata) {
     return { ...clip, frames: clip.frames.map(cel => {
       if (cel?.files === undefined) return cel;
       const [, , width, height] = clip.rect ?? [];
-      return celFiles(cel,dir,{width,height},channels);
+      return celFiles(cel,dir,{width,height},[...channels,'mask']);
     }) };
   });
   return resolved;
