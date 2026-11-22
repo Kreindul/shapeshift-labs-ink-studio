@@ -781,7 +781,7 @@
       }
     },
     'music.renderTransitions': {
-      description: 'Render adaptive score transitions, layered cues and stingers, with optional world cue rhythms and space.',
+      description: 'Render adaptive transitions with persistent performers, route-aware phrasing, and optional world cue rhythms and space.',
       inputs:{sources:'record',timeline:'record',intents:scoreRequests,assets:options,options,worldEvents:scoreRequests},
       outputs:{value:'audio',stems:'record',report:'record'},
       run({sources,timeline,intents,assets,options,worldEvents}) {

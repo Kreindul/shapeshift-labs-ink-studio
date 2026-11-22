@@ -4,6 +4,8 @@ Run an ordinary [adaptive production timeline](music-production.md#assemble-adap
 against paths someone could take through the world. Capture a late request, a
 reversal before a reveal, a long dwell, and a cue that lands during the hook.
 The same recorded requests, transitions, and cues play for every edit.
+[Persistent performers and adaptive phrases](music-persistent-performers.md)
+add held-note and listening-history evidence to the rehearsal.
 
 ## Capture a trace
 

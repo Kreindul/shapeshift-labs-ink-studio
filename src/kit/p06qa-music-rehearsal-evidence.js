@@ -115,7 +115,8 @@
       const request=trace.requests.find(row=>row.outcome==='committed' &&
         (row.serial!==undefined && marker.serial!==null ? row.serial===marker.serial :
           row.rule===marker.rule && near(row.resolvedAt,marker.time)));
-      append({id:'transition-'+(i+1),kind:'transition',...marker,wait:request ? round(marker.time-request.time) : null,
+      const held=report.performers?.joins[i]?.held;
+      append({id:'transition-'+(i+1),...(held && {held}),kind:'transition',...marker,wait:request ? round(marker.time-request.time) : null,
         gap:Math.max(0,round(marker.time-(left ? endOf(left) : marker.time))),
         outgoing:left ? {segment:left.segment,source:left.source,position:left.to} : null,
         incoming:right ? {segment:right.segment,source:right.source,position:right.from} : null,leaving,entering,
@@ -151,7 +152,9 @@
         loops:loops.filter(loop=>loop.segment===row.to && loop.time>=row.time && loop.time<end).length};
     });
     return {id:trace.id,label:trace.label ?? trace.id,end:trace.end,origin:trace.origin ?? null,
-      peak:report.peak,rms:report.rms,requests:trace.requests,dwells,cases:cases.sort((a,b)=>a.time-b.time || a.id.localeCompare(b.id))};
+      peak:report.peak,rms:report.rms,requests:trace.requests,dwells,
+      ...(report.phrasing && {phrasing:report.phrasing}),
+      ...(report.performers && {performers:report.performers}),cases:cases.sort((a,b)=>a.time-b.time || a.id.localeCompare(b.id))};
   }
 
   function matched(waves,target,ceiling) {

@@ -136,6 +136,10 @@ parallel inserts, and sidechain compression on the same sample grid.
 
 ## Assemble adaptive transitions
 
+Use [persistent performers and adaptive phrases](music-persistent-performers.md)
+to carry voices and their room through a scene change, and choose phrases from
+the player's route and prior listening.
+
 [Rehearse adaptive joins](music-adaptive-rehearsal.md) against recorded world
 paths and audition edits at the same sample addresses.
 

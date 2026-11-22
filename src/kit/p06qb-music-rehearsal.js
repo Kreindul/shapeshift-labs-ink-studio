@@ -8,7 +8,7 @@
 
   function revise(sources,timeline,revision,assets={}) {
     check(record(sources) && record(timeline?.segments) &&
-      fields(revision,['id','note','transitions','segments','stingers','stingerRules','productions']) &&
+      fields(revision,['id','note','transitions','segments','stingers','stingerRules','productions','performers','phrasing']) &&
       (revision.id===undefined || id(revision.id)) &&
       (revision.note===undefined || typeof revision.note==='string' && revision.note.length<=640) &&
       Array.isArray(revision.transitions ?? []) && (revision.transitions?.length ?? 0)<=64 &&
@@ -44,6 +44,10 @@
       next[name]=A.revise(sources[name],patch,assets);
     }
     const updated={...timeline,segments,transitions:[...edges.values()],stingers,stingerRules};
+    for (const key of ['performers','phrasing']) {
+      if (revision[key]===null) delete updated[key];
+      else if (revision[key]!==undefined) updated[key]=revision[key];
+    }
     L.schedule(next,updated,[],assets);
     return frozen({sources:next,timeline:updated});
   }
@@ -70,7 +74,7 @@
     return [...rows.values()];
   }
 
-  function run(sources,timeline,rawTraces,variants=[],assets={},options={}) {
+  function run(sources,timeline,rawTraces,variants=[],assets={},options={},host) {
     check(fields(options,['sampleRate','before','after','radius','watchTracks','target','ceiling','limit','cases','world']) &&
       Array.isArray(rawTraces) && integer(rawTraces.length,1,12) && Array.isArray(variants) && variants.length<=5 &&
       Array.from(variants).every(row=>record(row) && id(row.id) && row.id!=='reference') &&
@@ -100,7 +104,7 @@
     const passes=versions.map(version=>({id:version.id,note:version.note,
       traces:traces.map(trace=>{
         const spec={...version.timeline,end:trace.end};
-        const scheduled=L.schedule(version.sources,spec,trace.intents,assets);
+        const scheduled=L.schedule(version.sources,spec,trace.intents,assets,host);
         const result=L.renderScheduled(scheduled,spec,{sampleRate,
           ...(options.world && {world:{...options.world,events:trace.worldEvents}})});
         return {value:result.value,report:E.observe(trace,scheduled,result,{watchTracks,radius})};
