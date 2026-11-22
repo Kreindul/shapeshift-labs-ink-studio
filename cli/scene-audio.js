@@ -65,7 +65,7 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
   const inline = proceduralScore?.score === undefined ? null : K.music.score.compile(proceduralScore.score);
   const scoreSystem = proceduralScore?.system, synthAsset = Symbol('procedural score'), productionAsset=Symbol('music production');
 
-  function render(sequence, { timeline, runtime: sceneRuntime } = {}, selection) {
+  function render(sequence, { timeline, runtime: sceneRuntime } = {}, selection, delivery=false) {
     const start = sampleOf(sequence.startPoint), end = sampleOf(sequence.endPoint);
     const postSelected=post && (!selection || selection.kind==='stem' && !legacy.includes(selection.name));
     const mixStart=postSelected ? 0 : start;
@@ -253,6 +253,7 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
     const active=voices.filter(row => row.first < end && (postSelected || !selection ||
       (selection.kind==='stem' ? selection.name==='mix' || row.stem===selection.name :
         row.stem==='spatial' && row[selection.by]===selection.name)));
+    if (delivery) return post.prepare(active,resolve,{start,end,gain},true);
     const result=postSelected ? post.render(active,resolve,{start,end,gain},selection) :
       mix(active,resolve,{start,end,sampleRate,gain,capture:selection!==undefined});
     if (selection?.kind==='world' && !result.report.stems.spatial.voices)
@@ -261,7 +262,13 @@ function createSceneAudio(definition, { kit = require('../index.js').load(), res
     return result;
   }
   return Object.freeze({
+    sampleRate,
+    tempoMap: postConfig?.map,
     render: (sequence, options) => render(sequence, options),
+    prepareDelivery(sequence, options) {
+      if (!post) throw new TypeError('Scene delivery needs post routing to the named roles');
+      return render(sequence,options,undefined,true);
+    },
     capture(sequence, {source, ...options} = {}) {
       if (!fields(source,['kind','name','by']) || !token(source.name) ||
           !(source.kind==='stem' ? ['mix','music',...legacy,...(post ? buses : [])].includes(source.name) &&

@@ -3,11 +3,12 @@
   const A=P.mediaGraph, S=P.mediaGraphSupport;
   const {fields,record,integer,finite,id,check,db}=P.musicInstruments;
   const taps=['input','pre','post'], sampleBudget=48e6, workBudget=240e6;
+  const deliveryRoles=Object.freeze(['dialogue','music','foley','effects','ambience','returns']);
   function named(value,max,label) {
     check(record(value) && Object.keys(value).length<=max && Object.keys(value).every(id),'Invalid mixer '+label);
     return Object.entries(value);
   }
-  function compile(source,assets,host,premix) {
+  function compile(source,assets,host,premix,delivery) {
     check(fields(source,['id','sampleRate','map','end','tail','output','strips','processors','taps','peakPolicy','meter']) &&
       id(source.id) && id(source.output) && record(assets) &&
       (source.meter===undefined || typeof source.meter==='boolean') &&
@@ -78,6 +79,8 @@
       strips.set(name,row);
     }
     check(strips.has(source.output),'Mixer output strip is missing');
+    if (delivery) for (const [name,role] of named(delivery,48,'delivery roles'))
+      check(strips.has(name) && deliveryRoles.includes(role),'Invalid delivery role for strip '+name);
     function tap(spec) {
       const strip=strips.get(spec.strip);
       check(strip,'Unknown mixer strip '+spec.strip);
@@ -130,7 +133,7 @@
     sourceEnd=bounds ?? sourceEnd;
     const frames=source.tail==='cut' ? Math.max(1,sourceEnd) : Math.max(1,sourceEnd,master.timing.post.end,
       ...exports.map(([,row])=>timing(row.strip,row.tap).end));
-    let memory=frames*2*(exports.length+1), work=memory;
+    let memory=frames*2*(exports.length+1+(delivery ? deliveryRoles.length+1 : 0)), work=memory;
     for (const row of order) {
       for (const [name,stage] of [...Object.entries(row.timing),...row.inserts.map(x=>['insert',x])]) {
         const count=stage.end ? Math.min(frames,stage.end)+stage.latency : 0;
@@ -146,29 +149,38 @@
     return {rate,sourceEnd,frames,order,routes,master,exports};
   }
   const read=(data,index)=>data[index] ?? 0;
-  function render(source,assets,host,premix) {
-    const {rate,sourceEnd,frames,order,routes,master,exports}=compile(source,assets,host,premix);
+  function render(source,assets,host,premix,delivery) {
+    const {rate,sourceEnd,frames,order,routes,master,exports}=compile(source,assets,host,premix,delivery);
     const buffers=new Map();
+    const stems=delivery && Object.fromEntries(deliveryRoles.map(role=>[role,new Float64Array(frames*2)]));
+    let premaster;
+    const roleOf=name=>Object.hasOwn(delivery,name) ? delivery[name] : deliveryRoles.includes(name) ? name : 'returns';
     const buffer=(name,tap)=>buffers.get(name)[tap];
     const allocate=({latency,end})=>new Float64Array(end ? 2*(Math.min(end,frames)+latency) : 0);
     for (const row of order) {
       const input=allocate(row.timing.input), arrival=row.timing.input.latency;
-      const sample=[0,0];
+      const sample=[0,0], separate=stems && row===master;
       for (const clip of row.clips) {
         const gain=clip.gain.reader();
         for (let i=clip.start;i<Math.min(clip.end,frames);i++) {
           clip.reader.read(clip.fromSample+(i-clip.start)*clip.step,sample);
           const j=2*(i+arrival), scale=db(gain(i));
-          input[j]+=sample[0]*scale; input[j+1]+=sample[1]*scale;
+          const l=sample[0]*scale,r=sample[1]*scale;
+          input[j]+=l; input[j+1]+=r;
+          if (separate) {stems.returns[i*2]+=l;stems.returns[i*2+1]+=r;}
         }
       }
       for (const edge of row.routes) {
         const {samples,latency}=buffer(edge.from,edge.tap), gain=edge.level.reader();
+        const stem=separate ? stems[roleOf(edge.from)] : null;
         for (let i=0;i<Math.min(samples.length/2-latency,frames);i++) {
           const dest=2*(i+arrival), from=2*(i+latency), level=gain(i);
-          input[dest]+=samples[from]*level; input[dest+1]+=samples[from+1]*level;
+          const l=samples[from]*level,r=samples[from+1]*level;
+          input[dest]+=l; input[dest+1]+=r;
+          if (stem) {stem[i*2]+=l;stem[i*2+1]+=r;}
         }
       }
+      if (separate) premaster={samples:input,latency:arrival};
       let processed=input;
       for (const insert of row.inserts) {
         const next=allocate(insert), {processor}=insert;
@@ -245,8 +257,10 @@
           ...(key && {sidechain:{...key,compensation:keyDelay}})}))
       }]))};
     if (source.meter) report.meter=A.mixerMonitor.meter(value);
-    return {value,taps:printed,report};
+    return {value,taps:printed,report,...(stems && {premaster:print(premaster),stems})};
   }
   A.mixer=Object.freeze({render:(source,assets,host)=>render(source,assets,host),
-    renderPremix:(source,assets,buses)=>render(source,assets,undefined,buses)});
+    renderPremix:(source,assets,buses)=>render(source,assets,undefined,buses),
+    renderForDelivery:(source,assets,roles={},buses)=>render(source,assets,undefined,buses,roles),
+    deliveryRoles});
 })(KIT.procedural);

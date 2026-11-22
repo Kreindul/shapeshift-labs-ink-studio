@@ -16,11 +16,12 @@ function createScenePost(P,post,sampleRate) {
     definitions[name]=row;
   }
   const taps=Object.fromEntries(buses.map(name=>[name,{strip:name}]));
-  function render(voices,resolve,{start,end,gain},selection) {
+  function prepare(voices,resolve,{start,end,gain},collect=false) {
     check(start>=0 && end>start && end*2*buses.length<=32e6,'Scene post needs a nonnegative, bounded timeline range');
     const classified=voices.map(row=>({...row,stem:row.bus ?? (
       row.stem==='music' ? 'music' : row.stem==='tracks' || row.stem==='spatial' && row.loop ? 'ambience' : 'effects')}));
-    const {stems,statistics}=sumVoices(classified,resolve,{start:0,end,sampleRate,gain},buses);
+    const cues=collect ? [] : undefined;
+    const {stems,statistics}=sumVoices(classified,resolve,{start:0,end,sampleRate,gain,cues},buses);
     const assets=Object.fromEntries(Object.entries(post.assets ?? {}).map(([name,asset])=>[name,resolve(asset)]));
     const strips={...definitions}, premix=new Map();
     for (const [name,samples] of stems) {
@@ -28,10 +29,14 @@ function createScenePost(P,post,sampleRate) {
       premix.set(name,samples);
       strips[name]={...strips[name],clips:[{id:'scene',source:name}]};
     }
-    const stage=P.mediaGraph.mixer.renderPremix({id:'scene-post',sampleRate,end:{samples:end},tail:'cut',
-      output:'master',strips,taps,
+    const mixer={id:'scene-post',sampleRate,end:{samples:end},tail:'cut',output:'master',strips,taps,
       ...(post.map!==undefined && {map:post.map}),...(post.processors!==undefined && {processors:post.processors}),
-      ...(post.peakPolicy!==undefined && {peakPolicy:post.peakPolicy})},assets,premix);
+      ...(post.peakPolicy!==undefined && {peakPolicy:post.peakPolicy})};
+    return {mixer,assets,premix,statistics,cues};
+  }
+  function render(voices,resolve,{start,end,gain},selection) {
+    const {mixer,assets,premix,statistics}=prepare(voices,resolve,{start,end,gain});
+    const stage=P.mediaGraph.mixer.renderPremix(mixer,assets,premix);
     const slice=audio=>({...audio,samples:audio.samples.subarray(start*2,end*2)});
     const value=slice(stage.value), printed=Object.fromEntries(Object.entries(stage.taps).map(([name,sound])=>[name,slice(sound)]));
     const peak=audio=>{
@@ -47,6 +52,6 @@ function createScenePost(P,post,sampleRate) {
       .map(([name,sound])=>[name,WAV.encode(sound,{encoding:'pcm24'})]));
     return {waves,report};
   }
-  return {render};
+  return {render,prepare};
 }
 module.exports={createScenePost,buses,legacy};

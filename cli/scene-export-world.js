@@ -25,7 +25,7 @@ function readExportWorld(file, kit) {
   }
   const create = () => K.world.runtime.create(source);
   return {
-    fps: settings?.fps, audio,
+    fps: settings?.fps, audio, runtime: create,
     capture({ width, height, options, render }) {
       const run = create(), original = run.view(), { dt } = original.world;
       const period = settings?.simulationRate === undefined ? T.period(dt) : T.div(T.read(1), T.read(settings.simulationRate));
