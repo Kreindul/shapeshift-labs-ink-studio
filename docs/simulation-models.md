@@ -26,7 +26,7 @@ the resolved schedule, or `probe` to sample an individual world field.
 | --- | --- |
 | `format`, `version` | `"ink-studio/simulation-model"` and schema version `1`. |
 | `id`, `revision` | A model ID and a positive integer revision. Publish edits as a new model revision. |
-| `seed`, `numerics` | An explicit integer world seed and `{"dt":0.05}` for the world tick in seconds. |
+| `seed`, `numerics` | An explicit integer world seed and `{"dt":0.05}` for the world tick in seconds. Optional `blockSize` enables [sample-rate blocks](simulation-blocks.md). |
 | `domain`, `parameters`, `initial`, `boundaries` | JSON records that hold the authored data. A model may leave any of these records empty. Individual operators define how they interpret the data wired into their settings. |
 | `operators` | A named map of native system instances. Each has a `kind` and a pinned `revision`. Supply `config`, `schedule`, and `contract` as for a [world system](headless-worlds.md#compose-system-contracts). Put per-operator numerical settings here. Use [physical port quantities](physical-ports.md) to declare units and frames on named ports. |
 | `inputs`, `outputs` | Named aliases of `"operator/port"` strings. An exposed input must be free of internal connections. Its type comes from the native port definition. |

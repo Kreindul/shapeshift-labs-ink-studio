@@ -27,6 +27,9 @@ samples the saved endpoint.
   the model catch-up limit per visit, held input levels, queued input events,
   and accumulated output events. A visit advances the model to the last
   completed model tick at that host boundary.
+- `blocks` shows the maximum range and publication boundary of a
+  [sample-rate model](simulation-blocks.md). Its clock still reports the
+  logical sample cadence.
 
 ## Follow a signal
 

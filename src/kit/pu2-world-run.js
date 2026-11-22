@@ -239,7 +239,8 @@
     physicalRates(world,ports,schedule);
     const incoming = new Map(), edges = new Map(), indegree = new Map();
     const {contracts,edges:phaseEdges} = W.systemComposition.compile(world,systems);
-    for (const name of ordered(systems)) {
+    const names = ordered(systems);
+    for (const name of names) {
       edges.set(name,[]);
       indegree.set(name,0);
     }
@@ -263,12 +264,19 @@
         phaseEdges.push({kind:'signal',from,to,output:edge.from,input:edge.to});
     }
     if (world.simulationModel) W.models.checkInterface(world,ports,incoming,systems);
+    const blockSize = world.simulationModel?.blockSize, blockSystem = names[0];
+    if (blockSize !== undefined) {
+      check(Number.isSafeInteger(blockSize) && blockSize >= 1 && blockSize <= W.kernels.maxBlockSize &&
+        names.length === 1 && systems[blockSystem].kernel?.block === true &&
+        typeof systems[blockSystem].stepBlock === 'function' && !incoming.size && !schedule.active &&
+        !contracts.size, 'Block models need one block kernel on the model clock without connections or system contracts');
+    }
     for (const {from,to} of phaseEdges) {
       indegree.set(to,indegree.get(to)+1);
       edges.get(from).push(to);
     }
     if (contracts.size) for (const targets of edges.values()) targets.sort();
-    const names = ordered(systems), ready = names.filter(name => indegree.get(name) === 0), order = [];
+    const ready = names.filter(name => indegree.get(name) === 0), order = [];
     for (let i=0;i<ready.length;i++) {
       const name = ready[i];
       order.push(name);
@@ -437,6 +445,7 @@
       [edge.to,Array(edge.delay).fill(W.rates.buffered(edge)?W.rates.zero(ports.outputs[edge.from].type):rootOutputs[edge.from])]));
     const metrics = new Map();
     const scheduled = new Map();
+    let commandTicks;
     const added = [];
     const historyLimit = world.history?.limit ?? 10000;
     let tick = 0, states = {}, outputs = rootOutputs, manual = rootInputs, delays = rootDelays,
@@ -494,7 +503,10 @@
       return [...scheduled.keys()].sort((a,b) => a-b).flatMap(key => scheduled.get(key));
     }
     function queue(entries,log) {
-      if(entries.length)lastCheckpoint=undefined;
+      if(entries.length) {
+        lastCheckpoint=undefined;
+        commandTicks=undefined;
+      }
       for (const item of entries) {
         let items = scheduled.get(item.tick);
         if (!items) scheduled.set(item.tick,items = []);
@@ -659,6 +671,9 @@
     }
     const origin = save();
     const evidence=recordRun===undefined||recordRun===false?null:W.runRecords.capture(recordRun,origin,rates,query);
+    const blockSize = world.simulationModel?.blockSize;
+    const blockSystem = blockSize !== undefined && !world.scenario && !weather && !timeline && !eventActions &&
+      !causePolicy && !regions && !evidence && !playback && !debug ? names[0] : undefined;
     if(!skipInitialSubmission&&playback?.has(tick))enqueue(playback.get(tick),true);
     regions?.publish(view());
     debug?.publish(origin);
@@ -1133,7 +1148,7 @@
       lastCheckpoint=undefined;
       for (const [name,{calls,ms}] of Object.entries(spent)) {
         const value = metrics.get(name) ?? {calls:0,ms:0,maxMs:0};
-        metrics.set(name,{calls:value.calls+calls,ms:value.ms+ms,maxMs:Math.max(value.maxMs,ms)});
+        metrics.set(name,{...value,calls:value.calls+calls,ms:value.ms+ms,maxMs:Math.max(value.maxMs,ms)});
       }
       if(workerBatches){
         partitionBatches+=workerBatches;
@@ -1170,9 +1185,64 @@
       try{return await stepInBackground();}
       finally{asyncActive=false;}
     }
+    function runBlock(end, held) {
+      const first = tick+1, commands = scheduled.get(first) ?? [];
+      if (commands.some(row => row.action !== 'world/input')) return false;
+      const nextManual = {...manual};
+      for (const {args:{port,value}} of commands) nextManual[port] = portValue(ports.inputs[port],value,port);
+      Object.assign(nextManual,held);
+      const input = currentValues(blockSystem,nextManual,{},outputs,delays);
+      const start = profile ? clock() : 0, samples = end-tick;
+      const state = systems[blockSystem].stepBlock(states[blockSystem],{start:tick,end,input});
+      const nextOutputs = {};
+      readOutputs(blockSystem,state,undefined,nextOutputs);
+
+      states = freeze({[blockSystem]:state});
+      outputs = freeze(nextOutputs);
+      manual = freeze(nextManual);
+      lastSignals = freeze({...manual,...outputs});
+      lastEvents = freeze([]);
+      currentQuery = undefined;
+      lastCheckpoint = undefined;
+      lastDependencies = null;
+      scheduled.delete(first);
+      tick = end;
+      if (profile) {
+        const prior = metrics.get(blockSystem) ?? {calls:0,ms:0,maxMs:0};
+        const ms = clock()-start;
+        metrics.set(blockSystem,{calls:prior.calls+samples,ms:prior.ms+ms,maxMs:Math.max(prior.maxMs,ms),
+          blockCalls:(prior.blockCalls??0)+1,blockSamples:(prior.blockSamples??0)+samples});
+      }
+      return true;
+    }
+    function blockEnd(to) {
+      commandTicks ??= [...scheduled.keys()].sort((a,b) => a-b);
+      let low = 0, high = commandTicks.length;
+      while (low < high) {
+        const mid = Math.floor((low+high)/2);
+        if (commandTicks[mid] <= tick+1) low = mid+1;
+        else high = mid;
+      }
+      return Math.min(to,tick+blockSize,(commandTicks[low] ?? Infinity)-1);
+    }
+    function advanceBlocks(to, held) {
+      while (tick < to) {
+        if (runBlock(blockEnd(to),held)) continue;
+        check(held === undefined,'Held model inputs need a level-only sample block');
+        step();
+      }
+      return view();
+    }
+    function advanceHeld(to, held) {
+      check(!asyncActive && tickOK(to) && to >= tick, 'Invalid held block target');
+      const values = Object.fromEntries(Object.entries(held).map(([port,value]) =>
+        [port,portValue(ports.inputs[port],value,port)]));
+      return advanceBlocks(to,values);
+    }
     function advance(to, {onTick,stopOnOutcome = false} = {}) {
       check(!asyncActive,'A simulation advance is already in progress');
       check(tickOK(to) && to >= tick, 'Target tick precedes current state or exceeds the run budget');
+      if (blockSystem && onTick === undefined) return advanceBlocks(to);
       while (tick < to && (!stopOnOutcome || scenario.status === 'running')) {
         step();
         onTick?.(view(),query());
@@ -1185,6 +1255,10 @@
       asyncActive=true;
       try{
         while(tick<to&&(!stopOnOutcome||scenario.status==='running')){
+          if (blockSystem && onTick === undefined && runBlock(blockEnd(to))) {
+            await Promise.resolve();
+            continue;
+          }
           const completed=await stepInBackground();
           if(onTick)await onTick(completed,query());
         }
@@ -1196,7 +1270,7 @@
       return freeze({format:runFormat,version:1,origin,commands:added.slice(),end,...(trace&&{trace}),
         ...(evidence&&{evidence:evidence.document(end)})});
     }
-    return Object.freeze({view,query,projectEntities,step,advance,stepAsync,advanceAsync,...(timeline&&{timeline}),...(regions&&{regions:regions.api}),
+    return Object.freeze({view,query,projectEntities,step,advance,stepAsync,advanceAsync,...(blockSystem&&{[W.models.heldAdvance]:advanceHeld}),...(timeline&&{timeline}),...(regions&&{regions:regions.api}),
       ...(debug&&{stepFrame:debug.latest,stepAttempt:debug.attempt}),
       get scenario(){return scenario;}, get history(){return history;}, get events(){return lastEvents;},
       schedule:commands => enqueue(commands,true),checkpoint:save,recording,

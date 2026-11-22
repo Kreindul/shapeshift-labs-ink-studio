@@ -3,7 +3,7 @@
   const W = K.world, R = W.runtime, P = K.procedural;
   const {check, id, own, record, equal} = W.data, {clone, freeze} = P.data;
   const format = 'ink-studio/kernel-state', version = 1;
-  const maxBytes = 8 * 1024 * 1024;
+  const maxBytes = 8 * 1024 * 1024, maxBlockSize = 65536;
   const types = {number:'number', bool:'boolean', vec3:'vec3', record:'record', event:'array'};
   const defaults = {number:0, bool:false, vec3:[0,0,0], record:{}, event:[]};
   const arrays = {Int8Array,Uint8Array,Uint8ClampedArray,Int16Array,Uint16Array,Int32Array,Uint32Array,Float32Array,Float64Array};
@@ -94,6 +94,7 @@
     const kernel = spec.prepare(settings.config,{id:instance,seed,dt});
     check(record(kernel) && ['advance','reset','snapshot','restore'].every(key => typeof kernel[key] === 'function'),
       'Kernel prepare must return advance, reset, snapshot and restore');
+    check(!spec.block || typeof kernel.advanceBlock === 'function', 'Block kernel prepare must return advanceBlock');
     let current, shape;
 
     function state(outputs, steps) {
@@ -150,6 +151,18 @@
         return outputs;
       });
     }
+    function advanceBlock({start = current.steps, end, input:source = {}} = {}) {
+      check(start === current.steps && Number.isSafeInteger(end) && end >= start && end-start <= maxBlockSize,
+        'Kernel block needs a contiguous integer range of at most '+maxBlockSize+' samples');
+      if (end === start) return current.outputs;
+      const input = values(spec.inputs,source,false);
+      const randomAt = (sample,key) => P.data.hash(instance+'/'+(sample+1)+'/'+String(key),seed)/4294967296;
+      return transact(() => {
+        const outputs = values(spec.outputs,kernel.advanceBlock({start,end,dt,input,randomAt}),true);
+        current = state(outputs,end);
+        return outputs;
+      });
+    }
     function restore(saved) {
       if (saved === current) return current;
       const {outputs,payload} = decode(saved);
@@ -161,22 +174,31 @@
       });
     }
     reset();
-    return Object.freeze({advance,reset,snapshot:()=>current,restore});
+    return Object.freeze({advance,reset,snapshot:()=>current,restore,...(spec.block && {advanceBlock})});
   }
 
   function worldProvider(spec) {
     return (config,{id,world}) => {
       let session;
       const open = () => session ??= prepare(spec.kind,spec.revision,config,{id,seed:world.seed,dt:world.dt});
+      function stepBlock(saved, range) {
+        const run = open();
+        run.restore(saved);
+        run.advanceBlock(range);
+        return run.snapshot();
+      }
       return {
         inputs:spec.inputs, outputs:spec.outputs, shareCheckpoint:true,
-        kernel:{kind:spec.kind,revision:spec.revision,description:spec.description},
+        ...(spec.block && {stepBlock}),
+        kernel:{kind:spec.kind,revision:spec.revision,description:spec.description,...(spec.block && {block:true})},
         typedStateBytes:saved => Object.values(saved.buffers)
           .reduce((sum,{type,length}) => sum + arrays[type].BYTES_PER_ELEMENT*length,0),
         ...(spec.estimate && {estimate:() => spec.estimate(config,{id,seed:world.seed,dt:world.dt})}),
         initial:() => open().snapshot(),
         validateState:saved => { open().restore(saved); },
         step(saved,context) {
+          if (spec.block && world.simulationModel?.blockSize)
+            return stepBlock(saved,{start:context.tick-1,end:context.tick,input:context.input});
           const run = open();
           run.restore(saved);
           run.advance(context);
@@ -198,18 +220,20 @@
         description:'Model input commands with tick, input, and value.',
         properties:Object.fromEntries(Object.entries(spec.inputs).map(([key,{type,...details}])=>
           [key,{type:types[type],...details}]))},
-      clock:{...opts,properties:{tick:{type:'number',unit:'model tick'},dt:{type:'number',unit:'s'},seed:{type:'number'}}},
+      clock:{...opts,properties:{tick:{type:'number',unit:'model tick'},dt:{type:'number',unit:'s'},seed:{type:'number'},
+        ...(spec.block && {blockSize:{type:'number',unit:'samples',min:1,max:maxBlockSize}})}},
       checkpoint:{...opts,description:'Portable world checkpoint from the same kernel configuration and input schedule.'}},
       outputs:{...outputPorts,checkpoint:'record'},
       instantiate() {
         let run, prior;
         return ({config,commands,clock,checkpoint},{time,take}) => {
-          const {tick,dt=1/60,seed=1} = clock;
-          check(keys(clock,['tick','dt','seed']), 'Kernel graph clock accepts tick, dt and seed');
-          const request = [config,commands,dt,seed,checkpoint];
+          const {tick,dt=1/60,seed=1,blockSize} = clock;
+          const allowed = spec.block ? ['tick','dt','seed','blockSize'] : ['tick','dt','seed'];
+          check(keys(clock,allowed), 'Invalid kernel graph clock settings');
+          const request = [config,commands,dt,seed,blockSize,checkpoint];
           if (!prior || request.some((value,i)=>value!==prior[i])) {
             const alias = table => Object.fromEntries(Object.keys(table).map(key=>[key,'solver/'+key]));
-            const model = {format:W.models.format,version:1,id:kind,revision,seed,numerics:{dt},
+            const model = {format:W.models.format,version:1,id:kind,revision,seed,numerics:{dt,...(blockSize !== undefined && {blockSize})},
               domain:{},parameters:{},initial:{},boundaries:{},operators:{solver:{kind,revision,config}},
               inputs:alias(spec.inputs),outputs:alias(spec.outputs),commands,probes:{}};
             run = W.models.session(model,{...(Object.keys(checkpoint).length && {checkpoint})});
@@ -232,17 +256,19 @@
   }
 
   function register(kind, spec) {
-    const {revision = 1, description = 'Creator simulation kernel.', example} = spec ?? {};
+    const {revision = 1, description = 'Creator simulation kernel.', example, block = false} = spec ?? {};
     const name = 'kernel.' + kind + '.v' + revision;
     check(id(kind) && name.length <= 100 && positiveRevision(revision) && typeof description === 'string' &&
-      keys(spec,['revision','description','inputs','outputs','prepare','example','estimate']) && typeof spec.prepare === 'function' &&
-      (spec.estimate === undefined || typeof spec.estimate === 'function') &&
+      keys(spec,['revision','description','inputs','outputs','prepare','example','estimate','block']) && typeof spec.prepare === 'function' &&
+      typeof block === 'boolean' && (spec.estimate === undefined || typeof spec.estimate === 'function') &&
       (example === undefined || keys(example,['config','commands','clock'])), 'Invalid simulation kernel registration ' + name);
     const versions = kernels.get(kind) ?? new Map();
     check(!versions.has(revision), 'Duplicate simulation kernel ' + name);
     const inputs = ports(spec.inputs), outputs = ports(spec.outputs);
+    check(!block || [...Object.values(inputs),...Object.values(outputs)].every(port => port.type !== 'event'),
+      'Block kernels need level ports');
     check(!own(outputs,'checkpoint'),'Kernel output checkpoint is reserved for the graph snapshot');
-    const def = freeze({kind,revision,description,inputs,outputs,prepare:spec.prepare,estimate:spec.estimate,...(example && {example:clone(example)})});
+    const def = freeze({kind,revision,description,inputs,outputs,block,prepare:spec.prepare,estimate:spec.estimate,...(example && {example:clone(example)})});
     R.register(kind,worldProvider(def),{revision});
     versions.set(revision,def);
     kernels.set(kind,versions);
@@ -250,6 +276,6 @@
     return name;
   }
 
-  W.kernels = Object.freeze({register,prepare,format,operation:name => operations.get(name),
+  W.kernels = Object.freeze({register,prepare,format,maxBlockSize,operation:name => operations.get(name),
     graphOperations:() => Object.fromEntries(operations)});
 })(KIT);

@@ -167,6 +167,10 @@
     return freeze({
       version:1, world:world.id,tick, ...(world.simulationModel &&
         {model:{id:world.simulationModel.id,revision:world.simulationModel.revision}}),
+      ...(world.simulationModel?.blockSize !== undefined && {
+        blocks:{maxSamples:world.simulationModel.blockSize,range:'start-inclusive/end-exclusive',
+          publication:'block-end',splitsAt:'input commands and requested endpoints'}
+      }),
       clock:{dtSeconds:world.dt,hz:finite(hostHz),subdivision,mode:rates ? 'multi-rate' : 'fixed'},
       phases:phases.map(({slice,names}) => ({slice,at:slice/subdivision,candidates:names})),
       systems:lanes,postStep:{observers,transferProducers:transfers.producers},

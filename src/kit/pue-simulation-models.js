@@ -4,7 +4,7 @@
   const {check, copy, endpoint, id, own, read, record, selector, vector} = W.data;
   const {freeze} = K.procedural.data;
   const format = 'ink-studio/simulation-model';
-  const version = 1;
+  const version = 1, heldAdvance = Symbol('model input block');
   const sections = ['domain', 'parameters', 'initial', 'boundaries'];
   const revision = value => Number.isSafeInteger(value) && value > 0;
   const fields = (value, keys) => record(value) && Object.keys(value).every(key => keys.includes(key));
@@ -99,8 +99,11 @@
     check(sections.every(key => record(source[key])), 'Model needs domain, parameters, initial and boundaries records');
     parameterValues(source);
     const {numerics} = source;
-    check(fields(numerics, ['dt']) && Number.isFinite(numerics.dt) && numerics.dt > 0 && numerics.dt <= 1,
+    check(fields(numerics, ['dt','blockSize']) && Number.isFinite(numerics.dt) && numerics.dt > 0 && numerics.dt <= 1,
       'Model numerics needs an explicit timestep in (0, 1]');
+    const {blockSize} = numerics;
+    check(blockSize === undefined || Number.isSafeInteger(blockSize) && blockSize >= 1 && blockSize <= W.kernels.maxBlockSize,
+      'Model blockSize must be 1–'+W.kernels.maxBlockSize+' samples');
     check(source.world === undefined || fields(source.world, ['entities', 'visual', 'assetPacks', 'metadata']),
       'Model world may supply entities, visual settings, asset packs and metadata');
 
@@ -132,6 +135,7 @@
       systems, ...(modules !== undefined && {modules}), ...(instances !== undefined && {instances}),
       connections: source.connections ?? [], commands,
       simulationModel: {id: name, version, revision: assetRevision, inputs, outputs, probes,
+        ...(blockSize !== undefined && {blockSize}),
         ...(Object.keys(exposedParameters).length && {exposedParameters})}
     }, source);
     check(Object.keys(world.systems).length > 0, 'A model needs at least one operator or module instance');
@@ -185,5 +189,5 @@
       ...(parameters !== undefined && {parameters}), ...(seed !== undefined && {seed})}};
   }
 
-  W.models = Object.freeze({format, compile, expand, instantiate, checkInterface, sample, command, session, system});
+  W.models = Object.freeze({format, compile, expand, instantiate, checkInterface, sample, command, session, system, heldAdvance});
 })(KIT);

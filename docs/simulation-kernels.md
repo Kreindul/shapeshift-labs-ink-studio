@@ -107,6 +107,9 @@ to describe workspace size or named work per step in the
 [execution plan](simulation-execution-plan.md#interpret-the-estimates).
 Ink obtains the typed state size from the checkpoint buffers.
 
+For audio-rate and other sample-heavy models, optionally register an
+[`advanceBlock` kernel](simulation-blocks.md) with a preallocated sample loop.
+
 ## Checkpoint demo
 
 ```sh

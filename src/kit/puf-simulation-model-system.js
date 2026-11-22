@@ -88,8 +88,14 @@
         const pending = Object.fromEntries(events.map(name => [name, W.rates.add(state.pending[name], ctx.input[name], 'event')]));
         const eventValues = emptyEvents(eventOutputs);
         if (to === from) return freeze({...state, pending, eventValues});
+        const current = restore(state);
+        if (current[M.heldAdvance]) {
+          const held = Object.fromEntries(levels.map(name => [model.inputs[name],ctx.input[name]]));
+          current[M.heldAdvance](to,held);
+          return capture(current,emptyEvents(events),eventValues);
+        }
         // Outer ticks own the input history. A driven child starts its command ledger at this checkpoint.
-        const run = driven.length ? restore(state).fork() : restore(state);
+        const run = driven.length ? current.fork() : current;
         live = run;
         if (!driven.length && !eventOutputs.length) run.advance(to);
         else for (let tick = from + 1; tick <= to; tick++) {
