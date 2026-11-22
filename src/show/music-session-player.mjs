@@ -46,7 +46,7 @@ function selections() {
 function bounds(loop=state.loop) {
   for (const [input,edge] of [['loop-in','from'],['loop-out','to'],['keep-in','from'],['keep-out','to']]) {
     $(input).max=state.frames/state.sampleRate;
-    $(input).value=loop[edge]/state.sampleRate;
+    $(input).value=Number((loop[edge]/state.sampleRate).toFixed(6));
   }
 }
 function show(next) {
