@@ -80,6 +80,8 @@ with an inline controller, a checkpoint, and `options.dt`.
 
 ## Fit bounded inputs
 
+Use [reference parameter fitting](parameter-fitting.md) when a fit needs recorded curves, measured WAVs, or saved per-candidate errors.
+
 An `ink-studio/inverse-target-plan` maps finite parameter bounds to named
 observations. A target can be a number or a numeric vector, with a
 positive absolute `tolerance` for each component. Set optional
@@ -127,6 +129,9 @@ units of each target's tolerance. Use `starts` to supply alternative
 seed candidates for nonlinear problems. Use `settings.maxEvaluations`
 to cap work, `parameterTolerance` to set the normalized search
 resolution, and `history: true` to retain trial summaries.
+`history: "errors"` adds per-objective RMS, bias, and worst residual.
+Use `goal: "minimize"` to continue searching for lower weighted error
+after the tolerances have been met.
 `tolerance-met` requires all target components to meet their tolerances.
 `resolution`, `evaluation-limit`, and `no-feasible-sample` describe how
 an unmet fit stopped. The result describes the measured search, so a

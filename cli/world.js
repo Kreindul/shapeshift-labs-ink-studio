@@ -599,6 +599,20 @@ module.exports = function createCLI({kit,build,pose,dataScene,opt,renderOptions,
         if(opt['require-tolerance'])ensure(report.converged,'Inverse target fit ended with status '+report.status);
         return;
       }
+      case 'fit-parameters': {
+        ensure(typeof file==='string'&&other===undefined&&Object.keys(opt).every(key=>['out','json','require-tolerance'].includes(key))&&
+          (opt['require-tolerance']===undefined||opt['require-tolerance']===true),
+        'Use sim fit-parameters <run.json> [--out report.json --require-tolerance]');
+        const destination=typeof opt.out==='string'?path.resolve(opt.out):undefined;
+        ensure(opt.out===undefined||destination&&destination!==path.resolve(file),'Parameter fit needs a separate report file');
+        const report=require('./parameter-fit.js').run(kit,read(file),file,source=>{
+          ensure(path.resolve(source)!==destination,'Fit report must be separate from its source assets');
+          shot?.dependency?.(source);
+        });
+        respond(report);
+        if(opt['require-tolerance']&&!report.metTolerance)process.exitCode=2;
+        return;
+      }
       case 'input-compile': {
         ensure(typeof file==='string'&&other===undefined,'Use sim input-compile <plan.json> [--out score.json]');
         return respond(require('./input-compiler.js').load(kit,read(file),file,shot?.dependency));

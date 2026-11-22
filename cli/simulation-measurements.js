@@ -17,12 +17,10 @@ const nativeRunners={
   'ink-studio/sensor-run':'./virtual-sensors.js'
 };
 
-function run(kit,request,file,dependency=()=>{}){
+function sourceResolver(kit,file,dependency=()=>{}){
   const W=kit.KIT.world,{check,record,id,own}=W.data,{fields}=W.boundarySignals;
-  check(fields(request,['format','version','plan','sources'])&&request.format===runFormat&&request.version===1&&
-    record(request.sources)&&Object.keys(request.sources).length<=64&&Object.keys(request.sources).every(id),
-  'Expected a version 1 simulation measurement run');
   const owner=path.resolve(file), documents=new Map(), results=new Map();
+  const isNative=value=>own(nativeRunners,value?.format);
   function load(reference){
     if(typeof reference!=='string')return {value:reference,file:owner};
     check(reference.length&&!path.isAbsolute(reference)&&!path.win32.isAbsolute(reference),
@@ -40,21 +38,33 @@ function run(kit,request,file,dependency=()=>{}){
     if(mode==='saved')return value;
     if(mode==='diagnostics')return value?.format===W.diagnostics.format?value:
       require('./simulation-diagnostics.js').run(kit,value,file,dependency);
-    const native=own(nativeRunners,value?.format)?nativeRunners[value.format]:undefined;
+    const native=isNative(value)?nativeRunners[value.format]:undefined;
     check(mode!=='native'||native,'Unrecognized native simulation run format');
     return native?require(native).run(kit,value,file,dependency,value.diagnostics):value;
   }
-  const sources=Object.fromEntries(Object.entries(request.sources).map(([name,entry])=>{
-    check(fields(entry,['file','value','mode'])&&own(entry,'file')!==own(entry,'value')&&
-      (!own(entry,'file')||typeof entry.file==='string')&&['auto','native','saved','diagnostics'].includes(entry.mode??'auto'),
-    'Measurement source '+name+' needs a relative file or inline value and a supported mode');
-    const prepared=own(entry,'file')?load(entry.file):{value:entry.value,file:owner};
-    const mode=entry.mode??'auto';
-    if(!results.has(prepared))results.set(prepared,new Map());
-    const modes=results.get(prepared), key=mode==='auto'&&own(nativeRunners,prepared.value?.format)?'native':mode;
-    if(!modes.has(key))modes.set(key,solve(prepared,key));
-    return [name,modes.get(key)];
-  }));
-  return W.simulationMeasurements.run(load(request.plan).value,sources);
+  function sources(entries){
+    check(record(entries)&&Object.keys(entries).length<=64&&Object.keys(entries).every(id),'Invalid measurement source table');
+    return Object.fromEntries(Object.entries(entries).map(([name,entry])=>{
+      check(fields(entry,['file','value','mode'])&&own(entry,'file')!==own(entry,'value')&&
+        (!own(entry,'file')||typeof entry.file==='string')&&['auto','native','saved','diagnostics'].includes(entry.mode??'auto'),
+      'Measurement source '+name+' needs a relative file or inline value and a supported mode');
+      const prepared=own(entry,'file')?load(entry.file):{value:entry.value,file:owner};
+      const mode=entry.mode??'auto';
+      if(!results.has(prepared))results.set(prepared,new Map());
+      const modes=results.get(prepared), key=mode==='auto'&&isNative(prepared.value)?'native':mode;
+      if(!modes.has(key))modes.set(key,solve(prepared,key));
+      return [name,modes.get(key)];
+    }));
+  }
+  return {load,sources,isNative,solve};
 }
-module.exports={runFormat,run};
+
+function run(kit,request,file,dependency=()=>{}){
+  const W=kit.KIT.world;
+  W.data.check(W.boundarySignals.fields(request,['format','version','plan','sources'])&&
+    request.format===runFormat&&request.version===1,'Expected a version 1 simulation measurement run');
+  const resolver=sourceResolver(kit,file,dependency);
+  const sources=resolver.sources(request.sources);
+  return W.simulationMeasurements.run(resolver.load(request.plan).value,sources);
+}
+module.exports={runFormat,run,sourceResolver};

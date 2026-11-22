@@ -1011,6 +1011,7 @@ const CMD = {
         '    sim sound-controls <run.json|controls.json> [--out controls.json] [--at seconds | --sample index]   map and inspect sound automation',
         '    sim controller <run.json> [--out trace.json]   replay target following, hysteresis, or PID',
         '    sim fit-targets <plan.json> [--out report.json --require-tolerance]   fit bounded controls to measured targets',
+        '    sim fit-parameters <run.json> [--out report.json --require-tolerance]   fit native runs to weighted reference data',
         '    sim input-compile <plan.json> [--out score.json]   compile text, IPA, MIDI, recordings, and cues',
         '    sim input-edit <score.json> <edits.json> [--out score.json]   edit events and rebuild curves',
         '    sim input-export <score.json> [bindings.json] --kind recording|events|gesture   use editable input scores',

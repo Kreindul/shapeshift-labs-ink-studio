@@ -25,8 +25,8 @@
       check(fields(row,['value','tolerance','weight','quantity']),'Invalid inverse target '+name);
       const {value,tolerance,weight=1}=row, array=Array.isArray(value), values=array?Array.from(value):[value];
       const tolerances=Array.isArray(tolerance)?Array.from(tolerance):Array(values.length).fill(tolerance);
-      check(integer(values.length,1,16)&&values.every(finite)&&tolerances.length===values.length&&tolerances.every(positive)&&
-        positive(weight)&&weight<=1000000&&(components+=values.length)<=96,'Invalid inverse target value, tolerance or weight on '+name);
+      check(integer(values.length,1,256)&&values.every(finite)&&tolerances.length===values.length&&tolerances.every(positive)&&
+        positive(weight)&&weight<=1000000&&(components+=values.length)<=512,'Invalid inverse target value, tolerance or weight on '+name);
       return {name,array,values,tolerances,weight,quantity:K.quantities.normalize(row.quantity,'Inverse target '+name)};
     });
     return {parameters,targets,components};
@@ -35,12 +35,14 @@
   function fit(plan,evaluate){
     check(typeof evaluate==='function','Inverse fitting needs a deterministic evaluator');
     const {parameters,targets,components}=definitions(plan), n=parameters.length, {settings={},starts=[]}=plan;
-    check(fields(settings,['maxEvaluations','parameterTolerance','initialRadius','differenceStep','damping','history']),
+    check(fields(settings,['maxEvaluations','parameterTolerance','initialRadius','differenceStep','damping','history','goal']),
       'Unknown inverse fit settings');
-    const {maxEvaluations=256,parameterTolerance=1e-6,initialRadius=.25,differenceStep=1e-4,damping=1e-6,history=false}=settings;
+    const {maxEvaluations=256,parameterTolerance=1e-6,initialRadius=.25,differenceStep=1e-4,damping=1e-6,
+      history=false,goal='tolerance'}=settings, minimize=goal==='minimize';
     check(integer(maxEvaluations,1,4096)&&positive(parameterTolerance)&&parameterTolerance<=.25&&
       positive(initialRadius)&&initialRadius<=1&&initialRadius>=parameterTolerance&&positive(differenceStep)&&differenceStep<=.25&&
-      positive(damping)&&damping<=1&&typeof history==='boolean'&&Array.isArray(starts)&&starts.length<=16,
+      positive(damping)&&damping<=1&&(typeof history==='boolean'||history==='errors')&&
+      ['tolerance','minimize'].includes(goal)&&components*maxEvaluations<=524288&&Array.isArray(starts)&&starts.length<=16,
     'Invalid inverse fit work, step or history settings');
     const parameterNames=new Set(parameters.map(p=>p.name));
     const encode=raw=>parameters.map(({name,min,max,initial})=>{
@@ -54,9 +56,11 @@
     })];
     const physical=x=>Object.fromEntries(parameters.map(({name,min,max},i)=>[name,clamp(mix(min,max,x[i]),min,max)]));
     const trace=history?[]:null, cache=new Map();
+    const retainErrors=history==='errors';
     let evaluations=0,infeasible=0,best=null,iteration=0;
+    const done=()=>minimize?best?.cost===0:best?.met;
     function better(a,b){
-      return a!==null&&(!b||a.met&&!b.met||a.met===b.met&&a.cost<b.cost);
+      return a!==null&&(!b||(minimize||a.met===b.met?a.cost<b.cost:a.met));
     }
     function sample(x){
       const key=x.join(',');
@@ -72,7 +76,7 @@
         return null;
       }
       check(record(measured),'Inverse evaluator must return named measurements or null');
-      const vector=[], rows={}, ratio=[];
+      const vector=[], rows={}, ratio=[], objectiveErrors={};
       for(const target of targets){
         const {name,array,values,tolerances,weight,quantity}=target, received=measured[name];
         check(array?Array.isArray(received):finite(received),'Invalid inverse measurement shape on '+name);
@@ -86,14 +90,23 @@
           ratio.push(Math.abs(value));
         }
         const shape=items=>array?items:items[0];
+        const worst=normalized.reduce((j,value,i)=>Math.abs(value)>Math.abs(normalized[j])?i:j,0);
+        const worstRatio=Math.abs(normalized[worst]);
         rows[name]={target:shape(values),measured:shape(actual),residual:shape(errors),tolerance:shape(tolerances),
-          ratio:Math.max(...normalized.map(Math.abs)),...(quantity&&{quantity})};
+          ratio:worstRatio,...(quantity&&{quantity})};
+        if(retainErrors){
+          const factor=Math.sqrt(errors.length);
+          objectiveErrors[name]={rms:Math.hypot(...errors.map(error=>error/factor)),
+            bias:errors.reduce((sum,error)=>sum+error/errors.length,0),
+            worst:{index:worst,residual:errors[worst],ratio:worstRatio}};
+        }
       }
       const cost=vector.reduce((sum,value)=>sum+value*value,0)/components, maxRatio=Math.max(...ratio);
-      const row={x,parameters:params,targets:rows,cost,maxRatio,vector,met:maxRatio<=1};
+      const row={x,evaluation:evaluations,parameters:params,targets:rows,cost,maxRatio,vector,met:maxRatio<=1};
       cache.set(key,row);
       if(better(row,best))best=row;
-      trace?.push({evaluation:evaluations,parameters:params,rms:Math.sqrt(cost),maxRatio,feasible:true});
+      trace?.push({evaluation:evaluations,parameters:params,rms:Math.sqrt(cost),maxRatio,feasible:true,
+        ...(retainErrors&&{errors:objectiveErrors})});
       return row;
     }
 
@@ -130,13 +143,13 @@
         point[i]=clamp(point[i]+sign*radius,0,1);
         const at=sample(point);
         if(better(at,candidate))candidate=at;
-        if(best?.met||evaluations===maxEvaluations)return candidate;
+        if(done()||evaluations===maxEvaluations)return candidate;
       }
       return candidate;
     }
 
     for(const start of starting){
-      if(best?.met||evaluations===maxEvaluations)break;
+      if(done()||evaluations===maxEvaluations)break;
       sample(start);
     }
     let radius=initialRadius;
@@ -146,20 +159,22 @@
         poll(start,radius,null);
       }
     }
-    while(best&&!best.met&&evaluations<maxEvaluations&&radius>=parameterTolerance){
+    while(best&&!done()&&evaluations<maxEvaluations&&radius>=parameterTolerance){
       const origin=best;
       iteration++;
       const trial=descent(origin,radius);
-      if(!better(trial,origin)&&!best?.met)poll(origin.x,radius,origin);
+      if(!better(trial,origin)&&!done())poll(origin.x,radius,origin);
       if(!better(best,origin))radius*=.5;
     }
-    const status=best?.met?'tolerance-met':!best?'no-feasible-sample':evaluations===maxEvaluations?'evaluation-limit':'resolution';
+    const status=done()?(minimize?'exact-minimum':'tolerance-met'):
+      !best?'no-feasible-sample':evaluations===maxEvaluations?'evaluation-limit':'resolution';
     const bounds=best?Object.fromEntries(parameters.flatMap(({name,min,max})=>best.parameters[name]===min?[[name,'min']]:
       best.parameters[name]===max?[[name,'max']]:[])):{};
     const report={format:reportFormat,version:1,plan:{id:plan.id,revision:plan.revision??1,signature:hash(JSON.stringify(plan))},
       status,converged:best?.met??false,parameters:best?.parameters??null,targets:best?.targets??{},
       rms:best?Math.sqrt(best.cost):null,maxRatio:best?.maxRatio??null,bounds,
-      work:{evaluations,maxEvaluations,infeasible,iterations:iteration},...(trace&&{history:trace})};
+      work:{evaluations,maxEvaluations,infeasible,iterations:iteration},...(trace&&{history:trace}),
+      ...(retainErrors&&{bestEvaluation:best?.evaluation??null})};
     return freeze(report);
   }
 
